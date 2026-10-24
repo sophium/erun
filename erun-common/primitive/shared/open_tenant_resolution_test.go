@@ -8,8 +8,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// openTenantResolutionStore is a minimal OpenStore for exercising
-// resolveOpenTenant/resolveOpenEnvironment without a real config root.
 type openTenantResolutionStore struct {
 	defaultTenant      string
 	defaultEnvironment string
@@ -30,8 +28,6 @@ func (s openTenantResolutionStore) LoadEnvConfig(tenant, environment string) (co
 	return config.EnvConfig{Name: environment}, "", nil
 }
 
-// noProjectRoot simulates running outside any tenant's project checkout, so
-// resolveOpenTenant's cwd fallback never resolves a tenant.
 func noProjectRoot() (string, string, error) {
 	return "", "", config.ErrNotInGitRepository
 }
@@ -57,9 +53,6 @@ func TestResolveOpenTenantInferenceForbidden(t *testing.T) {
 	}
 }
 
-// TestResolveOpenTenantNamesTheCommandThatActuallyFailed is the regression for
-// the failure naming a fixed operation: it must name the operation the
-// operator ran, and offer that operation's own recovery, rather than "open"'s.
 func TestResolveOpenTenantNamesTheCommandThatActuallyFailed(t *testing.T) {
 	store := openTenantResolutionStore{}
 	tests := []struct {
@@ -67,8 +60,7 @@ func TestResolveOpenTenantNamesTheCommandThatActuallyFailed(t *testing.T) {
 		scopesTenantByFlag bool
 	}{
 		{"erun outputs list", true},
-		// build takes the tenant positionally, so its recovery must name the
-		// command without asserting a --tenant flag it does not have.
+		// build takes the tenant positionally, so it has no --tenant remedy.
 		{"erun build", false},
 	}
 	for _, tt := range tests {
@@ -103,9 +95,6 @@ func TestResolveOpenTenantNamesTheCommandThatActuallyFailed(t *testing.T) {
 	}
 }
 
-// TestResolveOpenTenantRecoveryFollowsANewlyAdoptingCommand locks the property
-// rather than the strings: a command that adopts this resolution path with its
-// own invocation gets its own recovery named, with no edit to the resolver.
 func TestResolveOpenTenantRecoveryFollowsANewlyAdoptingCommand(t *testing.T) {
 	store := openTenantResolutionStore{}
 	const adopting = "erun summarize"
@@ -128,11 +117,7 @@ func TestResolveOpenTenantRecoveryFollowsANewlyAdoptingCommand(t *testing.T) {
 	}
 }
 
-// TestResolveOpenTenantCommandWithNonScopingTenantFlagOmitsFlagRemedy covers
-// the other half of naming the real next step: a command whose --tenant means
-// something else (list's selects version-drift reporting) must not be told to
-// pass --tenant as the tenant fix, since that flag would not do what the
-// operator wants.
+// list's --tenant means something else, so it is not offered as the fix.
 func TestResolveOpenTenantCommandWithNonScopingTenantFlagOmitsFlagRemedy(t *testing.T) {
 	store := openTenantResolutionStore{}
 	_, err := ResolveOpenTenant(store, noProjectRoot, OpenParams{

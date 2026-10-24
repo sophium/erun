@@ -15,9 +15,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// seedTenantWithoutDefault leaves the default tenant unwritten and roots the
-// project outside the scenario cwd, so the bare root command falls through to
-// the interactive tenant-selection prompt.
+// seedTenantWithoutDefault leaves no default tenant so the root command reaches the tenant prompt.
 func seedTenantWithoutDefault(t *testing.T, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -53,22 +51,16 @@ func writeTestFile(t *testing.T, path, contents string) {
 	}
 }
 
-// remoteInitKubectlStub parameterizes the stubbed remote pod shell for
-// non-dry-run remote-init scenarios.
 type remoteInitKubectlStub struct {
 	RepoExists               bool
 	SSHConfigExists          bool
 	HostConfigVerifyExitCode int
 	LsRemoteFailures         int
-	// RegistryCredentialConfigured answers the registry-credential-check
-	// script: whether the pod appears to have a ghcr.io credential (docker
-	// config, gh session, or GH_TOKEN/GITHUB_TOKEN). Defaults to false (no
-	// credential), matching a freshly-deployed pod.
+	// RegistryCredentialConfigured: whether the pod has a ghcr.io credential.
 	RegistryCredentialConfigured bool
 }
 
-// stubRemoteInitKubectl stands in for the remote pod's shell so real-run
-// remote-init scenarios stay deterministic without a cluster.
+// stubRemoteInitKubectl stands in for the remote pod's shell.
 func stubRemoteInitKubectl(t *testing.T, dir string, spec remoteInitKubectlStub) {
 	t.Helper()
 	repoState := "repo_missing"
@@ -108,8 +100,7 @@ func stubRemoteInitKubectl(t *testing.T, dir string, spec remoteInitKubectlStub)
 		)
 	}
 	if spec.LsRemoteFailures > 0 {
-		// Forward slashes: this path is embedded in the sh stub, and Git Bash's sh
-		// handles a backslash Windows path in redirections unreliably.
+		// Forward slashes: Git Bash's sh handles backslash paths in redirections unreliably.
 		counter := filepath.ToSlash(filepath.Join(dir, "ls-remote-calls"))
 		lines = append(lines,
 			`  *ls-remote*)`,
@@ -156,12 +147,7 @@ func testInitHelp(t *testing.T) {
 }
 
 func testInitDryRunCreatesNoStrayConfigDirectory(t *testing.T) {
-	// `erun init --dry-run` created the environment's (and its tenant's)
-	// config directory on disk even though the write-yaml the directory
-	// exists for was correctly traced only. Reproduces the exact repro
-	// shape — a brand-new tenant and a brand-new host environment — and
-	// asserts the config root is byte-identical afterwards, not merely
-	// that the command exited 0 and printed traces.
+	// The config root must be byte-identical after a dry run.
 	setup := env.New(t)
 	args := []string{
 		"init", "erun", "ios-host",
@@ -186,11 +172,7 @@ func testInitDryRunCreatesNoStrayConfigDirectory(t *testing.T) {
 }
 
 func testInitRejectsHyphenatedTenant(t *testing.T) {
-	// A new tenant name containing a hyphen is rejected at creation, before
-	// any tenant/env config is written, so the `<tenant>-<env>` namespace
-	// mapping stays unambiguous (split on the first hyphen) and injective.
-	// The gate fires only when the tenant is new; existing hyphenated
-	// tenants load without re-validation, preserving back-compat.
+	// Hyphens would make the <tenant>-<env> namespace mapping ambiguous; existing tenants are not re-validated.
 	setup := env.New(t)
 	args := []string{
 		"init", "team-one", "prod",

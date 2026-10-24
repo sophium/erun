@@ -35,20 +35,14 @@ func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated conf
 	return err
 }
 
-// environmentCloudProviderTypes is the render order for cloud-alias slots, AWS
-// first as the legacy primary. Adding a type here gives it its own env selector
-// and sidebar login row.
+// environmentCloudProviderTypes is the render order for cloud-alias slots.
 var environmentCloudProviderTypes = []string{
 	configpkg.CloudProviderAWS,
 	configpkg.CloudProviderCloudflare,
 }
 
-// environmentCloudAliasSlots builds the per-provider-type cloud-alias slots for
-// one env. Two rules shape it: omit a type that has no configured aliases and
-// nothing attached, so a new env shows no empty selector before any token of
-// that type exists; and keep a currently-attached alias whose provider config
-// was deleted as an option, so the operator can still see and clear it
-// (recognition over recall).
+// environmentCloudAliasSlots omits types with no aliases and nothing attached,
+// and keeps an attached alias whose provider config was deleted so it can be cleared.
 func environmentCloudAliasSlots(store configpkg.CloudReadStore, config configpkg.EnvConfig) []uiEnvironmentCloudAlias {
 	optionsByType := configuredCloudAliasesByType(store)
 	attached := config.ResolvedCloudAliases()
@@ -127,12 +121,8 @@ func environmentCloudProviderAliases(store configpkg.CloudReadStore, current str
 	return aliases
 }
 
-// applyEnvironmentCloudAliasSlots writes the edited cloud aliases back onto the
-// env config. The AWS alias stays in the legacy CloudProviderAlias scalar so
-// every existing AWS reader is unchanged; other types live in the per-type
-// CloudProviderAliases map. An empty slot value clears that type's attachment.
-// When the UI sends no slots (the AWS-only single-selector path), the legacy
-// scalar is applied directly to preserve older-caller behavior.
+// applyEnvironmentCloudAliasSlots keeps AWS in the legacy CloudProviderAlias
+// scalar; other types go in CloudProviderAliases.
 func applyEnvironmentCloudAliasSlots(existing *configpkg.EnvConfig, config uiEnvironmentConfig) {
 	if len(config.CloudAliasSlots) == 0 {
 		existing.CloudProviderAlias = strings.TrimSpace(config.CloudProviderAlias)
@@ -156,17 +146,12 @@ func applyEnvironmentCloudAliasSlots(existing *configpkg.EnvConfig, config uiEnv
 	}
 }
 
-// linkedCloudContext returns the cloud context backing the env, with Status
-// filled from the background poller's in-memory cache. The persisted config no
-// longer carries Status, so a missing cache entry surfaces as Status="" that
-// callers must treat as "not yet observed," not "stopped."
+// linkedCloudContext fills Status from the poller cache; "" means not yet
+// observed, not stopped.
 func (a *App) linkedCloudContext(config configpkg.EnvConfig) (configpkg.CloudContextStatus, bool, error) {
 	return a.linkedCloudContextFor(config.CloudProviderAlias, config.KubernetesContext)
 }
 
-// linkedCloudContextFor is the same resolution keyed on the two fields it
-// actually reads, for read-model callers that hold a list result rather than a
-// full EnvConfig.
 func (a *App) linkedCloudContextFor(cloudProviderAlias, kubernetesContext string) (configpkg.CloudContextStatus, bool, error) {
 	cloudProviderAlias = strings.TrimSpace(cloudProviderAlias)
 	kubernetesContext = strings.TrimSpace(kubernetesContext)

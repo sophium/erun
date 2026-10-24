@@ -115,10 +115,6 @@ func TestCreateUserRejectsEmptyUsername(t *testing.T) {
 	}
 }
 
-// TestCreateUserMapsUnrecognizedConflictToGenericStatusConflict proves a
-// conflict Create cannot name a specific cause for still maps to 409, without
-// guessing at wording the way the pre-fix username-collision message did for
-// every conflict class.
 func TestCreateUserMapsUnrecognizedConflictToGenericStatusConflict(t *testing.T) {
 	users := &stubUserEnrollmentRepository{createErr: repository.ErrUnrecognizedConflict}
 	rec := postUsers(t, users, string(model.TenantTypeCompany), "tenant-a", `{"username":"alice"}`)
@@ -130,10 +126,6 @@ func TestCreateUserMapsUnrecognizedConflictToGenericStatusConflict(t *testing.T)
 	}
 }
 
-// TestCreateUserMapsUsernameConflictToUsernameTakenCode proves a username
-// collision is reported with its own machine code and an accurate message,
-// rather than the same generic conflict response every conflict class used
-// to get regardless of which uniqueness constraint actually fired.
 func TestCreateUserMapsUsernameConflictToUsernameTakenCode(t *testing.T) {
 	users := &stubUserEnrollmentRepository{createErr: repository.ErrUsernameConflict}
 	rec := postUsers(t, users, string(model.TenantTypeCompany), "tenant-a", `{"username":"alice"}`)
@@ -148,10 +140,6 @@ func TestCreateUserMapsUsernameConflictToUsernameTakenCode(t *testing.T) {
 	}
 }
 
-// TestCreateUserReportsAlreadyEnrolledAsSuccessNotConflict proves re-enrolling
-// an identity already enrolled in the tenant is reported as the no-op it is —
-// 200 with alreadyEnrolled true and the real existing username — rather than
-// as any kind of conflict.
 func TestCreateUserReportsAlreadyEnrolledAsSuccessNotConflict(t *testing.T) {
 	users := &stubUserEnrollmentRepository{
 		createAlreadyOn: true,
@@ -219,10 +207,6 @@ func TestListUsersAllowsOperationsCrossTenantOverride(t *testing.T) {
 	}
 }
 
-// TestEnrollUserRefusesAnUnresolvableIssuerMapping is the enrollment half of
-// the same refusal: a membership row under a mapping no token can resolve
-// through is a user who can never sign in, created successfully and failing
-// only later, somewhere else.
 func TestEnrollUserRefusesAnUnresolvableIssuerMapping(t *testing.T) {
 	users := &stubUserEnrollmentRepository{createErr: &repository.UnresolvableIssuerMappingError{
 		Issuer:      "https://auth.example",

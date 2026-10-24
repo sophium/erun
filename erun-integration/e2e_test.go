@@ -13,8 +13,6 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// e2eSuiteDockerfile is a suite Dockerfile carrying the `e2e` stage erun e2e
-// builds with --target e2e.
 const e2eSuiteDockerfile = "FROM mcr.microsoft.com/playwright:v1.49.1-noble AS deps\n" +
 	"WORKDIR /suite\n" +
 	"FROM deps AS e2e\n" +
@@ -22,15 +20,10 @@ const e2eSuiteDockerfile = "FROM mcr.microsoft.com/playwright:v1.49.1-noble AS d
 	"ARG ERUN_E2E_VERSION\n" +
 	"RUN npx playwright test\n"
 
-// e2eValidSuiteConfig is a playwright.config.ts that satisfies erun e2e's
-// lint: baseURL comes from the injected value, never a literal, and TLS
-// verification is never disabled.
+// e2eValidSuiteConfig passes erun e2e's lint: baseURL is injected and TLS is verified.
 const e2eValidSuiteConfig = "export default {\n  use: {\n    baseURL: process.env.ERUN_E2E_BASE_URL,\n  },\n};\n"
 
-// seedE2ESuite writes <projectRoot>/<devopsDir>/e2e/<component>/Dockerfile
-// (and a playwright.config.ts when configBody is set), the
-// "<tenant>-devops/e2e/<component>" convention discovery uses, mirroring
-// docker/ and k8s/.
+// seedE2ESuite writes a suite under <devopsDir>/e2e/<component>.
 func seedE2ESuite(t testing.TB, projectRoot, devopsDir, component, dockerfile, configBody string) string {
 	t.Helper()
 	dir := filepath.Join(projectRoot, devopsDir, "e2e", component)
@@ -48,10 +41,8 @@ func seedE2ESuite(t testing.TB, projectRoot, devopsDir, component, dockerfile, c
 	return dir
 }
 
-// e2eKubectlResponses stubs the reads erun e2e's preconditions make against a
-// deployed team/dev: the runtime deployment, two expose- Ingresses with
-// ready certificates, and the Certificate behind them. Hosts use the reserved
-// .invalid TLD so the loopback check never depends on real DNS.
+// e2eKubectlResponses stubs the precondition reads for a deployed team/dev. The
+// .invalid TLD keeps the loopback check off real DNS.
 func e2eKubectlResponses(consoleHost, apiHost string) map[string]string {
 	return map[string]string{
 		"deployment team-devops": "deployment.apps/team-devops",
@@ -62,8 +53,6 @@ func e2eKubectlResponses(consoleHost, apiHost string) map[string]string {
 	}
 }
 
-// stubE2EEnvironment stubs kubectl (the precondition reads) and helm (the
-// deployed version, 1.4.2) for a deployed team/dev.
 func stubE2EEnvironment(t testing.TB, setup env.Setup, responses map[string]string) (string, []string) {
 	t.Helper()
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -114,9 +103,6 @@ func testE2EDryRunNoE2eFolderIsACleanNoOp(t *testing.T) {
 }
 
 func testE2EDryRunMissingTenant(t *testing.T) {
-	// A discovered suite still requires a resolved tenant/environment
-	// before anything else is checked -- the same refusal usage/observe
-	// produce with none configured.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedE2ESuite(t, setup.Cwd, "team-devops", "erun-console", e2eSuiteDockerfile, "")
@@ -128,8 +114,6 @@ func testE2EDryRunMissingTenant(t *testing.T) {
 }
 
 func testE2EUnknownComponentIsNamedInTheError(t *testing.T) {
-	// The error names every discovered suite so the operator knows what
-	// --component accepts.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedE2ESuite(t, setup.Cwd, "team-devops", "erun-console", e2eSuiteDockerfile, "")
@@ -142,9 +126,6 @@ func testE2EUnknownComponentIsNamedInTheError(t *testing.T) {
 }
 
 func testE2EHostRunPlaywrightFolderIsRefusedWithTheMigration(t *testing.T) {
-	// The retired <tenant>-devops/playwright layout is refused naming the
-	// move to e2e/<component>/Dockerfile, not silently skipped as "no
-	// suite found".
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	legacy := filepath.Join(setup.Cwd, "team-devops", "playwright")
@@ -162,7 +143,6 @@ func testE2EHostRunPlaywrightFolderIsRefusedWithTheMigration(t *testing.T) {
 }
 
 func testE2EDockerfileWithoutAnE2eStageIsRefused(t *testing.T) {
-	// A near-miss stage name does not count: erun e2e builds --target e2e.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedE2ESuite(t, setup.Cwd, "team-devops", "erun-console", "FROM node:22 AS e2e-deps\nRUN true\n", "")
@@ -174,9 +154,7 @@ func testE2EDockerfileWithoutAnE2eStageIsRefused(t *testing.T) {
 }
 
 func testE2ERealRunRefusesASuiteThatDisablesHttpsVerification(t *testing.T) {
-	// The lint check runs before any environment resolution touches the
-	// network, so this refuses even though the fixture environment
-	// carries no real cluster.
+	// Lint runs before environment resolution.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -203,9 +181,7 @@ func testE2ERealRunRefusesASuiteThatHardcodesBaseUrl(t *testing.T) {
 }
 
 func testE2EDryRunRefusesWhenTheEnvironmentIsNotDeployed(t *testing.T) {
-	// Preconditions are checked before any suite runs, even under
-	// --dry-run: they are read-only, and dry-run's whole value here is
-	// showing a real refusal instead of assuming success.
+	// Preconditions are read-only, so they run even under --dry-run.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -223,10 +199,6 @@ func testE2EDryRunRefusesWhenTheEnvironmentIsNotDeployed(t *testing.T) {
 }
 
 func testE2EDryRunRunsEverySuiteAgainstTheExposedServices(t *testing.T) {
-	// No --component runs every suite in name order. Each suite's base URL
-	// is the exposure named like its directory, every exposure is passed
-	// as ERUN_E2E_URL_<SERVICE>, e2e.secrets become --secret, and the trace
-	// shows the exact docker invocation without running it.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -246,9 +218,6 @@ func testE2EDryRunRunsEverySuiteAgainstTheExposedServices(t *testing.T) {
 }
 
 func testE2EDryRunBaseUrlSkipsTheExposureChecks(t *testing.T) {
-	// --base-url replaces the exposed URL: no Ingress or Certificate is
-	// read (the kubectl stub fails any unstubbed call), and the named
-	// environment's deployed version is still resolved.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -265,10 +234,8 @@ func testE2EDryRunBaseUrlSkipsTheExposureChecks(t *testing.T) {
 }
 
 func testE2EDryRunBaseUrlWithoutVersionOrNamedEnvironmentIsRefused(t *testing.T) {
-	// A --base-url with only the current scope behind it may serve a
-	// different deployment, so the current scope's deployed version is
-	// not the one to expect: refuse before reading the environment
-	// (no kubectl or helm stub exists to read it) and ask for --version.
+	// A --base-url may serve another deployment, so the current scope's version
+	// is not assumed.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -284,10 +251,6 @@ func testE2EDryRunBaseUrlWithoutVersionOrNamedEnvironmentIsRefused(t *testing.T)
 }
 
 func testE2EDryRunBaseUrlAndVersionReadNothingFromTheEnvironment(t *testing.T) {
-	// --base-url and --version name the target entirely: the suites
-	// expect the given version, and the current scope is not read at
-	// all (the kubectl stub fails every call, and the helm stub's 1.4.2
-	// must not appear).
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -304,10 +267,6 @@ func testE2EDryRunBaseUrlAndVersionReadNothingFromTheEnvironment(t *testing.T) {
 }
 
 func testE2EDryRunBaseUrlAndVersionNeedNoConfiguredTenant(t *testing.T) {
-	// --base-url and --version name the target entirely, so a machine
-	// with no tenant configured at all can still run the suites, e.g.
-	// against production: no environment is resolved, kubectl and helm
-	// are never stubbed, and the log lands under ~/.erun/e2e.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedE2ESuite(t, setup.Cwd, "team-devops", "erun-console", e2eSuiteDockerfile, e2eValidSuiteConfig)
@@ -322,9 +281,6 @@ func testE2EDryRunBaseUrlAndVersionNeedNoConfiguredTenant(t *testing.T) {
 }
 
 func testE2ERealRunFailureAgainstBaseUrlAndVersionNamesTheUrl(t *testing.T) {
-	// No environment is read with --base-url and --version, so a failing
-	// suite's summary and JSON result name the URL the suite ran
-	// against, never a tenant/environment.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedE2ESuite(t, setup.Cwd, "team-devops", "erun-console", e2eSuiteDockerfile, e2eValidSuiteConfig)
@@ -343,8 +299,6 @@ func testE2ERealRunFailureAgainstBaseUrlAndVersionNamesTheUrl(t *testing.T) {
 }
 
 func testE2EDryRunVersionReplacesTheDeployedVersion(t *testing.T) {
-	// --version alone keeps the deployment and exposure checks and
-	// replaces only the deployed-version lookup.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -361,8 +315,7 @@ func testE2EDryRunVersionReplacesTheDeployedVersion(t *testing.T) {
 }
 
 func testE2EDryRunRefusesAnIngressResolvingToLoopback(t *testing.T) {
-	// A local cluster's ingress resolves to 127.0.0.1, which a docker build
-	// without host networking cannot reach; refuse before any suite runs.
+	// A docker build without host networking cannot reach 127.0.0.1.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -379,10 +332,6 @@ func testE2EDryRunRefusesAnIngressResolvingToLoopback(t *testing.T) {
 }
 
 func testE2ERealRunReportsAFailingSuiteBugReadyAndRunsTheRest(t *testing.T) {
-	// One suite fails, the other still runs: the exit code is non-zero and
-	// the failure names suite, component, target URL, deployed version,
-	// failing step and log -- with the log's tail, where the failing test
-	// names are -- and says e2e is not a release gate.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")

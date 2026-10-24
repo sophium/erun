@@ -16,15 +16,8 @@ import (
 )
 
 func testJobAgentStartDryRunPlansTheStreamingInvocation(t *testing.T) {
-	// An agent job names a tool and a prompt; erun builds the argv. The plan is
-	// where that argv is auditable, and the streaming flags are the whole point:
-	// without them the tool prints nothing until it exits, so a multi-hour run
-	// would report no output while it is actively editing files.
-	//
-	// Both tools are stubbed present: the dry-run plan also resolves whether the
-	// named tool is available in this environment, which is a real
-	// filesystem/PATH check that runs regardless of --dry-run, the same way the
-	// job dir check does.
+	// The dry-run plan shows the agent argv with its streaming flags; both tools
+	// are stubbed because availability is checked even in dry-run.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -43,10 +36,7 @@ func testJobAgentStartDryRunPlansTheStreamingInvocation(t *testing.T) {
 }
 
 func testJobAgentStartRefusesWhenTheToolIsNotAvailable(t *testing.T) {
-	// A knowable-before-spend precondition: an agent job naming a tool this
-	// environment does not have refuses before it takes a lease or starts a
-	// supervisor, rather than accepting the job and failing a minute later on
-	// the tool's own (often credential-shaped) error.
+	// An agent job naming an unavailable tool refuses before taking a lease.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "claude", "--", "fix the failing tests"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -62,12 +52,8 @@ func testJobAgentStartRefusesWhenTheToolIsNotAvailable(t *testing.T) {
 }
 
 func testJobAgentProgressReportsAnAuthenticationFailureAsTheReason(t *testing.T) {
-	// The tool is present but its credentials are stale — a real failure the
-	// preflight above cannot catch (the tool is installed). The job's own
-	// folded progress already carries the tool's raw auth message; the failed
-	// job's reason must say plainly that this looks like a credential problem
-	// in the environment, not a bug in the work, rather than leaving the raw
-	// vendor string to speak for itself.
+	// A tool failing on stale credentials yields a reason naming a credential
+	// problem, with the raw vendor message kept in progress.error.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -106,15 +92,8 @@ func testJobAgentProgressReportsAnAuthenticationFailureAsTheReason(t *testing.T)
 }
 
 func testJobAgentProgressReportsAGatewayReasoningRefusalAsTheReason(t *testing.T) {
-	// A gateway serving a reasoning model refuses the conversation when it
-	// wants the model's own reasoning handed back, and a client can only echo
-	// reasoning the gateway returned — so the refusal lands mid-run however
-	// far the job already got, and the work it did up to that point is all it
-	// has to show. The two events below are captured verbatim from `claude -p
-	// --output-format stream-json` on that refusal (the second is the closing
-	// envelope erun folds the error from), and the failed job's reason must
-	// say what was refused and that the work itself did not fail, rather than
-	// reporting a bare exit code under a checkpoint that names nothing.
+	// A gateway refusing to accept unechoed reasoning (events captured from real
+	// claude output) yields a reason that names it and says the work did not fail.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -164,9 +143,7 @@ func testJobAgentProgressReportsAGatewayReasoningRefusalAsTheReason(t *testing.T
 }
 
 func testJobAgentStartRefusesAnUnsupportedToolOrACommand(t *testing.T) {
-	// A caller that meant a command and a caller that meant an agent must not be
-	// silently given the other, and an unsupported tool must name the ones erun
-	// can actually stream.
+	// An unsupported agent tool is refused, naming the supported ones.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	unsupported := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "gemini", "--dry-run", "--", "do the thing"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -177,10 +154,7 @@ func testJobAgentStartRefusesAnUnsupportedToolOrACommand(t *testing.T) {
 }
 
 func testJobAgentProgressIsReadableWhileTheAgentWorks(t *testing.T) {
-	// The defect this kind closes: a detached agent run reporting nothing but
-	// "running" for its whole life. The stub emits the tool's real stream-json
-	// event shapes and then blocks, so the scenario reads mid-run on an
-	// observable condition and locks that erun answers what the agent is doing.
+	// A running agent job's output, status, and lease show its current activity.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	flushed := filepath.Join(setup.Cwd, "flushed")
@@ -204,12 +178,9 @@ func testJobAgentProgressIsReadableWhileTheAgentWorks(t *testing.T) {
 	waitForFile(t, flushed, 30*time.Second)
 	waitForJobActivity(t, setup, envVars, "sweep", 30*time.Second)
 
-	// job_output already serves the events, and job status answers the activity
-	// — the two together are what replace scraping the agent's own transcript.
 	midRun := erun.Run(t, []string{"job", "output", "--tenant", "team", "--environment", "dev", "--id", "sweep"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "sweep"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-	// The lease already names the work for the desktop; an agent job renames it
-	// to the current activity so "busy" becomes "editing <file>".
+	// An agent job renames its lease to the current activity.
 	lease := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 
 	if err := os.WriteFile(release, []byte("go\n"), 0o644); err != nil {
@@ -225,9 +196,7 @@ func testJobAgentProgressIsReadableWhileTheAgentWorks(t *testing.T) {
 }
 
 func testJobAgentProgressIsTheSameShapeForEveryTool(t *testing.T) {
-	// Normalizing inside erun is what keeps the progress contract stable across
-	// AI tools. Codex reports work as thread items rather than tool calls, and
-	// the caller still reads one activity line and one pair of counts.
+	// Codex thread items normalize to the same progress shape as claude tool calls.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -252,8 +221,6 @@ func testJobAgentProgressIsTheSameShapeForEveryTool(t *testing.T) {
 	status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "sweep"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	golden.Equal(t, "job/agent_progress_is_the_same_shape_for_every_tool", normalize.Apply(status.Combined))
 
-	// The normalized fields are what an orchestrator branches on, and the
-	// snapshot above renders them as one line; the record is the contract.
 	assertCodexSweepProgressNormalized(t, setup)
 }
 
@@ -298,12 +265,8 @@ func assertCodexFixProgress(t *testing.T, progress normalizedJobProgress) {
 }
 
 func testJobAgentProgressKeepsMovingAfterTheOutputCap(t *testing.T) {
-	// The defect this closes: once outputTruncated flips, progress used to
-	// freeze at whatever it last read, because it was derived from the same
-	// capped log the raw output writer had stopped growing. The cap is set
-	// small enough that the very first event already exceeds it, so every
-	// later event proves progress is fed straight from the stream rather than
-	// by re-reading the (now-frozen) log file.
+	// Progress keeps updating after the output cap (8 bytes, hit by the first
+	// event), because it is fed from the stream, not the capped log.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	flushed := filepath.Join(setup.Cwd, "flushed")
@@ -348,9 +311,6 @@ func testJobAgentProgressKeepsMovingAfterTheOutputCap(t *testing.T) {
 	if !finishedPayload.OutputTruncated {
 		t.Fatalf("expected the job to still report outputTruncated at the end, got %s", finished.Stdout)
 	}
-	// This is the assertion the bug report's freeze would fail: the second
-	// tool call and the final result both arrived well after the 8-byte cap,
-	// so seeing them here proves progress kept moving past it.
 	if finishedPayload.Progress.Turns != 2 {
 		t.Fatalf("expected both turns folded despite the cap, got %+v", finishedPayload.Progress)
 	}

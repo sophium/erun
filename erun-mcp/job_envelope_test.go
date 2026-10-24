@@ -17,14 +17,8 @@ import (
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// A tool started with wait:false runs its work inside this server's own
-// long-lived process, which was never itself started as anyone's job, so
-// nothing here inherits ERUN_JOB_ID the way a nested subprocess does. Without
-// the caller's own job id threaded onto the record, the job that started this
-// work can never find it on its own finish path -- its child scan matches on
-// StartedByJobID and nothing else -- so an agent that used a background build
-// as its gate got a clean exit and no gate-incomplete no matter what the build
-// then did.
+// The server process has no ERUN_JOB_ID, so the caller's job id must be threaded onto
+// the record or its parent's child scan never finds it.
 func TestJobEnvelopeRecordsTheCallersJobAsTheTasksParent(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "acme", Environment: "dev"}}
@@ -44,10 +38,7 @@ func TestJobEnvelopeRecordsTheCallersJobAsTheTasksParent(t *testing.T) {
 	}
 }
 
-// Nothing is guessed when the caller supplies nothing: a caller driving this
-// environment from outside any job at all is genuinely parentless, and
-// attributing its work to whichever job happens to be running here would be a
-// definite answer to an unknown question.
+// A caller outside any job is genuinely parentless.
 func TestJobEnvelopeLeavesTheParentEmptyWhenTheCallerNamesNone(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "acme", Environment: "dev"}}
@@ -61,8 +52,7 @@ func TestJobEnvelopeLeavesTheParentEmptyWhenTheCallerNamesNone(t *testing.T) {
 	}
 }
 
-// Handoff is what keeps the linkage from turning a deliberate "leave this
-// running past my turn" into a parent that waits for it.
+// Handoff keeps a deliberate fire-and-forget from becoming a waited-on child.
 func TestJobEnvelopeMarksAHandoffTask(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "acme", Environment: "dev"}}
@@ -80,10 +70,7 @@ func TestJobEnvelopeMarksAHandoffTask(t *testing.T) {
 	}
 }
 
-// The diagnosability half: a failed background tool used to leave an exit code
-// and a bare error string behind -- no argv (a task job has none to record)
-// and no log at all -- which is indistinguishable from any other failure. The
-// work's own trace and output now reach the job's log as it produces them.
+// The work's trace and output reach the job's log as produced.
 func TestJobEnvelopeMirrorsTheWorksOutputIntoTheJobsLog(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "acme", Environment: "dev"}}
@@ -107,11 +94,7 @@ func TestJobEnvelopeMirrorsTheWorksOutputIntoTheJobsLog(t *testing.T) {
 	}
 }
 
-// Embedding JobEnvelopeInput must stay invisible on the wire: the SDK's schema
-// reflection flattens an embedded struct, so wait keeps its own top-level
-// property exactly as it had when every input declared it itself, and the two
-// new switches arrive beside it rather than nested under a wrapper object no
-// caller knows to send.
+// The SDK flattens embedded structs, so the switches stay top-level properties.
 func TestJobEnvelopeSwitchesArePublishedAsTopLevelProperties(t *testing.T) {
 	t.Setenv("ERUN_CLAUDE_BIN", "true")
 	t.Setenv("ERUN_CODEX_BIN", "true")
@@ -143,9 +126,6 @@ func TestJobEnvelopeSwitchesArePublishedAsTopLevelProperties(t *testing.T) {
 	}
 }
 
-// publishedInputProperties reads a tool's top-level input properties off the
-// schema the server actually publishes, so the assertions above exercise the
-// wire shape rather than a hand-written expectation of it.
 func publishedInputProperties(t *testing.T, name string, inputSchema any) map[string]json.RawMessage {
 	t.Helper()
 	if inputSchema == nil {
@@ -164,9 +144,7 @@ func publishedInputProperties(t *testing.T, name string, inputSchema any) map[st
 	return schema.Properties
 }
 
-// startEnvelopeJob starts a background task through the envelope and returns
-// its finished record, bounded so work that never settles fails the test
-// rather than hanging the suite.
+// startEnvelopeJob is bounded so unsettled work fails rather than hangs.
 func startEnvelopeJob(t *testing.T, runtime sharedpkg.RuntimeConfig, name string, input sharedpkg.JobEnvelopeInput, execute func(bool, io.Writer) (sharedpkg.CommandOutput, error)) shared.EnvironmentJob {
 	t.Helper()
 	envelope, err := sharedpkg.RunJobEnvelope(runtime, name, input, false, execute)
@@ -192,12 +170,7 @@ func startEnvelopeJob(t *testing.T, runtime sharedpkg.RuntimeConfig, name string
 	}
 }
 
-// exec_raw grew a startedByJobId input, documented in the tool's own schema
-// and in erun-docs, and the CLI's off-environment job start was taught to fill
-// it in -- but it was never passed through to the job it starts, so every
-// off-environment `erun exec job start -- <command>` recorded no parent at
-// all. Preview resolves the supervisor invocation without spawning it, and
-// that invocation is where the value has to appear.
+// Preview resolves the supervisor invocation, where startedByJobId must appear.
 func TestExecRawBackgroundThreadsTheCallersJobIDToTheSupervisor(t *testing.T) {
 	t.Setenv("ERUN_ERUN_BIN", "erun-test-supervisor-stub")
 	runtime := normalizeRuntimeConfig(sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: t.TempDir()}})

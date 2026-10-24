@@ -17,14 +17,8 @@ import { recordTab } from './tabsThunks';
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
 
-// checkGatewayRedeploy asks which environments' running pods still route where
-// they were last deployed to, and offers to redeploy them.
-//
-// The gateway is rendered into each runtime at deploy time, so switching it in
-// ERun settings changes no pod by itself — before this the switch looked like it
-// did nothing. It runs after the save rather than before closing the dialog
-// because it reads every cluster; nothing is offered when every pod already
-// matches, and a read that fails offers nothing rather than guessing.
+// checkGatewayRedeploy offers to redeploy environments whose pods still route to
+// the old gateway, which is rendered at deploy time. A failed read offers nothing.
 export const checkGatewayRedeploy = (): AppThunk<Promise<void>> => async (dispatch) => {
   let drift: UIGatewayRouting[];
   try {
@@ -39,10 +33,8 @@ export const checkGatewayRedeploy = (): AppThunk<Promise<void>> => async (dispat
 
 export { closeGatewayRedeployDialog };
 
-// confirmGatewayRedeploy redeploys each listed environment at the version it
-// already runs, in its own Local shell, the way Upgrade all does: in parallel,
-// with each env's output and failure kept on that env, and without selecting it
-// or launching its AI tab as a side effect.
+// confirmGatewayRedeploy redeploys each env at its current version, in parallel,
+// without selecting it.
 export const confirmGatewayRedeploy =
   (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
     const items = getState().gatewayRedeploy.items;
@@ -84,12 +76,8 @@ export const confirmGatewayRedeploy =
     );
   };
 
-// loadManageGatewayRouting raises the Manage dialog's pending-redeploy banner
-// when this environment's running pod routes somewhere its saved configuration
-// no longer asks for. The banner is otherwise only raised by a save made in the
-// same dialog session, so a gateway switched in ERun settings — or an opt-out
-// saved before the dialog was last closed — left a pod on the old routing with
-// nothing saying so.
+// loadManageGatewayRouting raises the pending-redeploy banner when the running pod
+// routes somewhere the saved configuration no longer asks for.
 export const loadManageGatewayRouting =
   (selection: UISelection): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {

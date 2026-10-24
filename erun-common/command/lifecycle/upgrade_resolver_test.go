@@ -11,9 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// TestUpgradeVersionsResolverForStore owns the shared Upgrade-all resolution
-// policy as a white-box test because the registry lookup needs network and the
-// dry-run integration harness cannot reach it.
+// White-box because the registry lookup needs network the dry-run harness cannot reach.
 func TestUpgradeVersionsResolverForStore(t *testing.T) {
 	petiosEnv := config.EnvConfig{Name: "rihards-develop", RuntimeRegistry: "ghcr.io/petios"}
 
@@ -32,9 +30,7 @@ func TestUpgradeVersionsResolverForStore(t *testing.T) {
 	})
 
 	t.Run("a tenant lookup failure still resolves via the canonical image (#501)", func(t *testing.T) {
-		// The tenant image is a wrapper the deploy rebuilds FROM the canonical
-		// image, and ghcr 403s private and nonexistent repos alike — a listing
-		// failure must not block the upgrade.
+		// ghcr 403s private and missing repos alike, so a tenant listing failure must not block.
 		resolver := UpgradeVersionsResolverForStore(nil, func(_ context.Context, _, repository string) (registry.RuntimeRegistryVersions, error) {
 			if repository == config.DefaultRuntimeImageName {
 				return registry.RuntimeRegistryVersions{LatestStable: "1.0.85"}, nil
@@ -91,9 +87,7 @@ func resolveOrFatal(t *testing.T, resolver func(core.Context, string, config.Env
 	return sourced
 }
 
-// TestResolveEnvUpgradeItemCandidates pins the per-env candidate contract,
-// notably that registry disagreement yields an ambiguous item the caller must
-// resolve rather than an auto-target.
+// Registry disagreement yields an ambiguous item, not an auto-target.
 func TestResolveEnvUpgradeItemCandidates(t *testing.T) {
 	env := config.EnvConfig{Name: "prod", RuntimeVersion: "1.0.0", Type: config.EnvironmentTypeRuntime}
 	noTrace := func(string) {}
@@ -123,9 +117,6 @@ func TestResolveEnvUpgradeItemCandidates(t *testing.T) {
 	})
 }
 
-// TestResolveEnvUpgradeItemSnapshotChannel pins how the snapshot channel picks a
-// target when the registry carries stable releases, snapshots, or only one of
-// the two.
 func TestResolveEnvUpgradeItemSnapshotChannel(t *testing.T) {
 	noTrace := func(string) {}
 

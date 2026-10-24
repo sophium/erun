@@ -15,17 +15,10 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// tenant_platform.go resolves which erun-hosted-platform identity backs the
-// tenant dashboard's reads and writes, the same way `erun platform` does
-// (erun-common's ResolveERunPlatformAlias / newPlatformClientForAlias)
-// instead of the desktop inventing its own scheme from an environment's own
-// apiUrl and the tenant's primary cloud alias — which may be any provider
-// type and, for a loopback port-forward, is never the platform.
+// Platform identity resolves like `erun platform` does, never from an
+// environment's apiUrl or the tenant's primary cloud alias.
 
-// Platform-readiness states surfaced to the frontend when the platform
-// identity is not ready far enough to load the dashboard. Each maps to
-// exactly one next action; tenantPlatformStateReady means the platform
-// resolved and the caller may proceed to the identity read.
+// Each state maps to exactly one next action.
 const (
 	tenantPlatformStateReady        = ""
 	tenantPlatformStateNotConnected = "not-connected"
@@ -33,20 +26,11 @@ const (
 	tenantPlatformStateNotSignedIn  = "not-signed-in"
 	tenantPlatformStateNotEnrolled  = "not-enrolled"
 	tenantPlatformStateNoPermission = "no-permission"
-	// tenantPlatformStateTenantMismatch means the identity resolved and the
-	// platform answered — with a tenant that is not the local tenant the
-	// dashboard was opened from. The two namespaces are joined only by the
-	// alias the credential belongs to, so the platform's own name for the
-	// tenant behind the bearer is the only value that can establish
-	// correspondence; when it names a different one, every panel below would
-	// render that tenant's reviews, queue, users and audit under this local
-	// tenant's name, behind write controls that would act on them.
+	// tenantPlatformStateTenantMismatch: the platform's tenant is not the local one,
+	// so its rows must not render under the local name.
 	tenantPlatformStateTenantMismatch = "tenant-mismatch"
 )
 
-// tenantPlatformResolution is what resolveTenantPlatform found: either a
-// ready-to-use client, or a state the caller cannot proceed past, plus enough
-// context (resolved alias, URL, choices, identity claims) to render it.
 type tenantPlatformResolution struct {
 	state        string
 	client       *platformclient.PlatformClient
@@ -57,20 +41,10 @@ type tenantPlatformResolution struct {
 	subject      string
 }
 
-// resolveTenantPlatform resolves the erun-type cloud alias backing tenant's
-// platform reads. Once a tenant has attached any cloud alias at all, only an
-// erun-type alias within that tenant's own selection may back its platform
-// identity (resolveTenantERunPlatformAlias) — never a global alias the
-// tenant itself did not attach, even when it is the only erun alias
-// configured on the machine, so an AWS-only tenant never authenticates with
-// another tenant's erun credential.
-//
-// The erun platform's own API URL always comes from the resolved alias
-// (provider.ERun.APIURL), never from TenantConfig.APIURL: that field is
-// documented only as `erun open`'s own port-forward address
-// (erun-docs/docs/reference/configuration.md), and letting it redirect an
-// unrelated alias's bearer token to an arbitrary address would disclose that
-// credential.
+// resolveTenantPlatform only uses an erun alias the tenant attached, never a
+// global one, so one tenant never authenticates with another's credential. The
+// API URL comes from the alias, never TenantConfig.APIURL, which would let it
+// redirect the bearer token.
 func (a *App) resolveTenantPlatform(tenant, aliasOverride string) (tenantPlatformResolution, error) {
 	tenantConfig, _, err := a.deps.store.LoadTenantConfig(tenant)
 	if err != nil && !errors.Is(err, configpkg.ErrNotInitialized) {
@@ -85,10 +59,7 @@ func (a *App) resolveTenantPlatform(tenant, aliasOverride string) (tenantPlatfor
 		return *terminal, nil
 	}
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.APIURL) == "" {
-		// Mirrors newPlatformClientForAlias's own guard: a Provider already
-		// CloudProviderERun with a nil/empty ERun block is incomplete, not
-		// unconnected — a config-write defect the operator resolves by
-		// re-running `erun cloud login`, not by reconnecting from scratch.
+		// An erun provider with no ERun block is a config-write defect fixed by `erun cloud login`.
 		return tenantPlatformResolution{}, fmt.Errorf("erun platform alias %q is incomplete (its erun api configuration is missing); run `erun cloud login %s` to restore it", provider.Alias, provider.Alias)
 	}
 	apiURL := provider.ERun.APIURL
@@ -112,33 +83,15 @@ func (a *App) resolveTenantPlatform(tenant, aliasOverride string) (tenantPlatfor
 	}, nil
 }
 
-// tenantPlatformBearer mints the alias's bearer; one that cannot be minted, or
-// comes back empty, leaves the caller not signed in.
 func (a *App) tenantPlatformBearer(alias string) (string, bool) {
 	token, err := cloud.CloudProviderBearerToken(core.Context{}, a.deps.store, cloud.CloudBearerParams{Alias: alias}, a.deps.cloudDeps)
 	bearer := strings.TrimSpace(token.Token)
 	return bearer, err == nil && bearer != ""
 }
 
-// resolveTenantERunPlatformAlias picks which erun-type cloud alias backs
-// tenant's platform reads. It returns exactly one of: a usable provider (the
-// caller proceeds to mint a bearer from it), a terminal resolution the
-// caller returns as-is (not-connected / choose-alias), or an error.
-//
-// An explicit aliasOverride — the operator's own choose-alias pick, or an
-// MCP/dashboard caller naming one directly — is always honored verbatim,
-// exactly like `erun platform --erun-alias`; it is a deliberate one-time
-// choice, not an implicit default, so it is not further restricted to the
-// tenant's own selection.
-//
-// Otherwise: a tenant that has never attached any cloud alias at all
-// (TenantConfig.CloudProviderAliases empty) keeps the prior convenience of
-// falling back to the machine's sole configured erun alias, since the
-// tenant has expressed no preference to consult. A tenant that HAS attached
-// aliases is scoped strictly to the erun-type aliases within that selection
-// (erun-docs/docs/reference/configuration.md: "cloud provider aliases the
-// tenant is allowed to use") — none found there means not-connected, full
-// stop, never a fallback to an alias the tenant did not attach.
+// resolveTenantERunPlatformAlias honors an explicit aliasOverride verbatim, like
+// `erun platform --erun-alias`. A tenant with no attached aliases falls back to
+// the sole global erun alias; one with aliases never falls back outside them.
 func (a *App) resolveTenantERunPlatformAlias(tenantConfig configpkg.TenantConfig, aliasOverride string) (provider configpkg.CloudProviderConfig, terminal *tenantPlatformResolution, err error) {
 	if aliasOverride != "" || len(tenantConfig.CloudProviderAliases) == 0 {
 		return a.resolveGlobalERunPlatformAlias(aliasOverride)
@@ -159,10 +112,6 @@ func (a *App) resolveTenantERunPlatformAlias(tenantConfig configpkg.TenantConfig
 	return provider, nil, nil
 }
 
-// resolveGlobalERunPlatformAlias is the machine-wide resolution: the explicit
-// override when given, else the machine's sole configured erun
-// alias. Used both for an explicit aliasOverride (always honored verbatim)
-// and for a tenant that has never attached any cloud alias at all.
 func (a *App) resolveGlobalERunPlatformAlias(aliasOverride string) (configpkg.CloudProviderConfig, *tenantPlatformResolution, error) {
 	provider, err := shared.ResolveERunPlatformAlias(a.deps.store, aliasOverride)
 	if err != nil {
@@ -172,9 +121,7 @@ func (a *App) resolveGlobalERunPlatformAlias(aliasOverride string) (configpkg.Cl
 	return provider, nil, nil
 }
 
-// tenantSelectedERunAliases filters tenantConfig's own attached aliases down
-// to the erun-type ones, preserving order. A stale/removed alias name in the
-// tenant's own selection is skipped rather than failing the whole read.
+// Stale alias names are skipped.
 func (a *App) tenantSelectedERunAliases(tenantConfig configpkg.TenantConfig) []string {
 	var erunAliases []string
 	for _, alias := range tenantConfig.CloudProviderAliases {
@@ -191,9 +138,7 @@ func (a *App) tenantSelectedERunAliases(tenantConfig configpkg.TenantConfig) []s
 	return erunAliases
 }
 
-// chooseTenantERunAlias picks primary when it names one of candidates, the
-// sole candidate when there is exactly one, or "" (ambiguous — the caller
-// renders choose-alias) otherwise.
+// chooseTenantERunAlias returns "" when ambiguous.
 func chooseTenantERunAlias(candidates []string, primary string) string {
 	primary = strings.TrimSpace(primary)
 	for _, alias := range candidates {
@@ -207,13 +152,7 @@ func chooseTenantERunAlias(candidates []string, primary string) string {
 	return ""
 }
 
-// tenantPlatformResolutionForResolveError classifies why
-// ResolveERunPlatformAlias could not resolve a single alias: none configured
-// at all (not-connected) versus more than one with no override (choose-
-// alias, listing every alias so the frontend can offer them). Any other
-// failure (an explicit override naming a non-erun or unknown alias) is a
-// caller-wiring condition, not a state the frontend renders, so it surfaces
-// as a real error.
+// Errors other than none/ambiguous are caller-wiring bugs and surface as errors.
 func (a *App) tenantPlatformResolutionForResolveError(resolveErr error) (tenantPlatformResolution, error) {
 	aliases, err := a.configuredERunAliases()
 	if err != nil {
@@ -229,13 +168,8 @@ func (a *App) tenantPlatformResolutionForResolveError(resolveErr error) (tenantP
 	}
 }
 
-// tenantPlatformClient resolves tenant's platform (resolveTenantPlatform) and
-// returns a ready-to-use client plus a request-scoped context, for the review
-// detail/write paths that run only after the dashboard's own platform
-// resolution has already succeeded once (opening a review's detail or
-// writing to it is only reachable from an already-loaded Reviews tab). A
-// not-ready state therefore surfaces as a plain error here rather than the
-// dashboard's own four-state UI.
+// tenantPlatformClient is for paths reachable only after the dashboard resolved,
+// so a not-ready state is a plain error here.
 func (a *App) tenantPlatformClient(ctx context.Context, tenant string) (*platformclient.PlatformClient, context.Context, context.CancelFunc, error) {
 	resolution, err := a.resolveTenantPlatform(tenant, "")
 	if err != nil {
@@ -248,25 +182,14 @@ func (a *App) tenantPlatformClient(ctx context.Context, tenant string) (*platfor
 	return resolution.client, requestCtx, cancel, nil
 }
 
-// uiConnectERunPlatformInput is the "Connect to erunpaas.com" action's input:
-// the API base URL — discovered against the platform itself the same way
-// `erun cloud init erun` already does — and the tenant the click came from.
-//
-// Tenant is empty only for the machine-wide settings dialog, which attaches
-// the alias globally and has no tenant to attach it to. A click on a tenant's
-// dashboard carries that tenant so the attach lands in the selection the
-// dashboard's own resolution reads (resolveTenantPlatform): an alias attached
-// only machine-globally cannot move a tenant whose own selection is already
-// non-empty, which left the Connect card byte-identical after a click.
+// Tenant is empty only from the machine-wide settings dialog; otherwise the alias
+// must land in the tenant's selection, since a non-empty selection ignores global aliases.
 type uiConnectERunPlatformInput struct {
 	APIURL string `json:"apiUrl"`
 	Tenant string `json:"tenant,omitempty"`
 }
 
-// ConnectERunPlatform attaches a hosted erun platform as a cloud alias, so the
-// not-connected state has an in-app path with no terminal and no hand-typed
-// URL beyond the base address itself. It attaches the alias to the tenant the
-// click came from, which is the state the caller is asking to move.
+// ConnectERunPlatform attaches a hosted erun platform alias to the tenant the click came from.
 func (a *App) ConnectERunPlatform(input uiConnectERunPlatformInput) (uiCloudProviderStatus, error) {
 	provider, err := cloud.InitERunCloudProvider(core.Context{}, a.deps.store, cloud.InitERunCloudProviderParams{
 		APIURL: strings.TrimSpace(input.APIURL),
@@ -282,15 +205,7 @@ func (a *App) ConnectERunPlatform(input uiConnectERunPlatformInput) (uiCloudProv
 	return cloudProviderStatusToUI(cloud.CloudProviderTokenStatus(provider, a.deps.cloudDeps)), nil
 }
 
-// attachTenantCloudProviderAlias attaches alias to tenant's own cloud provider
-// selection. This is the write that makes Connect able to leave the
-// not-connected state: resolution consults the tenant's own selection whenever
-// that selection is non-empty, so the alias has to be in it, not merely in the
-// machine-global list.
-//
-// A tenant with no config of its own yet gets one naming just this alias —
-// refusing to write it would leave exactly the tenant this action is meant to
-// connect with no selection at all, and no way to grow one from the card.
+// A tenant with no config yet gets one naming just this alias.
 func (a *App) attachTenantCloudProviderAlias(tenant, alias string) error {
 	config, _, err := a.deps.store.LoadTenantConfig(tenant)
 	if err != nil && !errors.Is(err, configpkg.ErrNotInitialized) {
@@ -302,10 +217,6 @@ func (a *App) attachTenantCloudProviderAlias(tenant, alias string) error {
 	return a.deps.store.SaveTenantConfig(config)
 }
 
-// uiPlatformUserEnrollInput is the "not enrolled" state's enrollment attempt:
-// every field prefilled from the identity already in hand
-// (dashboard.platformIssuer/platformSubject), so the operator never retypes
-// values erun already knows.
 type uiPlatformUserEnrollInput struct {
 	Alias    string `json:"alias"`
 	Username string `json:"username"`
@@ -313,21 +224,15 @@ type uiPlatformUserEnrollInput struct {
 	Subject  string `json:"subject"`
 }
 
-// uiPlatformUser is the enrolled row the platform returned.
 type uiPlatformUser struct {
 	UserID   string `json:"userId"`
 	TenantID string `json:"tenantId"`
 	Username string `json:"username"`
 }
 
-// EnrollERunPlatformUser attempts to enroll the given identity into the
-// tenant. This succeeds only for a tenant with no users yet (first-user
-// bootstrap) or when the caller already holds user-management capability on
-// the platform; a not-yet-enrolled caller's own identity is refused by the
-// platform's own auth middleware before this call is even authorized — the
-// expected outcome for the common case, so the refusal is classified into
-// the administrator hand-off (enrollERunPlatformUserError,
-// tenant_platform_error.go) rather than surfaced as the raw platform error.
+// EnrollERunPlatformUser enrolls an identity; the platform refuses it unless the
+// tenant has no users or the caller manages users, and that refusal is classified
+// by enrollERunPlatformUserError.
 func (a *App) EnrollERunPlatformUser(input uiPlatformUserEnrollInput) (uiPlatformUser, error) {
 	user, err := platform.RunPlatformCreateUser(core.Context{}, a.deps.store, strings.TrimSpace(input.Alias), platformclient.PlatformCreateUserParams{
 		Username: strings.TrimSpace(input.Username),

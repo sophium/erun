@@ -13,9 +13,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// TestLoadTenantDashboardRequiresATenant is the null-input case: an empty
-// tenant must fail loudly, naming the operation and its recovery, rather
-// than silently returning null.
 func TestLoadTenantDashboardRequiresATenant(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{}})
 	_, err := app.LoadTenantDashboard(uiTenantDashboardInput{})
@@ -27,10 +24,7 @@ func TestLoadTenantDashboardRequiresATenant(t *testing.T) {
 	}
 }
 
-// TestLoadTenantDashboardChoosesAliasWhenMoreThanOneIsConfigured is the
-// multiple-erun-alias case: the CLI errors and asks for --alias; the desktop
-// instead reports every configured alias as a choice so the operator can
-// pick one, preselecting none until they do.
+// Several erun aliases are reported as choices with none preselected.
 func TestLoadTenantDashboardChoosesAliasWhenMoreThanOneIsConfigured(t *testing.T) {
 	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
 		{Alias: "erun+a@erun", Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: "https://a.example", ClientID: "client-a"}},
@@ -53,8 +47,6 @@ func TestLoadTenantDashboardChoosesAliasWhenMoreThanOneIsConfigured(t *testing.T
 		t.Fatalf("PlatformAliasChoices = %v, want %v", got, want)
 	}
 
-	// An explicit PlatformAlias resolves the ambiguity, exactly like the
-	// CLI's --alias.
 	chosen, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs", PlatformAlias: "erun+b@erun"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard with an explicit alias failed: %v", err)
@@ -64,9 +56,7 @@ func TestLoadTenantDashboardChoosesAliasWhenMoreThanOneIsConfigured(t *testing.T
 	}
 }
 
-// TestLoadTenantDashboardReportsNotSignedInLocally is state B's second row:
-// an erun alias is configured but never signed in, so the bearer mint fails
-// before any network call to the platform is made.
+// An alias that never signed in fails before any network call.
 func TestLoadTenantDashboardReportsNotSignedInLocally(t *testing.T) {
 	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
 		{Alias: testERunAlias, Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "client-1"}},
@@ -96,12 +86,8 @@ func TestLoadTenantDashboardReportsNotSignedInLocally(t *testing.T) {
 	}
 }
 
-// TestLoadTenantDashboardIgnoresTenantAPIURLOverrideForThePlatformRead:
-// TenantConfig.APIURL is documented only as `erun open`'s own port-forward
-// address (erun-docs/docs/reference/configuration.md), not a platform-URL
-// override. Honoring it would send the resolved alias's bearer token to
-// whatever address the field named, so the platform read must always use the
-// alias's own known URL.
+// TenantConfig.APIURL is not a platform URL; honoring it would leak the
+// alias's bearer token to that address.
 func TestLoadTenantDashboardIgnoresTenantAPIURLOverrideForThePlatformRead(t *testing.T) {
 	var requests []string
 	server := tenantDashboardAPI(t, "null", nil, &requests)
@@ -122,12 +108,7 @@ func TestLoadTenantDashboardIgnoresTenantAPIURLOverrideForThePlatformRead(t *tes
 	}
 }
 
-// TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant: a global
-// erun alias exists and is even signed in, but this tenant's own
-// configuration selected only an AWS alias. The dashboard must never
-// authenticate this tenant's platform
-// reads with a credential the tenant itself did not select, even though it
-// is the only erun alias configured anywhere.
+// A tenant must never use an erun alias it did not select.
 func TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		t.Fatalf("must never reach the erun platform with an alias this tenant did not select, got %s", req.URL.Path)
@@ -168,10 +149,6 @@ func TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant(t *testin
 	}
 }
 
-// TestLoadTenantDashboardUsesTheTenantsOwnSelectedERunAlias: once the tenant's
-// own selection DOES include an erun alias, that alias is used even though a different erun alias is also
-// configured globally — the tenant's own choice, not "the only one on the
-// machine", decides.
 func TestLoadTenantDashboardUsesTheTenantsOwnSelectedERunAlias(t *testing.T) {
 	var requests []string
 	server := tenantDashboardAPI(t, "null", nil, &requests)

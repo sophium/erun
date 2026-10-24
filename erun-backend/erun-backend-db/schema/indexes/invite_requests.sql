@@ -1,7 +1,5 @@
--- One pending request per verified (issuer, subject): a second submission
--- must update the existing pending row rather than queue a duplicate (issue's
--- §4 abuse bound). Enforced here, not only in application code, so it holds
--- even against a racing double-submit.
+-- One pending request per verified (issuer, subject), enforced here so a racing double-submit
+-- cannot queue a duplicate.
 CREATE UNIQUE INDEX invite_requests_pending_issuer_subject_idx
   ON invite_requests (issuer, subject)
   WHERE status = 'PENDING';

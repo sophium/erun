@@ -16,15 +16,9 @@ type EnvironmentInput struct {
 	Preview     bool   `json:"preview,omitempty" jsonschema:"when true, skip the live doctor deploy diagnosis (the only part of this call that runs helm/kubectl) and report health as not observed rather than run it"`
 }
 
-// EnvironmentTool is the environment read model's one aggregate call: an
-// environment's list-style summary plus its resolved lifecycle state
-// (running/idle/deploy-failed/stopped/unknown), its idle policy + activity
-// snapshot, its cloud-context config, and a doctor deploy diagnosis -- each
-// reusing the existing list/idle/doctor resolvers rather than
-// re-implementing them. Cloud-context power state is never refreshed live
-// here (that needs the operator's own AWS credentials, which do not reach
-// inside this pod), so a managed-cloud environment reports state "unknown"
-// rather than guessing from a status this package never persists.
+// EnvironmentTool aggregates summary, lifecycle state, idle status, cloud
+// context and deploy diagnosis. Cloud power state cannot be refreshed in-pod,
+// so managed-cloud environments report "unknown".
 func EnvironmentTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, EnvironmentInput) (*mcp.CallToolResult, lifecycle.EnvironmentReadModel, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input EnvironmentInput) (*mcp.CallToolResult, lifecycle.EnvironmentReadModel, error) {
 		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)

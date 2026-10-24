@@ -25,13 +25,7 @@ func testCloudLoginRealRunInvokesAwsSsoLoginViaStub(t *testing.T) {
 }
 
 func testCloudLoginRealRunLibraryExecutionModeNeedsNoAwsBinary(t *testing.T) {
-	// Proves the library path produces the same observable result as the
-	// subprocess path: with execution.modes.aws-sts=library and a real
-	// static-credential AWS profile on disk, CheckAWSStatus resolves via
-	// aws-sdk-go-v2 against a fake STS endpoint (AWS_ENDPOINT_URL) instead
-	// of shelling out, so the scenario declares no "aws" stub at all —
-	// the PATH scrub in internal/env would fail the run with "executable
-	// file not found" if production code fell through to a subprocess.
+	// No "aws" stub is declared: a subprocess fallback would fail on the PATH scrub.
 	setup := env.New(t)
 	seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 	seedExecutionMode(t, setup, "aws-sts", "library")
@@ -55,10 +49,7 @@ func testCloudLoginDryRunTracesAwsSsoLogin(t *testing.T) {
 }
 
 func testCloudLoginSelectPromptResolvesActiveAlias(t *testing.T) {
-	// Without --alias, `cloud login` shows a Select of configured aliases;
-	// "\r" confirms the single highlighted entry (the run's one interactive
-	// prompt — readline read-ahead). The stub's exit-0 get-caller-identity
-	// classifies the token active, so no login round-trip runs.
+	// "\r" confirms the single alias; readline read-ahead allows one prompt per run.
 	setup := env.New(t)
 	seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 	envVars, _ := stubAWSCallerIdentityAndJWT(t, setup)
@@ -74,8 +65,6 @@ func testCloudLoginSelectPromptResolvesActiveAlias(t *testing.T) {
 }
 
 func testCloudLoginExpiredConfirmsReloginViaStub(t *testing.T) {
-	// The stub's stderr message is the decision input that classifies the
-	// session expired; "y" confirms the forced `aws sso login` re-login.
 	setup := env.New(t)
 	seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 	stubs := setup.Cwd + "/stubs"
@@ -102,9 +91,6 @@ func testCloudLoginExpiredConfirmsReloginViaStub(t *testing.T) {
 }
 
 func testCloudLoginNotConfiguredDeclinesRelogin(t *testing.T) {
-	// The stub's "could not be found" stderr classifies the provider
-	// not_configured; answering "n" must decline without running
-	// `aws sso login` (the stub's login arm fails loudly if it does).
 	setup := env.New(t)
 	seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 	stubs := setup.Cwd + "/stubs"
@@ -134,9 +120,6 @@ func testCloudLoginNotConfiguredDeclinesRelogin(t *testing.T) {
 }
 
 func testCloudLoginRealRunUnsupportedProviderFails(t *testing.T) {
-	// A provider stored as provider=gcp reports status unknown; confirming
-	// the login must fail with "unsupported cloud provider" rather than
-	// shell out to a CLI that does not exist.
 	setup := env.New(t)
 	root := filepath.Join(setup.ConfigHome, "erun")
 	if err := os.MkdirAll(root, 0o755); err != nil {

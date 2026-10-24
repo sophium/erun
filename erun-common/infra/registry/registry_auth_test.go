@@ -36,8 +36,7 @@ func useCredentialHelper(t *testing.T, fn func(binaryPath, serverURL string) ([]
 	t.Cleanup(func() { runDockerCredentialHelper = prev })
 }
 
-// useCredentialHelperPaths pins the candidate helper binaries so tests don't
-// depend on which container runtimes are installed on the host.
+// useCredentialHelperPaths keeps tests independent of installed runtimes.
 func useCredentialHelperPaths(t *testing.T, fn func(helper string) []string) {
 	t.Helper()
 	prev := dockerCredentialHelperPaths
@@ -53,7 +52,6 @@ func useGHToken(t *testing.T, fn func(owner string) (string, bool)) {
 }
 
 func TestResolveRegistryBasicAuthCredsStore(t *testing.T) {
-	// osxkeychain-style store: inline auth is empty; the secret lives in the helper.
 	dir := writeDockerConfig(t, `{"auths":{"ghcr.io":{}},"credsStore":"osxkeychain"}`)
 	useDockerConfigDir(t, dir)
 	useCredentialHelperPaths(t, func(helper string) []string {
@@ -106,8 +104,7 @@ func TestResolveRegistryBasicAuthHelperMissFallsBackToInline(t *testing.T) {
 	}
 }
 
-// The key GUI-launch fix: several runtimes ship docker-credential-<helper> and
-// only one holds the credential; resolution must try each, not stop at the first.
+// Several runtimes ship the same helper; resolution must try each.
 func TestCredentialFromHelperTriesAllBinaries(t *testing.T) {
 	dir := writeDockerConfig(t, `{"auths":{"ghcr.io":{}},"credsStore":"osxkeychain"}`)
 	useDockerConfigDir(t, dir)

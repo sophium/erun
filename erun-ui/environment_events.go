@@ -11,21 +11,15 @@ func initEmittedKey(tenant, environment string) string {
 	return strings.TrimSpace(tenant) + "\x00" + strings.TrimSpace(environment)
 }
 
-// clearInitEmitted lets a later legitimate (re-)initialization of the same env
-// fire the event again — after an init failure (retry) or a delete + re-create.
+// clearInitEmitted lets a retry or re-create fire the event again.
 func (a *App) clearInitEmitted(tenant, environment string) {
 	a.initEmittedMu.Lock()
 	delete(a.initEmitted, initEmittedKey(tenant, environment))
 	a.initEmittedMu.Unlock()
 }
 
-// Commands piped into the shared Local shell never produce a PTY exit, so init
-// success is observed from a trace line and surfaced as this event rather than
-// a PTY-exit hook. It fires AT MOST ONCE per env: a Windows ConPTY repaint (from
-// writing the follow-up deploy command into the same Local shell) re-sends the
-// buffered "==> Initialized" line as fresh output, and without this guard each
-// re-fire composed another deploy — whose write repainted again — an endless
-// create→deploy loop. clearInitEmitted resets it for a retry/re-create.
+// emitEnvironmentInitialized fires at most once per env: a Windows ConPTY
+// repaint re-sends the "==> Initialized" line and would loop create->deploy.
 func (a *App) emitEnvironmentInitialized(tenant, environment string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -55,7 +49,6 @@ func (a *App) emitEnvironmentInitFailed(tenant, environment string) {
 	if tenant == "" || environment == "" {
 		return
 	}
-	// A failed init may be retried; allow the next success to fire the event.
 	a.clearInitEmitted(tenant, environment)
 	a.emitEvent(environmentInitFailedEvent, uiEnvironmentInitializedPayload{
 		Tenant:      tenant,
@@ -63,8 +56,7 @@ func (a *App) emitEnvironmentInitFailed(tenant, environment string) {
 	})
 }
 
-// The create→deploy→open flow gates opening an env's tabs on this signal, so
-// tabs never spawn against a runtime that is not yet deployed.
+// Tabs open on this signal so they never spawn against an undeployed runtime.
 func (a *App) emitEnvironmentDeployed(tenant, environment string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -77,8 +69,7 @@ func (a *App) emitEnvironmentDeployed(tenant, environment string) {
 	})
 }
 
-// A config-file change carries no selection, so unlike the lifecycle events the
-// frontend reloads state but must not auto-open anything.
+// A config-file change carries no selection, so the frontend must not auto-open.
 func (a *App) emitEnvironmentsChanged() {
 	a.emitEvent(environmentsChangedEvent, struct{}{})
 }
@@ -89,15 +80,8 @@ type uiHostedDefinitionUploadedPayload struct {
 	Revision    int    `json:"revision"`
 }
 
-// emitHostedDefinitionUploaded says that a definition upload wrote a new
-// revision for one environment.
-//
-// The upload's own config write already fires environments-changed, but that
-// tick reloads the sidebar and the tenant list — not the Manage dialog's
-// environment config, which is what renders the marker row and the local
-// divergence. Without this the panel would keep showing the revision the
-// environment had before the upload, in the one dialog whose subject is that
-// revision.
+// emitHostedDefinitionUploaded refreshes the Manage dialog, which
+// environments-changed does not reload.
 func (a *App) emitHostedDefinitionUploaded(tenant, environment string, revision int) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -118,9 +102,7 @@ type uiDoctorCompletedPayload struct {
 	Message     string `json:"message,omitempty"`
 }
 
-// emitDoctorCompleted is `erun doctor`'s only completion signal (see
-// handleDoctorTraceLine): the Manage dialog's SSH tab records it as the
-// persisted last-run outcome so "is this healthy?" has a visible answer.
+// emitDoctorCompleted is `erun doctor`'s only completion signal.
 func (a *App) emitDoctorCompleted(tenant, environment string, success bool, message string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -142,10 +124,8 @@ type uiSSHDInitCompletedPayload struct {
 	Message     string `json:"message,omitempty"`
 }
 
-// emitSSHDInitCompleted is `erun sshd init`'s only completion signal (see
-// handleSSHDInitTraceLine): it runs piped into the shared Local shell like
-// doctor, so the Manage dialog's SSH tab records this event as the persisted
-// last-run outcome instead of relying on a PTY exit that never fires.
+// emitSSHDInitCompleted is `erun sshd init`'s only completion signal; piped
+// commands never produce a PTY exit.
 func (a *App) emitSSHDInitCompleted(tenant, environment string, success bool, message string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)

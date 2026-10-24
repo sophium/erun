@@ -11,10 +11,8 @@ import (
 	"strings"
 )
 
-// linkImplementations ties every method of a module interface to the methods
-// that implement it, and an embedded field to its type, so a rename of one
-// renames the others: an implementation whose method changed name would stop
-// implementing.
+// linkImplementations links interface methods to their implementations, and
+// embedded fields to their types, so renames stay consistent.
 func (w *world) linkImplementations(fset *token.FileSet, named []*types.TypeName) {
 	var ifaces, concrete []*types.TypeName
 	for _, tn := range named {
@@ -78,34 +76,27 @@ func (w *world) union(a, b string) {
 	}
 }
 
-// decisions is what a mapping means for every module object: the package
-// directory it ends up in, and its name there.
 type decisions struct {
-	dir     map[string]string
-	newName map[string]string
-	// exportedFields names every struct field the mapping exports.
+	dir            map[string]string
+	newName        map[string]string
 	exportedFields []string
 	decls          map[string][]declTarget
 	errs           []string
 }
 
-// declTarget is one top-level declaration of a module file and where it goes.
 type declTarget struct {
 	start, end int
 	dir        string
-	// method is the key of the method a FuncDecl declares, which Go requires
-	// to stay with its receiver type wherever that type is declared.
+	// method keys a FuncDecl's method, which must stay with its receiver type.
 	method string
-	// dups are the other packages a test-only declaration is copied into,
-	// because tests there use it: a _test.go declaration cannot be exported.
+	// dups are packages a test-only declaration is copied into, since a _test.go
+	// declaration cannot be exported.
 	dups map[string]bool
-	// group is the offset of the grouped declaration a spec belongs to, and
-	// tok its keyword; zero for a declaration that is not one spec of a group.
+	// group is the offset of the enclosing grouped declaration, or zero.
 	group int
 	tok   string
-	// kept marks a test-only copy left in place because dest, where its file
-	// goes, already declares it; drop removes it when its own package is
-	// emptied, so references to it resolve to that twin.
+	// kept marks a test copy left in place because dest already declares it; drop
+	// removes it when its own package is emptied.
 	kept, drop bool
 	dest       string
 }
@@ -127,7 +118,6 @@ func (w *world) decide(m packageMap) decisions {
 	return d
 }
 
-// declAt is the top-level declaration of a module file containing offset.
 func (d decisions) declAt(file string, offset int) *declTarget {
 	decls := d.decls[file]
 	for i := range decls {
@@ -138,8 +128,7 @@ func (d decisions) declAt(file string, offset int) *declTarget {
 	return nil
 }
 
-// visibleDir is where code in package directory from finds an object: its
-// own copy when the object is a test helper duplicated there.
+// visibleDir prefers a test helper's local copy in from.
 func (w *world) visibleDir(key, from string, d decisions) string {
 	o := w.objects[key]
 	if decl := d.declAt(o.file, offsetOf(key)); decl != nil && decl.dups[from] {
@@ -151,9 +140,8 @@ func (w *world) visibleDir(key, from string, d decisions) string {
 	return d.dir[key]
 }
 
-// duplicateTestHelpers copies every test-only declaration a test in another
-// package refers to into that package, together with what the copy refers to
-// in turn and the methods of a copied type, until nothing more is needed.
+// duplicateTestHelpers copies test-only declarations, transitively, into
+// every package whose tests use them.
 func (w *world) duplicateTestHelpers(d decisions) {
 	w.initsFollowTheirFile(d)
 	for changed := true; changed; {
@@ -172,7 +160,6 @@ func (w *world) duplicateTestHelpers(d decisions) {
 	w.debugDecls(d)
 }
 
-// debugDecls prints where every declaration named debugName goes.
 func (w *world) debugDecls(d decisions) {
 	if debugName == "" {
 		return
@@ -186,10 +173,8 @@ func (w *world) debugDecls(d decisions) {
 	}
 }
 
-// initsFollowTheirFile copies a test file's init into every package that
-// receives part of that file. An init refers to nothing the tests in its file
-// name, so no reference carries it; but those tests rely on what it sets up,
-// wherever they end up.
+// initsFollowTheirFile copies a test file's init to every package receiving
+// part of the file: no reference carries an init, but its tests rely on it.
 func (w *world) initsFollowTheirFile(d decisions) {
 	for file, decls := range d.decls {
 		sf := w.files[file]
@@ -219,7 +204,6 @@ func (w *world) initsFollowTheirFile(d decisions) {
 	}
 }
 
-// isInit says whether a declaration is a package init function.
 func (w *world) isInit(sf *sourceFile, decl *declTarget) bool {
 	for _, astDecl := range sf.ast.Decls {
 		fn, ok := astDecl.(*ast.FuncDecl)
@@ -230,9 +214,8 @@ func (w *world) isInit(sf *sourceFile, decl *declTarget) bool {
 	return false
 }
 
-// relocateUnusedTestHelpers moves, rather than copies, a test-only helper its
-// own package no longer uses: every test that used it went elsewhere, so the
-// original would be left behind unused.
+// relocateUnusedTestHelpers moves, rather than copies, a helper its own
+// package no longer uses.
 func (w *world) relocateUnusedTestHelpers(d decisions) {
 	for moved := true; moved; {
 		moved = false
@@ -253,8 +236,6 @@ func (w *world) relocateUnusedTestHelpers(d decisions) {
 	}
 }
 
-// redirectDeclObjects records a relocated declaration's new directory for
-// every object it declares.
 func (w *world) redirectDeclObjects(od *declTarget, d decisions) {
 	for key, o := range w.objects {
 		if d.declAt(o.file, offsetOf(key)) == od {
@@ -288,8 +269,7 @@ func (w *world) dupForSite(s site, d decisions) bool {
 	return changed
 }
 
-// objectDir is the directory an object's declaration ends up in: a method
-// goes with its receiver type, a field with the declaration it is written in.
+// objectDir places a method with its receiver type and a field with its declaration.
 func (w *world) objectDir(key string, m packageMap, d decisions) string {
 	o := w.objects[key]
 	if o.method && o.owner != "" {
@@ -320,8 +300,6 @@ func offsetOf(key string) int {
 // debugName, when set, explains why that identifier is exported.
 var debugName = os.Getenv("PKGMOVE_DEBUG")
 
-// testHelpersUsedAtHome are the duplicated test-only declarations some code in
-// their own package still refers to.
 func (w *world) testHelpersUsedAtHome(d decisions) map[*declTarget]bool {
 	used := map[*declTarget]bool{}
 	for _, s := range w.sites {
@@ -340,8 +318,7 @@ func (w *world) testHelpersUsedAtHome(d decisions) map[*declTarget]bool {
 	return used
 }
 
-// alreadyDeclares reports whether a package already has its own declaration of
-// o's name -- a copy an earlier step made -- in which case it needs no other.
+// alreadyDeclares reports whether dir already has its own declaration of o's name.
 func (w *world) alreadyDeclares(dir string, o *object) bool {
 	if w.declared == nil {
 		w.declared = map[string]map[string]bool{}
@@ -361,10 +338,8 @@ func (w *world) alreadyDeclares(dir string, o *object) bool {
 	return sf != nil && path.Dir(sf.rel) != dir && w.declared[dir][o.name]
 }
 
-// keepCopiesInPlace leaves a test-only declaration where it is when the
-// package its file's rule sends it to already declares every name it does:
-// it is a copy an earlier step made, and that package has its own. This is
-// what makes re-running a step's map after rebasing onto it change nothing.
+// keepCopiesInPlace leaves a test-only declaration where its destination
+// already declares it, so re-running a map changes nothing.
 func (w *world) keepCopiesInPlace(d decisions) {
 	for file, decls := range d.decls {
 		sf := w.files[file]
@@ -383,9 +358,7 @@ func (w *world) keepCopiesInPlace(d decisions) {
 	dropCopiesOfEmptiedPackages(w, d)
 }
 
-// dropCopiesOfEmptiedPackages drops a copy kept in place when nothing else of
-// its package stays there: the package is going away, and the destination
-// already declares the same thing.
+// dropCopiesOfEmptiedPackages drops kept copies whose package is going away.
 func dropCopiesOfEmptiedPackages(w *world, d decisions) {
 	stays := packagesKeepingDeclarations(w, d)
 	for file, decls := range d.decls {
@@ -402,8 +375,6 @@ func dropCopiesOfEmptiedPackages(w *world, d decisions) {
 	}
 }
 
-// packagesKeepingDeclarations are the packages some declaration other than a
-// kept copy stays in.
 func packagesKeepingDeclarations(w *world, d decisions) map[string]bool {
 	stays := map[string]bool{}
 	for file, decls := range d.decls {

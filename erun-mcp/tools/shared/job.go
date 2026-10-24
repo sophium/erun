@@ -4,13 +4,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// The job tools are the host-side half of the job surface. An orchestrator
-// driving an environment from outside starts long work here, then comes back for
-// its state — instead of using `raw` to hand-roll detachment, a log redirect, a
-// polling loop, a sentinel token, and a parse of this envelope to recover an
-// exit code that a wrapping shell had already mangled.
-
-// JobResult is the handle plus whatever is known about the job right now.
+// JobResult is the job handle plus its current known state.
 type JobResult struct {
 	Tenant      string                `json:"tenant"`
 	Environment string                `json:"environment"`

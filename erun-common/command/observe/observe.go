@@ -8,60 +8,38 @@ import (
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
-// ObserveParams configures which named Secrets to check for key presence.
-// Pods, quotas, limit ranges, ingresses, and certificates are always reported
-// in full: enumerating them costs nothing and reveals nothing sensitive.
+// ObserveParams names the Secrets to check for key presence; everything else is always reported.
 type ObserveParams struct {
 	Secrets []ObserveSecretCheck
 }
 
-// ObserveSecretCheck names one Secret/key pair to check for presence. The
-// value itself is never read or reported, only whether the key exists.
+// ObserveSecretCheck names one Secret/key pair; the value is never read.
 type ObserveSecretCheck struct {
 	Name string
 	Key  string
 }
 
-// ObserveResult is an environment's observed Kubernetes state: a read-only
-// snapshot an orchestrator can act on without composing kubectl or helm by
-// hand.
+// ObserveResult is a read-only snapshot of an environment's Kubernetes state.
 type ObserveResult struct {
-	Tenant         string                        `json:"tenant"`
-	Environment    string                        `json:"environment"`
-	Namespace      string                        `json:"namespace"`
-	Pods           []ObservedPod                 `json:"pods"`
-	ResourceQuotas []ObservedResourceQuota       `json:"resourceQuotas"`
-	LimitRanges    []ObservedLimitRange          `json:"limitRanges"`
-	Ingresses      []clusterread.ObservedIngress `json:"ingresses"`
-	// Services is what the namespace actually runs, which is the list a
-	// developer picks from when choosing something to expose.
-	Services     []clusterread.ObservedService     `json:"services"`
-	Certificates []clusterread.ObservedCertificate `json:"certificates"`
-	Secrets      []ObservedSecretCheck             `json:"secrets,omitempty"`
-	// HelmRelease is the runtime release's own record of what should be
-	// running. Nil in dry-run, where nothing was read yet.
+	Tenant         string                            `json:"tenant"`
+	Environment    string                            `json:"environment"`
+	Namespace      string                            `json:"namespace"`
+	Pods           []ObservedPod                     `json:"pods"`
+	ResourceQuotas []ObservedResourceQuota           `json:"resourceQuotas"`
+	LimitRanges    []ObservedLimitRange              `json:"limitRanges"`
+	Ingresses      []clusterread.ObservedIngress     `json:"ingresses"`
+	Services       []clusterread.ObservedService     `json:"services"`
+	Certificates   []clusterread.ObservedCertificate `json:"certificates"`
+	Secrets        []ObservedSecretCheck             `json:"secrets,omitempty"`
+	// HelmRelease is nil in dry-run.
 	HelmRelease *clusterread.ObservedHelmRelease `json:"helmRelease,omitempty"`
-	// Drift names every disagreement found between the live release, the
-	// running pods, and what the env config records — the pre-deploy
-	// live-vs-plan diff an orchestrator must do before any env-shaping
-	// deploy.
-	//
-	// The field is always present in a real run, which is why it is not
-	// `omitempty`: an empty list is the verdict "the comparison ran and
-	// nothing disagreed", and a consumer must be able to tell that apart from
-	// "this key is never populated". A dry run reads nothing and so carries a
-	// null here, the same "not determined" answer its sibling lists report —
-	// never an empty list, which would assert a comparison that never ran.
+	// Drift is not omitempty: [] means "compared, nothing disagreed"; a dry run's null means
+	// "not determined".
 	Drift []string `json:"drift"`
 }
 
-// RunObservation reads pods, quota/limit usage, ingress routing, certificate
-// readiness, and the runtime helm release for one namespace, walking a
-// Certificate's CertificateRequest -> Order -> Challenge chain when it is not
-// Ready so the caller gets the failure reason without composing that walk
-// itself. It is read-only by construction: every kubectl call below is a
-// literal `get` against a fixed resource kind, and the one helm call is a
-// literal `status`, never a caller-supplied verb.
+// RunObservation reads one namespace's state, walking a non-Ready Certificate's chain to its
+// failure reason. Read-only: every kubectl call is a literal `get`, the helm call a literal `status`.
 func RunObservation(ctx core.Context, req config.ShellLaunchParams, params ObserveParams) (ObserveResult, error) {
 	result := ObserveResult{Tenant: req.Tenant, Environment: req.Environment, Namespace: req.Namespace}
 
@@ -105,10 +83,7 @@ func RunObservation(ctx core.Context, req config.ShellLaunchParams, params Obser
 	if result.LimitRanges, err = fetchObservedLimitRanges(limitArgs); err != nil {
 		return ObserveResult{}, err
 	}
-	// The read names itself and observe names the operation on top of it: these
-	// two fetchers are shared with the services listing and expose's own reads,
-	// so neither can carry "observe:" as its own prefix. The message is
-	// unchanged -- "observe: " then "get ingress: ...", exactly as before.
+	// These fetchers are shared, so the "observe:" prefix is added here.
 	if result.Ingresses, err = clusterread.FetchObservedIngresses(ingressArgs); err != nil {
 		return ObserveResult{}, fmt.Errorf("observe: %w", err)
 	}

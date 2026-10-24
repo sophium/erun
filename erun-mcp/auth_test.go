@@ -9,10 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
-// identityWithScopedToken mints a token from a fresh desktop identity carrying
-// scope (a space-delimited MCPCapability list, e.g. "erun:attach"). An empty
-// scope is the desktop's own single-admin case (MCPCapabilitiesFromClaims
-// resolves no claims to admin).
+// identityWithScopedToken mints a token with scope; empty scope resolves to admin.
 func identityWithScopedToken(t *testing.T, scope string) (issuer, token string) {
 	t.Helper()
 	priv, pub, err := mcpauth.GenerateDesktopIdentity()

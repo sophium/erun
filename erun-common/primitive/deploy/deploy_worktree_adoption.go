@@ -9,12 +9,10 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-// worktreeClaimSuffix names the runtime release's dedicated worktree volume; it
-// mirrors the runtime chart's `{{ .Release.Name }}-worktree` claim.
+// Mirrors the runtime chart's `{{ .Release.Name }}-worktree` claim.
 const worktreeClaimSuffix = "-worktree"
 
-// podWorktreePath mirrors the runtime chart's $repoPath: the in-pod git folder is
-// derived from the repo name alone, whatever the env's host-side repo path is.
+// podWorktreePath mirrors the runtime chart's $repoPath.
 func podWorktreePath(repoName string) string {
 	repoName = strings.TrimSpace(repoName)
 	if repoName == "" {
@@ -23,25 +21,14 @@ func podWorktreePath(repoName string) string {
 	return "/home/erun/git/" + repoName
 }
 
-// announceWorktreeVolumeChange reports a deploy that moves the environment's
-// worktree onto the dedicated worktree volume.
-//
-// An environment whose checkout predates that volume keeps it on the home
-// volume, at the very path the claim mounts at, so the deploy that first creates
-// the claim relocates the worktree between volumes. The pod's init container
-// adopts the existing tree rather than letting the empty claim mask it, but the
-// relocation still has to be visible: a rollout that reported plain success
-// while swapping the volume under a populated worktree is what made the loss
-// invisible in the first place.
-//
-// Best-effort by design — when the claim's existence cannot be read, the notice
-// is printed anyway. Staying quiet is the failure mode being fixed.
+// announceWorktreeVolumeChange reports a deploy that first creates the worktree
+// claim and so relocates an existing worktree between volumes. When the claim
+// cannot be read the notice prints anyway: silence is the failure being avoided.
 func announceWorktreeVolumeChange(ctx core.Context, spec HelmDeploySpec) {
 	if spec.WorktreeStorage != WorktreeStoragePVC {
 		return
 	}
-	// Only the runtime release owns the worktree volume; a component chart's
-	// deploy carries the same env fields but creates no claim.
+	// Component releases carry the same env fields but create no worktree claim.
 	if strings.TrimSpace(spec.ReleaseName) != config.RuntimeReleaseName(spec.Tenant) {
 		return
 	}
@@ -74,11 +61,8 @@ func announceWorktreeVolumeChange(ctx core.Context, spec HelmDeploySpec) {
 	ctx.Info("    the worktree starts empty when there is nothing to adopt")
 }
 
-// kubectlGetPVCArgs is the single source of the `kubectl get pvc <claim> -o
-// name` argv, shared by kubectlWorktreeClaimArgs (which renders it for both
-// dry-run and audit purposes) and defaultWorktreeClaimExists (which also
-// executes it as a subprocess), so the dry-run trace can never drift from
-// either execution path.
+// kubectlGetPVCArgs is the single argv source so the dry-run trace cannot drift
+// from execution.
 func kubectlGetPVCArgs(contextName, namespace, claim string) []string {
 	args := make([]string, 0, 8)
 	if contextName = strings.TrimSpace(contextName); contextName != "" {
@@ -94,10 +78,8 @@ func kubectlWorktreeClaimArgs(spec HelmDeploySpec, claim string) []string {
 	return kubectlGetPVCArgs(spec.KubernetesContext, spec.Namespace, claim)
 }
 
-// worktreeClaimExists dispatches to the subprocess or library path per the
-// kubectl-pvc-get execution mode (see execution_mode.go), distinguishing "the
-// claim is not there" from "the answer is unknown" either way, so a cluster
-// erun cannot read never passes for a settled worktree.
+// worktreeClaimExists distinguishes "absent" from "unknown" so an unreadable
+// cluster never passes as settled.
 func worktreeClaimExists(contextName, namespace, claim string) (bool, error) {
 	if config.CurrentExecutionMode(kube.KubectlPVCGetExecutionOperation) == config.ExecutionModeLibrary {
 		return kube.LibraryPersistentVolumeClaimExists(contextName, namespace, claim)

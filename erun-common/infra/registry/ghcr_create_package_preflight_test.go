@@ -10,19 +10,13 @@ import (
 	"testing"
 )
 
-// fakeGHCRRegistry answers the two requests this preflight makes: a token
-// exchange and a blob-upload-session start. It also records the DELETE the
-// probe should send to abandon a session it was granted, and the exact
-// repository path each request named, so a scenario can assert the tag/chart
-// parsing reached the registry correctly.
+// fakeGHCRRegistry serves the token exchange and blob-upload start, recording
+// abandon DELETEs and the repository each request named.
 type fakeGHCRRegistry struct {
-	// TokenStatus is the token endpoint's status; a non-2xx makes the whole
-	// check inconclusive before it ever reaches the upload probe.
-	TokenStatus int
-	// UploadStatus is the blob-upload-session endpoint's status.
+	// A non-2xx TokenStatus makes the check inconclusive.
+	TokenStatus  int
 	UploadStatus int
-	// UploadBody is returned on a denied upload, the registry's own reason.
-	UploadBody string
+	UploadBody   string
 
 	mu           sync.Mutex
 	repositories []string
@@ -102,9 +96,7 @@ func (r *fakeGHCRRegistry) deletedCount() int {
 	return len(r.deleted)
 }
 
-// The failure this exists to prevent: a token that pushes every existing
-// package fine still gets denied create_package on the first brand-new one,
-// and that must be caught before the build, not after.
+// A token that pushes existing packages can still be denied create_package.
 func TestANewPackageDeniedByTheRegistryIsRefusedUpFront(t *testing.T) {
 	registry := &fakeGHCRRegistry{UploadStatus: http.StatusForbidden, UploadBody: `denied: permission_denied: create_package`}
 	server := registry.start(t)
@@ -128,9 +120,6 @@ func TestANewPackageDeniedByTheRegistryIsRefusedUpFront(t *testing.T) {
 	}
 }
 
-// An existing package, or a brand-new one this credential can actually
-// create, must not block the release — the registry granting the session is
-// conclusive proof push would have worked.
 func TestAPushableRepositoryIsAccepted(t *testing.T) {
 	registry := &fakeGHCRRegistry{UploadStatus: http.StatusAccepted}
 	server := registry.start(t)
@@ -143,8 +132,6 @@ func TestAPushableRepositoryIsAccepted(t *testing.T) {
 	}
 }
 
-// The check converts a *known* failure into an immediate one; it must never
-// invent a new way to block a release it cannot actually judge.
 func TestGHCRCreatePackageCheckNeverBlocksOnAnInconclusiveAnswer(t *testing.T) {
 	auth := RegistryBasicAuth{Username: "sophium", Secret: "token"}
 
@@ -171,8 +158,7 @@ func TestGHCRCreatePackageCheckNeverBlocksOnAnInconclusiveAnswer(t *testing.T) {
 	})
 }
 
-// Only ghcr is checked, and only when a credential resolves; neither entry
-// point may reach the network otherwise.
+// Neither entry point may reach the network for non-ghcr or without a credential.
 func TestGHCREntryPointsSkipWhenNotApplicable(t *testing.T) {
 	if err := VerifyGHCRCanPushImage(context.Background(), nil, "020362606330.dkr.ecr.eu-west-2.amazonaws.com/acme/api:1.0.0"); err != nil {
 		t.Fatalf("a non-ghcr registry must not be probed: %v", err)

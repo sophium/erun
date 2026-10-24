@@ -27,9 +27,7 @@ func assertConfigFileMode(t *testing.T, path string, want os.FileMode) {
 	}
 }
 
-// TestDoctorSyncConfigWritesRestrictedConfig covers the other writer of these
-// files: `erun doctor --sync-config` rewrites the root and environment config
-// through its own path, so a reconcile must not restore the wide mode.
+// --sync-config writes config through its own path, so it must keep the restricted mode.
 func TestDoctorSyncConfigWritesRestrictedConfig(t *testing.T) {
 	requirePOSIXFileModes(t)
 	configHome := t.TempDir()

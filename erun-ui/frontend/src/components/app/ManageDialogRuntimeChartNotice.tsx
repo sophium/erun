@@ -16,18 +16,13 @@ import type { AppState } from '@/app/state';
 
 type ManageDialog = AppState['manageDialog'];
 
-// RuntimeChartNotice states what a deploy of the picked version would install for
-// the runtime, immediately under the version row and immediately above the field
-// that changes it -- the blocking reason and its fix, adjacent, where the operator
-// is acting rather than inside a popover that closes.
+// RuntimeChartNotice states what a deploy of the picked version installs for the runtime.
 export function RuntimeChartNotice({
   dialog,
   id = RUNTIME_CHART_NOTICE_ID,
 }: {
   dialog: ManageDialog;
-  // The picker panel renders its own instance while it is open, so each instance
-  // derives every id it owns from this one -- including the recovery button, which
-  // would otherwise collide with its twin during the panel's close animation.
+  // The picker renders its own instance, so every id derives from this one to avoid close-animation collisions.
   id?: string;
 }): React.ReactElement | null {
   const dispatch = useAppDispatch();
@@ -69,10 +64,7 @@ export function RuntimeChartNotice({
   }
   const stated = statedRuntimeChart(dialog, plan?.version ?? '');
   if (stated) {
-    // Visibility of system status: with the two coordinates apart, "what will be
-    // installed" is two facts, and this is the one the version cannot show. Read
-    // from the environment's saved chart rather than the probe, which was resolved
-    // before the chart was stated and would still be describing the old answer.
+    // Read from the saved chart, not the probe, which predates the chart choice.
     return (
       <div id={id} className="text-[12px] leading-[1.4] text-muted-foreground">
         Runtime chart {stated.chart} {stated.version}, set on this environment.

@@ -33,14 +33,8 @@ func WriteUsageResult(ctx core.Context, report podruntime.RuntimeUsageReport) er
 	return writeUsageSizing(ctx, report.Sizing)
 }
 
-// writeUsageDindReading prints the erun-dind sidecar's own CPU/memory reading
-// on a build-capable environment: every image build actually runs there, a
-// separate cgroup the runtime container's own reading above cannot see, so
-// without this a busy build reads as an idle environment. Falls back to
-// naming the gap when the sidecar's own cgroup could not be read (an older
-// runtime image, a sidecar mid-restart), matching the desktop hover card's
-// "-- excludes builds" caveat (Sidebar.EnvHoverCard.tsx) so both transports
-// agree on what this reading covers either way.
+// writeUsageDindReading prints the dind sidecar's reading, where builds actually run,
+// or names the gap when it could not be read.
 func writeUsageDindReading(ctx core.Context, usage config.RuntimeUsage) error {
 	if !usage.ExcludesBuilds {
 		return nil
@@ -69,11 +63,7 @@ func writeUsageCPU(ctx core.Context, prefix string, cpu config.RuntimeCPUUsage) 
 	return err
 }
 
-// writeUsageMemory names the denominator a memory percentage is taken against
-// as a *limit*. Unqualified, `394.4MiB / 2.0GiB (19.3%)` reads as "this
-// environment holds 2.0GiB": a cgroup ceiling is what the container may grow to
-// under pressure, and it reserves nothing at all. The reservation is the line
-// writeUsageRequests prints beneath it.
+// writeUsageMemory labels the denominator as a limit: a cgroup ceiling reserves nothing.
 func writeUsageMemory(ctx core.Context, prefix string, memory config.RuntimeMemoryUsage) error {
 	if memory.Unavailable != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "%sMemory: unavailable (%s)\n", prefix, memory.Unavailable)
@@ -92,21 +82,10 @@ func writeUsageMemory(ctx core.Context, prefix string, memory config.RuntimeMemo
 	return err
 }
 
-// writeUsageRequests prints the reservation the scheduler admits this
-// environment's pod on, which is a different number from every limit above and
-// the one that decides whether the pod can be placed on a node at all. Without
-// it the only figures on this output are ceilings, and a ceiling reads as
-// provisioned: ~135 CPU and ~198GiB of limits on one node against 2.5 CPU and
-// 10GiB of actual reservation is indistinguishable here from five environments
-// holding their limits.
-//
-// It names each container's own request as well as the pod's effective total,
-// because the container is what each limit above belongs to -- the runtime
-// container's 1GiB request is the figure to read against its own 27GiB limit.
+// writeUsageRequests prints the scheduler reservation per container and for the pod,
+// since limits alone read as provisioned capacity.
 func writeUsageRequests(ctx core.Context, requests *config.RuntimeUsageRequests) error {
 	if requests == nil {
-		// A dry run read nothing, and the reading is omitted rather than
-		// printed as a reservation of nothing.
 		return nil
 	}
 	if requests.Unavailable != "" {
@@ -133,10 +112,7 @@ func sortedUsageRequestContainers(containers map[string]config.KubernetesRequest
 	return names
 }
 
-// formatUsageRequests renders one request pair, naming the parts rather than
-// emitting two bare numbers ("0.5 CPU / 2.0GiB"), and stating a resource the
-// container declares nothing for as "none" -- an undeclared request reserves
-// nothing, and a bare 0 would read as a measured reservation of zero.
+// formatUsageRequests renders an undeclared request as "none", not 0.
 func formatUsageRequests(requests config.KubernetesRequests) string {
 	cpu := "none"
 	if requests.CPUMilli > 0 {
@@ -149,11 +125,7 @@ func formatUsageRequests(requests config.KubernetesRequests) string {
 	return cpu + " / " + memory
 }
 
-// formatUsagePeak and formatUsageOOMKills report "unavailable" rather than a
-// fabricated zero when memory.peak / memory.events' oom_kill counter could
-// not be read -- the same distinction the reader itself carries via
-// PeakObserved/OOMKillsObserved, so the two never collapse into a confident
-// zero here either.
+// formatUsagePeak reports "unavailable" rather than zero when the counter was not read.
 func formatUsagePeak(memory config.RuntimeMemoryUsage) string {
 	if !memory.PeakObserved {
 		return "unavailable"
@@ -168,12 +140,7 @@ func formatUsageOOMKills(memory config.RuntimeMemoryUsage) string {
 	return fmt.Sprintf("%d", memory.OOMKills)
 }
 
-// writeUsageDisk labels the mount's total/used/percent as "(node, shared)":
-// they come from a statfs of the whole mount, so every environment scheduled
-// on the same node reports the identical figures regardless of which of them
-// actually wrote the bytes (see RuntimeDiskUsage.NodeShared). The own-usage
-// line beneath it is the number scoped to this environment alone -- the one
-// an operator can actually reduce by cleaning up this environment.
+// writeUsageDisk labels mount figures "(node, shared)"; the own-usage line is this environment's alone.
 func writeUsageDisk(ctx core.Context, disks []config.RuntimeDiskUsage) error {
 	for _, disk := range disks {
 		if disk.Unavailable != "" {
@@ -213,19 +180,7 @@ func writeUsageWarnings(ctx core.Context, warnings []string) error {
 	return nil
 }
 
-// writeUsageSizing prints the standing recommendation directly beneath the
-// warnings, because the two are one subject: an environment reported as
-// saturated with no advice beside it leaves the operator holding an alarm and
-// no next action. It renders through runtimeSizingLines -- the same renderer
-// `erun list` uses, over the same recommendation, computed once from the
-// reading above plus retained history -- so the remedy shown here cannot
-// contradict the one shown there.
-//
-// A recommendation is omitted only when the reading and the history together
-// support none at all, which is silence about an environment erun has never
-// observed rather than silence about a saturated one: a memory warning is
-// derived from the same evidence and the same threshold as a raise, so a
-// warning always arrives with its verdict.
+// writeUsageSizing prints the recommendation beside the warnings using the same renderer as `erun list`.
 func writeUsageSizing(ctx core.Context, sizing *deploy.RuntimeSizingRecommendation) error {
 	if sizing == nil {
 		return nil

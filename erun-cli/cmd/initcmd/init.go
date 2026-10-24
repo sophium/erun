@@ -118,8 +118,7 @@ func applyClusterRegistryFlag(runParams *open.BootstrapInitParams, clusterRegist
 	if strings.TrimSpace(runParams.ContainerRegistry) != "" {
 		return fmt.Errorf("--cluster-registry conflicts with --container-registry; pick one")
 	}
-	// The in-cluster erun-registry is plain HTTP, so mark it insecure; the
-	// rest (service/namespace/port) fill from the erun-registry convention.
+	// The in-cluster erun-registry is plain HTTP.
 	runParams.ClusterRegistry = &config.ClusterRegistry{Insecure: true}
 	return nil
 }
@@ -147,10 +146,7 @@ func applyInitTypeFlag(cmd *cobra.Command, runParams *open.BootstrapInitParams, 
 	if !parsed.IsValid() {
 		return fmt.Errorf("invalid --type %q: must be local-agent, remote-agent, runtime, or host", envType)
 	}
-	// The deprecated --remote bool models "not local-agent" for exactly the
-	// two legacy types it predates; deriving it from RemoteWorktree (rather
-	// than repeating "!= local-agent" here) keeps host correctly reporting
-	// false instead of inheriting the old exclusion's wrong answer for it.
+	// Derived from RemoteWorktree so host reports false.
 	expectedRemote := (open.BootstrapInitParams{Type: parsed}).RemoteWorktree()
 	remoteFlag := cmd.Flags().Lookup("remote")
 	remoteChanged := remoteFlag != nil && remoteFlag.Changed
@@ -247,8 +243,6 @@ func KubernetesContextPrompt(run shared.PromptRunner, selectRun shared.SelectRun
 	return manualKubernetesContextPrompt(run, label)
 }
 
-// listedKubernetesContexts returns the contexts to offer for selection; a
-// failed listing offers none, leaving the context to be typed in.
 func listedKubernetesContexts(list shared.KubernetesContextsLister) []string {
 	if list == nil {
 		return nil
@@ -367,19 +361,13 @@ func preferCurrentKubernetesContext(contexts []string, current string) []string 
 	return result
 }
 
-// tenantPromptHasAnswer reports whether a non-terminal stdin carries an answer
-// to read. Piped input must keep driving the plain select exactly as it always
-// has, so this peeks rather than declaring every non-terminal stdin unanswerable:
-// only an exhausted stdin (the "< /dev/null" case) is.
+// tenantPromptHasAnswer peeks so piped answers still work; only an exhausted stdin is unanswerable.
 var tenantPromptHasAnswer = func() bool {
 	_, err := shared.PlainPromptInput().Peek(1)
 	return err == nil
 }
 
-// TenantSelectionUnavailable reports whether this run has no way to ask which
-// tenant to use, and so must not print a menu it cannot read an answer to. A
-// piped answer still counts as a way to ask -- the plain prompt reads it -- so
-// only an exhausted stdin is unanswerable.
+// TenantSelectionUnavailable reports whether stdin cannot answer a tenant prompt.
 func TenantSelectionUnavailable() bool {
 	return !shared.StdinIsTerminal() && !tenantPromptHasAnswer()
 }

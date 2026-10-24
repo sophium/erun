@@ -14,22 +14,18 @@ import (
 
 const configBackupSuffix = ".bak"
 
-// configBackupKeep caps retained backups per config file; eviction is purely by count, never by age.
+// configBackupKeep caps retained backups per config file, by count only.
 const configBackupKeep = 5
 
 var TimeNow = time.Now
 
-// ConfigBackup describes one dated backup file on disk. Date is parsed from
-// the filename, not the filesystem mtime, so rotation order stays correct
-// even where file timestamps are imprecise.
+// ConfigBackup is one dated backup file; Date comes from the filename, not mtime.
 type ConfigBackup struct {
 	Path string
 	Date time.Time
 }
 
-// writeConfigBackupIfDue is best-effort and snapshots the live config at most
-// once per UTC day: the sole "back up now" signal is an empty slot for today's
-// date, with no dependency on timers, mtimes, or external state.
+// writeConfigBackupIfDue snapshots the live config at most once per UTC day, best-effort.
 func writeConfigBackupIfDue(livePath string, keep int, now func() time.Time) error {
 	if strings.TrimSpace(livePath) == "" {
 		return errors.New("live path is required")
@@ -88,8 +84,7 @@ func findConfigBackupByDate(livePath, date string) (ConfigBackup, bool, error) {
 	return ConfigBackup{}, false, nil
 }
 
-// restoreConfigFromBackup validates that a backup deserializes cleanly before
-// overwriting the live config, so a corrupted backup can never replace a good one.
+// restoreConfigFromBackup validates a backup before it overwrites the live config.
 func restoreConfigFromBackup(backupPath, livePath string, validate func(backupPath string, data []byte) error) error {
 	if strings.TrimSpace(backupPath) == "" || strings.TrimSpace(livePath) == "" {
 		return errors.New("backup and live paths are required")
@@ -113,8 +108,7 @@ func restoreConfigFromBackup(backupPath, livePath string, validate func(backupPa
 	return nil
 }
 
-// pruneOldConfigBackups only counts and evicts backups it wrote (parseable
-// YYYY-MM-DD names); foreign .bak files in the directory are left untouched.
+// pruneOldConfigBackups evicts only backups with its own YYYY-MM-DD names.
 func pruneOldConfigBackups(dir, base string, keep int) error {
 	if keep <= 0 {
 		return nil
@@ -182,26 +176,21 @@ func parseConfigBackupName(base, name string) (time.Time, bool) {
 	return parsed, true
 }
 
-// ---- Root config backup API ------------------------------------------------
-
 func WriteRootConfigBackupIfDue(livePath string, now func() time.Time) error {
 	return writeConfigBackupIfDue(livePath, configBackupKeep, now)
 }
 
-// ListRootConfigBackups returns the root config's dated backups, newest
-// first.
+// ListRootConfigBackups returns the root config's backups, newest first.
 func ListRootConfigBackups(livePath string) ([]ConfigBackup, error) {
 	return listConfigBackups(livePath)
 }
 
-// FindRootConfigBackupByDate resolves a root-config backup by its
-// YYYY-MM-DD stamp.
+// FindRootConfigBackupByDate resolves a root-config backup by its YYYY-MM-DD stamp.
 func FindRootConfigBackupByDate(livePath, date string) (ConfigBackup, bool, error) {
 	return findConfigBackupByDate(livePath, date)
 }
 
-// RestoreRootConfigFromBackup copies a root-config backup over the live
-// root config after confirming the bytes deserialize into an ERunConfig.
+// RestoreRootConfigFromBackup restores a root-config backup after validating it.
 func RestoreRootConfigFromBackup(backupPath, livePath string) error {
 	return restoreConfigFromBackup(backupPath, livePath, func(path string, data []byte) error {
 		probe := ERunConfig{}
@@ -212,14 +201,11 @@ func RestoreRootConfigFromBackup(backupPath, livePath string) error {
 	})
 }
 
-// ---- Environment config backup API -----------------------------------------
-
 func WriteEnvConfigBackupIfDue(livePath string, now func() time.Time) error {
 	return writeConfigBackupIfDue(livePath, configBackupKeep, now)
 }
 
-// ListEnvConfigBackups returns the dated backups for one environment's
-// config, newest first.
+// ListEnvConfigBackups returns one environment config's backups, newest first.
 func ListEnvConfigBackups(tenant, environment string) ([]ConfigBackup, error) {
 	livePath, err := EnvConfigPath(tenant, environment)
 	if err != nil {
@@ -228,8 +214,7 @@ func ListEnvConfigBackups(tenant, environment string) ([]ConfigBackup, error) {
 	return listConfigBackups(livePath)
 }
 
-// FindEnvConfigBackupByDate resolves an environment-config backup by its
-// YYYY-MM-DD stamp.
+// FindEnvConfigBackupByDate resolves an environment-config backup by its YYYY-MM-DD stamp.
 func FindEnvConfigBackupByDate(tenant, environment, date string) (ConfigBackup, bool, error) {
 	livePath, err := EnvConfigPath(tenant, environment)
 	if err != nil {
@@ -238,12 +223,7 @@ func FindEnvConfigBackupByDate(tenant, environment, date string) (ConfigBackup, 
 	return findConfigBackupByDate(livePath, date)
 }
 
-// RestoreEnvConfigFromBackup copies an environment-config backup over
-// the live env config after confirming the bytes deserialize into an
-// EnvConfig (which also runs the legacy-field migration). Used by
-// `erun doctor --restore-env-config-from-backup` to recover an env whose
-// config was changed or corrupted — for example a type silently
-// resolved to the wrong value.
+// RestoreEnvConfigFromBackup restores an environment-config backup after validating it.
 func RestoreEnvConfigFromBackup(backupPath, tenant, environment string) error {
 	livePath, err := EnvConfigPath(tenant, environment)
 	if err != nil {
@@ -258,7 +238,7 @@ func RestoreEnvConfigFromBackup(backupPath, tenant, environment string) error {
 	})
 }
 
-// EnvConfigPath resolves the on-disk path of one environment's config file.
+// EnvConfigPath returns the path of one environment's config file.
 func EnvConfigPath(tenant, environment string) (string, error) {
 	if err := ValidateStatePathSegment("tenant", tenant); err != nil {
 		return "", err

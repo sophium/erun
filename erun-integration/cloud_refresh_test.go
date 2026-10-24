@@ -14,10 +14,7 @@ import (
 )
 
 func testCloudRefreshDryRunTracesPodWriteAndResolvedRegion(t *testing.T) {
-	// The plan must show the region it resolved (from the alias' SSO region,
-	// this env having no cloud context), the deployment wait, and the exec
-	// that rewrites the erun-host profile — with the credentials arriving on
-	// the pod's stdin, so the script body in the trace carries no secret.
+	// Credentials reach the pod on stdin, so the traced script carries no secret.
 	setup := env.New(t)
 	fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
 	result := erun.Run(t, []string{"cloud", "refresh", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -28,9 +25,6 @@ func testCloudRefreshDryRunTracesPodWriteAndResolvedRegion(t *testing.T) {
 }
 
 func testCloudRefreshDryRunReportsUnresolvedRegion(t *testing.T) {
-	// The alias records no Identity Center region and the registry is not an
-	// ECR host, so no region resolves. The plan has to say so rather than
-	// quietly plan a profile with no region in it.
 	setup := env.New(t)
 	fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "", "")
 	result := erun.Run(t, []string{"cloud", "refresh", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -41,9 +35,7 @@ func testCloudRefreshDryRunReportsUnresolvedRegion(t *testing.T) {
 }
 
 func testCloudRefreshCloudflareAliasFails(t *testing.T) {
-	// Host credential injection is an AWS-only mechanism; a Cloudflare alias
-	// ships its token as a chart Secret at deploy time instead, so refresh
-	// must reject it rather than try to export credentials from it.
+	// Cloudflare tokens ship as a chart Secret at deploy time, not via refresh.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -83,11 +75,7 @@ func testCloudRefreshWithoutAwsAliasFails(t *testing.T) {
 }
 
 func testCloudRefreshRealRunKeepsCredentialsOutOfOutput(t *testing.T) {
-	// The contract this scenario exists for: nothing secret passes through
-	// the caller. The aws stub hands back credential values that would be
-	// unmistakable in any trace line, and the kubectl stub records the exec
-	// argv it was given. Neither the captured streams nor the recorded argv
-	// may contain them — the profile reaches the pod on stdin only.
+	// Neither streams nor the recorded kubectl argv may contain the credentials.
 	setup := env.New(t)
 	fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -112,10 +100,7 @@ func testCloudRefreshRealRunKeepsCredentialsOutOfOutput(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// Normalization does not mask these values, so a substring guard on the
-	// raw capture is the only way to lock the contract (see
-	// erun-integration/AGENTS.md § "Whole-output snapshots vs targeted
-	// substring assertions" cases 1 and 2).
+	// Normalization does not mask these values, so a raw substring guard is needed.
 	for _, leak := range []string{secret, "TOKENVALUEMUSTNOTLEAK", "ASIAEXAMPLE"} {
 		if strings.Contains(result.Combined, leak) {
 			t.Fatalf("credential value %q leaked into command output:\n%s", leak, result.Combined)
@@ -134,12 +119,7 @@ func testCloudRefreshRealRunKeepsCredentialsOutOfOutput(t *testing.T) {
 }
 
 func testCloudRefreshDryRunUnaffectedByLibraryExecutionMode(t *testing.T) {
-	// Locks the dry-run/audit contract for aws-export-credentials: the plan
-	// must stay byte-identical to the subprocess-mode golden even with
-	// execution.modes.aws-export-credentials=library, because
-	// RefreshHostAWSCredentials returns before ever calling
-	// ExportCloudProviderCredentials on a dry run (see
-	// refresh_dry_run_traces_pod_write_and_resolved_region.txt).
+	// Library mode must not change the dry-run trace: export is never called on a dry run.
 	setup := env.New(t)
 	fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
 	seedExecutionMode(t, setup, "aws-export-credentials", "library")
@@ -151,14 +131,7 @@ func testCloudRefreshDryRunUnaffectedByLibraryExecutionMode(t *testing.T) {
 }
 
 func testCloudRefreshRealRunLibraryExecutionModeNeedsNoAwsBinary(t *testing.T) {
-	// Proves the library path produces the same observable result as the
-	// subprocess path: with execution.modes.aws-export-credentials=library
-	// and a real static-credential AWS profile on disk, ExportCloudProviderCredentials
-	// resolves via aws-sdk-go-v2's shared-config credential chain instead of
-	// shelling out, so the scenario declares no "aws" stub at all — only
-	// "kubectl", for the pod write this command always performs. The PATH
-	// scrub in internal/env would fail the run with "executable file not
-	// found" if production code fell through to a subprocess.
+	// Only kubectl is stubbed: an aws subprocess fallback would fail on the PATH scrub.
 	setup := env.New(t)
 	fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
 	seedExecutionMode(t, setup, "aws-export-credentials", "library")

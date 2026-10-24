@@ -4,9 +4,7 @@ import (
 	"testing"
 )
 
-// TestRemoteAppSessionAttachLines pins the takeover contract a caller outside
-// erun-cli/erun-common (the WSS session-attach gateway) reuses directly,
-// independent of remoteShellLaunchLines's own byte-identical assertions.
+// The WSS session-attach gateway reuses this takeover contract directly.
 func TestRemoteAppSessionAttachLines(t *testing.T) {
 	socket := "/tmp/erun-sessions/erun-local-ai.dtach"
 	lines := RemoteAppSessionAttachLines(socket, "winch", `/bin/bash "$launch"`)
@@ -20,10 +18,7 @@ func TestRemoteAppSessionAttachLines(t *testing.T) {
 	assertScriptHas(t, script, `!= "$attach_id" ]; then exit 76; fi`, "a kicked attach must exit 76 on a foreign owner")
 }
 
-// TestResolveAISessionAttachOutcome pins the mapping a WSS gateway uses to
-// tell an evicted client it was taken over rather than merely disconnected —
-// and, symmetrically, that a connection close with no exit status must read
-// as unknown, never as a guessed Ended or TakenOver.
+// A close with no exit status must read as unknown, never a guessed outcome.
 func TestResolveAISessionAttachOutcome(t *testing.T) {
 	cases := []struct {
 		name          string

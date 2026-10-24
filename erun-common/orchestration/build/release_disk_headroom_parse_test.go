@@ -33,8 +33,7 @@ func TestParseDFDiskBytes(t *testing.T) {
 		if want := uint64(20971520) * 1024; free != want {
 			t.Fatalf("free = %d, want %d", free, want)
 		}
-		// The wrapped row drops the filesystem field, shifting every column
-		// one left — the total still has to be found relative to Capacity.
+		// A wrapped row drops the filesystem field; total is found relative to Capacity.
 		if want := uint64(102400000) * 1024; total != want {
 			t.Fatalf("total = %d, want %d", total, want)
 		}
@@ -55,11 +54,7 @@ func TestParseDFDiskBytes(t *testing.T) {
 }
 
 func TestResolveMinDiskHeadroomBytes(t *testing.T) {
-	// A filesystem small enough that 10% of it is under the absolute floor.
 	const smallDisk uint64 = 100 << 30 // 100 GiB -> 10 GiB proportional
-	// A filesystem big enough that 10% of it clears the absolute floor — the
-	// shape of the node that evicted every pod while free space still sat
-	// above a 20 GiB floor.
 	const largeDisk uint64 = 435 << 30 // 435 GiB -> 43.5 GiB proportional
 
 	t.Run("defaults to the absolute floor when total is unknown", func(t *testing.T) {
@@ -88,9 +83,7 @@ func TestResolveMinDiskHeadroomBytes(t *testing.T) {
 		}
 	})
 
-	// The whole point of the proportional floor: kubelet's evictionHard for
-	// nodefs defaults to 5% available, so a floor at or below that line can
-	// only prune after eviction has already begun.
+	// kubelet's nodefs evictionHard defaults to 5%; a floor below it prunes only after eviction.
 	t.Run("clears kubelet's 5 percent eviction threshold", func(t *testing.T) {
 		t.Setenv(shared.ReleaseMinDiskHeadroomEnv, "")
 		evictionThreshold := largeDisk / 100 * 5
@@ -121,8 +114,6 @@ func TestFormatGiB(t *testing.T) {
 }
 
 func TestParseBuildxDuReclaimable(t *testing.T) {
-	// The shape `docker buildx du` actually writes: a per-record table whose
-	// last column is a timestamp, closed by a colon-keyed summary block.
 	const listing = "ID\t\t\t\t\t\tRECLAIMABLE\tSIZE\t\tLAST ACCESSED\n" +
 		"2khmsvw4ntqfc7uq0q8r1y64c\t\ttrue \t\t0B        \t14 hours ago\n" +
 		"2ke0dwuumo5alaz7lo0x6gtnm\t\ttrue \t\t0B*       \t30 hours ago\n" +
@@ -139,8 +130,6 @@ func TestParseBuildxDuReclaimable(t *testing.T) {
 		ok   bool
 	}{
 		{"a listing with a reclaimable summary", listing, 43370000000, true},
-		// A zero the check treats as "nothing to reclaim" is still an answer,
-		// not a failed read — the two lead to different decisions.
 		{"an empty cache reads as zero, not as unreadable", "Shared:\t0B\nPrivate:\t0B\nReclaimable:\t0B\nTotal:\t0B\n", 0, true},
 		{"no summary at all is unreadable", "2khmsvw4ntqfc7uq0q8r1y64c\t\ttrue \t\t0B        \t14 hours ago\n", 0, false},
 		{"empty output is unreadable", "", 0, false},
@@ -160,7 +149,6 @@ func TestParseBuildxDuReclaimable(t *testing.T) {
 }
 
 func TestParseDockerSize(t *testing.T) {
-	// Shapes taken from real `docker system df --format` output on a build box.
 	cases := []struct {
 		in   string
 		want uint64
@@ -171,7 +159,6 @@ func TestParseDockerSize(t *testing.T) {
 		{"250.8MB", 250800000, true},
 		{"103.4GB", 103400000000, true},
 		{"512kB", 512000, true},
-		// Some rows carry a trailing percentage; the number is still the size.
 		{"77.29GB (100%)", 77290000000, true},
 		{"", 0, false},
 		{"not-a-size", 0, false},

@@ -10,33 +10,15 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// tenant_platform_registration.go is the Registration tab's own surface: the
-// hosted objects `erun platform` registers — cloud contexts and hosted
-// environments — that a tenant/env created only in the desktop's local
-// config has no automatic counterpart of on a hosted platform. It gives the
-// desktop the same registration path `erun platform context create` /
-// `erun platform provision` / `erun platform env register|deploy|stop|delete`
-// already give the CLI, through the same platformclient.PlatformClient the rest
-// of the dashboard reads and writes through.
-//
-// `erun platform tenant create` and `erun platform user enroll` stay
-// deliberately absent here: a tenant registration configures an OIDC issuer
-// mapping (and, for a shared issuer, an org-claim pair) that the desktop has
-// no safe way to guess at through a form, and the first tenant only ever
-// comes from the platform's own bootstrap. NotEnrolledState (tenant_platform.go
-// / TenantPlatformState.tsx) already gives user enrollment a self-service
-// attempt plus an administrator hand-off; the Registration panel points at
-// `erun platform tenant create` for the tenant case rather than
-// half-implementing it.
+// Tenant creation and user enrollment are deliberately absent: an issuer
+// mapping cannot be guessed safely through a form.
 
 // The write routes the Registration tab gates on, in the same canonical
 // "METHOD /path" form tenant_dashboard.go's read routes use.
 const (
 	tenantDashboardWriteCreateContext = "POST /v1/contexts"
-	// tenantDashboardWriteRegisterEnvironment also gates PreviewPlatformEnvironment
-	// (register with preview:true): both hit this same POST /v1/environments
-	// route, so a preview needs no separate capability from the register it
-	// precedes.
+	// tenantDashboardWriteRegisterEnvironment also gates preview, which hits the
+	// same route.
 	tenantDashboardWriteRegisterEnvironment = "POST /v1/environments"
 	tenantDashboardWriteDeployEnvironment   = "POST /v1/environments/{environment_id}/deploy"
 	tenantDashboardWriteStopEnvironment     = "POST /v1/environments/{environment_id}/stop"
@@ -52,12 +34,8 @@ const (
 	actionDeleteEnv     platformAction = "delete this environment"
 )
 
-// loadTenantDashboardRegistration resolves the Registration tab's two lists
-// (contexts, environments) and the write capabilities its forms/buttons
-// gate on. Each list degrades independently — a caller denied one, or whose
-// read of one fails, still sees the other — and the tab itself is hidden
-// only when the caller can neither read nor write anything registration-
-// shaped at all.
+// loadTenantDashboardRegistration degrades each list independently and hides
+// the tab only when nothing is readable or writable.
 func loadTenantDashboardRegistration(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
 	loadTenantDashboardRegistrationCapabilities(capabilities, dashboard)
 	contextsRestricted := loadTenantDashboardContexts(ctx, client, capabilities, dashboard)
@@ -80,9 +58,8 @@ func loadTenantDashboardRegistrationCapabilities(capabilities model.PlatformCapa
 	dashboard.CanDeleteEnvironment = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteDeleteEnvironment) == ""
 }
 
-// loadTenantDashboardContexts resolves the contexts list (or its restriction/
-// error) and returns the restriction, so the caller can fold it into the
-// tab-level hide decision without re-deriving it.
+// loadTenantDashboardContexts returns the restriction for the tab-level hide
+// decision.
 func loadTenantDashboardContexts(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) string {
 	restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadContexts)
 	if restricted != "" {
@@ -98,8 +75,6 @@ func loadTenantDashboardContexts(ctx context.Context, client *platformclient.Pla
 	return ""
 }
 
-// loadTenantDashboardEnvironments is loadTenantDashboardContexts's mirror for
-// the environments list.
 func loadTenantDashboardEnvironments(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) string {
 	restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadEnvironments)
 	if restricted != "" {
@@ -160,13 +135,8 @@ func uiPlatformEnvironmentFrom(environment platformclient.PlatformEnvironment) u
 	}
 }
 
-// platformOutcomeKind classifies a write's error into "conflict"/
-// "unavailable" (an expected, actionable refusal the caller renders as a
-// recoverable state, not a raw error — e.g. a quota cap, or a deploy already
-// in flight) or "" (a genuine failure the caller returns as an error,
-// through operatorPlatformError). platformActionMessage names the message a
-// "conflict"/"unavailable" outcome carries, taken from the platform's own
-// response body when one exists rather than the wrapped Go error text.
+// platformOutcomeKind returns "conflict"/"unavailable" for recoverable
+// refusals, or "" for a genuine failure.
 func platformOutcomeKind(err error) string {
 	switch {
 	case errors.Is(err, platformclient.ErrPlatformConflict):
@@ -188,9 +158,8 @@ func platformActionMessage(err error) string {
 	return err.Error()
 }
 
-// CreatePlatformContext registers a cloud context, or — with input.Preview
-// set — only resolves and returns its bootstrap plan without creating
-// anything, mirroring `erun platform context create [--preview]`.
+// CreatePlatformContext registers a cloud context, or with Preview only
+// returns its plan.
 func (a *App) CreatePlatformContext(input uiCreatePlatformContextInput) (uiPlatformContextOutcome, error) {
 	tenant, err := requireTenant("creating a cloud context", input.Tenant)
 	if err != nil {
@@ -236,10 +205,8 @@ func (a *App) CreatePlatformContext(input uiCreatePlatformContextInput) (uiPlatf
 	return outcome, nil
 }
 
-// createEnvironmentParams validates and converts input, shared by
-// PreviewPlatformEnvironment and RegisterPlatformEnvironment so the two can
-// never diverge on what fields they send for the same operator input — the
-// defect class of a preview that cannot model what submit does.
+// createEnvironmentParams is shared so preview and register never send
+// different fields for the same input.
 func createEnvironmentParams(input uiRegisterPlatformEnvironmentInput) (platformclient.PlatformCreateEnvironmentParams, error) {
 	name := strings.TrimSpace(input.Name)
 	envType := strings.TrimSpace(input.Type)
@@ -256,10 +223,8 @@ func createEnvironmentParams(input uiRegisterPlatformEnvironmentInput) (platform
 	}, nil
 }
 
-// PreviewPlatformEnvironment resolves and returns the ordered plan the exact
-// same input would submit through RegisterPlatformEnvironment, without
-// creating anything. Always returns a plan (QuotaOk names whether it can
-// actually register), never a conflict: this call creates nothing.
+// PreviewPlatformEnvironment returns the plan without creating anything;
+// QuotaOk reports whether register would succeed.
 func (a *App) PreviewPlatformEnvironment(input uiRegisterPlatformEnvironmentInput) (uiPlatformProvisionResult, error) {
 	tenant, err := requireTenant("previewing a hosted environment", input.Tenant)
 	if err != nil {
@@ -287,12 +252,8 @@ func (a *App) PreviewPlatformEnvironment(input uiRegisterPlatformEnvironmentInpu
 	return uiPlatformProvisionResult{Plan: result.Plan, QuotaOk: result.QuotaOk}, nil
 }
 
-// RegisterPlatformEnvironment registers a hosted environment, mirroring
-// `erun platform env register`, or — with input.Adopt set — records one that
-// already exists without provisioning or deploying anything. A quota
-// cap (the tenant's environment count limit) reports as Kind "conflict"
-// naming the cap, not a raw error — the recoverable state the operator
-// resolves by deleting or stopping another environment first.
+// RegisterPlatformEnvironment registers, or with Adopt records, a hosted
+// environment; a quota cap is a "conflict" outcome, not an error.
 func (a *App) RegisterPlatformEnvironment(input uiRegisterPlatformEnvironmentInput) (uiPlatformEnvironmentOutcome, error) {
 	tenant, err := requireTenant("registering a hosted environment", input.Tenant)
 	if err != nil {
@@ -324,38 +285,27 @@ func (a *App) RegisterPlatformEnvironment(input uiRegisterPlatformEnvironmentInp
 	return uiPlatformEnvironmentOutcome{Kind: "accepted", Environment: &converted}, nil
 }
 
-// DeployPlatformEnvironment starts a server-side deploy of an
-// already-registered runtime environment, mirroring `erun platform env
-// deploy`. Reports a deploy already in flight (Kind "conflict") or no
-// deploy executor configured (Kind "unavailable") as a recoverable state.
+// DeployPlatformEnvironment starts a server-side deploy of a runtime environment.
 func (a *App) DeployPlatformEnvironment(input uiPlatformEnvironmentActionInput) (uiPlatformEnvironmentOutcome, error) {
 	return a.platformEnvironmentAction(input, actionDeployEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (platformclient.PlatformEnvironment, error) {
 		return client.DeployEnvironment(requestCtx, environmentID, platformclient.PlatformDeployEnvironmentParams{Version: strings.TrimSpace(input.Version)})
 	})
 }
 
-// StopPlatformEnvironment scales a runtime environment's Deployment to zero,
-// mirroring `erun platform env stop`.
+// StopPlatformEnvironment scales a runtime environment to zero.
 func (a *App) StopPlatformEnvironment(input uiPlatformEnvironmentActionInput) (uiPlatformEnvironmentOutcome, error) {
 	return a.platformEnvironmentAction(input, actionStopEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (platformclient.PlatformEnvironment, error) {
 		return client.StopEnvironment(requestCtx, environmentID)
 	})
 }
 
-// DeletePlatformEnvironment starts tearing down a hosted environment's
-// namespace and its row, mirroring `erun platform env delete`. The desktop
-// asks for confirmation before calling this — see the Registration panel's
-// delete control — the same boundary every other destructive dashboard
-// action gets.
+// DeletePlatformEnvironment tears down a hosted environment; the UI confirms first.
 func (a *App) DeletePlatformEnvironment(input uiPlatformEnvironmentActionInput) (uiPlatformEnvironmentOutcome, error) {
 	return a.platformEnvironmentAction(input, actionDeleteEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (platformclient.PlatformEnvironment, error) {
 		return client.DeleteEnvironment(requestCtx, environmentID)
 	})
 }
 
-// platformEnvironmentAction is Deploy/Stop/Delete's shared shape: resolve the
-// tenant's platform client, validate the environment id, run the given call,
-// and classify its error into a recoverable outcome or a real error.
 func (a *App) platformEnvironmentAction(input uiPlatformEnvironmentActionInput, action platformAction, call func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (platformclient.PlatformEnvironment, error)) (uiPlatformEnvironmentOutcome, error) {
 	tenant, err := requireTenant(string(action), input.Tenant)
 	if err != nil {

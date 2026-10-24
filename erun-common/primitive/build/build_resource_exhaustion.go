@@ -19,51 +19,24 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// dockerBuildMemoryFramingMarkers are the phrases BuildKit itself uses when the
-// step it ran could not get memory: "cannot allocate memory" from the kernel
-// refusing an allocation, "ResourceExhausted" from BuildKit's own solver. They
-// are evidence only inside the build's own failure framing -- see
-// dockerBuildFramingFailureText for why the step's own output cannot be.
+// Memory markers count only inside BuildKit's own failure framing, never in step output.
 var dockerBuildMemoryFramingMarkers = []string{
 	"cannot allocate memory",
 	"resourceexhausted",
 }
 
-// dockerBuildSignalKilledMarker is what os/exec renders for any child a SIGKILL
-// ended. On its own it is not evidence of anything about the environment:
-// os/exec sends SIGKILL itself whenever a caller cancels an exec.CommandContext
-// context, so the code under test emits this exact string for its own reasons.
-// A test that cancels its own context logs "fetchError=... signal: killed:
-// error=... context canceled" and the build around it then runs to completion
-// and fails on a real defect. The marker counts only once a process the build
-// itself owns reports the kill (see dockerBuildResourceExhaustionEvidence).
+// os/exec renders SIGKILL from a cancelled context identically, so this marker counts only
+// when a process the build itself owns reports the kill.
 const dockerBuildSignalKilledMarker = "signal: killed"
 
-// dockerBuildStepSigkillExitCode is 128 + SIGKILL(9): what BuildKit reports for
-// a step whose own process a signal ended, as opposed to a step that ran and
-// returned a status of its own choosing.
+// 128 + SIGKILL(9): a step ended by a signal rather than by its own status.
 const dockerBuildStepSigkillExitCode = 137
 
-// buildkitStepExitCodePattern pulls the exit status out of the failure framing
-// BuildKit prints for the step that stopped the build, which reads
-// `ERROR: process "/bin/sh -c go test ./..." did not
-// complete successfully: exit code: 2` under BuildKit's own step-number prefix.
+// Matches BuildKit's `did not complete successfully: exit code: N` step framing.
 var buildkitStepExitCodePattern = regexp.MustCompile(`exit code: (\d+)`)
 
-// dockerBuildFramingFailureText returns what BuildKit says about the failure --
-// its per-step ERROR lines and its failed-to-solve line -- with every line the
-// step itself printed stripped out.
-//
-// The distinction is the whole point. BuildKit's framing is the build
-// infrastructure talking about a process it ran and how that process ended.
-// Step output is the log of the code under test, which is user-controlled,
-// arrives under BuildKit's "#N <elapsed> " prefix rather than an ERROR token,
-// and will keep producing strings that look like infrastructure diagnoses --
-// "signal: killed" from a cancelled context, a gRPC RESOURCE_EXHAUSTED a test
-// asserts on -- while the build fails for an unrelated reason. Reading the
-// whole captured output as if it were BuildKit's own words is how a real test
-// failure gets reported to the operator as a resource problem, sending them to
-// resize a dind that was never the problem.
+// dockerBuildFramingFailureText returns BuildKit's ERROR and failed-to-solve lines, stripping
+// step output: test logs routinely print strings that look like infrastructure diagnoses.
 func dockerBuildFramingFailureText(output string) string {
 	var framing strings.Builder
 	for _, line := range strings.Split(output, "\n") {
@@ -84,11 +57,7 @@ func dockerBuildFramingFailureText(output string) string {
 	return framing.String()
 }
 
-// buildkitStepExitCode returns the exit status BuildKit reported for the step
-// that stopped the build -- the last such status in the framing, matching which
-// step dockerBuildFailureReason reads the failure from. ok is false when the
-// output carries no such framing, in which case nothing is known about how that
-// step ended.
+// buildkitStepExitCode returns the last step exit status in BuildKit's framing; ok is false without one.
 func buildkitStepExitCode(output string) (code int, ok bool) {
 	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(strings.TrimRight(line, "\r"))
@@ -113,11 +82,7 @@ func buildkitStepExitCode(output string) (code int, ok bool) {
 	return code, ok
 }
 
-// dockerBuildProcessExitSignal names the signal that ended the `docker build`
-// process itself, or "" when it was not terminated by one. Windows has no
-// equivalent (a terminated process reports a code, not a signal), which is why
-// this defers to the platform-split helper the job supervisor already owns
-// rather than growing a second one.
+// dockerBuildProcessExitSignal names the signal that ended `docker build` itself, or "".
 func dockerBuildProcessExitSignal(err error) string {
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
@@ -126,23 +91,10 @@ func dockerBuildProcessExitSignal(err error) string {
 	return core.EnvironmentJobExitSignal(exitErr.ProcessState)
 }
 
-// dockerBuildResourceExhaustionEvidence decides whether the build's own
-// processes establish a resource kill, and returns the half of the story that
-// text cannot supply.
-//
-// Both halves are required, the same way dockerBuildNetworkDiagnosis requires a
-// stall and a measured mismatch: a marker in the log alone has a dozen innocent
-// explanations, and an environment condition alone has been observed to mask a
-// real defect. ok is false whenever the evidence does not reach that bar --
-// including when "signal: killed" appears but only in the code under test's own
-// output, which is the case this function exists to stop misreporting. Declining
-// is deliberate: the caller then keeps the ordinary build failure reason, which
-// names the step that actually failed and the status it returned.
+// dockerBuildResourceExhaustionEvidence reports a resource kill only when the build's own
+// processes establish it; a marker in step output alone is never enough.
 func dockerBuildResourceExhaustionEvidence(output string, buildErr error) (string, bool) {
-	// A SIGKILL of the `docker build` process itself. SIGTERM is deliberately
-	// excluded: it is a cancellation or a timeout, not the kernel reclaiming
-	// memory, and reporting it as exhaustion is the same misattribution one
-	// level up.
+	// SIGTERM is a cancellation or timeout, not the kernel reclaiming memory.
 	if signal := dockerBuildProcessExitSignal(buildErr); signal == syscall.SIGKILL.String() {
 		return fmt.Sprintf("signal %q terminated the docker build process itself", signal), true
 	}
@@ -152,10 +104,6 @@ func dockerBuildResourceExhaustionEvidence(output string, buildErr error) (strin
 			return fmt.Sprintf("BuildKit reported %q for the step that failed", marker), true
 		}
 	}
-	// BuildKit's own record that the step's process was ended by a signal,
-	// corroborated by the marker saying which one. A step whose own process the
-	// kernel killed cannot have chosen its exit status, so this is a kill the
-	// build infrastructure observed rather than text the code printed.
 	if code, ok := buildkitStepExitCode(output); ok && code == dockerBuildStepSigkillExitCode &&
 		strings.Contains(strings.ToLower(output), dockerBuildSignalKilledMarker) {
 		return fmt.Sprintf("BuildKit reported exit code %d for the step that failed and %q appears in its output", code, dockerBuildSignalKilledMarker), true
@@ -163,22 +111,12 @@ func dockerBuildResourceExhaustionEvidence(output string, buildErr error) (strin
 	return "", false
 }
 
-// dockerBuildResourceExhaustionDiagnosis inspects a failed `docker build`'s
-// captured output *and its own process outcome*, and when the two together
-// establish a resource kill, returns a headline that names that cause -- and,
-// when this process is itself running inside an erun runtime pod, the container
-// that actually ran the build and its configured memory limit, read back from
-// the Kubernetes API rather than assumed. ok is false when the evidence does
-// not establish one, in which case the caller returns the plain build failure
-// reason unchanged.
+// dockerBuildResourceExhaustionDiagnosis returns a headline for an established resource kill,
+// naming the in-pod build container and its memory limit when read back from Kubernetes.
 func dockerBuildResourceExhaustionDiagnosis(output string, buildErr error) (string, bool) {
 	return dockerBuildResourceExhaustionDiagnosisWithRunner(output, buildErr, os.Getenv, shared.RunOpenKubectl)
 }
 
-// dockerBuildResourceExhaustionDiagnosisWithRunner is
-// dockerBuildResourceExhaustionDiagnosis with the environment lookup and
-// Kubernetes call injectable, so a test can simulate being in-pod (or not)
-// and supply a fake pod response instead of shelling out to a real kubectl.
 func dockerBuildResourceExhaustionDiagnosisWithRunner(output string, buildErr error, getenv func(string) string, runner shared.OpenKubectlRunnerFunc) (string, bool) {
 	evidence, ok := dockerBuildResourceExhaustionEvidence(output, buildErr)
 	if !ok {
@@ -195,12 +133,8 @@ func dockerBuildResourceExhaustionDiagnosisWithRunner(output string, buildErr er
 	return diagnosis, true
 }
 
-// dockerBuildBlamedContainer names the container that actually ran the build
-// when this process is running inside an erun runtime pod with a dind
-// sidecar, and best-effort resolves its configured memory limit from the
-// Kubernetes API. ok is false off-pod (a plain workstation build has no
-// sidecar to blame) or when the container cannot be found in this pod's own
-// spec -- this never guesses a container or a limit it did not read back.
+// dockerBuildBlamedContainer names the in-pod dind container and best-effort reads its memory
+// limit; ok is false off-pod or when the container is not in this pod's spec.
 func dockerBuildBlamedContainer(getenv func(string) string, runner shared.OpenKubectlRunnerFunc) (container, limit string, ok bool) {
 	if getenv == nil || strings.TrimSpace(getenv("KUBERNETES_SERVICE_HOST")) == "" {
 		return "", "", false
@@ -216,10 +150,6 @@ func dockerBuildBlamedContainer(getenv func(string) string, runner shared.OpenKu
 	return RuntimeDindContainerName, memory, true
 }
 
-// dockerBuildPodSpecDiagnostic is the minimal `kubectl get pod -o json` shape
-// dockerBuildContainerMemoryLimit needs -- the pod's declared spec, not its
-// observed status (runtimePodDiagnostic in open_runtime_diagnostics.go covers
-// that side already).
 type dockerBuildPodSpecDiagnostic struct {
 	Spec struct {
 		Containers []struct {
@@ -233,12 +163,7 @@ type dockerBuildPodSpecDiagnostic struct {
 	} `json:"spec"`
 }
 
-// dockerBuildContainerMemoryLimit reads one named container's configured
-// memory limit from this pod's own spec. found is false whenever the answer
-// cannot be trusted: kubectl unavailable, the API call failed, or the
-// container is absent from the response. Dispatches to the subprocess or
-// library path per the kubectl-pod-get execution mode (see
-// execution_mode.go).
+// dockerBuildContainerMemoryLimit reads a container's memory limit from this pod's spec; found is false when untrustworthy.
 func dockerBuildContainerMemoryLimit(podName, containerName string, runner shared.OpenKubectlRunnerFunc) (limit string, found bool) {
 	podName = strings.TrimSpace(podName)
 	if podName == "" {
@@ -250,8 +175,6 @@ func dockerBuildContainerMemoryLimit(podName, containerName string, runner share
 	return defaultDockerBuildContainerMemoryLimit(podName, containerName, runner)
 }
 
-// defaultDockerBuildContainerMemoryLimit is the subprocess-backed path
-// dockerBuildContainerMemoryLimit dispatches to by default.
 func defaultDockerBuildContainerMemoryLimit(podName, containerName string, runner shared.OpenKubectlRunnerFunc) (limit string, found bool) {
 	if runner == nil {
 		return "", false
@@ -274,9 +197,7 @@ func defaultDockerBuildContainerMemoryLimit(podName, containerName string, runne
 	return "", false
 }
 
-// LibraryDockerBuildContainerMemoryLimit is the library-backed alternative to
-// defaultDockerBuildContainerMemoryLimit, resolving the same pod via
-// k8s.io/client-go instead of shelling out to kubectl.
+// LibraryDockerBuildContainerMemoryLimit is the client-go variant of defaultDockerBuildContainerMemoryLimit.
 func LibraryDockerBuildContainerMemoryLimit(podName, containerName string) (limit string, found bool) {
 	pod, err := kube.LibraryGetPod(podName)
 	if err != nil {
@@ -296,11 +217,8 @@ func LibraryDockerBuildContainerMemoryLimit(podName, containerName string) (limi
 	return "", false
 }
 
-// DockerBuildResourceExhaustionError wraps a failed `docker build` whose
-// output showed the process was killed for memory rather than failing on its
-// own merits. Its Error() is the diagnosis alone -- the raw build output was
-// already streamed to stderr before this wraps it -- so the top-level error a
-// caller prints states the real cause instead of "exit status 1".
+// DockerBuildResourceExhaustionError is a `docker build` failure killed for memory. Error() is
+// the diagnosis alone; the raw output was already streamed.
 type DockerBuildResourceExhaustionError struct {
 	Diagnosis string
 	Err       error

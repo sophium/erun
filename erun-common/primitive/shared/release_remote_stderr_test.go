@@ -5,11 +5,7 @@ import (
 	"testing"
 )
 
-// The release tag-replay helpers must keep git's stderr:
-// git's stderr is already captured onto exec.ExitError.Stderr by Output(),
-// and each caller (findReplayedReleaseTagCommit, moveReleaseTagOnto) folds
-// the bare error straight into an operator-facing message, so dropping the
-// stderr here means that message never carries it either.
+// Callers fold this error into operator messages, so git's stderr must survive.
 func TestGitCommitSubjectIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: bad object deadbeef", 128)
 	_, err := GitCommitSubject(t.TempDir(), "deadbeef")

@@ -7,15 +7,8 @@ import { createApi } from '@reduxjs/toolkit/query';
 import type { TenantConfigView } from '../models/platformConfig';
 import { buildPlatformConfigEndpoints, type PlatformBaseQuery } from './platformConfigEndpoints';
 
-// Proof that the seam is real: the SAME endpoint
-// definition (buildPlatformConfigEndpoints), injected into two independent
-// createApi instances with two independently-implemented base queries — one
-// shaped like a real HTTP fetch, one shaped like erun-ui/frontend's real
-// wailsQueryFn contract (an arbitrary async call wrapped into
-// `{data} | {error}`) — resolves to byte-identical TenantConfigView output
-// from the same fixture. erun-ui/frontend's own suite runs the equivalent
-// test using its real wailsQueryFn helper directly; see
-// src/app/api/platformConfigEndpoints.test.ts there.
+// One endpoint definition over an HTTP-shaped and a wailsQueryFn-shaped base query must
+// yield identical TenantConfigView output.
 
 const FIXTURE_BODY = {
   tenant: { tenantId: 'tn-1', name: 'Acme', type: 'COMPANY' },
@@ -47,9 +40,6 @@ const EXPECTED: TenantConfigView = {
       name: 'prod',
       type: 'runtime',
       status: 'running',
-      // The row's own owning tenant, which can differ from the caller's when an
-      // OPERATIONS caller lists another tenant's environments. Absent from this
-      // fixture body, so the lenient parse leaves it undefined.
       tenantId: undefined,
       kubernetesContext: undefined,
       contextId: undefined,
@@ -107,8 +97,7 @@ describe('buildPlatformConfigEndpoints', () => {
   });
 
   it('resolves the identical model over a wails-shaped base query', async () => {
-    // Mirrors erun-ui/frontend's real wailsQueryFn: any endpoint just wraps an
-    // arbitrary async call into `{data} | {error}` — no URL, no fetch.
+    // Like wailsQueryFn: wraps an async call into `{data} | {error}`, no URL or fetch.
     const wailsLikeBaseQuery: PlatformBaseQuery = async (request) => {
       if (request.url !== '/v1/config') {
         return { error: { message: 'unknown request' } };

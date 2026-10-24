@@ -3,23 +3,9 @@ import { LOCAL_SHELL_PROMPT, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 import type { AppShell } from '../../../pages/index.js';
 import { captureInvokes, sessionInputs } from '../../../pages/index.js';
 
-// #969: text selected in a desktop terminal tab never reached the macOS
-// clipboard. The chord table was Windows/Linux-shaped and never inspected
-// metaKey, so Cmd+C reduced to a bare "c" and the copy path was unreachable on
-// the platform the desktop ships to first.
-//
-// These specs drive the real chord layer through a real xterm selection and
-// assert the observable outcome — what is on the host clipboard — rather than
-// that a handler is registered. The macOS block sets the browser's user agent,
-// which is the same signal the production build reads (the WebView UA) to pick
-// the platform's chords.
-//
-// Harness limitation: Playwright's Chromium is not the macOS WKWebView the
-// desktop embeds. This proves the chord classification and the copy path behind
-// it; it cannot prove WKWebView delivers Cmd+C as a keydown carrying metaKey,
-// nor that it leaves Cmd+V's native paste event intact (the reason Cmd+V is
-// deliberately not intercepted). Those need a real macOS desktop. The
-// per-platform chord tables are unit-covered in frontend/src/app/clipboard.test.ts.
+// Selected text must reach the clipboard via the platform's chords (Cmd+C on
+// macOS, chosen by user agent). Chromium is not WKWebView, so native Cmd+V and
+// keydown delivery are not proven here.
 
 const MAC_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15';
@@ -27,16 +13,8 @@ const MAC_USER_AGENT =
 const INTERRUPT = '\x03';
 const ESCAPE = '\x1b';
 
-// Prints one known line and selects it with the mouse, leaving the terminal in
-// the state an operator is in when they have highlighted a URL the pod printed.
-//
-// The Local tab's real shell prints its own prompt asynchronously once it has
-// started, over the same event channel printOnlyLine's synthetic clear uses —
-// so this waits for that known, harness-controlled prompt (see
-// fixtures/seedRoot.ts ERUN_LOCAL_SHELL_OVERRIDE) first, so its startup output
-// is behind the clear. The prompt being up does not make the shell quiet: a
-// resize the spec provoked can still make it redraw its current line, which is
-// why printOnlyLine leaves the cursor off row 0.
+// Waits for the harness prompt first so shell startup output is behind the
+// clear; the shell may still redraw, so printOnlyLine leaves row 0.
 async function selectPrintedLine(app: AppShell, sessionId: number, marker: string): Promise<void> {
   await expect(app.terminalPane.rows()).toContainText(LOCAL_SHELL_PROMPT);
   await app.terminalPane.printOnlyLine(sessionId, marker);
@@ -59,8 +37,7 @@ test.describe('terminal selection copy on macOS (#969)', () => {
     await expect.poll(() => app.terminalPane.hostClipboard()).toContain(marker);
   });
 
-  // On macOS Ctrl+C is the interrupt, not a copy chord — a stale selection must
-  // never swallow it.
+  // On macOS Ctrl+C is the interrupt; a selection must never swallow it.
   test('Ctrl+C still reaches the session as ^C even with a selection', async ({
     app,
     page,
@@ -92,8 +69,6 @@ test.describe('terminal selection copy on Windows/Linux (#969)', () => {
     await expect.poll(() => app.terminalPane.hostClipboard()).toContain(marker);
   });
 
-  // The guard the copy path must not lose: with nothing selected, Ctrl+C is the
-  // interrupt and has to reach the session.
   test('Ctrl+C with no selection reaches the session as ^C', async ({ app, page, seededEnv }) => {
     const sessionId = await app.openEnvironmentTerminal(SEED_TENANT, seededEnv.environment);
     expect(sessionId).toBeGreaterThan(0);
@@ -110,9 +85,7 @@ test.describe('terminal selection copy on Windows/Linux (#969)', () => {
     expect(await app.terminalPane.hostClipboard()).toBe('clipboard-before-interrupt');
   });
 
-  // Cmd is not a Windows/Linux clipboard modifier, and the pre-fix chord
-  // signature ignored meta entirely — so this is the case proving the two
-  // platform tables stay apart rather than both matching everything.
+  // The platform chord tables must stay apart.
   test('Cmd+C does not copy off macOS', async ({ app, page, seededEnv }) => {
     const sessionId = await app.openEnvironmentTerminal(SEED_TENANT, seededEnv.environment);
     expect(sessionId).toBeGreaterThan(0);
@@ -122,10 +95,8 @@ test.describe('terminal selection copy on Windows/Linux (#969)', () => {
     const invokes = captureInvokes(page);
     await page.keyboard.press('Meta+c');
 
-    // Bound the negative on a real round-trip rather than a delay: Escape is no
-    // clipboard chord on any platform, so it falls straight through to the
-    // session, and by the time it lands any write Cmd+C would have made has
-    // already happened.
+    // Escape passes straight to the session, so once it lands any Cmd+C write
+    // would already have happened.
     await page.keyboard.press('Escape');
     await expect.poll(() => sessionInputs(invokes, sessionId)).toContain(ESCAPE);
     expect(await app.terminalPane.hostClipboard()).toBe('clipboard-before-meta');

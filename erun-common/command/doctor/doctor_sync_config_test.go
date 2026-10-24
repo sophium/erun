@@ -11,12 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// syncConfigTestEnv returns the env lookup a runtime pod's chart-injected
-// ERUN_* vars would populate for a managed-cloud runtime env, with any
-// overrides layered on top -- e.g. {"ERUN_CLOUD_CONTEXT_NAME": ""} to model a
-// cluster whose kube-context was never registered with `erun context init`, so
-// the entrypoint leaves the context name unset while still resolving
-// provider/alias/region from the AWS alias.
+// syncConfigTestEnv returns a managed-cloud runtime pod's injected env with overrides applied.
 func syncConfigTestEnv(overrides map[string]string) func(string) string {
 	env := map[string]string{
 		"ERUN_TENANT":               "team",
@@ -34,11 +29,6 @@ func syncConfigTestEnv(overrides map[string]string) func(string) string {
 	return func(key string) string { return env[key] }
 }
 
-// TestInjectedCloudContextNameDefaultsToKubernetesContext: an unset
-// ERUN_CLOUD_CONTEXT_NAME must default the injected context name the same way
-// NormalizeCloudContextConfig -- the rule every writer already applies --
-// defaults it, so the injected projection is comparable against the on-disk
-// config by construction instead of via a second, driftable copy of the rule.
 func TestInjectedCloudContextNameDefaultsToKubernetesContext(t *testing.T) {
 	injected, ok := shared.ResolveInjectedRuntimeConfig(syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": ""}))
 	if !ok {
@@ -52,10 +42,6 @@ func TestInjectedCloudContextNameDefaultsToKubernetesContext(t *testing.T) {
 	}
 }
 
-// TestInjectedCloudContextNameExplicitUnchanged locks the unchanged side: a
-// chart that does set ERUN_CLOUD_CONTEXT_NAME (a cluster whose context was
-// registered via `erun context init`) must still see that exact name, not the
-// kubernetes-context default.
 func TestInjectedCloudContextNameExplicitUnchanged(t *testing.T) {
 	injected, ok := shared.ResolveInjectedRuntimeConfig(syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": "my-cloud-context"}))
 	if !ok {
@@ -69,10 +55,6 @@ func TestInjectedCloudContextNameExplicitUnchanged(t *testing.T) {
 	}
 }
 
-// TestSyncConfigSecondRunReachesInSync proves there is no perpetual-drift
-// loop: with ERUN_CLOUD_CONTEXT_NAME unset, a first --sync-config run must
-// reconcile the missing cloud context, and a second run against the files the
-// first run wrote must report InSync().
 func TestSyncConfigSecondRunReachesInSync(t *testing.T) {
 	configHome := t.TempDir()
 	env := syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": ""})
@@ -91,9 +73,6 @@ func TestSyncConfigSecondRunReachesInSync(t *testing.T) {
 	}
 }
 
-// TestSyncConfigExplicitContextNameReachesInSync locks the unchanged side end
-// to end: an explicitly named cloud context reconciles and round-trips to
-// InSync() exactly like it always did.
 func TestSyncConfigExplicitContextNameReachesInSync(t *testing.T) {
 	configHome := t.TempDir()
 	env := syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": "my-cloud-context"})
@@ -112,9 +91,6 @@ func TestSyncConfigExplicitContextNameReachesInSync(t *testing.T) {
 	}
 }
 
-// TestSyncConfigGenuineCloudContextDriftStillReported proves the fix does not
-// silence a real disagreement: once the region on disk is stale, drift must
-// still be reported even though the context name now matches by construction.
 func TestSyncConfigGenuineCloudContextDriftStillReported(t *testing.T) {
 	configHome := t.TempDir()
 	env := syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": ""})
@@ -140,11 +116,7 @@ func TestSyncConfigGenuineCloudContextDriftStillReported(t *testing.T) {
 	}
 }
 
-// TestSyncConfigRootNotRewrittenWhenInSync proves RunRuntimeConfigSync never
-// touches the on-disk root config once the two sides already agree. It makes
-// the config directory read-only after the first reconcile, so any attempted
-// rewrite -- even one that would produce byte-identical content -- fails
-// loudly instead of passing silently, then confirms the file is untouched.
+// The config directory is made read-only so any rewrite, even byte-identical, fails.
 func TestSyncConfigRootNotRewrittenWhenInSync(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX permission bits are not enforced the same way on windows")

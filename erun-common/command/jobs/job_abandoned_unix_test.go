@@ -17,14 +17,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// The actual reproduction: a background process that escapes into a
-// *fresh* process group of its own -- exactly what an agent tool's Bash tool
-// does when it backgrounds a command so it survives the turn that started it
-// -- rather than staying in the immediate child's own group the way a plain
-// `cmd &` does. `set -m` is what forces bash's job control to
-// give the backgrounded sleep its own pgid instead of sharing the script's;
-// environmentJobProcessGroupSurvivors alone cannot see it once it lands
-// there, which is exactly the false `succeeded: true` this issue reported.
+// `set -m` gives the backgrounded sleep its own pgid, which the process-group
+// scan alone cannot see.
 func TestEnvironmentJobThatBackgroundsWorkIntoAFreshProcessGroupIsNotReportedAsSuccess(t *testing.T) {
 	isolateActivityCache(t)
 
@@ -58,22 +52,10 @@ func TestEnvironmentJobThatBackgroundsWorkIntoAFreshProcessGroupIsNotReportedAsS
 	}
 }
 
-// The third escape, and the widest: a background process that calls setsid for
-// itself, taking a fresh process group *and* a fresh session. The test above
-// escapes only the process group, which the session scan still catches; this
-// one leaves the session too, so no scan of the job's own group or session can
-// name it at all. What it cannot leave is its parentage -- the kernel hands an
-// orphan to the nearest ancestor marked a child subreaper, which the supervisor
-// is -- so the record still reads as abandoned rather than as the clean success
-// its exit code claims.
-//
-// This is the state the reported failure was in: the job's own pids were gone,
-// the leftover was running under a pgid and sid of its own, and the record said
-// `succeeded: true`.
+// setsid leaves both the group and the session; only parentage via the child
+// subreaper still finds it.
 func TestEnvironmentJobThatBackgroundsWorkIntoItsOwnSessionIsNotReportedAsSuccess(t *testing.T) {
-	// A leftover that left both the job's process group and its session is
-	// found only by the descendant scan, which needs Linux's child subreaper
-	// (job_process_descendant_other.go documents the gap elsewhere).
+	// Only the descendant scan finds this, and it needs Linux's child subreaper.
 	if runtime.GOOS != "linux" {
 		t.Skip("own-session survivor detection needs the Linux child subreaper")
 	}
@@ -109,20 +91,8 @@ func TestEnvironmentJobThatBackgroundsWorkIntoItsOwnSessionIsNotReportedAsSucces
 	}
 }
 
-// killProcessesMatching kills every process whose command line names path,
-// for a background process that escaped the job's own process group (so
-// signalEnvironmentJobProcessGroup on the job's ChildPID cannot reach it), and
-// then waits for them to go.
-//
-// The wait is what keeps one test's leftover out of the next test's: a
-// survivor of a job is deliberately detached, and the supervisor is a child
-// subreaper, so an escaped leftover is reparented onto the test process and
-// stays visible to every descendant scan the tests below run until it actually
-// dies. Signalling it is not the same as it being gone.
-//
-// A leftover only answers to this if its own command line carries path:
-// `sleep 5` redirected to a log names neither, which is why the background
-// commands below give their process a marker to be found by.
+// killProcessesMatching kills escaped leftovers by command line and waits for
+// them to die, since the subreaper keeps them visible to later tests' scans.
 func killProcessesMatching(path string) {
 	deadline := time.Now().Add(core.EnvironmentJobProcessGroupSurvivorSettleWindow * 10)
 	for {
@@ -140,8 +110,6 @@ func killProcessesMatching(path string) {
 	}
 }
 
-// pidsMatching returns the pids whose command line names path, ignoring the
-// ones pgrep cannot report.
 func pidsMatching(path string) []int {
 	out, err := exec.Command("pgrep", "-f", path).Output()
 	if err != nil {
@@ -156,11 +124,8 @@ func pidsMatching(path string) []int {
 	return pids
 }
 
-// leftoverBackgroundCommand returns a command that runs a long-lived process
-// under marker as its command line, so killProcessesMatching can find it after
-// it has escaped its job. It is deliberately one process carrying the marker:
-// `exec -a` replaces the shell with the sleep, so killing it does not orphan a
-// child that would then have to be reaped separately.
+// leftoverBackgroundCommand uses `exec -a` so a single process carries the
+// marker and killing it orphans no child.
 func leftoverBackgroundCommand(marker string, seconds int) string {
 	return fmt.Sprintf("bash -c 'exec -a %s sleep %d'", marker, seconds)
 }

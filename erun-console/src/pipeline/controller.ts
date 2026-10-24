@@ -7,11 +7,7 @@ export type PipelineState =
   | { status: 'ready'; issues: PipelineIssue[] }
   | { status: 'error'; message: string };
 
-// usePipelineController reads the tenant's whole pipeline -- jobs and reviews
-// unioned on the issue each belongs to. Polls, for the same reason the job
-// queue does: the view exists to answer "what is going on" while things are
-// going on, and a rung that moved is only worth watching if the panel behind
-// it is current. Same interval as the job queue.
+// Polled at the job queue's interval so moved rungs show up.
 const POLL_INTERVAL_MS = 5000;
 
 export function usePipelineController(token: string): PipelineState {

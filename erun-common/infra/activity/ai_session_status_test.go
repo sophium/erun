@@ -6,8 +6,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// recordAISessionEventForTest records an event and fails the test on error,
-// keeping the scenario steps below to one line each.
 func recordAISessionEventForTest(t *testing.T, params model.AISessionEventParams) {
 	t.Helper()
 	if err := RecordAISessionEvent(params); err != nil {
@@ -15,7 +13,6 @@ func recordAISessionEventForTest(t *testing.T, params model.AISessionEventParams
 	}
 }
 
-// loadAISessionStatusForTest resolves a status and fails the test on error.
 func loadAISessionStatusForTest(t *testing.T, tenant, environment, sessionID string) model.AISessionStatus {
 	t.Helper()
 	status, err := LoadAISessionStatus(tenant, environment, sessionID)
@@ -25,13 +22,7 @@ func loadAISessionStatusForTest(t *testing.T, tenant, environment, sessionID str
 	return status
 }
 
-// TestAISessionAwaitingInputIsNotIdleDuringLongSilence is the load-bearing
-// case a PTY output-volume heuristic cannot represent: a session that
-// finished its turn and is waiting on the human produces no output at all,
-// which a silence-based heuristic reads identically to "idle" or "finished".
-// The status model must read it as AwaitingInput regardless of how long the
-// silence runs, and it must stay distinguishable from a session that has
-// actually exited.
+// A session waiting on the human is silent, which an output-volume heuristic reads as idle.
 func TestAISessionAwaitingInputIsNotIdleDuringLongSilence(t *testing.T) {
 	isolateActivityCache(t)
 	tenant, environment, sessionID := "acme", "dev", "session-1"
@@ -46,11 +37,7 @@ func TestAISessionAwaitingInputIsNotIdleDuringLongSilence(t *testing.T) {
 		}
 	})
 
-	// No further events arrive after turn-end - the session is silent
-	// because it is waiting on the human, not because it went away. This
-	// must not decay into Idle no matter how long the silence runs (there is
-	// no elapsed-time input to this model at all, so "how long" isn't even
-	// simulated here - the absence of a timeout is the point).
+	// The model has no elapsed-time input, so silence can never decay to Idle.
 	t.Run("turn-end reads as awaiting-input and carries the tool forward", func(t *testing.T) {
 		recordAISessionEventForTest(t, model.AISessionEventParams{
 			Tenant: tenant, Environment: environment, SessionID: sessionID,

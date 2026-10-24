@@ -9,10 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// VerifyPublishedDockerImage re-resolves the multi-arch manifest just pushed for
-// a tag. Nothing else proves the image half of a version exists, and a release
-// that assumed it does is how a tag gets announced for an image no deploy can
-// pull.
+// VerifyPublishedDockerImage re-resolves the pushed manifest, the only proof
+// the image exists.
 func VerifyPublishedDockerImage(ctx core.Context, tag string, insecure bool) error {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {

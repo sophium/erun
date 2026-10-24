@@ -7,8 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewContributeCmd groups the `erun contribute …` subcommands that drive
-// contribute-mode workflows.
+// NewContributeCmd groups the `erun contribute …` subcommands.
 func NewContributeCmd(runGit gitx.GitCommandRunnerFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "contribute",

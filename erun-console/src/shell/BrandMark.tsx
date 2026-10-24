@@ -3,16 +3,8 @@ import * as React from 'react';
 
 import { BUNDLED_BRAND } from './brand';
 
-// BrandMark renders an instance's logo when platform discovery (GET
-// /v1/platform) carries one (`logoUrl`), and falls back to the product
-// initial otherwise — the fallback must never assume a hardcoded instance
-// name.
-//
-// A configured URL that fails to load falls back to the same mark: an
-// operator's logo lives on their own host, so a moved asset, a blocked
-// origin, or a typo is a real state, and a broken image icon on the front
-// door is a dead end nothing on the page explains. The failure is reset when
-// a different logo resolves, so one bad URL does not suppress the next.
+// A logo that fails to load falls back to the initial; the failure resets when a
+// different URL resolves.
 export function BrandMark({
   brand,
   logoUrl,

@@ -14,10 +14,7 @@ import (
 )
 
 func testCloudSetRealRunSameAliasHealsManagedCloud(t *testing.T) {
-	// `cloud set` with the alias the env already carries takes the
-	// no-change path but must still backfill managedcloud=true for a
-	// remote worktree that predates the flag (a side effect read from
-	// disk, not the captured streams).
+	// The no-change path must still backfill managedcloud=true for an older remote worktree.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	envCfgPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -46,10 +43,7 @@ func testCloudSetRealRunSameAliasHealsManagedCloud(t *testing.T) {
 }
 
 func testCloudSetRealRunNewAliasMarksManagedCloud(t *testing.T) {
-	// Assigning a new alias to a remote env must set managedcloud=true (a
-	// remote worktree implies a managed cloud runtime) and persist both
-	// fields. The config deliberately omits `name:` so the
-	// environment-name backfill branch also runs.
+	// The config omits `name:` so the environment-name backfill also runs.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	envCfgPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -88,8 +82,7 @@ func testCloudSetMissingEnvironmentFails(t *testing.T) {
 }
 
 func testCloudSetEmptyAliasFails(t *testing.T) {
-	// --alias is cobra-required, but an explicitly empty value still passes
-	// cobra's presence check and must be rejected by the params validation.
+	// An empty --alias passes cobra's required check.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"cloud", "set", "team", "dev", "--alias", ""}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -100,10 +93,7 @@ func testCloudSetEmptyAliasFails(t *testing.T) {
 }
 
 func testCloudSetEmptyTenantFails(t *testing.T) {
-	// TENANT/ENVIRONMENT are cobra-positional (ExactArgs(2)), so an
-	// explicitly empty value still satisfies the arg-count check and must
-	// be rejected by normalizeEnvironmentCloudProviderAliasParams before
-	// any env lookup runs.
+	// Empty positionals pass cobra's ExactArgs.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"cloud", "set", "", "dev", "--alias", "team-cloud"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode == 0 {

@@ -14,27 +14,16 @@ import (
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// Changing an environment's erun version means moving every place that version
-// is recorded — the Terraform module refs, an erun image reference set directly
-// in Terraform variables, each umbrella's erun chart dependencies, the build-env
-// image tag, a stated runtime chart or runtime image naming erun's own stock
-// release, and the env's own runtime version — together. The desktop
-// composes `erun pin` for that rather than reimplementing it: the CLI, the MCP
-// tool and this share one engine, so all three agree on what a re-pin touches.
+// The desktop shells `erun pin` so CLI, MCP and UI share one re-pin engine.
 
-// uiPinPlan is the desktop's read-model of a resolved plan. It carries the
-// sites so the dialog can show current → target per reference, which is what
-// makes the motion something an operator can agree to rather than trust.
+// uiPinPlan is a resolved pin plan, with per-site current and target versions.
 type uiPinPlan struct {
 	Tenant      string      `json:"tenant"`
 	Environment string      `json:"environment"`
 	Target      string      `json:"target"`
 	Previous    string      `json:"previous,omitempty"`
 	Sites       []uiPinSite `json:"sites"`
-	// Skipped explains, in order, what the plan deliberately left out and why —
-	// a reference the environment's own config says is on another release line.
-	// Without it the dialog would drop a row the operator expected (an env whose
-	// runtime image is its own keeps its runtimeversion) with nothing said.
+	// Skipped lists references deliberately left on another release line.
 	Skipped   []string         `json:"skipped,omitempty"`
 	Changed   int              `json:"changed"`
 	Aligned   bool             `json:"aligned"`
@@ -50,8 +39,7 @@ type uiPinSite struct {
 	Aligned bool   `json:"aligned"`
 }
 
-// PreviewPinVersion resolves what re-pinning this environment to target would
-// change, without writing. An empty target means the latest published stable.
+// PreviewPinVersion resolves a re-pin without writing; empty target means latest stable.
 func (a *App) PreviewPinVersion(selection uiSelection, target string) (uiPinPlan, error) {
 	return a.runPinCommand(selection, target, true, false)
 }
@@ -61,8 +49,7 @@ func (a *App) ApplyPinVersion(selection uiSelection, target string) (uiPinPlan, 
 	return a.runPinCommand(selection, target, false, false)
 }
 
-// RevertPinVersion pins back to the version recorded before the last re-pin, so
-// trying a version out is cheap to undo.
+// RevertPinVersion pins back to the version recorded before the last re-pin.
 func (a *App) RevertPinVersion(selection uiSelection) (uiPinPlan, error) {
 	return a.runPinCommand(selection, "", false, true)
 }
@@ -96,9 +83,7 @@ func (a *App) runPinCommand(selection uiSelection, target string, preview, rever
 	return plan, nil
 }
 
-// runPinCLI shells the CLI and reads its structured result. The human trace goes
-// to stderr and the JSON to stdout, so a failure can be reported with the
-// command's own words rather than a generic one.
+// runPinCLI runs the CLI: JSON on stdout, human trace on stderr.
 func runPinCLI(ctx context.Context, cliPath string, args []string) (uiPinPlan, error) {
 	cmd := exec.CommandContext(ctx, cliPath, args...)
 	core.HideConsoleWindow(cmd)
@@ -122,9 +107,7 @@ func runPinCLI(ctx context.Context, cliPath string, args []string) (uiPinPlan, e
 	return toUIPinPlan(resolved), nil
 }
 
-// lastMeaningfulLine picks the line an operator should read out of a trace that
-// also carries audit lines, so the dialog shows the reason rather than the
-// command's opening line.
+// lastMeaningfulLine returns the last non-audit line of a trace.
 func lastMeaningfulLine(detail string) string {
 	lines := strings.Split(detail, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -161,8 +144,7 @@ func toUIPinPlan(plan lifecycle.PinPlan) uiPinPlan {
 	return out
 }
 
-// pinSiteLabel names the reference in the terms the repo uses, so a site in the
-// dialog can be found on disk without translation.
+// pinSiteLabel names a site by its repo path.
 func pinSiteLabel(site lifecycle.PinSite) string {
 	path := strings.TrimSpace(site.Path)
 	detail := strings.TrimSpace(site.Detail)
@@ -176,8 +158,7 @@ func pinSiteLabel(site lifecycle.PinSite) string {
 	}
 }
 
-// ListPinnableVersions answers what the environment can be pinned to, so the
-// picker offers real published versions rather than a free-text box.
+// ListPinnableVersions lists the published versions the environment can pin to.
 func (a *App) ListPinnableVersions(selection uiSelection) ([]string, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("list pinnable versions", selection.Tenant, selection.Environment); err != nil {
@@ -206,21 +187,14 @@ func (a *App) ListPinnableVersions(selection uiSelection) ([]string, error) {
 	return versions.Tags, nil
 }
 
-// uiPinRepoCheckoutStatus answers, ahead of Preview/Apply, whether this
-// environment's erun references have a resolvable local checkout on this
-// machine. A sourceless runtime environment (no MountSource) has none of its
-// own, and the dialog needs to know before it offers a plan `erun pin` can
-// never resolve — rather than only discovering it once a Preview click fails.
+// uiPinRepoCheckoutStatus reports whether `erun pin` can resolve a local checkout.
 type uiPinRepoCheckoutStatus struct {
 	Resolvable bool   `json:"resolvable"`
 	Reason     string `json:"reason,omitempty"`
 }
 
-// PinRepoCheckoutStatus mirrors resolvePinProjectRoot's own decision
-// (erun-cli/cmd/pin/pin.go) without running the CLI: an environment whose worktree
-// lives on this machine always has one; a remote-worktree environment
-// (remote-agent or runtime) needs a sibling environment of the same tenant
-// that does, since every environment of a tenant shares one repo.
+// PinRepoCheckoutStatus mirrors the CLI's resolvePinProjectRoot: a remote-worktree env
+// needs a same-tenant sibling with a local checkout.
 func (a *App) PinRepoCheckoutStatus(selection uiSelection) (uiPinRepoCheckoutStatus, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("resolve pin repo checkout status", selection.Tenant, selection.Environment); err != nil {

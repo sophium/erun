@@ -20,56 +20,28 @@ type StartEnvironmentJobParams struct {
 	Tenant      string
 	Environment string
 	Name        string
-	// ID defaults to the name, matching the lease store, so re-running the same
-	// named work keeps one stable handle.
+	// ID defaults to the name, so re-running named work keeps one handle.
 	ID      string
 	Command []string
-	// Agent names the AI tool to run as an agent job. Setting it replaces
-	// Command: erun builds the tool's streaming invocation from Prompt, which is
-	// the whole reason the kind exists — the tool's default mode reports nothing
-	// until it exits.
+	// Agent names an AI tool; erun builds its streaming invocation from Prompt
+	// in place of Command.
 	Agent  string
 	Prompt string
 	Dir    string
-	// Env is additional environment for the job's own process, on top of what it
-	// inherits from the environment's runtime pod (e.g. raising
-	// CLAUDE_CODE_MAX_OUTPUT_TOKENS for one agent run). Values land in the
-	// supervisor's argv, which anything able to list processes in this
-	// environment can read — this is not where secrets belong. See
-	// normalizeEnvironmentJobEnv for the names it refuses to set.
-	Env map[string]string
-	// MaxOutputBytes caps the captured output; zero takes the default.
+	// Env is extra environment for the job's process. It lands in the supervisor's
+	// argv, readable by anyone listing processes, so never put secrets here.
+	Env            map[string]string
 	MaxOutputBytes int64
-	// LeaseTTL is how long the job's activity lease holds between renewals; the
-	// supervisor renews well inside it for as long as the work runs.
-	LeaseTTL time.Duration
-	// Handoff marks this job as deliberately meant to outlive whatever starts
-	// it, excluding it from that caller's own finish check entirely (see
-	// EnvironmentJob.Handoff). Only meaningful when this start itself runs
-	// from inside another job's own work.
+	LeaseTTL       time.Duration
+	// Handoff excludes this job from its starting job's finish check.
 	Handoff bool
-	// Exclusive declares that this job needs the environment to itself: it
-	// claims EnvironmentActivityLeaseScopeEnvironment for its lifetime, and
-	// while it holds that claim every other job start here is refused (see
-	// job_exclusive.go). Resolution rewrites this field to what the start
-	// actually did, so a job running under an ancestor's existing claim reads
-	// as not holding one of its own.
+	// Exclusive claims the whole environment; resolution rewrites it to whether
+	// this job actually holds its own claim.
 	Exclusive bool
-	// StartedByJobID is an explicit override for the job this new work should
-	// record as its own parent (see EnvironmentJob.StartedByJobID). Leave it
-	// empty for the common case: the supervisor this spawns inherits its own
-	// process's ERUN_JOB_ID for free when the start itself runs as a plain
-	// nested subprocess of another job's work (an agent's own Bash tool). Set it explicitly only when forwarding this start through a
-	// channel that cannot carry that inheritance itself — the MCP edge, most
-	// notably, since a request reaching it crosses into that server's own
-	// long-lived process, which has no ERUN_JOB_ID of its own regardless of
-	// how deep the logical nesting is on the calling side. See
-	// CurrentEnvironmentJobID.
+	// StartedByJobID overrides the inherited ERUN_JOB_ID parent link, for starts
+	// forwarded through the MCP edge, whose process has none.
 	StartedByJobID string
-	// SupervisorPath is the erun executable that will supervise the job. Each
-	// transport resolves it — the CLI is already that executable, the MCP server
-	// finds it on the environment's PATH — so this package stays free of any
-	// assumption about which binary is calling.
+	// SupervisorPath is the erun executable that supervises the job; each transport resolves it.
 	SupervisorPath string
 }
 
@@ -104,19 +76,9 @@ func (p StartEnvironmentJobParams) normalize() (StartEnvironmentJobParams, error
 	return p, nil
 }
 
-// resolveEnvironmentJobDir resolves the directory the work runs in, and proves
-// it usable before anything is detached.
-//
-// The supervisor is started with no inherited working directory, so a relative
-// dir cannot mean "relative to the supervisor" — left alone it resolves against
-// whatever directory the transport happens to be sitting in, which is not the
-// repository. Anchor it to the project root instead, the same reading every
-// other repo-facing surface gives a path, so a caller can name a subdirectory
-// here exactly as they would to `raw`.
-//
-// The check happens now rather than at exec because Go reports an unusable
-// cmd.Dir as an ENOENT naming the *binary*: an unverified dir surfaces as a
-// missing shell, sending the reader after a broken image instead of a bad path.
+// resolveEnvironmentJobDir anchors a relative dir to the project root (the
+// supervisor has no working directory) and checks it now: Go reports a bad
+// cmd.Dir as ENOENT naming the binary.
 func resolveEnvironmentJobDir(dir string) (string, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
@@ -140,9 +102,7 @@ func resolveEnvironmentJobDir(dir string) (string, error) {
 	return resolved, nil
 }
 
-// normalizeEnvironmentJobIdentity resolves the target and the handle a job is
-// addressed by, shared by starting and attaching. The id defaults to the name,
-// matching the lease store, so re-running the same named work keeps one handle.
+// normalizeEnvironmentJobIdentity validates the target and defaults the id to the name.
 func normalizeEnvironmentJobIdentity(tenant, environment, name, id string) (string, error) {
 	if err := model.ErrMissingTenantOrEnvironment("resolve environment job identity", tenant, environment); err != nil {
 		return "", err
@@ -157,10 +117,8 @@ func normalizeEnvironmentJobIdentity(tenant, environment, name, id string) (stri
 	return resolveEnvironmentJobID(value)
 }
 
-// resolveEnvironmentJobWork settles what the job runs. An agent job names a tool
-// and a prompt and erun builds the argv; a command job brings its own. Naming
-// both is refused rather than resolved, because a caller that meant one of them
-// would otherwise silently get the other.
+// resolveEnvironmentJobWork settles what the job runs; naming both an agent and
+// a command is refused rather than silently picking one.
 func resolveEnvironmentJobWork(agent, prompt string, command []string) (string, []string, error) {
 	if strings.TrimSpace(agent) == "" {
 		if strings.TrimSpace(prompt) != "" {
@@ -185,27 +143,17 @@ func resolveEnvironmentJobWork(agent, prompt string, command []string) (string, 
 	return tool, built, nil
 }
 
-// jobEnvKeyPattern is the shape a caller-supplied job env var name must take:
-// a plain identifier, the only thing that is ever a real environment variable
-// name on the platforms erun runs on.
 var jobEnvKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// jobEnvDeniedKeys are names a caller-supplied job env must never override.
-// PATH/LD_PRELOAD/LD_LIBRARY_PATH/DYLD_* can redirect what the job's own
-// process executes or dynamically loads — a code-execution hijack, not a
-// tuning knob — and HOME/SHELL/IFS can subvert whatever script the job's
-// command runs.
+// jobEnvDeniedKeys can hijack what the job executes or loads, or subvert its scripts.
 var jobEnvDeniedKeys = map[string]struct{}{
 	"PATH": {}, "LD_PRELOAD": {}, "LD_LIBRARY_PATH": {},
 	"DYLD_INSERT_LIBRARIES": {}, "DYLD_LIBRARY_PATH": {},
 	"HOME": {}, "SHELL": {}, "IFS": {},
 }
 
-// normalizeEnvironmentJobEnv validates a caller-supplied job environment
-// override. An `ERUN_` name is refused outright: that prefix is erun's own
-// seam for redirecting its subprocess lookups (`ERUN_<NAME>_BIN`) and its
-// detection overrides, and a job that later shells out to erun itself must not
-// be able to redirect those from the outside.
+// normalizeEnvironmentJobEnv also refuses ERUN_ names, which redirect erun's own
+// subprocess lookups and detection.
 func normalizeEnvironmentJobEnv(env map[string]string) (map[string]string, error) {
 	out := make(map[string]string, len(env))
 	for key, value := range env {
@@ -222,9 +170,7 @@ func normalizeEnvironmentJobEnv(env map[string]string) (map[string]string, error
 	return out, nil
 }
 
-// sortedEnvironmentJobEnvPairs renders a job env override as "KEY=VALUE"
-// pairs in a stable order, so the supervisor argv and its dry-run trace never
-// reorder between runs of the same request.
+// sortedEnvironmentJobEnvPairs renders KEY=VALUE pairs in a stable order.
 func sortedEnvironmentJobEnvPairs(env map[string]string) []string {
 	if len(env) == 0 {
 		return nil
@@ -241,20 +187,13 @@ func sortedEnvironmentJobEnvPairs(env map[string]string) []string {
 	return pairs
 }
 
-// ensureAgentJobToolAvailable refuses an agent job before anything is spent —
-// no activity lease, no log file, no supervisor process — when the named tool
-// is not installed in this environment. That precondition is knowable up
-// front; starting anyway trades a direct, actionable refusal for the tool's
-// own failure a minute later, which for an unconfigured environment reads as
-// a credential problem with no credential fix.
+// ensureAgentJobToolAvailable refuses before anything is spent when the tool is
+// missing, rather than failing later like a credential problem.
 func ensureAgentJobToolAvailable(ctx core.Context, tool string) error {
 	if strings.TrimSpace(tool) == "" {
 		return nil
 	}
 	ctx.Trace(fmt.Sprintf("job: resolving agent tool %q in this environment", tool))
-	// cmd.Err carries Go's own exec.LookPath phrasing, which is an
-	// implementation detail rather than something to hand to the caller
-	// verbatim; the tool name and "not available" already say what happened.
 	if cmd := core.Command(tool); cmd.Err != nil {
 		err := fmt.Errorf("agent tool %q is not available in this environment; install and configure it here, or start the job with a different --agent", tool)
 		ctx.Trace(fmt.Sprintf("job: resolving agent tool %q failed: %v", tool, err))
@@ -263,8 +202,6 @@ func ensureAgentJobToolAvailable(ctx core.Context, tool string) error {
 	return nil
 }
 
-// environmentJobKind names the kind a recorded tool implies, so the record and
-// every reader agree without either re-deriving it.
 func environmentJobKind(agentTool string) string {
 	if strings.TrimSpace(agentTool) == "" {
 		return EnvironmentJobKindCommand

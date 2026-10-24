@@ -9,10 +9,6 @@ import (
 	"testing"
 )
 
-// TestPlatformClientAdvanceMergeQueueNamesTheOccupyingReview pins the client
-// half of the occupied-slot refusal: the platform reports which review already
-// holds the branch, and that has to reach the operator through the typed error
-// rather than an opaque response body, the same way an unresolved thread does.
 func TestPlatformClientAdvanceMergeQueueNamesTheOccupyingReview(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -40,9 +36,6 @@ func TestPlatformClientAdvanceMergeQueueNamesTheOccupyingReview(t *testing.T) {
 	}
 }
 
-// TestPlatformClientAdvanceMergeQueueKeepsTheThreadRefusal: the occupied-slot
-// decoration sits beside the unresolved-thread one on the same 409, so the
-// thread refusal must still reach a caller as its own typed error.
 func TestPlatformClientAdvanceMergeQueueKeepsTheThreadRefusal(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

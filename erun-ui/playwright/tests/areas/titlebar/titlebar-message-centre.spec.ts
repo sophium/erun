@@ -3,10 +3,8 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// The message centre's class icons must render in the titlebar's
-// right-hand group (not the centred status slot), the unread badge must be
-// legible and never rely on colour alone, and clearing a class (or
-// everything) must mark it read without deleting it from history.
+// Class icons render in the titlebar's right-hand group, badges never rely on
+// colour alone, and clearing marks read without deleting history.
 
 function emit(page: Page, payload: Record<string, unknown>): Promise<void> {
   return page.evaluate((notification) => {
@@ -28,11 +26,7 @@ function envelope(data: unknown): { contentType: string; body: string } {
   return { contentType: 'application/json', body: JSON.stringify({ data }) };
 }
 
-// A not-yet-eligible idle reading renders its label as `idle <n>s`
-// (Titlebar.helpers.ts's idleStatusBadge) -- unlike the other badge
-// variants ("idle ready", "outside hours"), this one's rendered width
-// tracks the digit count of secondsUntilStop, which is exactly the
-// variable-width case the layout fix needs to stay stable against.
+// `idle <n>s` is the badge variant whose width tracks secondsUntilStop.
 function widthVaryingIdleStatus(secondsUntilStop: number): unknown {
   return {
     timeoutSeconds: 600,
@@ -87,14 +81,12 @@ test.describe('titlebar message centre layout and bulk clear', () => {
     const icon = app.titlebar.messageCenterIcon('error');
     await expect(icon).toBeVisible();
 
-    // Right-aligned: the icon sits in the right half of a 1440px-wide viewport
-    // (playwright.config.ts's fixed viewport), not the centred status slot.
+    // Right half of the fixed 1440px viewport.
     const boxBefore = await icon.boundingBox();
     expect(boxBefore).not.toBeNull();
     expect(boxBefore?.x ?? 0).toBeGreaterThan(720);
 
-    // Grow the idle label from "idle 5s" to "idle 359999s" -- outboard
-    // placement means the icon's absolute x must not move.
+    // The icon is outboard of the idle label, so its x must not move.
     secondsUntilStop = 359999;
     await waitForNextIdlePoll(page);
     await expect(idleBadge).toHaveText('idle 359999s');
@@ -120,10 +112,7 @@ test.describe('titlebar message centre layout and bulk clear', () => {
         .first()
         .evaluate((el) => getComputedStyle(el).color),
     ]);
-    // The badge's own background must never equal the icon's currentColor --
-    // that is exactly the red-on-red/amber-on-amber separation defect this
-    // fixes (root AGENTS.md's StatusDotGlyph rule: state must not rest on
-    // colour alone, so the badge needs a fixed, independent background).
+    // State must not rest on colour alone, so the badge has its own background.
     expect(badgeBackground).not.toBe(iconColor);
 
     for (let i = 2; i <= 12; i++) {
@@ -147,12 +136,9 @@ test.describe('titlebar message centre layout and bulk clear', () => {
 
     await app.titlebar.openMessageCenter('error');
     await app.titlebar.messageCenterMarkClassReadButton('error').click();
-    // The rest of the titlebar is aria-hidden while the modal dialog is
-    // open, so it must close before any titlebar-icon locator is trusted.
+    // The titlebar is aria-hidden while the modal is open.
     await app.titlebar.closeMessageCenter();
 
-    // Scoped to the error tab: the error icon disappears, the warning one
-    // must not be touched.
     await expect(errorIcon).toHaveCount(0);
     await expect(warningIcon).toBeVisible();
 
@@ -161,11 +147,8 @@ test.describe('titlebar message centre layout and bulk clear', () => {
     await app.titlebar.closeMessageCenter();
     await expect(warningIcon).toHaveCount(0);
 
-    // Cleared, not deleted: the centre stays reachable and both messages are
-    // still listed in the dialog. Reached through whichever entry point the
-    // titlebar is offering -- this spec cleared its own two classes, but a
-    // notice another spec left arriving in this worker's page is a class it
-    // never raised, and an unread class suppresses the history fallback.
+    // Cleared, not deleted. Another spec's unread notice may suppress the history
+    // fallback, so go through whichever entry point is offered.
     await expect(app.titlebar.messageCenterEntryPoint()).toBeVisible();
     await app.titlebar.openMessageCenterFromTitlebar();
     await expect(app.titlebar.messageCenterRow('Scoped clear: error message.')).toBeVisible();
@@ -193,15 +176,11 @@ test.describe('titlebar message centre layout and bulk clear', () => {
 
     await app.titlebar.openMessageCenter('error');
     await app.titlebar.messageCenterMarkAllReadButton().click();
-    // The rest of the titlebar is aria-hidden while the modal dialog is
-    // open, so it must close before any titlebar-icon locator is trusted.
+    // The titlebar is aria-hidden while the modal is open.
     await app.titlebar.closeMessageCenter();
 
     await expect(errorIcon).toHaveCount(0);
     await expect(warningIcon).toHaveCount(0);
-    // Same reachability invariant as the scoped-clear case above: the class
-    // icons this spec raised are gone, and the centre must still be reachable
-    // through whatever entry point the titlebar offers in their place.
     await expect(app.titlebar.messageCenterEntryPoint()).toBeVisible();
 
     await app.titlebar.openMessageCenterFromTitlebar();

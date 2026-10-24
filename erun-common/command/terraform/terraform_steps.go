@@ -8,12 +8,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// terraformLockPlatforms are the provider platforms `erun terraform init`
-// records in a generated .terraform.lock.hcl. They match erun's deploy targets
-// (build/deploy always produce linux/amd64 + linux/arm64), so one committed lock
-// lets init run -lockfile=readonly on every env regardless of the pod's arch — a
-// lock generated for only the local platform would fail a read-only init on a
-// pod of the other architecture.
+// terraformLockPlatforms match erun's deploy targets so one committed lock
+// works with -lockfile=readonly on any pod architecture.
 var terraformLockPlatforms = []string{"linux_amd64", "linux_arm64"}
 
 type terraformStep struct {
@@ -22,14 +18,10 @@ type terraformStep struct {
 }
 
 func executeTerraformSteps(ctx core.Context, result TerraformResult, steps []terraformStep, confirm TerraformConfirmFunc, rfc2136Secret string) error {
-	// The durable state + data dir live on the home PVC; create it before init so
-	// terraform can write the local-backend state and TF_DATA_DIR there.
 	if err := os.MkdirAll(result.WorkDir, 0o755); err != nil {
 		return fmt.Errorf("creating terraform state dir %s: %w", result.WorkDir, err)
 	}
-	// A lock-generating init needs to write .terraform.lock.hcl into the tree.
-	// Fail early with a recovery path rather than a raw permission error when the
-	// tree is read-only (e.g. a baked runtime release with no committed lock).
+	// Fail with a recovery path when a lock-generating init meets a read-only tree.
 	if result.Operation == string(TerraformInit) && !result.LockReadonly {
 		if err := ensureTerraformTreeWritable(result.Directory); err != nil {
 			return err
@@ -52,11 +44,8 @@ func executeTerraformSteps(ctx core.Context, result TerraformResult, steps []ter
 	return nil
 }
 
-// buildTerraformSteps resolves the terraform command sequence for op. init is
-// its own operation, so plan/apply/destroy no longer run it implicitly — the
-// operator runs `erun terraform init` once (and after changing providers), which
-// keeps apply/plan/destroy from ever trying to write the lock file into a
-// read-only playbook tree.
+// buildTerraformSteps does not run init; the operator runs `erun terraform init`
+// so plan/apply/destroy never write the lock into a read-only tree.
 func buildTerraformSteps(op TerraformOperation, varFile, stateFile, planFile string, lockReadonly bool, extraArgs []string) []terraformStep {
 	switch op {
 	case TerraformInit:
@@ -77,7 +66,7 @@ func buildTerraformSteps(op TerraformOperation, varFile, stateFile, planFile str
 }
 
 func buildTerraformApplySteps(varFile, planFile string, extraArgs []string) []terraformStep {
-	// -check, not a rewrite: the playbook tree is read-only in the release.
+	// -check: the playbook tree is read-only in the release.
 	fmtStep := terraformStep{args: []string{"fmt", "-check", "-recursive", ".."}}
 	plan := append([]string{"plan", "-input=false"}, terraformVarFileArgs(varFile)...)
 	plan = append(plan, extraArgs...)
@@ -86,12 +75,8 @@ func buildTerraformApplySteps(varFile, planFile string, extraArgs []string) []te
 	return []terraformStep{fmtStep, {args: plan}, apply}
 }
 
-// buildTerraformInitSteps sets up the local backend at the durable state file and
-// populates the provider cache (TF_DATA_DIR) on the PVC. When the tree already
-// carries a committed .terraform.lock.hcl (e.g. a baked read-only release), init
-// runs -lockfile=readonly so it never rewrites the tree. When no lock exists yet,
-// init generates one and a follow-up `providers lock` records hashes for every
-// deploy platform, so the single committed lock initializes on any env's arch.
+// buildTerraformInitSteps uses -lockfile=readonly when a lock is committed;
+// otherwise it generates one with hashes for every deploy platform.
 func buildTerraformInitSteps(stateFile string, lockReadonly bool) []terraformStep {
 	initArgs := []string{"init", "-input=false", "-backend-config=path=" + stateFile}
 	if lockReadonly {
@@ -124,11 +109,7 @@ func cloudflareTokenPresent() bool {
 	return strings.TrimSpace(os.Getenv("CLOUDFLARE_API_TOKEN")) != ""
 }
 
-// terraformExtraEnv sets TF_DATA_DIR to the durable home-PVC data dir (so
-// providers/modules/backend record survive a pod restart) and supplies the
-// Cloudflare API token and, when the resolved dns01_provider needs it, the
-// RFC2136 TSIG secret the edge module's cert-manager DNS-01 solver needs.
-// Both ride in the environment, never in argv, so neither lands in the trace.
+// terraformExtraEnv passes secrets via the environment so they never land in the trace.
 func terraformExtraEnv(dataDir, rfc2136Secret string) []string {
 	env := []string{"TF_DATA_DIR=" + dataDir}
 	if token := strings.TrimSpace(os.Getenv("CLOUDFLARE_API_TOKEN")); token != "" {
@@ -140,11 +121,8 @@ func terraformExtraEnv(dataDir, rfc2136Secret string) []string {
 	return env
 }
 
-// ensureTerraformTreeWritable confirms init can write .terraform.lock.hcl into
-// the playbook tree, and otherwise returns a recovery path. A sourceless runtime
-// env surfaces the tree as a symlink into the read-only, root-owned image layer
-// (/opt/erun/release), so the erun user cannot create the lock there — the lock
-// must be generated on a writable env and committed so it bakes into the image.
+// ensureTerraformTreeWritable reports a recovery path when the tree is read-only
+// (a sourceless runtime env symlinks it into the image layer).
 func ensureTerraformTreeWritable(dir string) error {
 	probe, err := os.CreateTemp(dir, ".erun-tf-writeprobe-*")
 	if err != nil {

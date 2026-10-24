@@ -11,11 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// BuildExecutionProfile summarizes this run's own step-timing tree (see
-// traceBuildUmbrella, which stashes the root on ctx.timing) into the bounded
-// shape ReportBuildOutcome carries to the platform. nil when no timing root
-// is active -- a dry run, or a build that hit an error before
-// traceBuildUmbrella started one.
+// BuildExecutionProfile summarizes this run's timing tree; nil when no timing root is active.
 func BuildExecutionProfile(ctx core.Context) *core.BuildProfileSummary {
 	if ctx.Timing == nil {
 		return nil
@@ -54,8 +50,7 @@ func runDockerBuildExecutionPhase(ctx core.Context, execution shared.BuildExecut
 		if err := buildAndPushDeployDockerImages(ctx, execution.DockerBuilds, build, push, pushedTags); err != nil {
 			return pushedTags, err
 		}
-		// A builds-here --deploy pushes images but deploys charts from the working
-		// tree, so package (validate) the charts rather than publish them.
+		// A builds-here --deploy deploys charts from the working tree, so validate rather than publish.
 		return pushedTags, pushpkg.PackageComponentCharts(ctx, execution.ComponentCharts)
 	}
 	if err := buildpkg.RunDockerBuilds(ctx, execution.DockerBuilds, build); err != nil {
@@ -91,8 +86,6 @@ func RunDockerPushSpec(ctx core.Context, pushInput shared.DockerPushSpec, buildI
 			return err
 		}
 		if buildInput.Push {
-			// The multi-arch build already pushed the image, so only the chart
-			// remains; a single-image push aligns chart and image versions.
 			return helm.PublishComponentChart(ctx, buildInput.Image, buildInput.Image.Version)
 		}
 	}
@@ -128,8 +121,5 @@ func RunDockerPushExecution(ctx core.Context, execution shared.DockerPushExecuti
 			return err
 		}
 	}
-	// Publish every chart under <tenant>-devops/k8s/* at the push/release version,
-	// discovered by directory scan rather than keyed to same-named images, so
-	// image-less component charts (a tenant's wrappers) publish too.
 	return pushpkg.PublishComponentCharts(ctx, execution.ComponentCharts)
 }

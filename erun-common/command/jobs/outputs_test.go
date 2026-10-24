@@ -7,12 +7,7 @@ import (
 	"testing"
 )
 
-// TestResolveLocalOutputsEmptyDirectorySerializesAsEmptyArray pins the JSON
-// shape a caller of the outputs_list MCP tool actually observes for a
-// directory that has never been created (the ordinary case for an
-// environment that has never written anything to it): Entries must marshal
-// to "[]", not "null" - the same nil-slice-on-empty-collection defect fixed
-// in LoadAISessionStatuses.
+// A never-created directory must marshal Entries as "[]", not "null".
 func TestResolveLocalOutputsEmptyDirectorySerializesAsEmptyArray(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "never-created")
 
@@ -39,8 +34,6 @@ func TestResolveLocalOutputsEmptyDirectorySerializesAsEmptyArray(t *testing.T) {
 	}
 }
 
-// TestResolveLocalOutputsNonEmptySerializesAsArray confirms the fix above does
-// not disturb the populated case.
 func TestResolveLocalOutputsNonEmptySerializesAsArray(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hi"), 0o644); err != nil {

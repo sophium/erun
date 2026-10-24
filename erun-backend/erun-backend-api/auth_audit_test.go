@@ -65,10 +65,7 @@ func TestAuthMiddlewareLogsAuditEventForAuthorizedRequest(t *testing.T) {
 	}
 }
 
-// TestAuthMiddlewareLogsMCPAuditEventForAnMCPToolCall pins AuditEventTypeMCP:
-// an MCP tool call authenticates with the same bearer token as any other
-// caller, so PlatformClient.WithMCPTool's header (platformclient.MCPToolAuditHeader)
-// is the only thing that tells this request apart from a plain API call.
+// The MCP tool header is the only thing distinguishing this from a plain API call.
 func TestAuthMiddlewareLogsMCPAuditEventForAnMCPToolCall(t *testing.T) {
 	var event AuditEvent
 	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{
@@ -104,8 +101,6 @@ func TestAuthMiddlewareLogsMCPAuditEventForAnMCPToolCall(t *testing.T) {
 	if event.MCPTool != "review_show" {
 		t.Fatalf("mcpTool = %q, want %q", event.MCPTool, "review_show")
 	}
-	// The same fields a plain API call would carry must still be populated --
-	// this only changes classification, not the rest of the record.
 	if event.TenantID != "019a7fa5-c2c0-7c55-bc70-714873a71f10" {
 		t.Fatalf("unexpected tenant id: %q", event.TenantID)
 	}

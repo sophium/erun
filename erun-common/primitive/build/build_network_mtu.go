@@ -14,17 +14,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// dockerBuildNetworkStallMarkers are the tells that a build step died reaching
-// the network rather than on its own merits. They are deliberately about the
-// *transport* giving up -- a connection reset, a receive that never completed,
-// a handshake that timed out -- and not about a server's answer: a 404 from a
-// pinned download URL is a real defect in the build, and must never be
-// attributed to the pod's network.
-//
-// The signature of the mismatch this file diagnoses is peculiar and worth
-// naming: the TCP connection establishes, small packets flow, and the transfer
-// then stops dead at the first full-size one. What a tool reports for that is
-// either a stall it eventually gives up on or a reset, so both appear here.
+// dockerBuildNetworkStallMarkers are transport failures only, never a server's answer: a
+// 404 is a real build defect.
 var dockerBuildNetworkStallMarkers = []string{
 	"recv failure",
 	"connection reset by peer",
@@ -37,20 +28,10 @@ var dockerBuildNetworkStallMarkers = []string{
 	"temporary failure resolving",
 }
 
-// warnOnceAboutBridgeMTU keeps the warning to one line per process. A build
-// resolves many images and would otherwise repeat it for each.
 var warnOnceAboutBridgeMTU sync.Once
 
-// warnAboutBridgeMTUMismatch says up front that this environment's daemon is
-// bridging wider than its pod network can carry, so the operator learns it in
-// the first seconds rather than from a download that stalls many minutes in.
-//
-// A warning rather than a refusal, deliberately: the mismatch makes failure
-// likely, not certain -- a CNI that clamps MSS masks it, and a fully-cached
-// build never touches the network at all. Refusing here would fail builds that
-// would have succeeded, which for a merge queue build is the same disease as
-// the bug it is warning about. The refusal-grade certainty only exists once a
-// step has actually stalled, which is where dockerBuildNetworkDiagnosis speaks.
+// warnAboutBridgeMTUMismatch warns rather than refuses: a CNI clamping MSS or a cached
+// build can still succeed.
 func warnAboutBridgeMTUMismatch(stderr io.Writer) {
 	if stderr == nil {
 		return
@@ -64,14 +45,8 @@ func warnAboutBridgeMTUMismatch(stderr io.Writer) {
 	})
 }
 
-// dockerBuildNetworkDiagnosis explains a failed build step whose output shows
-// the network gave up, when this pod's docker daemon is bridging containers at
-// an MTU its own pod network cannot carry. Both halves are required: the
-// mismatch alone does not prove breakage (some CNIs clamp MSS and paper over
-// it), and a network stall alone has plenty of other causes. Only when a real
-// stall coincides with a real, measured mismatch does this claim a cause --
-// per root AGENTS.md, a confident remedy for a cause that was not checked is
-// worse than none.
+// dockerBuildNetworkDiagnosis claims an MTU cause only when a network stall coincides with
+// a measured bridge/pod MTU mismatch.
 func dockerBuildNetworkDiagnosis(output string) (string, bool) {
 	if !dockerBuildOutputShowsNetworkStall(output) {
 		return "", false
@@ -93,8 +68,6 @@ func dockerBuildOutputShowsNetworkStall(output string) bool {
 	return false
 }
 
-// bridgeMTUMismatch is a measured pair, never an assumed one: both numbers were
-// read back, and BridgeMTU exceeds PodMTU.
 type bridgeMTUMismatch struct {
 	BridgeMTU int
 	PodMTU    int
@@ -112,9 +85,6 @@ func (m bridgeMTUMismatch) diagnosis() string {
 	)
 }
 
-// deployRemedyTarget names this environment in the remedy when the pod knows
-// what it is, so the suggested command is runnable rather than a template the
-// reader has to fill in.
 func deployRemedyTarget() string {
 	tenant := strings.TrimSpace(os.Getenv("ERUN_TENANT"))
 	environment := strings.TrimSpace(os.Getenv("ERUN_ENVIRONMENT"))
@@ -124,16 +94,8 @@ func deployRemedyTarget() string {
 	return tenant + " " + environment
 }
 
-// dockerBridgeMTUMismatch compares the MTU the local docker daemon bridges
-// containers at against the MTU of the interface this process egresses
-// through. ok is false unless both were read and the bridge is genuinely the
-// larger -- an unreadable value, or a daemon whose bridge already fits, is not
-// a mismatch.
-//
-// Only meaningful in-pod, which is the only place the two share a network
-// namespace: off-pod the daemon may live in a VM (Docker Desktop) whose
-// interfaces have nothing to do with this process's, so the comparison would be
-// between unrelated numbers. Gated accordingly.
+// dockerBridgeMTUMismatch is meaningful only in-pod: off-pod the daemon may be in a VM
+// with unrelated interfaces.
 func dockerBridgeMTUMismatch() (bridgeMTUMismatch, bool) {
 	return dockerBridgeMTUMismatchWith(os.Getenv, dockerDefaultBridgeMTU, localEgressMTU)
 }
@@ -157,10 +119,7 @@ func dockerBridgeMTUMismatchWith(
 	return bridgeMTUMismatch{BridgeMTU: bridge, PodMTU: pod, Interface: iface}, true
 }
 
-// dockerDefaultBridgeMTU reports the MTU the daemon hands containers on its
-// default bridge -- the network BuildKit's own steps run on. Read back from the
-// daemon rather than assumed to be docker's 1500 default, so a daemon already
-// started with --mtu is correctly seen as fine.
+// dockerDefaultBridgeMTU is read from the daemon, not assumed to be 1500.
 func dockerDefaultBridgeMTU() (int, bool) {
 	cmd := core.Command("docker", "network", "inspect", "bridge", "--format", `{{index .Options "com.docker.network.driver.mtu"}}`)
 	out := new(bytes.Buffer)
@@ -172,10 +131,7 @@ func dockerDefaultBridgeMTU() (int, bool) {
 	return parsePositiveMTU(strings.TrimSpace(out.String()))
 }
 
-// localEgressMTU reports the MTU of the interface carrying this process's
-// default route, and its name. Reads procfs/sysfs directly so it needs no
-// iproute2 and no privileges, matching what `erun dind-entrypoint` does
-// from the other side of the same namespace.
+// localEgressMTU reads procfs/sysfs, needing no iproute2 or privileges.
 func localEgressMTU() (int, string, bool) {
 	return EgressMTUUnder(procRootForMTU(), sysRootForMTU())
 }
@@ -210,9 +166,6 @@ func EgressMTUUnder(procRoot, sysRoot string) (int, string, bool) {
 	return mtu, iface, true
 }
 
-// defaultRouteInterface picks the interface whose route has an all-zero
-// destination and mask, which is what a default route looks like in
-// /proc/net/route.
 func defaultRouteInterface(routeTable string) (string, bool) {
 	file, err := os.Open(routeTable)
 	if err != nil {
@@ -233,8 +186,7 @@ func defaultRouteInterface(routeTable string) (string, bool) {
 	return "", false
 }
 
-// parsePositiveMTU rejects anything below the IPv6 minimum: a smaller number is
-// a misread rather than a link this code should reason about.
+// parsePositiveMTU rejects values below the IPv6 minimum as misreads.
 func parsePositiveMTU(raw string) (int, bool) {
 	mtu, err := strconv.Atoi(raw)
 	if err != nil || mtu < 1280 {

@@ -6,11 +6,7 @@ import (
 	"strings"
 )
 
-// StderrFromExitError trims the stderr exec.Cmd.Output() captures onto a
-// failed *exec.ExitError, so a caller that wrapped only "%w" (which renders
-// as the content-free "exit status N") can include the process's own
-// diagnostic instead. Returns "" for a non-ExitError (e.g. context
-// cancellation) or an ExitError with nothing on stderr.
+// StderrFromExitError returns the trimmed stderr of an *exec.ExitError, or "".
 func StderrFromExitError(err error) string {
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {

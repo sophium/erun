@@ -6,10 +6,7 @@ import (
 	"testing"
 )
 
-// writeDoctorHelmStub points ERUN_HELM_BIN at a script that prints stdout and
-// stderr and exits with the given code, so a test can drive RunDeployDiagnosis
-// against the real, distinct shapes a live `helm status` invocation returns
-// (plain text, not the `-o json` shape observe reads) without a live cluster.
+// writeDoctorHelmStub points ERUN_HELM_BIN at a script with the given output and exit code.
 func writeDoctorHelmStub(t *testing.T, stdout, stderr string, exitCode int) {
 	t.Helper()
 	dir := t.TempDir()

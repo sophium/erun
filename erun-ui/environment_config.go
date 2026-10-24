@@ -75,10 +75,7 @@ func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironme
 	return updated, nil
 }
 
-// SetEnvironmentAutoStart persists the desktop's per-env auto-start preference:
-// "ask" prompts again on next open, "always" starts the linked cloud context
-// without prompting, "never" shows the "Start environment" empty state. Only
-// the desktop honors it; CLI users always run the preflight start.
+// SetEnvironmentAutoStart persists the desktop-only auto-start preference.
 func (a *App) SetEnvironmentAutoStart(selection uiSelection, mode string) (uiEnvironmentConfig, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("set environment auto-start", selection.Tenant, selection.Environment); err != nil {
@@ -103,8 +100,7 @@ func (a *App) SetEnvironmentAutoStart(selection uiSelection, mode string) (uiEnv
 	return a.environmentConfigToUI(selection.Tenant, existing, selection.Environment, ports)
 }
 
-// parseAutoStartMode maps a mode to its stored preference; "ask" is the unset
-// (nil) one.
+// parseAutoStartMode maps "ask" to nil.
 func parseAutoStartMode(mode string) (*bool, error) {
 	var value *bool
 	switch strings.TrimSpace(mode) {
@@ -155,9 +151,7 @@ func resolveWorkspaceSyncDialogDefaultDirectory(findProjectRoot shared.ProjectFi
 	return strings.TrimSpace(projectRoot)
 }
 
-// ChooseLocalRepoPath opens a native directory picker for the env-init dialog's
-// local repo path. A local-agent env mounts this path into the agent pod as its
-// worktree, so it must be a real directory on this machine.
+// ChooseLocalRepoPath opens a native directory picker for the local repo path.
 func (a *App) ChooseLocalRepoPath(current string) (string, error) {
 	if a.ctx == nil {
 		return "", fmt.Errorf("application context is not ready")
@@ -179,11 +173,7 @@ func (a *App) ChooseLocalRepoPath(current string) (string, error) {
 
 func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing configpkg.EnvConfig) (configpkg.EnvConfig, error) {
 	updated := environmentConfigFromUI(config, existing)
-	// The repository path is the one field the desktop runs on the same machine
-	// as, so it is refused here — with the reason env-init gives for the same
-	// value — rather than written and left to surface at the next deploy as a
-	// failure of the mount. Both callers share ValidateEnvRepoPath, so the
-	// dialog accepts exactly the paths init accepts.
+	// Shares ValidateEnvRepoPath with init so both accept exactly the same paths.
 	if err := configpkg.ValidateEnvRepoPath(updated.ResolvedType(), updated.LocalRepoPath); err != nil {
 		return configpkg.EnvConfig{}, err
 	}
@@ -332,8 +322,7 @@ func canConnectLocalTCP(port int) bool {
 func environmentConfigFromUI(config uiEnvironmentConfig, existing configpkg.EnvConfig) configpkg.EnvConfig {
 	existing.Name = strings.TrimSpace(config.Name)
 	applyEnvironmentCloudAliasSlots(&existing, config)
-	// ContainerRegistries are intentionally not set here; SaveEnvironmentConfig
-	// routes the marked list to the right store by env type.
+	// ContainerRegistries are routed by env type in SaveEnvironmentConfig.
 	existing.RuntimePod = runtimePodConfigFromUI(config.RuntimePod)
 	existing.SSHD.WorkspaceSync.Enabled = config.SSHD.WorkspaceSyncEnabled
 	existing.SSHD.WorkspaceSync.LocalPath = strings.TrimSpace(config.SSHD.WorkspaceSyncLocalPath)
@@ -353,21 +342,14 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing configpkg.EnvC
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
 	existing.AutoUpgrade = config.AutoUpgrade
 	existing.DisableBuildScript = config.DisableBuildScript
-	// The chart the env rides is the operator's standing statement of one of the
-	// four deploy coordinates; a redeploy installs it, so saving it is enough --
-	// nothing derives it.
 	existing.RuntimeChart = strings.TrimSpace(config.RuntimeChart)
-	// Both are pull-time coordinates the operator states once: the registry
-	// erun's own chart comes from, and the secrets the pod pulls its image
-	// with. An empty list clears the secrets rather than keeping a stale one.
+	// An empty list clears the pull secrets rather than keeping a stale one.
 	existing.RuntimeRegistry = strings.TrimSpace(config.RuntimeRegistry)
 	existing.ImagePullSecrets = trimmedNonEmpty(config.ImagePullSecrets)
 	existing.PlatformAccount = config.PlatformAccount
 	existing.MountSource = config.MountSource
 	existing.RepoURL = strings.TrimSpace(config.RepoURL)
-	// Preserve the sibling deploy.timeout; only the saved component selection is
-	// edited here. An empty slice clears the saved default (omitempty), reverting
-	// the env to the repo plan / runtime-only default.
+	// Preserve the sibling deploy.timeout; an empty slice clears the saved default.
 	existing.Deploy.Components = trimmedComponentNames(config.DeployComponents)
 	if configpkg.IsValidUpgradeChannel(config.UpgradeChannel) {
 		existing.UpgradeChannel = config.UpgradeChannel
@@ -379,8 +361,6 @@ func trimmedComponentNames(names []string) []string {
 	return trimmedNonEmpty(names)
 }
 
-// trimmedNonEmpty drops blanks so an omitempty field clears rather than
-// persisting a list of empty strings the operator never entered.
 func trimmedNonEmpty(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, raw := range values {

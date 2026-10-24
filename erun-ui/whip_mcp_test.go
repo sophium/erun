@@ -8,10 +8,6 @@ import (
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
-// TestDecodeWhipMCPResultNilStructuredContentIsAnError is the red-then-green
-// contract for the bug this file exists to close: json.Unmarshal("null", &v)
-// is a documented no-op, so a nil StructuredContent must never be allowed to
-// decode straight into an indistinguishable-from-real zero WhipResult.
 func TestDecodeWhipMCPResultNilStructuredContentIsAnError(t *testing.T) {
 	result, err := decodeWhipMCPResult(&mcp.CallToolResult{StructuredContent: nil})
 	if err == nil {
@@ -22,9 +18,6 @@ func TestDecodeWhipMCPResultNilStructuredContentIsAnError(t *testing.T) {
 	}
 }
 
-// TestDecodeWhipMCPResultEmptyStructuredContentIsAnError covers the sibling
-// case the issue calls out explicitly: {} decodes to a zero struct with no
-// unmarshal error just as readily as null does.
 func TestDecodeWhipMCPResultEmptyStructuredContentIsAnError(t *testing.T) {
 	_, err := decodeWhipMCPResult(&mcp.CallToolResult{StructuredContent: map[string]any{}})
 	if err == nil {
@@ -32,12 +25,6 @@ func TestDecodeWhipMCPResultEmptyStructuredContentIsAnError(t *testing.T) {
 	}
 }
 
-// TestDecodeWhipMCPResultIsErrorSurfacesToolMessage covers the sibling this
-// decode path was missing entirely: a tool-reported failure comes back as a
-// populated CallToolResult with IsError set and no StructuredContent, not as
-// a JSON-RPC error, so session.CallTool's own err is nil. Without an explicit
-// IsError check this fell into the same nil-StructuredContent trap and
-// silently reported success.
 func TestDecodeWhipMCPResultIsErrorSurfacesToolMessage(t *testing.T) {
 	_, err := decodeWhipMCPResult(&mcp.CallToolResult{
 		IsError: true,
@@ -51,10 +38,6 @@ func TestDecodeWhipMCPResultIsErrorSurfacesToolMessage(t *testing.T) {
 	}
 }
 
-// TestDecodeWhipMCPResultRejectsAnEmptyCandidateID covers a decoded result
-// that unmarshalled cleanly but still names no target -- the identity a
-// report row is judged by must never depend on what the pod chose to echo
-// back.
 func TestDecodeWhipMCPResultRejectsAnEmptyCandidateID(t *testing.T) {
 	_, err := decodeWhipMCPResult(&mcp.CallToolResult{
 		StructuredContent: map[string]any{"decision": 1, "pushed": true},
@@ -64,8 +47,6 @@ func TestDecodeWhipMCPResultRejectsAnEmptyCandidateID(t *testing.T) {
 	}
 }
 
-// TestDecodeWhipMCPResultPassesThroughARealResult is the green counterpart:
-// a genuine decision with a stamped identity decodes and returns untouched.
 func TestDecodeWhipMCPResultPassesThroughARealResult(t *testing.T) {
 	result, err := decodeWhipMCPResult(&mcp.CallToolResult{
 		StructuredContent: map[string]any{

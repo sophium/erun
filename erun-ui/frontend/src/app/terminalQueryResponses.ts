@@ -23,19 +23,9 @@ export function registerTerminalQueryResponseHandlers(
     return true;
   };
 
-  // No-op handlers swallow xterm's built-in color/device-attribute/status
-  // query replies. Replies route back through the PTY asynchronously, so
-  // once the asking process (claude, codex, ssh, …) has exited — or a query
-  // reaches xterm on reattach at a bare bash prompt — the reply lands on the
-  // shell's stdin and bash runs it as a command. Querying tools instead time
-  // out to the same xterm defaults a hardcoded reply would have given.
-  //
-  // Cursor-position reports (DSR) stay answered: tools genuinely need the
-  // cursor location and there is no sane default to time out to.
-  //
-  // Answer only live parses. Re-rendering a tab re-parses every query a tool
-  // ever emitted, but the asking tool is long gone, so a replayed reply
-  // becomes typed junk at the prompt; isReplayParse gates those out.
+  // Query replies route back through the PTY asynchronously, so after the asking
+  // tool exits they land on bash's stdin as commands. Swallow them; tools time
+  // out to xterm's defaults. DSR stays answered, live parses only.
   const suppressQuery = (): boolean => true;
 
   return [

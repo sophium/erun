@@ -1,5 +1,4 @@
-// Pure logic behind OperateToolForm.tsx, split out so that file only exports
-// the component (react-refresh/only-export-components).
+// Split from OperateToolForm.tsx for react-refresh/only-export-components.
 
 export const OPERATE_TOOL_OPTIONS = [
   { value: 'deploy', label: 'Deploy — install a published version' },
@@ -21,11 +20,7 @@ export interface OperateArgsInput {
   preview: boolean;
 }
 
-// buildOperateArgs assembles exactly the input each tool's own schema
-// declares (erun-mcp/tools/deploy/deploy.go's DeployInput, context.go's
-// ContextActionInput/ContextStartInput, resize.go's ResizeInput) -- an
-// unrelated field (e.g. `force` for context_stop, which stopCloudContext
-// never reads) is left off rather than sent and ignored.
+// Sends only the fields each tool's input schema declares.
 export function buildOperateArgs(input: OperateArgsInput): Record<string, unknown> {
   const base: Record<string, unknown> = { preview: input.preview };
   switch (input.tool) {
@@ -49,11 +44,7 @@ export function buildOperateArgs(input: OperateArgsInput): Record<string, unknow
   }
 }
 
-// operateFormValid mirrors each tool's own required input: deploy refuses an
-// empty version server-side (errMissingDeployVersion), and both context
-// tools require a name. resize has no required field -- every input is
-// optional (an empty call with applyRecommendation false is a no-op preview,
-// not a refusal).
+// resize has no required field: an empty call is a no-op preview.
 export function operateFormValid(input: {
   tool: string;
   version: string;

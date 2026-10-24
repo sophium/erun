@@ -62,31 +62,19 @@ type CommandOutput struct {
 	Stdout           string                  `json:"stdout,omitempty"`
 	Stderr           string                  `json:"stderr,omitempty"`
 	RootConfig       *DoctorRootConfigReport `json:"rootConfig,omitempty"`
-	// Build lets an Agent capture the minted version and thread it into `push`
-	// / `deploy`, since MCP composes the pure primitives itself.
+	// Build lets an agent thread the minted version into push/deploy.
 	Build *core.BuildResult `json:"build,omitempty"`
-	// Pin carries the resolved re-pin plan so a caller sees every reference that
-	// moved without diffing the tree afterwards.
-	Pin *PinOutput `json:"pin,omitempty"`
-	// Write carries what a `write` call actually wrote.
-	Write *gitx.WriteWorkingTreeFileResult `json:"write,omitempty"`
-	// Commit carries what a `commit` call actually committed.
-	Commit *gitx.CommitWorkingTreeResult `json:"commit,omitempty"`
-	// Push carries what a `push` call actually pushed.
-	Push *gitx.PushWorkingTreeBranchResult `json:"push,omitempty"`
-	// Merge carries what an `exec_merge` call actually merged.
-	Merge *mergequeue.MergeWorkingTreeBranchResult `json:"merge,omitempty"`
-	// GateMerge carries what an `exec_gate-merge` call actually squash-merged.
-	GateMerge *mergequeue.GateMergeWorkingTreeResult `json:"gateMerge,omitempty"`
-	// ReportCommitStatus carries what an `exec_report-commit-status` call
-	// actually reported.
-	ReportCommitStatus *review.ReportCommitStatusResult `json:"reportCommitStatus,omitempty"`
-	// ClosePullRequest carries what an `exec_close-pr` call actually did.
-	ClosePullRequest *review.ClosePullRequestResult `json:"closePullRequest,omitempty"`
-	// Spec carries the resolved release plan `release` publishes.
-	Spec *shared.ReleaseSpec `json:"spec,omitempty"`
-	// Interaction carries a structured question `init` needs answered in a
-	// follow-up call, when it cannot resolve one from the input given.
+	// Pin is the resolved re-pin plan.
+	Pin                *PinOutput                               `json:"pin,omitempty"`
+	Write              *gitx.WriteWorkingTreeFileResult         `json:"write,omitempty"`
+	Commit             *gitx.CommitWorkingTreeResult            `json:"commit,omitempty"`
+	Push               *gitx.PushWorkingTreeBranchResult        `json:"push,omitempty"`
+	Merge              *mergequeue.MergeWorkingTreeBranchResult `json:"merge,omitempty"`
+	GateMerge          *mergequeue.GateMergeWorkingTreeResult   `json:"gateMerge,omitempty"`
+	ReportCommitStatus *review.ReportCommitStatusResult         `json:"reportCommitStatus,omitempty"`
+	ClosePullRequest   *review.ClosePullRequestResult           `json:"closePullRequest,omitempty"`
+	Spec               *shared.ReleaseSpec                      `json:"spec,omitempty"`
+	// Interaction is a question init needs answered in a follow-up call.
 	Interaction *setup.BootstrapInitInteraction `json:"interaction,omitempty"`
 }
 
@@ -106,11 +94,8 @@ func captureCommandOutput(log io.Writer, work func(stdout, stderr io.Writer) err
 	return stdout.String(), stderr.String(), err
 }
 
-// MirrorToJobLog sends what the work writes to both the buffer this call
-// returns inline and, for a backgrounded call, the job's own log as it is
-// produced. A caller polling exec_job_output would otherwise see nothing until
-// the work finished, and a failed background job would leave nothing but an
-// exit code behind. A synchronous call passes io.Discard and pays a no-op.
+// MirrorToJobLog tees output to the inline buffer and the background job's log,
+// so polls show progress and failures leave a log.
 func MirrorToJobLog(capture, log io.Writer) io.Writer {
 	if log == nil || log == io.Discard {
 		return capture
@@ -160,20 +145,15 @@ func RunCommandOutput(ctx core.Context, workDir string, traceOutput *bytes.Buffe
 	}, nil
 }
 
-// RunRuntimeCommand runs one tool's work and captures it. log is the
-// background job's own log for a call started through runJobEnvelope with wait
-// false, and nil (or io.Discard) for a synchronous call that returns
-// everything inline; the trace and the work's own stdout/stderr are mirrored
-// into it as they are produced.
+// RunRuntimeCommand runs one tool's work and captures it; log is the background
+// job's log, or nil for a synchronous call.
 func RunRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, log io.Writer, run func(core.Context, string) error) (CommandOutput, error) {
 	traceOutput := new(bytes.Buffer)
 	traceSink := MirrorToJobLog(traceOutput, log)
 	ctx := RuntimeCallContext(preview, verbosity, nil, traceSink, traceSink)
 	ctx.KubernetesContextPreflight = cloud.CloudContextPreflight(runtime.Store, cloud.CloudContextDependencies{})
-	// Surfaces agent-driven operations in the desktop's Diagnostics console,
-	// matching the CLI's trace contract. Read-only tools (idle, raw, list,
-	// version) deliberately bypass runRuntimeCommand so probe polls cannot
-	// flood the trace log.
+	// The env trace feeds the desktop's Diagnostics console; read-only tools bypass
+	// RunRuntimeCommand so probe polls don't flood it.
 	ctx, closeEnvTrace := e2e.ActivateEnvTrace(ctx, runtime.Context.Tenant, runtime.Context.Environment)
 	defer closeEnvTrace()
 
@@ -196,13 +176,8 @@ func RuntimeFindProjectRoot(runtime RuntimeContext, workDir string) (string, str
 	return config.FindProjectRootFromDir(workDir)
 }
 
-// ResolveLocalTarget resolves the tenant/environment a tool acts on, and refuses
-// a target this server cannot reach. An MCP server serves exactly one
-// environment: its tools run in this pod, against this pod's repo and this pod's
-// erun binary, so an explicit tenant/environment naming a DIFFERENT environment
-// can never be honoured. Accepting one and acting locally anyway is worse than
-// refusing it, because the result then asserts a target the work never reached
-// and the caller is left holding written evidence that it worked.
+// ResolveLocalTarget resolves the tool's tenant/environment and refuses any other
+// environment: this server can only act on its own pod.
 func ResolveLocalTarget(runtime RuntimeConfig, tenant, environment string) (string, string, error) {
 	resolvedTenant, resolvedEnvironment, err := matchOrDefaultLocalTarget(
 		strings.TrimSpace(runtime.Context.Tenant), strings.TrimSpace(runtime.Context.Environment),
@@ -217,16 +192,8 @@ func ResolveLocalTarget(runtime RuntimeConfig, tenant, environment string) (stri
 	return resolvedTenant, resolvedEnvironment, nil
 }
 
-// matchOrDefaultLocalTarget is the refusal check shared by resolveLocalTarget
-// and scopedTenantEnv: a caller-supplied tenant/environment that names a
-// different environment than this server's own is refused, naming both the
-// server's own scope and the requested one, and pointing at the remedy --
-// call that environment's own MCP edge -- rather than silently substituting
-// the local environment for the requested one. A field left empty by the
-// caller defaults to the server's own identity rather than being required;
-// resolveLocalTarget layers the "both must resolve" requirement on top of
-// that, scopedTenantEnv does not, since some of its callers have no
-// tenant/environment work to do at all.
+// matchOrDefaultLocalTarget refuses a different requested environment, naming both
+// and the remedy; an empty field defaults to the server's own.
 func matchOrDefaultLocalTarget(serverTenant, serverEnvironment, requestedTenant, requestedEnvironment string) (tenant, environment string, err error) {
 	requestedTenant = strings.TrimSpace(requestedTenant)
 	requestedEnvironment = strings.TrimSpace(requestedEnvironment)
@@ -242,10 +209,7 @@ func matchOrDefaultLocalTarget(serverTenant, serverEnvironment, requestedTenant,
 	return FirstNonEmpty(requestedTenant, serverTenant), FirstNonEmpty(requestedEnvironment, serverEnvironment), nil
 }
 
-// ErrMissingLocalTarget names exactly what is missing (tenant, environment,
-// or both) and what the caller can do about it, instead of the bare "tenant
-// and environment are required" dead end this replaced: that message named
-// no operation, no subject, and no recovery.
+// ErrMissingLocalTarget names what is missing and how to recover.
 func ErrMissingLocalTarget(missingTenant, missingEnvironment bool) error {
 	var missing []string
 	if missingTenant {

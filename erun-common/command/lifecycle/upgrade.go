@@ -14,9 +14,7 @@ import (
 	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// UpgradeVersionsOverrideEnv is a test-only seam that forces the upgrade
-// versions resolver's channel targets so tests resolve deterministically
-// without a registry. Not a production knob.
+// UpgradeVersionsOverrideEnv is a test-only seam forcing the resolver's channel targets.
 const UpgradeVersionsOverrideEnv = "ERUN_UPGRADE_VERSIONS_OVERRIDE"
 
 func runtimeVersionsOverrideFromEnvWithError() (registrypkg.RuntimeRegistryVersions, string, bool) {
@@ -43,29 +41,20 @@ func runtimeVersionsOverrideFromEnvWithError() (registrypkg.RuntimeRegistryVersi
 	return versions, forcedError, true
 }
 
-// RegistryVersionsLookup queries one image repository for its latest channel
-// versions.
+// RegistryVersionsLookup queries one image repository for its latest channel versions.
 type RegistryVersionsLookup func(ctx context.Context, namespace, repository string) (registrypkg.RuntimeRegistryVersions, error)
 
-// SourcedRuntimeVersions pairs a registry with the runtime versions it offers
-// for an environment's runtime image.
+// SourcedRuntimeVersions pairs a registry with the runtime versions it offers.
 type SourcedRuntimeVersions struct {
 	Registry string
 	Versions registrypkg.RuntimeRegistryVersions
 }
 
-// EnvVersionsResolver resolves the candidate runtime versions for one
-// environment — one entry per registry queried, each tagged with its source
-// registry.
+// EnvVersionsResolver resolves one environment's candidate versions, one entry per registry.
 type EnvVersionsResolver func(ctx core.Context, tenant string, env config.EnvConfig) ([]SourcedRuntimeVersions, error)
 
-// UpgradeVersionsResolverForStore builds the shared Upgrade-all resolver. It
-// always queries the canonical ERun image alongside the env's own registries
-// because tenant images are thin wrappers rebuilt FROM the canonical image, so
-// its channel-latest is part of the env's real target universe and a
-// private/nonexistent tenant repo (ghcr 403s both alike) never blocks the
-// upgrade. Each result is tagged with its source registry so the caller can
-// offer a pick when registries disagree on the newest version.
+// UpgradeVersionsResolverForStore builds the Upgrade-all resolver. It always queries the canonical
+// image too: tenant images are rebuilt FROM it, and ghcr 403s private and missing repos alike.
 func UpgradeVersionsResolverForStore(_ deploypkg.DeployStore, lookup RegistryVersionsLookup) EnvVersionsResolver {
 	return func(_ core.Context, tenant string, env config.EnvConfig) ([]SourcedRuntimeVersions, error) {
 		if versions, forcedError, ok := runtimeVersionsOverrideFromEnvWithError(); ok {
@@ -132,43 +121,25 @@ func upgradeDiscoveryRegistries(env config.EnvConfig) []string {
 	return registries
 }
 
-// UpgradeTarget scopes and parameterizes an upgrade run. An empty Tenant
-// covers every tenant; Environment narrows to one env (requires Tenant).
-// VersionOverride, when set, is the target for every opted-in env regardless
-// of channel, so `erun upgrade --version X` needs no registry lookup.
+// UpgradeTarget scopes an upgrade run; VersionOverride targets every env without a registry lookup.
 type UpgradeTarget struct {
 	Tenant          string
 	Environment     string
 	VersionOverride string
 	Force           bool
-	// GateEnvironment names the environment driving this tenant's
-	// merge-queue gate -- erun has no stored concept of which environment
-	// that is (see the backend API guide's Release cadence policy),
-	// so the caller states it, the same way `erun list --gate-environment`
-	// already does for drift detection. When set, that environment's item is
-	// always included regardless of its own Upgrade-all opt-in, and moved to
-	// the front of the plan so it rolls before any environment it gates --
-	// the cadence policy's "immediate, unconditional" gate redeploy is never
-	// left to arrive last. Requires Tenant, and the named environment must
-	// exist in it.
+	// GateEnvironment names the tenant's merge-queue gate, which erun does not store. It is always
+	// included and rolled first. Requires Tenant and must exist in it.
 	GateEnvironment string
-	// Fleet includes every non-host environment in Tenant's scope regardless
-	// of its own Upgrade-all opt-in -- an explicit whole-tenant roll (e.g.
-	// remediating version drift found by `erun list --tenant`) rather than
-	// the routine autoupgrade cadence. Requires Tenant.
+	// Fleet includes every non-host environment in Tenant regardless of opt-in. Requires Tenant.
 	Fleet bool
 }
 
-// ResolveUpgradePlanForStore resolves the "Upgrade all" plan and traces every
-// decision through ctx so `--dry-run` is a complete audit of which envs are
-// opted in, the channel each tracks, its current version, and the resolved
-// target (or why it is unresolved).
+// ResolveUpgradePlanForStore resolves the Upgrade-all plan, tracing every decision for --dry-run.
 func ResolveUpgradePlanForStore(ctx core.Context, store deploypkg.DeployStore, target UpgradeTarget, resolveVersions EnvVersionsResolver) (UpgradePlan, error) {
 	return buildUpgradePlan(store, target, resolveVersions, ctx.Trace)
 }
 
-// BuildUpgradePlan is the Context-free plan resolver for in-process callers
-// (the desktop) that have no CLI/MCP trace channel.
+// BuildUpgradePlan is the untraced plan resolver for in-process callers.
 func BuildUpgradePlan(store deploypkg.DeployStore, target UpgradeTarget, resolveVersions EnvVersionsResolver) (UpgradePlan, error) {
 	return buildUpgradePlan(store, target, resolveVersions, nil)
 }
@@ -200,8 +171,6 @@ func buildUpgradePlan(store deploypkg.DeployStore, target UpgradeTarget, resolve
 	return UpgradePlan{Items: items}, nil
 }
 
-// upgradeScope is UpgradeTarget's fields, trimmed and validated once so the
-// rest of plan resolution can trust them.
 type upgradeScope struct {
 	tenant          string
 	environment     string
@@ -227,10 +196,7 @@ func normalizeUpgradeScope(target UpgradeTarget) (upgradeScope, error) {
 	return scope, nil
 }
 
-// collectUpgradePlanItems walks every in-scope tenant's environments into
-// plan items, and reports whether scope.gateEnvironment (when named) was
-// actually found among them -- a typo must fail the whole plan, not resolve
-// silently with no gate verdict.
+// A gate environment that is not found must fail the plan.
 func collectUpgradePlanItems(store deploypkg.DeployStore, tenants []config.TenantConfig, scope upgradeScope, resolveVersions EnvVersionsResolver, traceln func(string)) ([]UpgradePlanItem, bool, error) {
 	items := make([]UpgradePlanItem, 0)
 	gateFound := scope.gateEnvironment == ""
@@ -269,9 +235,7 @@ func appendTenantUpgradeItems(items []UpgradePlanItem, tenant string, envs []con
 			traceln(fmt.Sprintf("upgrade: %s/%s not opted in (autoupgrade=false), skipping", tenant, env.Name))
 			continue
 		}
-		// Checked against ResolvedType rather than the broader !HasPod() so a
-		// legacy env with an unresolved type (ResolvedType == "") keeps
-		// upgrading exactly as it did before host existed.
+		// ResolvedType, not !HasPod(), so a legacy env with an empty type keeps upgrading.
 		if env.ResolvedType() == config.EnvironmentTypeHost {
 			traceln(fmt.Sprintf("upgrade: %s/%s is a host environment (no runtime pod to upgrade), skipping", tenant, env.Name))
 			continue
@@ -284,10 +248,7 @@ func appendTenantUpgradeItems(items []UpgradePlanItem, tenant string, envs []con
 	return items
 }
 
-// upgradeInclusionTrace names why an environment made the plan. The ordinary
-// "opted in" wording is unchanged from before --fleet/--gate-environment
-// existed; a fleet or gate-forced inclusion (env.AutoUpgrade false) gets its
-// own wording so it never reads as an opt-in it never had.
+// Fleet and gate-forced inclusions get their own wording so they never read as an opt-in.
 func upgradeInclusionTrace(tenant string, env config.EnvConfig, fleet, isGate bool) string {
 	channel, current := env.ResolvedUpgradeChannel(), strings.TrimSpace(env.RuntimeVersion)
 	switch {
@@ -300,11 +261,7 @@ func upgradeInclusionTrace(tenant string, env config.EnvConfig, fleet, isGate bo
 	}
 }
 
-// prioritizeGateUpgradeItem moves the gate environment's item to the front of
-// items when present, so RunUpgradePlan's sequential deploy loop rolls the
-// merge-queue gate before any environment it gates -- the release-cadence
-// policy's gate-first redeploy (see the backend API guide's Release cadence policy),
-// never left to per-environment discretion or to wherever it happened to sort.
+// prioritizeGateUpgradeItem moves the gate first so it rolls before what it gates.
 func prioritizeGateUpgradeItem(items []UpgradePlanItem, tenant, gateEnvironment string) []UpgradePlanItem {
 	for i, item := range items {
 		if item.Tenant != tenant || item.Environment != gateEnvironment {
@@ -357,8 +314,7 @@ func resolveEnvUpgradeItem(tenant string, env config.EnvConfig, override string,
 			item.UnresolvedReason = fmt.Sprintf("no %s version found in the listed registries", channel)
 			traceln(fmt.Sprintf("upgrade: %s/%s target unresolved: %s", tenant, env.Name, item.UnresolvedReason))
 		} else {
-			// Record current as the (already-met) target so the run reports
-			// up to date rather than unresolved.
+			// Record current as the met target so the run reports up to date, not unresolved.
 			item.Target = current
 			traceln(fmt.Sprintf("upgrade: %s/%s up to date at %s", tenant, env.Name, displayVersion(current)))
 		}
@@ -373,10 +329,7 @@ func resolveEnvUpgradeItem(tenant string, env config.EnvConfig, override string,
 	return item
 }
 
-// collectUpgradeCandidates returns the distinct newer candidates for the
-// channel. anyResolved is true when at least one registry produced a channel
-// target (even one equal to current), letting the caller tell "up to date"
-// from "nothing resolved".
+// anyResolved separates "up to date" from "nothing resolved".
 func collectUpgradeCandidates(sourced []SourcedRuntimeVersions, channel, current string) ([]UpgradeVersionCandidate, bool) {
 	candidates := make([]UpgradeVersionCandidate, 0, len(sourced))
 	seen := make(map[string]struct{}, len(sourced))
@@ -417,12 +370,7 @@ func candidateSummary(candidates []UpgradeVersionCandidate) string {
 // UpgradeItemDeployer redeploys one lagging env to its target version.
 type UpgradeItemDeployer func(ctx core.Context, item UpgradePlanItem) error
 
-// UpgradeOccupancyError explains why a lagging member was refused instead of
-// deployed: the environment is currently held by another worker, and an
-// upgrade rolls the runtime pod exactly as `erun resize` does (Recreate
-// strategy), so deploying over that hold would yank the environment out from
-// under whoever holds it -- the same refusal runtime_resize.go's
-// RuntimeResizeOccupancyError already makes for a resize.
+// UpgradeOccupancyError refuses an upgrade of a held environment, since the roll recreates its pod.
 type UpgradeOccupancyError struct {
 	Tenant      string
 	Environment string
@@ -434,15 +382,8 @@ func (e *UpgradeOccupancyError) Error() string {
 		e.Tenant, e.Environment, activity.FormatLeaseHolders(e.Holders))
 }
 
-// LeaseGuardedUpgradeDeployer wraps deploy so a held environment refuses
-// rather than deploys -- an operator or orchestrator driving a fleet-wide
-// roll is working from a plan resolved minutes earlier and is far more likely
-// than a single-environment `erun deploy` to hit an environment nobody at the
-// keyboard remembers is mid-job. override bypasses the refusal and is traced
-// so it is never silent; holder is recorded on the exclusive lease taken for
-// the deploy's own duration, which also guards the roll itself against a
-// second, concurrent upgrade racing the same environment -- the same
-// exclusive-claim shape runtime_resize.go's RunRuntimeResize already uses.
+// LeaseGuardedUpgradeDeployer refuses held environments unless override (traced), and holds an
+// exclusive lease during the deploy so concurrent upgrades cannot race.
 func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, holder activity.EnvironmentActivityLeaseHolder, now func() time.Time) UpgradeItemDeployer {
 	if now == nil {
 		now = time.Now
@@ -459,11 +400,7 @@ func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, hold
 			}
 			ctx.Trace(fmt.Sprintf("upgrade: %s/%s overriding %d held lease(s): %s", item.Tenant, item.Environment, len(leases), activity.FormatLeaseHolders(leases)))
 		}
-		// A dry run must show this refusal (or override) exactly as a real run
-		// would, but must not itself claim the exclusive lease -- that would be
-		// a side effect dry-run's own contract forbids, matching
-		// runtime_resize.go's RunRuntimeResize returning before its own
-		// TakeEnvironmentActivityLease call under ctx.DryRun.
+		// Dry-run shows the refusal but must not take the lease.
 		if ctx.DryRun {
 			return deploy(ctx, item)
 		}
@@ -488,10 +425,7 @@ type UpgradeItemFailure struct {
 	Error string          `json:"error"`
 }
 
-// UpgradeResult summarizes an upgrade run. Unresolved members are skipped but
-// never counted as up to date — their latest simply couldn't be determined.
-// The run continues past a per-env failure so one bad env doesn't strand the
-// rest.
+// UpgradeResult summarizes an upgrade run; unresolved members are never counted as up to date.
 type UpgradeResult struct {
 	Plan       UpgradePlan          `json:"plan"`
 	Upgraded   []UpgradePlanItem    `json:"upgraded,omitempty"`
@@ -500,10 +434,7 @@ type UpgradeResult struct {
 	Failed     []UpgradeItemFailure `json:"failed,omitempty"`
 }
 
-// RunUpgradePlan deploys every lagging member and leaves up-to-date members
-// untouched. An unresolved target is reported as unresolved, not up to date:
-// its latest couldn't be determined (or an ambiguous env needs a pick). The
-// run continues past per-env failures and reports them.
+// RunUpgradePlan deploys every lagging member, continuing past per-env failures.
 func RunUpgradePlan(ctx core.Context, plan UpgradePlan, deploy UpgradeItemDeployer) UpgradeResult {
 	result := UpgradeResult{Plan: plan}
 	for _, item := range plan.Items {
@@ -529,9 +460,6 @@ func RunUpgradePlan(ctx core.Context, plan UpgradePlan, deploy UpgradeItemDeploy
 	return result
 }
 
-// upgradeItemAnnouncement reports one member's roll. Under --dry-run nothing
-// has deployed yet, so the wording stays conditional ("would upgrade") rather
-// than asserting a rollout that never happened.
 func upgradeItemAnnouncement(dryRun bool, item UpgradePlanItem) string {
 	verb := "Upgrading"
 	if dryRun {
@@ -540,9 +468,6 @@ func upgradeItemAnnouncement(dryRun bool, item UpgradePlanItem) string {
 	return fmt.Sprintf("==> %s %s/%s %s -> %s (%s)", verb, item.Tenant, item.Environment, displayVersion(item.Current), item.Target, item.Channel)
 }
 
-// upgradeCompletionSummary is the final tally. Under --dry-run it stays in the
-// conditional so the summary can never be mistaken for a real rollout's
-// "N upgraded" report.
 func upgradeCompletionSummary(dryRun bool, result UpgradeResult) string {
 	if dryRun {
 		return fmt.Sprintf("==> Dry run: would upgrade %d, %d up to date, %d unresolved, %d failed", len(result.Upgraded), len(result.UpToDate), len(result.Unresolved), len(result.Failed))
@@ -564,18 +489,14 @@ func displayVersion(v string) string {
 	return v
 }
 
-// UpgradeVersionCandidate is one newer runtime version discovered for an env,
-// tagged with the registry that offered it. When an env has more than one
-// distinct newer candidate, the caller picks one.
+// UpgradeVersionCandidate is one newer version for an env and the registry that offered it.
 type UpgradeVersionCandidate struct {
 	Version  string `json:"version"`
 	Registry string `json:"registry,omitempty"`
 }
 
-// UpgradePlanItem is one opted-in environment's upgrade decision. An empty
-// Target means the env is up to date, its latest could not be resolved, or it
-// has more than one newer candidate awaiting a pick — UnresolvedReason
-// distinguishes the last two.
+// UpgradePlanItem is one environment's upgrade decision; an empty Target is up to date,
+// unresolved, or awaiting a pick, per UnresolvedReason.
 type UpgradePlanItem struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
@@ -583,27 +504,19 @@ type UpgradePlanItem struct {
 	Current     string `json:"current"`
 	Target      string `json:"target"`
 	Lagging     bool   `json:"lagging"`
-	// Candidates holds the distinct newer versions found across the env's
-	// registries; more than one means the user must pick.
-	Candidates []UpgradeVersionCandidate `json:"candidates,omitempty"`
-	// UnresolvedReason says why Target is empty so the run reports the cause
-	// rather than a bare "(unset)".
-	UnresolvedReason string `json:"unresolvedReason,omitempty"`
+	// Candidates holds the distinct newer versions; more than one needs a pick.
+	Candidates       []UpgradeVersionCandidate `json:"candidates,omitempty"`
+	UnresolvedReason string                    `json:"unresolvedReason,omitempty"`
 	// IsGate marks the environment named by UpgradeTarget.GateEnvironment.
-	// prioritizeGateUpgradeItem uses it only implicitly (by tenant+name); it
-	// is carried on the item so a rendered plan can point out which member is
-	// the gate without the caller re-deriving it from the request.
 	IsGate bool `json:"isGate,omitempty"`
 }
 
-// UpgradePlan is the resolved "Upgrade all" plan: every opted-in environment,
-// each marked lagging or up to date.
+// UpgradePlan is the resolved Upgrade-all plan.
 type UpgradePlan struct {
 	Items []UpgradePlanItem `json:"items"`
 }
 
-// Lagging returns the plan items that will be redeployed — opted-in envs whose
-// current version differs from a resolvable channel target.
+// Lagging returns the items whose current version differs from a resolvable target.
 func (p UpgradePlan) Lagging() []UpgradePlanItem {
 	lagging := make([]UpgradePlanItem, 0, len(p.Items))
 	for _, item := range p.Items {
@@ -616,12 +529,7 @@ func (p UpgradePlan) Lagging() []UpgradePlanItem {
 
 func channelTarget(versions registrypkg.RuntimeRegistryVersions, channel string) string {
 	if strings.TrimSpace(channel) == config.UpgradeChannelSnapshot {
-		// An absent snapshot side is not "nothing newer exists" — it means the
-		// registry publishes no snapshots at all, and the stable release is then
-		// the only, and newest, candidate. Falling through to LatestSnapshot in
-		// that case resolves to "", which leaves a snapshot-channel env
-		// permanently unresolvable against a stable-only registry — the canonical
-		// one included, so every env pointed at it silently never upgraded.
+		// No snapshots published means the stable release is the newest candidate, not none.
 		if stable, snapshot, superseded := stableSupersedesSnapshot(versions); superseded || snapshot == "" {
 			return stable
 		}
@@ -630,14 +538,8 @@ func channelTarget(versions registrypkg.RuntimeRegistryVersions, channel string)
 	return strings.TrimSpace(versions.LatestStable)
 }
 
-// stableSupersedesSnapshot reports whether the latest stable release is the
-// newer artifact for the snapshot channel. A snapshot tag is a
-// pre-release of its base version — builds stamp <version>-snapshot-<utc-ts>
-// and the release flow bumps the version right after each stable release — so
-// a stable at or above the snapshot's base version was published on top of
-// that snapshot stream, while a snapshot whose base outranks the stable
-// belongs to the next, newer stream. Unparseable versions keep the snapshot
-// target.
+// A snapshot is a pre-release of its base version, so a stable at or above that base supersedes it.
+// Unparseable versions keep the snapshot.
 func stableSupersedesSnapshot(versions registrypkg.RuntimeRegistryVersions) (stable, snapshot string, superseded bool) {
 	stable = strings.TrimSpace(versions.LatestStable)
 	snapshot = strings.TrimSpace(versions.LatestSnapshot)

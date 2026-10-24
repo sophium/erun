@@ -30,12 +30,8 @@ func testReviewMergeQueueListDryRun(t *testing.T) {
 	golden.Equal(t, "review/merge_queue_list_dry_run", normalize.Apply(result.Combined))
 }
 
-// The reported failure, end to end: one tenant, two repositories, both
-// with a `main`. The queue used to be keyed on the target branch alone, so
-// each repository's `erun review queue list --target-branch main` printed
-// the other's waiting work as its own, and advancing promoted whichever
-// review happened to be queued first — into a gate that runs in the
-// checkout of a repository whose branch that review does not name.
+// Two repositories in one tenant both have `main`; each queue must list and advance only
+// its own reviews.
 func testReviewMergeQueueIsTheRepositorysOwn(t *testing.T) {
 	setup := env.New(t)
 	server := reviewAPIStubServer(t)
@@ -52,16 +48,11 @@ func testReviewMergeQueueIsTheRepositorysOwn(t *testing.T) {
 		}
 		return reviewID.ReviewID
 	}
-	// createReviewJSON always opens in reviewRepository; the second
-	// repository's review is opened directly so both branches — and the
-	// name — are spelled the same way in each.
 	ours := readied("Land the widget", reviewRepository, "feature/widget")
 	otherID := createReadiedOtherRepositoryReview(t, setup)
 
 	assertQueueListsOnlyItsRepository(t, setup, ours, otherID)
 
-	// Advancing names one repository's queue; the other's review stays
-	// where it is rather than being promoted by a queue it is not in.
 	promoted := erun.Run(t, []string{
 		"review", "queue", "advance", "--repository", otherRepository, "--target-branch", "main", "--output", "json",
 	}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -80,8 +71,6 @@ func testReviewMergeQueueIsTheRepositorysOwn(t *testing.T) {
 	}
 }
 
-// createReadiedOtherRepositoryReview opens the same name and branches in
-// otherRepository and records a successful build so it queues at READY.
 func createReadiedOtherRepositoryReview(t *testing.T, setup env.Setup) string {
 	t.Helper()
 	theirs := erun.Run(t, []string{
@@ -108,8 +97,6 @@ func createReadiedOtherRepositoryReview(t *testing.T, setup env.Setup) string {
 	return other.ReviewID
 }
 
-// assertQueueListsOnlyItsRepository requires each repository's queue list to
-// name its own review and leave the other repository's out.
 func assertQueueListsOnlyItsRepository(t *testing.T, setup env.Setup, ours, otherID string) {
 	t.Helper()
 	for _, tc := range []struct {
@@ -148,12 +135,7 @@ func testReviewMergeQueueAdvanceEmptyQueueRealRun(t *testing.T) {
 	}
 }
 
-// merge_queue_advance_names_the_occupying_review drives the reported
-// failure end to end: a review already at MERGE (its gate build still
-// running) while a second READY review is advanced. The refusal has to
-// reach the operator naming the review holding the slot — which is the one
-// they must finish or requeue — rather than as a not-found that sends them
-// looking for a missing endpoint.
+// Advancing into an occupied queue must name the occupying review, not report not-found.
 func testReviewMergeQueueAdvanceNamesTheOccupyingReview(t *testing.T) {
 	setup := env.New(t)
 	server := reviewAPIStubServer(t)
@@ -188,9 +170,7 @@ func testReviewMergeQueueAdvanceNamesTheOccupyingReview(t *testing.T) {
 	if !strings.Contains(result.Combined, "requeue") {
 		t.Fatalf("expected the refusal to name the requeue remedy, got:\n%s", result.Combined)
 	}
-	// The client decodes the refusal into its own typed error and renders
-	// that; a raw envelope here would mean the message reached the operator
-	// as an undecoded body instead of a sentence.
+	// A raw envelope would mean the typed error was not decoded.
 	if strings.Contains(result.Combined, `"code":"MERGE_QUEUE_OCCUPIED"`) {
 		t.Fatalf("expected a decoded refusal, got the raw response body:\n%s", result.Combined)
 	}
@@ -220,12 +200,8 @@ func testReviewMergeQueueOverrideAdvanceRequiresReason(t *testing.T) {
 	}
 }
 
-// merge_queue_override_advance_empty_queue_real_run mirrors
-// merge_queue_advance_empty_queue_real_run: the stub server has no CLI-only
-// path to READY a review (that requires a build result, which this
-// double does not model), so this proves the override's real request/
-// response round trip — reason included — reaches the server rather than
-// only exercising --dry-run's trace branch.
+// The stub cannot READY a review without a build, so this checks the override's real
+// round trip, reason included.
 func testReviewMergeQueueOverrideAdvanceEmptyQueueRealRun(t *testing.T) {
 	setup := env.New(t)
 	server := reviewAPIStubServer(t)

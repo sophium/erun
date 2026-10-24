@@ -24,8 +24,6 @@ func hasFlag(args []string, flag string) bool {
 	return false
 }
 
-// The app resolves a private runtime image but could not name the secret that
-// image needs, so an env it created went ImagePullBackOff with no in-app repair.
 func TestInitFlagsCarryPullSecretsAndRuntimeRegistry(t *testing.T) {
 	args := appendInitOptionalFlags(nil, uiSelection{
 		RuntimeImage:     "registry.example.com/acme/devops",
@@ -42,8 +40,6 @@ func TestInitFlagsCarryPullSecretsAndRuntimeRegistry(t *testing.T) {
 	}
 }
 
-// `erun init` rejects any pair of the three registry choices, so the desktop
-// must never emit two.
 func TestInitFlagsKeepTheThreeRegistryChoicesExclusive(t *testing.T) {
 	hosted := appendInitOptionalFlags(nil, uiSelection{ErunRegistry: true, ContainerRegistry: "ignored.example.com"})
 	if !hasFlag(hosted, "--erun-registry") {
@@ -67,8 +63,6 @@ func TestInitFlagsKeepTheThreeRegistryChoicesExclusive(t *testing.T) {
 	}
 }
 
-// The runtime registry is a different coordinate from where the project's
-// images are pushed, so selecting a hosted or cluster registry must not drop it.
 func TestRuntimeRegistrySurvivesAnExclusiveRegistryChoice(t *testing.T) {
 	for _, selection := range []uiSelection{
 		{ErunRegistry: true, RuntimeRegistry: "ghcr.io/sophium"},

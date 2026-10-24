@@ -1,5 +1,4 @@
-// Side-effect import: stateApi injects its endpoint into the shared wailsApi
-// instance on import.
+// Side-effect import: registers the stateApi endpoint.
 import './api/stateApi';
 
 import assert from 'node:assert/strict';
@@ -19,11 +18,7 @@ import tenantsReducer from './slices/tenantsSlice';
 import terminalReducer, { setSessionId } from './slices/terminalSlice';
 import type { AppDispatch } from './store';
 
-// Mirrors platformSignInRecovery.test.ts's RPC-boundary stub: every
-// wailsQueryFn-backed endpoint calls through window.go.main.App.*, so
-// standing that up by hand drives the real production dispatch path (the
-// actual stateApi endpoint, real RTK Query middleware) instead of asserting
-// dispatch shape and stopping there.
+// Stubs the Wails bridge so the real endpoint and RTK Query middleware run.
 function stubWailsBridge(app: Record<string, (...args: never[]) => Promise<unknown>>): void {
   (globalThis as unknown as { window: unknown }).window = { go: { main: { App: app } } };
 }
@@ -62,11 +57,6 @@ function resolveCall(calls: Deferred[], index: number, state: UIState): void {
   call.resolve(state);
 }
 
-// RTK Query's condition() check bails a forced refetch out from under a
-// pending request for the same query, so reloadStateAfterEnvironmentChange
-// waits for the in-flight request via getRunningQueryThunk first. An
-// invalidation arriving mid-flight must still end up with a second, real
-// fetch and fresh data, not the first fetch's stale result.
 test('an invalidation arriving during an in-flight getInitialState still produces a fresh refetch', async () => {
   const pendingCalls: Deferred[] = [];
   stubWailsBridge({
@@ -79,15 +69,12 @@ test('an invalidation arriving during an in-flight getInitialState still produce
   const store = buildTestStore();
   const dispatch = store.dispatch as unknown as AppDispatch;
 
-  // Simulate boot()'s own in-flight load.
   const inFlight = dispatch(stateApi.endpoints.getInitialState.initiate(undefined)).unwrap();
   await waitFor(() => pendingCalls.length === 1);
 
-  // The invalidation arrives while that load is still in flight.
   const reloaded = dispatch(reloadStateAfterEnvironmentChange());
 
-  // The reload must wait for the in-flight request rather than starting a
-  // second one immediately.
+  // The reload must wait rather than start a second request.
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(
     pendingCalls.length,
@@ -98,7 +85,6 @@ test('an invalidation arriving during an in-flight getInitialState still produce
   resolveCall(pendingCalls, 0, { tenants: [tenant('stale')] });
   await inFlight;
 
-  // Only now should the forced refetch actually run.
   await waitFor(() => pendingCalls.length === 2);
   resolveCall(pendingCalls, 1, { tenants: [tenant('fresh')] });
   await reloaded;
@@ -148,16 +134,6 @@ function fakeOrchestrator(overrides: Partial<OrchestratorInfo> = {}): Orchestrat
   };
 }
 
-// getInitialState is a real backend round trip, so an orchestrator session
-// can already have been focused (the headless harness's own reconnect
-// handoff, or a concurrent user action) by the time it resolves. boot() used
-// to dispatch setSelected(loaded.selected) unconditionally at that point --
-// and setSelected's own selection-sync middleware (selectionSyncMiddleware)
-// reconciles terminal.sessionId onto whatever environment that selection
-// names, clobbering the orchestrator's session with a stale or empty one.
-// This is the root cause behind orchestrator-cross-env-diff.spec.ts's flake:
-// the same race the openSelection-side fix in sessionThunks.ts (isDefaultLandingOpen)
-// guards is reachable through this earlier, separate dispatch too.
 test('boot() does not restore the persisted selection once an orchestrator session already owns the terminal', async () => {
   const pendingLoadState: { resolve: (value: unknown) => void }[] = [];
   stubWailsBridge({
@@ -177,8 +153,7 @@ test('boot() does not restore the persisted selection once an orchestrator sessi
   const booted = dispatch(boot());
   await waitFor(() => pendingLoadState.length === 1);
 
-  // The orchestrator session claims the terminal while getInitialState is
-  // still in flight -- the same shape focusOrchestratorSession takes.
+  // An orchestrator claims the terminal while getInitialState is in flight.
   store.dispatch(setSessionId(999));
 
   pendingLoadState[0]?.resolve({

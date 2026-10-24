@@ -12,10 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// RecordAISessionEvent persists the AI tool's own report of a turn-boundary
-// event. It replaces the previous event for the session outright: only the
-// most recent event decides the resolved state, so there is nothing to
-// reconcile across a history of stale ones.
+// RecordAISessionEvent replaces the session's previous event; only the latest decides state.
 func RecordAISessionEvent(params model.AISessionEventParams) error {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
@@ -62,11 +59,8 @@ func RecordAISessionEvent(params model.AISessionEventParams) error {
 	return os.WriteFile(aiSessionPath(dir, sessionID), data, 0o644)
 }
 
-// previouslyReportedAISessionTool carries the tool name forward from an
-// earlier event when a later one (e.g. a bare exit) omits it, so the tool
-// column of a resolved status does not go blank mid-session. Any lookup
-// failure is silently treated as "no prior tool" rather than failing the
-// event this call is trying to record.
+// previouslyReportedAISessionTool keeps the tool name when a later event omits it; lookup
+// failures read as no prior tool.
 func previouslyReportedAISessionTool(tenant, environment, sessionID string) string {
 	existing, ok, err := loadAISessionRecord(tenant, environment, sessionID)
 	if err != nil || !ok {
@@ -75,9 +69,7 @@ func previouslyReportedAISessionTool(tenant, environment, sessionID string) stri
 	return existing.Tool
 }
 
-// LoadAISessionStatus resolves the current status for one session. A session
-// with no recorded event at all reads as Idle - there has never been an AI
-// session running under this id - rather than an error.
+// LoadAISessionStatus reads a session with no recorded event as Idle.
 func LoadAISessionStatus(tenant, environment, sessionID string) (model.AISessionStatus, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -98,8 +90,7 @@ func LoadAISessionStatus(tenant, environment, sessionID string) (model.AISession
 	return model.ResolveAISessionStatus(record), nil
 }
 
-// LoadAISessionStatuses resolves every session recorded for an environment,
-// sorted by session id for a stable, diffable listing.
+// LoadAISessionStatuses returns every session sorted by id.
 func LoadAISessionStatuses(tenant, environment string) ([]model.AISessionStatus, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -130,9 +121,7 @@ func LoadAISessionStatuses(tenant, environment string) ([]model.AISessionStatus,
 	return statuses, nil
 }
 
-// readAISessionRecordFile reads one session file for LoadAISessionStatuses's
-// directory scan. A non-JSON entry, an unreadable file, or a malformed one is
-// silently skipped rather than failing the whole listing over one bad file.
+// readAISessionRecordFile skips bad files rather than failing the listing.
 func readAISessionRecordFile(path string) (model.AISessionRecord, bool) {
 	if !strings.HasSuffix(path, ".json") {
 		return model.AISessionRecord{}, false

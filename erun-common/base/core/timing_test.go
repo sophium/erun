@@ -8,9 +8,7 @@ import (
 	"time"
 )
 
-// newFakeClock reuses the fakeClock defined in deploy_pod_watch_test.go —
-// timing is awkward to test deterministically, so both suites control
-// elapsed time exactly instead of sleeping.
+// newFakeClock reuses fakeClock from deploy_pod_watch_test.go.
 func newFakeClock() *fakeClock {
 	return &fakeClock{t: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
 }
@@ -50,7 +48,6 @@ func TestStepTimingUnaccountedTimeIsReportedNotDropped(t *testing.T) {
 	clock.advance(2 * time.Second)
 	child.Finish(nil)
 
-	// A gap the child didn't cover — e.g. time spent between stages.
 	clock.advance(3 * time.Second)
 	root.Finish(nil)
 
@@ -71,7 +68,6 @@ func TestStepTimingUnaccountedTimeIsReportedNotDropped(t *testing.T) {
 	}
 }
 
-// UnaccountedSeconds lives on TimingStepJSON, so exercise it there directly.
 func TestStepTimingJSONRecordCarriesUnaccountedOnParent(t *testing.T) {
 	clock := newFakeClock()
 	root := NewStepTiming("release", clock.now)
@@ -92,8 +88,7 @@ func TestStepTimingConcurrentChildrenReportOverlapNotNegative(t *testing.T) {
 	clock := newFakeClock()
 	root := NewStepTiming("build", clock.now)
 
-	// Two children whose combined duration exceeds the parent's own wall time
-	// — the shape a concurrent build produces.
+	// Children overlap, as in a concurrent build.
 	a := root.Child("amd64")
 	b := root.Child("arm64")
 	clock.advance(5 * time.Second)
@@ -122,10 +117,7 @@ func TestStepTimingBreaksNoiseLevelTiesByNameNotDuration(t *testing.T) {
 	clock := newFakeClock()
 	root := NewStepTiming("push", clock.now)
 
-	// Both children finish within the noise floor of each other — the shape a
-	// near-instant stub produces — so the sort must not depend on which one
-	// happened to measure a few microseconds larger, or the same run could
-	// render a different order every time.
+	// Durations within the noise floor must order by name.
 	zebra := root.Child("zebra")
 	clock.advance(3 * time.Millisecond)
 	zebra.Finish(nil)

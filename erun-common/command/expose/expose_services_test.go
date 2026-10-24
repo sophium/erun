@@ -6,10 +6,7 @@ import (
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
-// TestParseObservedServicesSortsAndKeepsPorts pins what the picker reads: a
-// stable order (kubectl's own is not something a UI should inherit) and every
-// port, since a multi-port Service is exactly the case where the caller has to
-// choose one.
+// kubectl's order is not stable enough for a UI, and multi-port Services need every port.
 func TestParseObservedServicesSortsAndKeepsPorts(t *testing.T) {
 	var list clusterread.ServiceList
 	list.Items = append(list.Items, clusterread.ServiceItem{})
@@ -37,8 +34,6 @@ func TestParseObservedServicesSortsAndKeepsPorts(t *testing.T) {
 	}
 }
 
-// An exposure whose Ingress carries no tls block for its host reads as http,
-// never as the scheme someone asked for.
 func TestMergeServicesWithExposuresReportsHTTPWithoutTLS(t *testing.T) {
 	merged := mergeServicesWithExposures(
 		[]clusterread.ObservedService{{Name: "frs-api"}},
@@ -53,9 +48,6 @@ func TestMergeServicesWithExposuresReportsHTTPWithoutTLS(t *testing.T) {
 	}
 }
 
-// TestResolveExposeBackendServiceKeepsTheConvention locks the default: an
-// existing caller that names no backend still gets <tenant>-<service>, so
-// nothing that works today changes.
 func TestResolveExposeBackendServiceKeepsTheConvention(t *testing.T) {
 	if got := resolveExposeBackendService("", "frs", "api"); got != "frs-api" {
 		t.Fatalf("derived backend = %q, want frs-api", got)

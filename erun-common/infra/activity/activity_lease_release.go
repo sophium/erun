@@ -6,38 +6,21 @@ import (
 	"strings"
 )
 
-// EnvironmentActivityLeaseReleaseOutcome distinguishes what a release actually
-// did, so a caller — and the report it prints — can tell "a held claim was
-// removed" from "there was nothing there to remove" instead of both reading as
-// the same bare success. Both are still success from the release call's own
-// point of view: a wrapper's exit trap must never fail a job that already
-// finished cleanly just because it releases twice.
+// EnvironmentActivityLeaseReleaseOutcome reports what a release did; every outcome is
+// success so a repeated release never fails a finished job.
 type EnvironmentActivityLeaseReleaseOutcome int
 
 const (
-	// EnvironmentActivityLeaseReleased means a held claim existed under the
-	// given id (and, for an exclusive claim, scope) and this call removed it.
+	// EnvironmentActivityLeaseReleased means this call removed a held claim.
 	EnvironmentActivityLeaseReleased EnvironmentActivityLeaseReleaseOutcome = iota
-	// EnvironmentActivityLeaseNotHeld means nothing was held under the given
-	// id/scope: never taken, already released, or already expired and
-	// reclaimed.
+	// EnvironmentActivityLeaseNotHeld means nothing was held: never taken, already released, or reclaimed.
 	EnvironmentActivityLeaseNotHeld
-	// EnvironmentActivityLeaseHeldElsewhere means this id is holding a lease
-	// on this environment, but under the other shape than the one this call
-	// asked to release -- a shared lease released with --exclusive, or an
-	// exclusive claim released without it. Nothing was removed and this is
-	// still not an error, but the release was aimed at the wrong store: the
-	// claim the caller meant to drop is untouched and stays held for its full
-	// TTL. EnvironmentActivityLeaseHeldElsewhereNote names the release that
-	// would match.
+	// EnvironmentActivityLeaseHeldElsewhere: the id holds a lease of the other
+	// shape (shared vs exclusive), which stays held.
 	EnvironmentActivityLeaseHeldElsewhere
 )
 
-// ReleaseEnvironmentActivityLease drops a shared (non-exclusive) lease.
-// Idempotent: releasing a lease that already expired or was never taken is
-// success, so a wrapper's exit trap never fails a job that already finished
-// cleanly — but the returned outcome tells a caller whether anything was
-// actually there to remove, rather than reporting the same success either way.
+// ReleaseEnvironmentActivityLease drops a shared lease; it is idempotent.
 func ReleaseEnvironmentActivityLease(tenant, environment, id string) (EnvironmentActivityLeaseReleaseOutcome, error) {
 	resolved, err := ResolveEnvironmentActivityLeaseID(id, id)
 	if err != nil {
@@ -49,11 +32,8 @@ func ReleaseEnvironmentActivityLease(tenant, environment, id string) (Environmen
 	}
 	if err := os.Remove(filepath.Join(dir, resolved+".json")); err != nil {
 		if os.IsNotExist(err) {
-			// Nothing was held as a shared lease. Before calling that simply
-			// "not held", check the other store: a caller who took an
-			// exclusive claim and released it without --exclusive lands here,
-			// and reporting a bare no-match would leave them believing the
-			// claim was dropped while it stays held for its full TTL.
+			// An exclusive claim released without --exclusive lands here; say so rather than
+			// report a no-match while it stays held.
 			if held, heldErr := environmentActivityLeaseHeldAsExclusiveClaim(tenant, environment, resolved); heldErr == nil && held {
 				return EnvironmentActivityLeaseHeldElsewhere, nil
 			}
@@ -64,12 +44,7 @@ func ReleaseEnvironmentActivityLease(tenant, environment, id string) (Environmen
 	return EnvironmentActivityLeaseReleased, nil
 }
 
-// environmentActivityLeaseHeldAsExclusiveClaim reports whether id is the
-// recorded holder of an exclusive claim on any scope of this environment.
-// Exclusive claims are keyed by scope rather than by holder id (see
-// exclusiveEnvironmentActivityLeaseDir), so this reads that directory instead
-// of probing a single path -- the scope is what the caller would have to name,
-// and it is not recoverable from the id alone.
+// Exclusive claims are keyed by scope, so scan the directory for this holder.
 func environmentActivityLeaseHeldAsExclusiveClaim(tenant, environment, id string) (bool, error) {
 	dir, err := exclusiveEnvironmentActivityLeaseDir(tenant, environment)
 	if err != nil {
@@ -97,12 +72,8 @@ func environmentActivityLeaseHeldAsExclusiveClaim(tenant, environment, id string
 	return false, nil
 }
 
-// EnvironmentActivityLeaseHeldElsewhereNote explains a release that matched
-// nothing because the id is held under the other shape, and names the release
-// that would match it. releasedExclusive is the shape the caller asked for, so
-// the note describes the opposite one. It returns "" when the id is not held
-// elsewhere after all, so a caller only ever prints a note it can stand
-// behind rather than a guess about where the claim went.
+// EnvironmentActivityLeaseHeldElsewhereNote names the release that would match, or ""
+// when the id is not held under the other shape.
 func EnvironmentActivityLeaseHeldElsewhereNote(tenant, environment, id string, releasedExclusive bool) (string, error) {
 	resolved, err := ResolveEnvironmentActivityLeaseID(id, id)
 	if err != nil {
@@ -138,16 +109,8 @@ func environmentActivityLeaseFileExists(dir, id string) bool {
 	return err == nil
 }
 
-// ReleaseExclusiveEnvironmentActivityLease drops an exclusive claim on a
-// scope. It only removes the file when the recorded holder is this same id —
-// releasing by scope name alone, without proving you are the holder, could
-// otherwise drop a different holder's exclusivity out from under them (a
-// stale release call racing a new legitimate claim). An already-vacated scope
-// is a success outcome, matching the shared release's idempotence, but a
-// scope held by a *different* id is refused outright and names the actual
-// holder (EnvironmentActivityLeaseConflictError) instead of quietly reporting
-// success for a claim it never touched — the same shape a conflicting take
-// already refuses with.
+// ReleaseExclusiveEnvironmentActivityLease removes the claim only when this id holds it,
+// so a stale release cannot drop another holder's claim.
 func ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id string) (EnvironmentActivityLeaseReleaseOutcome, error) {
 	scope = NormalizeExclusiveEnvironmentActivityLeaseScope(scope)
 	resolvedID, err := ResolveEnvironmentActivityLeaseID(id, id)
@@ -161,11 +124,7 @@ func ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id str
 	existing, err := loadEnvironmentActivityLease(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// The scope holds nothing. This is the reverse of the shared
-			// release's case: if this id is holding an ordinary shared lease,
-			// the caller asked to drop it with --exclusive, and a bare
-			// no-match would read as "already gone" while the lease stays
-			// held.
+			// Reverse case: a shared lease released with --exclusive.
 			if environmentActivityLeaseHeldAsShared(tenant, environment, resolvedID) {
 				return EnvironmentActivityLeaseHeldElsewhere, nil
 			}

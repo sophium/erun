@@ -8,35 +8,21 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// reportPodUnreachable prints a degraded report for a doctor check that needs
-// the runtime pod, instead of aborting the rest of the command's report: the
-// helm release status and pod state doctor prints first are the causal
-// evidence, so this only names what could not be read and points back at
-// them rather than surfacing a raw exec error with no next step.
+// reportPodUnreachable degrades a pod-dependent check to a report instead of aborting.
 func reportPodUnreachable(ctx core.Context, header string, err error) error {
 	_, ferr := fmt.Fprintf(ctx.Stdout, "== %s ==\ncould not read: %s\nThe runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.\n\n", header, strings.TrimSpace(err.Error()))
 	return ferr
 }
 
-// reportPodSkippedUnreachable mirrors reportPodUnreachable for a section that
-// never attempts its own probe because an earlier section already confirmed
-// the cluster is unreachable (common.DeployDiagnosisResult.ClusterUnreachable)
-// -- skipping here is what turns four independent multi-minute kubectl
-// timeouts rediscovering the same fact into one immediate line each.
+// reportPodSkippedUnreachable skips the probe once the cluster is known unreachable,
+// avoiding repeated kubectl timeouts.
 func reportPodSkippedUnreachable(ctx core.Context, header string) error {
 	_, err := fmt.Fprintf(ctx.Stdout, "== %s ==\nskipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.\n\n", header)
 	return err
 }
 
-// reportRuntimeImageRegistryMismatch names a runtime image pinned to a
-// registry other than the env's own runtimeregistry, before any pod-dependent
-// check runs — the config alone is enough to tell, so this never execs and
-// runs the same in --dry-run as for real: there is no live read to skip. The
-// pull secret erun refreshes on deploy is keyed off exactly the registries in
-// play (deploy_image_pull_secret.go covers both now), but that refresh still
-// depends on a credential resolving for each at deploy time; a mismatch here
-// is worth flagging on its own, because a credential failure for the image's
-// own registry is exactly what leaves a redeployed pod unable to pull.
+// reportRuntimeImageRegistryMismatch flags a runtime image outside the env's
+// runtimeregistry, whose credential failure leaves a redeployed pod unable to pull.
 func reportRuntimeImageRegistryMismatch(ctx core.Context, result config.OpenResult) error {
 	imageRegistry, runtimeRegistry, mismatched := result.EnvConfig.RuntimeImageRegistryMismatch()
 	if !mismatched {
@@ -53,14 +39,8 @@ func reportRuntimeImageRegistryMismatch(ctx core.Context, result config.OpenResu
 	return err
 }
 
-// reportRuntimeImageLineMismatch names a runtimeimage stuck on a different
-// release line than the environment's last confirmed deploy actually ran —
-// config alone is enough to tell (see EnvConfig.RuntimeImageLineMismatch), so
-// this never execs and runs the same in --dry-run as for real. It matters
-// because a future deploy that re-resolves runtimeimage
-// without an explicit --runtime-image/--runtime-chart can silently move the
-// pod back onto the wrong line, and the runtime chart's Recreate strategy
-// tears the running pod down before that mistake is visible.
+// reportRuntimeImageLineMismatch flags a runtimeimage on a different release line than
+// the last deploy; a re-resolving deploy could move the pod back, and Recreate hides it.
 func reportRuntimeImageLineMismatch(ctx core.Context, result config.OpenResult) error {
 	recordedLine, observedLine, mismatched := result.EnvConfig.RuntimeImageLineMismatch()
 	if !mismatched {

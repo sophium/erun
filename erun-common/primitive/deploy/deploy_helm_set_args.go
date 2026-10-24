@@ -69,12 +69,8 @@ func helmIdleTimezone(config configpkg.EnvironmentIdleConfig) string {
 	return policy.Timezone
 }
 
-// helmCloudContextSetArgs projects the env's resolved cloud context. Every value
-// but the region is always set, so a projection reconciles back to empty when an
-// env loses its cloud context. The region is the exception: the chart turns it
-// into AWS_REGION, and an explicitly empty AWS_REGION overrides — rather than
-// falls back to — the region the pod's own AWS profile carries, so "no region
-// resolved" has to mean "no value threaded at all".
+// helmCloudContextSetArgs omits an empty region: the chart turns it into
+// AWS_REGION, and an empty AWS_REGION overrides the pod's own AWS profile.
 func helmCloudContextSetArgs(d HelmDeploySpec) []string {
 	args := []string{
 		"--set-string", "cloudContext.name=" + d.CloudContextName,
@@ -90,9 +86,8 @@ func helmCloudContextSetArgs(d HelmDeploySpec) []string {
 	)
 }
 
-// helmRegistrySetArgs returns the registry-projection helm --set args, each
-// guarded on presence so an env that carries none renders nothing and an old
-// chart with no .Values for them is unaffected.
+// helmRegistrySetArgs guards each value on presence so older charts are
+// unaffected.
 func helmRegistrySetArgs(d HelmDeploySpec) []string {
 	var args []string
 	if registry := strings.TrimSpace(d.ContainerRegistry); registry != "" {
@@ -112,13 +107,8 @@ func helmRegistrySetArgs(d HelmDeploySpec) []string {
 	return args
 }
 
-// helmPlatformAccountSetArgs appends the platform-account switch only when the
-// env opted in, so every other deploy plan stays byte-for-byte unchanged. When
-// set, the runtime chart binds the env's SA to cluster-admin (a
-// <release>-platform ClusterRoleBinding) so in-pod platform terraform and
-// component installs can manage cluster-scoped resources. Absent on a later
-// deploy, the chart default (false) prunes the binding on upgrade, so a flip in
-// either direction reconciles.
+// helmPlatformAccountSetArgs binds the env's SA to cluster-admin when set; the
+// chart default prunes the binding when absent.
 func helmPlatformAccountSetArgs(platformAccount bool) []string {
 	if !platformAccount {
 		return nil
@@ -126,11 +116,7 @@ func helmPlatformAccountSetArgs(platformAccount bool) []string {
 	return []string{"--set", "platformAccount=true"}
 }
 
-// helmStoppedSetArgs renders the operator's stop so the upgrade reconciles it
-// instead of quietly restarting the pod. Emitted only when the env is stopped,
-// so every running env's plan is byte-for-byte unchanged — and an absent value
-// renders replicas: 1, so a wake reconciles in the other direction just as
-// declaratively.
+// helmStoppedSetArgs renders stopped=true only; absent renders replicas: 1.
 func helmStoppedSetArgs(stopped bool) []string {
 	if !stopped {
 		return nil
@@ -138,11 +124,7 @@ func helmStoppedSetArgs(stopped bool) []string {
 	return []string{"--set", "stopped=true"}
 }
 
-// helmPlatformSetArgs returns the per-instance platform.* helm --set args,
-// guarded on presence so non-platform deploys (every existing env) render none.
-// Threaded to every chart; only the platform singletons read them — PowerDNS to
-// bootstrap its services zone, Zitadel to resolve its auth host, erun-backend-api
-// to serve them at the unauthenticated GET /v1/platform discovery endpoint.
+// helmPlatformSetArgs is read only by the platform singletons.
 func helmPlatformSetArgs(p configpkg.PlatformConfig) []string {
 	if p.IsZero() {
 		return nil
@@ -169,9 +151,6 @@ func helmPlatformSetArgs(p configpkg.PlatformConfig) []string {
 	return args
 }
 
-// helmImagePullSecretSetArgs renders the runtime pod's imagePullSecrets as
-// indexed helm --set keys, skipping blank names. Empty input yields no args, so
-// a public-image env passes nothing and its deploy is byte-for-byte unchanged.
 func helmImagePullSecretSetArgs(secrets []string) []string {
 	args := make([]string, 0, len(secrets)*2)
 	idx := 0
@@ -185,9 +164,6 @@ func helmImagePullSecretSetArgs(secrets []string) []string {
 	return args
 }
 
-// helmRegistryCredentialSecretSetArgs renders registryCredentialSecretName as
-// a single helm --set key, empty input yielding no args so an env init never
-// provisioned a credential for is byte-for-byte unchanged.
 func helmRegistryCredentialSecretSetArgs(name string) []string {
 	if name = strings.TrimSpace(name); name == "" {
 		return nil
@@ -195,9 +171,6 @@ func helmRegistryCredentialSecretSetArgs(name string) []string {
 	return []string{"--set-string", "registryCredentialSecretName=" + name}
 }
 
-// helmPlatformAliasSecretSetArgs renders platformAliasSecretName as a single
-// helm --set key, empty input yielding no args so an env init found no host
-// alias for is byte-for-byte unchanged.
 func helmPlatformAliasSecretSetArgs(name string) []string {
 	if name = strings.TrimSpace(name); name == "" {
 		return nil
@@ -207,10 +180,8 @@ func helmPlatformAliasSecretSetArgs(name string) []string {
 
 func helmClaudeSetArgs(config configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig) []string {
 	args := make([]string, 0, 12)
-	// A gateway replaces the model provider, so it renders the provider flags
-	// off: Claude Code reads CLAUDE_CODE_USE_BEDROCK / _MANTLE ahead of
-	// ANTHROPIC_BASE_URL, and leaving either on would route the session past the
-	// gateway the environment selected.
+	// Claude Code reads CLAUDE_CODE_USE_BEDROCK/_MANTLE ahead of ANTHROPIC_BASE_URL,
+	// so a gateway must turn them off.
 	gatewayOn := configpkg.EffectiveGateway(config, gateway).Configured()
 	useMantle := !gatewayOn && resolveClaudeBool(config.UseMantle, configpkg.DefaultClaudeUseMantle)
 	useBedrock := !gatewayOn && resolveClaudeBool(config.UseBedrock, configpkg.DefaultClaudeUseBedrock)
@@ -222,28 +193,20 @@ func helmClaudeSetArgs(config configpkg.EnvironmentClaudeConfig, gateway *config
 	if config.MaxOutputTokens != nil {
 		args = append(args, "--set-string", "claude.maxOutputTokens="+strconv.Itoa(*config.MaxOutputTokens))
 	}
-	// The gateway is erun-level, so these render for every environment that
-	// selects from the catalog; one that opted out renders none of them. Only
-	// the Secret's name travels here, and that name is a fixed constant rather
-	// than an operator entry — the credential is one erun-level value, delivered
-	// into this namespace by applyGatewayCredentialsSecret, so there is nothing
-	// per-environment to name. The value itself never passes through helm.
+	// The gateway credential never passes through helm; applyGatewayCredentialsSecret
+	// delivers it.
 	if gateway := configpkg.EffectiveGateway(config, gateway); gateway.Configured() {
 		args = append(args, "--set-string", "claude.openRouterBaseURL="+escapeHelmSetValue(strings.TrimSpace(gateway.BaseURL)))
 		if ids := configpkg.FormatClaudeModels(gateway.ModelIDs()); ids != "" {
 			args = append(args, "--set-string", "claude.openRouterAvailableModels="+escapeHelmSetValue(ids))
 		}
-		// The pod-wide default, so Claude invoked outside the AI tab (an exec
-		// agent job) does not fall back to a model the gateway may not serve.
+		// Pod-wide default so Claude outside the AI tab uses a model the gateway serves.
 		if model := gateway.ResolveDefaultModel(); model != "" {
 			args = append(args, "--set-string", "claude.openRouterModel="+escapeHelmSetValue(model))
 			if context := gateway.ContextFor(model); context > 0 {
 				args = append(args, "--set-string", "claude.openRouterModelContext="+strconv.Itoa(context))
 			}
 		}
-		// Both names are erun's own constants, not operator entries: erun creates
-		// this Secret from the erun-level credential, so there is nothing here
-		// to supply and nothing to get out of step with what deploy creates.
 		args = append(args, "--set-string", "claude.openRouterAuthTokenSecret="+configpkg.GatewaySecretName)
 		args = append(args, "--set-string", "claude.openRouterAuthTokenKey="+configpkg.GatewaySecretKey)
 	}
@@ -257,8 +220,7 @@ func resolveClaudeBool(value *bool, fallback bool) bool {
 	return *value
 }
 
-// claudeFlagValue returns the "1"/"0" form expected by the chart template and
-// the entrypoint script, distinct from formatHelmBool's "true"/"false" form.
+// claudeFlagValue returns the "1"/"0" form the chart and entrypoint expect.
 func claudeFlagValue(value bool) string {
 	if value {
 		return "1"
@@ -266,9 +228,8 @@ func claudeFlagValue(value bool) string {
 	return "0"
 }
 
-// escapeHelmSetValue escapes characters that Helm's --set/--set-string parser
-// treats as structural so the input is preserved as a literal scalar value.
-// Helm splits values on commas, so a comma inside the value must be backslash-escaped.
+// escapeHelmSetValue escapes backslashes and commas, which helm --set treats as
+// structural.
 func escapeHelmSetValue(value string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `,`, `\,`)
 	return replacer.Replace(value)

@@ -1,17 +1,7 @@
 import { formatElapsed } from './activityQueueState';
 
-// orchestratorBusyLabel names a working orchestrator and, when the report
-// carries a timestamp, how long it has been working.
-// `${name} is working` alone restates the spinner; the elapsed time comes from
-// `busyAtUnix`, carried from the same activity report the spinner reads.
-// Sidebar.ErunSection's orchestratorShellLabel does the same for a background
-// shell.
-//
-// A missing or zero timestamp degrades to the bare statement rather than
-// inventing an elapsed time: an orchestrator that reported busy before this
-// field existed, or whose report predates its current session, has no honest
-// duration to show. That is the same fail-soft rule the rest of the sidebar
-// follows -- say less rather than say something untrue.
+// orchestratorBusyElapsed is '' for a missing or zero timestamp rather than an
+// invented duration.
 export function orchestratorBusyElapsed(busyAtUnix: number | undefined, nowMs: number): string {
   if (busyAtUnix === undefined || busyAtUnix <= 0) {
     return '';

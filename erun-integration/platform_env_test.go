@@ -25,9 +25,6 @@ func testPlatformEnvRegisterDryRun(t *testing.T) {
 }
 
 func testPlatformEnvLifecycleRealRun(t *testing.T) {
-	// One scenario drives register -> list -> get -> deploy -> stop ->
-	// delete against the real stub server, covering every environment
-	// PlatformClient method's request/response handling in one pass.
 	setup := env.New(t)
 	server := platformAPIStubServer(t)
 	platformAlias(t, setup, server)
@@ -53,10 +50,7 @@ func testPlatformEnvLifecycleRealRun(t *testing.T) {
 }
 
 func testPlatformEnvPushDryRun(t *testing.T) {
-	// The dry run resolves the local marker and traces which row it names
-	// and which portable fields would travel, without reaching the network
-	// or writing anything. The fields list is the allowlist itself, so a
-	// host-owned value appearing here would be the leak this plan forbids.
+	// The fields list is the allowlist, so a host-owned value here would be a leak.
 	setup := env.New(t)
 	seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
 	fixture.SeedHostedRuntimeTenantEnv(t, setup, "acme", "prod", "https://api.example.test", "tenant-1", "env-1", 1)
@@ -69,8 +63,6 @@ func testPlatformEnvPushDryRun(t *testing.T) {
 }
 
 func testPlatformEnvPullDryRun(t *testing.T) {
-	// The pull's dry run traces the two reads it would make and states the
-	// boundary it will hold: only portable fields are written.
 	setup := env.New(t)
 	seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
 	fixture.SeedHostedRuntimeTenantEnv(t, setup, "acme", "prod", "https://api.example.test", "tenant-1", "env-1", 1)
@@ -83,10 +75,7 @@ func testPlatformEnvPullDryRun(t *testing.T) {
 }
 
 func testPlatformEnvDefinitionRoundTripRealRun(t *testing.T) {
-	// The round trip the issue names, driven through the compiled binary
-	// against the API double: an upload, then a pull, showing the portable
-	// fields arrive while every host-owned value stays exactly as this
-	// machine had it.
+	// Upload then pull: portable fields arrive, host-owned values stay.
 	setup := env.New(t)
 	server := platformAPIStubServer(t)
 	platformAlias(t, setup, server)
@@ -102,7 +91,6 @@ func testPlatformEnvDefinitionRoundTripRealRun(t *testing.T) {
 		t.Fatalf("push did not report the revision it wrote:\n%s", push.Combined)
 	}
 
-	// Edit the portable value locally, then pull the platform's copy back.
 	rewriteEnvConfigLine(t, configPath, "runtimeversion: 1.0.0", "runtimeversion: 9.9.9")
 	pull := erun.Run(t, []string{"platform", "env", "pull", "acme", "prod"},
 		erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -122,8 +110,7 @@ func testPlatformEnvDefinitionRoundTripRealRun(t *testing.T) {
 		"host-owned-component",
 		"localportrangestart: 17100",
 		"localrepopath:",
-		// A key this binary cannot model at all: a pull preserves it
-		// because the writer only ever touches keys EnvConfig declares.
+		// The writer only touches keys EnvConfig declares, so unknown keys survive.
 		"futureunmodelledkey: keep-me",
 	} {
 		if !strings.Contains(restored, hostOwned) {
@@ -133,10 +120,7 @@ func testPlatformEnvDefinitionRoundTripRealRun(t *testing.T) {
 }
 
 func testPlatformEnvPullRefusesAPlatformNameMismatch(t *testing.T) {
-	// A platform row whose name is not the local directory being pulled
-	// into. The stub's row is named "prod"; this environment is "dev".
-	// Writing it would create a second environment rather than update this
-	// one, so the pull must refuse rather than rename.
+	// The stub row is "prod" and this env is "dev"; writing would create a second env.
 	setup := env.New(t)
 	server := platformAPIStubServer(t)
 	platformAlias(t, setup, server)
@@ -157,9 +141,7 @@ func testPlatformEnvPullRefusesAPlatformNameMismatch(t *testing.T) {
 }
 
 func testPlatformEnvPullRefusesAMarkerPointingAtAnotherTenant(t *testing.T) {
-	// The marker names tenant-other; the platform resolves tenant-1.
-	// Adopting the resolved identity instead of refusing would write the
-	// definition to a row this machine does not think it is following.
+	// Adopting the resolved tenant would write to a row this machine does not follow.
 	setup := env.New(t)
 	server := platformAPIStubServer(t)
 	platformAlias(t, setup, server)
@@ -189,8 +171,7 @@ func testPlatformEnvGetNotFound(t *testing.T) {
 }
 
 func testPlatformEnvDeleteDryRunSkipsConfirmation(t *testing.T) {
-	// --dry-run must never block on the interactive confirm prompt: the
-	// harness has no TTY to answer it.
+	// The harness has no TTY to answer the confirm prompt.
 	setup := env.New(t)
 	seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
 	result := erun.Run(t, []string{"platform", "env", "delete", "env-1", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -200,9 +181,6 @@ func testPlatformEnvDeleteDryRunSkipsConfirmation(t *testing.T) {
 	golden.Equal(t, "platform/env_delete_dry_run", normalize.Apply(result.Combined))
 }
 
-// rewriteEnvConfigLine replaces one line of a seeded env config in place, so a
-// scenario can move a portable value locally and prove the next pull brings the
-// platform's copy back without touching anything else in the file.
 func rewriteEnvConfigLine(t testing.TB, path, from, to string) {
 	t.Helper()
 	content := mustReadFile(t, path)

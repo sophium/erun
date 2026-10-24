@@ -40,8 +40,6 @@ func testExecGateMergeRefusesMissingTarget(t *testing.T) {
 }
 
 func testExecGateMergeRefusesStdinMessageCountMismatch(t *testing.T) {
-	// Two --source flags need two NUL-separated messages on stdin, one per
-	// source in order; a mismatched count is refused before touching git.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	result := erun.Run(t, []string{"exec", "gate-merge", "--source", "a", "--source", "b", "--target", "main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add a\n"})
@@ -52,9 +50,6 @@ func testExecGateMergeRefusesStdinMessageCountMismatch(t *testing.T) {
 }
 
 func testExecGateMergeDryRunMustNotReachTheNetwork(t *testing.T) {
-	// A dry run against a bogus remote must still succeed: --dry-run never
-	// fetches, checks out, squash-merges, or commits, mirroring merge's own
-	// network-free dry-run contract.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature/add-widget", "--target", "main", "--remote", "nonexistent", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget\n"})
@@ -65,12 +60,7 @@ func testExecGateMergeDryRunMustNotReachTheNetwork(t *testing.T) {
 }
 
 func testExecGateMergeDryRunRefusesDirtyWorktree(t *testing.T) {
-	// The clean-worktree check runs even during --dry-run, the same
-	// discipline exec commit/push apply to their own branch-mismatch check:
-	// it is a read, not a mutation, so a dry run refuses exactly what a real
-	// run would refuse. It checks only tracked-file changes (mirroring the
-	// release flow's own worktree-clean check), so this dirties a tracked
-	// file rather than adding an untracked one.
+	// The dirty check runs under --dry-run and reads only tracked files.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	mustWriteFile(t, filepath.Join(setup.Cwd, "README.md"), "uncommitted change\n")
@@ -82,9 +72,6 @@ func testExecGateMergeDryRunRefusesDirtyWorktree(t *testing.T) {
 }
 
 func testExecGateMergeDryRunBatchTracesEachSource(t *testing.T) {
-	// A batch's dry-run trace must show the fetch naming every source, one
-	// checkout, and one squash-merge + commit pair per source, in order —
-	// the plan a caller audits before actually running the batch.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature/a", "--source", "feature/b", "--target", "main", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add a\x00Add b"})
@@ -95,20 +82,11 @@ func testExecGateMergeDryRunBatchTracesEachSource(t *testing.T) {
 }
 
 func testExecGateMergeRefusesWhileTheEnvironmentIsHeldExclusively(t *testing.T) {
-	// gate-merge rewrites the environment's one shared worktree, so two in
-	// flight at once corrupt each other's accounting rather than merely
-	// slowing each other down: a drive has already reported pushing a commit
-	// that belonged to another batch's tree, and closed two pull requests
-	// against work that had not landed. ERUN_TENANT/ERUN_ENVIRONMENT are what
-	// the runtime chart injects, and are what scopes this check to a real
-	// environment -- off-pod there is nothing to contend for, so the check
-	// no-ops and every other gate-merge scenario here is unaffected.
+	// Concurrent gate-merges corrupt the shared worktree; off-pod (no ERUN_TENANT/ERUN_ENVIRONMENT) the check no-ops.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
-	// inEnvironment marks this as running inside the environment, so the lease
-	// verbs act on its own store directly instead of reaching for an MCP edge
-	// no scenario has.
+	// inEnvironment makes the lease verbs use the local store instead of an MCP edge.
 	envVars := inEnvironment(append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev"))
 	take := erun.Run(t, []string{
 		"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
@@ -126,12 +104,7 @@ func testExecGateMergeRefusesWhileTheEnvironmentIsHeldExclusively(t *testing.T) 
 }
 
 func testExecGateMergeRefusesAClaimTakenAtTheDefaultScope(t *testing.T) {
-	// A drive that names no --scope gets the documented default, "worktree",
-	// which is the environment's one shared worktree and exactly the resource
-	// gate-merge rewrites. That is the shape both transports record from an
-	// ordinary exclusive take, so it has to refuse here; reading only the
-	// "environment" scope left the guard inert for it and let the drive
-	// rewrite the tree under a claim that was held -- failing open.
+	// The default exclusive scope, "worktree", is the tree gate-merge rewrites, so it must refuse too.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -150,8 +123,6 @@ func testExecGateMergeRefusesAClaimTakenAtTheDefaultScope(t *testing.T) {
 	if refused.ExitCode == 0 {
 		t.Fatalf("expected a refusal while a default-scoped exclusive claim is held, got 0:\n%s", refused.Combined)
 	}
-	// --under-lease exempts that claim and only that claim, so the drive that
-	// took it proceeds where an unrelated id still does not.
 	own := erun.Run(t, []string{
 		"exec", "gate-merge", "--source", "feature/add-widget", "--target", "main",
 		"--under-lease", "merge-queue", "--remote", "nonexistent", "--dry-run",
@@ -171,16 +142,11 @@ func testExecGateMergeRefusesAClaimTakenAtTheDefaultScope(t *testing.T) {
 }
 
 func testExecGateMergeUnderLeaseIsNotRefusedByTheCallersOwnClaim(t *testing.T) {
-	// A merge-queue drive holds the environment for its whole window, which
-	// spans several separate processes and so cannot be expressed as a job.
-	// Without --under-lease the mechanism would refuse the very caller it
-	// exists to protect -- a dead end rather than a safeguard.
+	// A merge-queue drive spans several processes, so it holds the claim via --under-lease.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
-	// inEnvironment marks this as running inside the environment, so the lease
-	// verbs act on its own store directly instead of reaching for an MCP edge
-	// no scenario has.
+	// inEnvironment makes the lease verbs use the local store instead of an MCP edge.
 	envVars := inEnvironment(append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev"))
 	take := erun.Run(t, []string{
 		"activity", "lease", "take", "--tenant", "team", "--environment", "dev",

@@ -20,8 +20,6 @@ import {
 } from './slices/outputsDialogSlice';
 import type { AppThunk } from './store';
 
-// openOutputs surfaces the files an agent produced, newest-first — from the
-// environment's runtime pod, or from this host for an orchestrator.
 export const openOutputs =
   (target: OutputsTarget): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -36,7 +34,7 @@ export const openOutputs =
     }
   };
 
-// downloadOutput saves one entry through a native Save dialog; an empty path back means the operator cancelled.
+// An empty path back means the operator cancelled.
 export const downloadOutput =
   (name: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -61,10 +59,8 @@ export const downloadOutput =
     }
   };
 
-// runOutputOnHost launches an artifact on this machine. For an environment that
-// is the copy workspace sync mirrored down from the pod, so it errors clearly
-// when the env has no host workspace or the artifact has not synced yet. For an
-// orchestrator the file was produced here, so it runs in place.
+// runOutputOnHost runs an environment's artifact from its synced host mirror, and
+// an orchestrator's in place.
 export const runOutputOnHost =
   (name: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {

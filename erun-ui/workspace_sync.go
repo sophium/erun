@@ -68,14 +68,8 @@ func (a *App) startWorkspaceSyncForSelection(selection uiSelection) {
 	go a.runWorkspaceSyncLoop(ctx, key, selection, result, localPath)
 }
 
-// reconcileWorkspaceSyncForConfiguredEnvs settles the running sync workers onto
-// what the config asks for right now, in both directions. It runs on the
-// heartbeat rather than only at boot because linking is done from the running
-// app: an env enabled afterwards never got a worker and its mirror stayed
-// silently empty, and an env disabled afterwards kept its worker and went on
-// writing into a mirror the operator had already detached.
-// startWorkspaceSyncForSelection re-validates each env and dedups an
-// already-running poller, so this settles to a no-op once the two agree.
+// reconcileWorkspaceSyncForConfiguredEnvs runs on the heartbeat because envs
+// are linked and unlinked while the app runs.
 func (a *App) reconcileWorkspaceSyncForConfiguredEnvs() {
 	if a.deps.store == nil {
 		return
@@ -88,8 +82,7 @@ func (a *App) reconcileWorkspaceSyncForConfiguredEnvs() {
 	for _, selection := range desired {
 		a.startWorkspaceSyncForSelection(selection)
 	}
-	// Stopping is only safe on a complete picture: a partial read would tear
-	// down workers for envs that are still perfectly well configured.
+	// Stop only on a complete picture, or healthy workers get torn down.
 	if !complete {
 		return
 	}
@@ -100,10 +93,8 @@ func (a *App) reconcileWorkspaceSyncForConfiguredEnvs() {
 	}
 }
 
-// desiredWorkspaceSyncSelections reports the envs that should be mirroring right
-// now, and whether that picture is complete. Incomplete matters: a tenant that
-// could not be read says nothing about its envs, and reading silence as "not
-// wanted" would tear down healthy workers.
+// desiredWorkspaceSyncSelections reports completeness: an unreadable tenant
+// must not read as "not wanted".
 func (a *App) desiredWorkspaceSyncSelections(tenants []config.TenantConfig) (map[string]uiSelection, bool) {
 	desired := map[string]uiSelection{}
 	complete := true
@@ -114,8 +105,7 @@ func (a *App) desiredWorkspaceSyncSelections(tenants []config.TenantConfig) (map
 			continue
 		}
 		for _, env := range envs {
-			// Cheap pre-filter; startWorkspaceSyncForSelection re-validates and
-			// gates on RemoteRepo(), so a non-remote env here is a no-op.
+			// Cheap pre-filter; startWorkspaceSyncForSelection re-validates.
 			if !env.SSHD.Enabled || !env.SSHD.WorkspaceSync.Enabled {
 				continue
 			}
@@ -126,9 +116,7 @@ func (a *App) desiredWorkspaceSyncSelections(tenants []config.TenantConfig) (map
 	return desired, complete
 }
 
-// runningWorkspaceSyncKeys snapshots the workers currently polling, so the
-// reconcile can compare against the desired set without holding the lock across
-// the stops it decides on.
+// runningWorkspaceSyncKeys snapshots so stops run without holding the lock.
 func (a *App) runningWorkspaceSyncKeys() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -206,8 +194,8 @@ const (
 	workspaceSyncPassStop
 )
 
-// prepareWorkspaceSyncPass sleeps one interval itself before signalling retry, so
-// the sync loop's continue does not busy-spin on an unreachable SSHD.
+// prepareWorkspaceSyncPass sleeps before signalling retry so the loop does not
+// busy-spin on an unreachable SSHD.
 func (a *App) prepareWorkspaceSyncPass(ctx context.Context, key string, result config.OpenResult, params workspace.WorkspaceSyncParams) workspaceSyncPassOutcome {
 	if a.deps.canConnectLocalPort != nil && !a.deps.canConnectLocalPort(config.SSHLocalPortForResult(result)) && a.deps.ensureSSHD != nil {
 		if err := a.deps.ensureSSHD(ctx, result); err != nil {

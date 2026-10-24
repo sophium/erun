@@ -9,9 +9,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// TestNormalizeDockerBuildSecretsRefusesEntriesThatWouldNotMeanWhatTheySay
-// covers the trust boundary: the config file is hand-written, and an entry that
-// is passed through unchecked is how a build ends up mounting nothing.
 func TestNormalizeDockerBuildSecretsRefusesEntriesThatWouldNotMeanWhatTheySay(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -62,10 +59,6 @@ func TestNormalizeDockerBuildSecretsRefusesEntriesThatWouldNotMeanWhatTheySay(t 
 	}
 }
 
-// TestProjectDockerSecretsInheritance locks the inheritance rule to the one
-// docker.platforms already uses, so the two sibling keys under `docker:` do not
-// diverge: an unlisted environment inherits the project default, an
-// environment's own list wins, and an explicit empty list opts out.
 func TestProjectDockerSecretsInheritance(t *testing.T) {
 	projectRoot := writeDockerPlatformsProjectConfig(t, `docker:
     secrets:

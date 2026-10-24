@@ -26,10 +26,7 @@ func buildDockerSecretScenarios(t *testing.T) {
 }
 
 func testBuildDryRunConfiguredDockerSecretReachesBuildArgv(t *testing.T) {
-	// environments.<env>.docker.secrets declares a BuildKit build secret for
-	// this env. The credential stays in the environment variable docker reads
-	// it from; what reaches the build argv is the reference only, so the
-	// trace and the command are safe to log.
+	// Only the secret reference reaches the argv, so the trace is safe to log.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	fixture.SeedProjectK8sConfig(t, setup,
@@ -53,11 +50,7 @@ func testBuildDryRunConfiguredDockerSecretReachesBuildArgv(t *testing.T) {
 }
 
 func testBuildDryRunProjectDockerSecretDefaultAppliesToUnlistedEnvironment(t *testing.T) {
-	// docker.secrets at the top level is the project default, inherited by
-	// every environment that declares no secrets of its own. A project that
-	// always needs one private registry credential states it once, so an
-	// environment nobody listed (here "code1", which has no entry at all)
-	// still receives it rather than silently building without it.
+	// "code1" has no entry and must inherit the project default.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	src := filepath.Join(setup.Cwd, "build-secrets", "chart-repo.json")
@@ -76,9 +69,6 @@ func testBuildDryRunProjectDockerSecretDefaultAppliesToUnlistedEnvironment(t *te
 }
 
 func testBuildDryRunBlankDockerSecretEntryIsDropped(t *testing.T) {
-	// A list literal can leave a wholly blank entry behind. It declares
-	// nothing, so it must not reach the build as an empty --secret, and it
-	// must not disturb the entry beside it.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	fixture.SeedProjectK8sConfig(t, setup,
@@ -100,11 +90,7 @@ func testBuildDryRunBlankDockerSecretEntryIsDropped(t *testing.T) {
 }
 
 func testBuildDryRunEmptyDockerSecretListOptsEnvironmentOut(t *testing.T) {
-	// The explicit opt-out: an environment declaring secrets: [] inherits
-	// nothing from the project default, so it builds with no secrets even
-	// though the default names one. The project default's src deliberately
-	// does not exist here — the opt-out must win before the default is read,
-	// not after it has already been validated.
+	// The default's src does not exist: the opt-out must win before it is read.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	missing := filepath.Join(setup.Cwd, "build-secrets", "absent.json")
@@ -129,12 +115,8 @@ func testBuildDryRunEmptyDockerSecretListOptsEnvironmentOut(t *testing.T) {
 }
 
 func testBuildFailsWhenDeclaredDockerSecretEnvironmentVariableIsUnset(t *testing.T) {
-	// A declared secret that cannot be supplied must fail the build. A
-	// Dockerfile guards secret-dependent work with `if [ -f
-	// /run/secrets/<id> ]`, so a secret that silently fails to arrive makes
-	// the build skip that work and still exit zero — reporting success having
-	// verified less than the project asked for. The error names the missing
-	// variable and the remedy.
+	// Dockerfiles guard on `[ -f /run/secrets/<id> ]`, so a missing secret
+	// would silently skip work and still exit zero.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	fixture.SeedProjectK8sConfig(t, setup,
@@ -153,9 +135,6 @@ func testBuildFailsWhenDeclaredDockerSecretEnvironmentVariableIsUnset(t *testing
 }
 
 func testBuildFailsWhenDeclaredDockerSecretFileCannotBeRead(t *testing.T) {
-	// The src form gets the same treatment: a path that cannot be read fails
-	// the build and names the remedy, rather than handing docker a secret
-	// source that is not there.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	missing := filepath.Join(setup.Cwd, "build-secrets", "absent.json")
@@ -175,9 +154,6 @@ func testBuildFailsWhenDeclaredDockerSecretFileCannotBeRead(t *testing.T) {
 }
 
 func testBuildFailsWhenDockerSecretEntryHasNoId(t *testing.T) {
-	// id is what the Dockerfile mounts by, so an entry without one cannot be
-	// mounted at all. Refusing it beats passing docker a secret the
-	// Dockerfile's --mount=type=secret can never name.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	fixture.SeedProjectK8sConfig(t, setup,
@@ -197,9 +173,6 @@ func testBuildFailsWhenDockerSecretEntryHasNoId(t *testing.T) {
 }
 
 func testBuildFailsWhenDockerSecretEntryDeclaresNeitherEnvNorSrc(t *testing.T) {
-	// The other half of exactly-one-source: an entry naming an id but no
-	// source at all has nothing to mount, and passing it through would leave
-	// the Dockerfile's mount empty.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	fixture.SeedProjectK8sConfig(t, setup,
@@ -217,8 +190,6 @@ func testBuildFailsWhenDockerSecretEntryDeclaresNeitherEnvNorSrc(t *testing.T) {
 }
 
 func testBuildFailsWhenDockerSecretEntryDeclaresBothEnvAndSrc(t *testing.T) {
-	// Exactly one source per entry. Accepting both would silently pick one
-	// and mount a credential the project did not intend.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	src := filepath.Join(setup.Cwd, "build-secrets", "chart-repo.json")
@@ -242,9 +213,7 @@ func testBuildFailsWhenDockerSecretEntryDeclaresBothEnvAndSrc(t *testing.T) {
 }
 
 func testBuildFailsWhenDockerSecretFieldContainsAComma(t *testing.T) {
-	// docker parses the --secret value as a comma-separated key=value list,
-	// so a comma inside a field would be read as the start of another pair
-	// and silently change which secret gets mounted.
+	// docker parses --secret as comma-separated pairs.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	fixture.SeedProjectK8sConfig(t, setup,

@@ -13,25 +13,16 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// LinuxPackageSpec is one linux package component: a Dockerfile under
-// <tenant>-devops/linux/<name>/, built with the project root as its context.
-// It never produces an image. A plain build runs it through its `test` stage
-// to a cache-only output; `erun build --release` exports its `dist` stage for
-// every release platform and uploads the .deb files at the root of that export
-// to the GitHub release for the tag.
+// LinuxPackageSpec is one linux package component. It never produces an image: a plain
+// build runs its test stage; a release exports dist and uploads its root .deb files.
 type LinuxPackageSpec struct {
 	Name           string `json:"name"`
 	ContextDir     string `json:"contextDir"`
 	DockerfilePath string `json:"dockerfilePath"`
-	// Fingerprint, Platform and Reuse are a plain build's reuse decision
-	// (applyLinuxPackageReuse): Reuse skips the check stage because a pass is
-	// recorded for this fingerprint on the docker daemon's platform. A release
-	// never sets them.
-	Fingerprint string `json:"fingerprint,omitempty"`
-	Platform    string `json:"platform,omitempty"`
-	Reuse       bool   `json:"reuse,omitempty"`
-	// NoReuseReason is why a plain build can neither reuse nor record a pass
-	// for the package, so the trace says why it runs.
+	// Fingerprint, Platform and Reuse are a plain build's reuse decision; a release never sets them.
+	Fingerprint   string `json:"fingerprint,omitempty"`
+	Platform      string `json:"platform,omitempty"`
+	Reuse         bool   `json:"reuse,omitempty"`
 	NoReuseReason string
 }
 
@@ -39,9 +30,7 @@ const (
 	LinuxPackageDistStage = "dist"
 )
 
-// NewLinuxPackageSpecs builds the package specs for contexts, with the project
-// root as their docker build context. Without a resolvable project root the
-// convention <root>/<tenant>-devops/linux/<name> names it.
+// NewLinuxPackageSpecs builds the package specs for contexts, rooted at the project root.
 func NewLinuxPackageSpecs(projectRoot string, contexts []LinuxPackageContext) []LinuxPackageSpec {
 	specs := make([]LinuxPackageSpec, 0, len(contexts))
 	for _, context := range contexts {
@@ -80,8 +69,7 @@ func LinuxPackageExportDir(root string, pkg LinuxPackageSpec, platform string) s
 	return filepath.Join(root, pkg.Name, filepath.FromSlash(platform))
 }
 
-// releaseLinuxPackageDir is where a release exports its packages: outside the
-// worktree, which a release keeps clean, and per project and version.
+// releaseLinuxPackageDir is outside the worktree, which a release keeps clean.
 func releaseLinuxPackageDir(projectRoot, version string) string {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil || strings.TrimSpace(cacheDir) == "" {
@@ -90,9 +78,7 @@ func releaseLinuxPackageDir(projectRoot, version string) string {
 	return filepath.Join(cacheDir, "erun", "release", filepath.Base(filepath.Clean(projectRoot)), version, "linux")
 }
 
-// ReleaseLinuxPackageFiles lists the .deb files at the root of every exported
-// `dist` stage. Only the root is read, so a stage that is a whole filesystem
-// cannot publish a package some tool happened to cache inside it.
+// ReleaseLinuxPackageFiles lists the .deb files at the root of every exported dist stage only.
 func ReleaseLinuxPackageFiles(spec ReleaseSpec) ([]string, error) {
 	files := make([]string, 0, len(spec.LinuxPackages)*len(MultiPlatformDockerBuilds))
 	for _, pkg := range spec.LinuxPackages {
@@ -136,10 +122,8 @@ func githubReleaseCreateArgs(tag, version string, files []string) []string {
 	return append(args, "--generate-notes")
 }
 
-// UploadReleaseLinuxPackages attaches the exported .deb files to the GitHub
-// release for the version's tag, creating the release when it does not exist
-// yet. It runs after the tag is public, because creating a release for a tag
-// the remote does not have would make GitHub tag the default branch instead.
+// UploadReleaseLinuxPackages attaches the .deb files to the tag's GitHub release. It must run
+// after the tag is public, or GitHub would tag the default branch.
 func UploadReleaseLinuxPackages(ctx core.Context, spec ReleaseSpec) error {
 	if len(spec.LinuxPackages) == 0 {
 		return nil
@@ -178,8 +162,7 @@ func runGitHubCLI(dir string, args []string, stdout, stderr io.Writer) error {
 	return cmd.Run()
 }
 
-// newLinuxPackageUploadError names what is already public, so the remedy is to
-// finish the upload rather than to undo the release.
+// newLinuxPackageUploadError names what is already public, so the remedy is to finish the upload.
 func newLinuxPackageUploadError(spec ReleaseSpec, err error) error {
 	return errors.Join(err, fmt.Errorf("the linux packages for v%s were not attached to its GitHub release; the tag, images and charts are already public, so do not delete the tag: attach the .deb files under %s with `gh release upload v%s <files> --clobber` (or `gh release create v%s <files> --generate-notes` when the release does not exist)",
 		spec.Version, spec.LinuxPackageDir, spec.Version, spec.Version))

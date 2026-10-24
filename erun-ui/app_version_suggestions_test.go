@@ -86,10 +86,7 @@ func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 }
 
 func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
-	// The "Version to deploy" picker must query the registry the env's runtime
-	// image was actually published to, not the hardcoded default — otherwise an
-	// env on a non-default registry can never offer its own deployed version
-	// back. The ERun fallback image stays on the canonical default registry.
+	// The picker must query the env's runtime image registry, not the default one.
 	const customRegistry = "harbor.example/team"
 	var tenantImageNamespace string
 	app := NewApp(erunUIDeps{
@@ -130,8 +127,6 @@ func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
 }
 
 func TestLoadVersionSuggestionsQueriesEachListedRegistry(t *testing.T) {
-	// The version picker must query every registry in the env's marked list, so
-	// an offered version can come from any listed registry and carries its source.
 	queried := map[string]bool{}
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
@@ -328,8 +323,6 @@ func TestLoadVersionSuggestionsSurfacesAuthNoticeForPrivateImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
-	// The private tenant image contributes an auth notice; the canonical ERun
-	// image still lists its versions.
 	if got := versionValues(result.Suggestions); strings.Join(got, "\n") != strings.Join([]string{"1.0.50", "1.0.49"}, "\n") {
 		t.Fatalf("unexpected suggestions: %+v", result.Suggestions)
 	}

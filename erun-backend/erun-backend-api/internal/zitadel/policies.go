@@ -8,12 +8,8 @@ import (
 	"strings"
 )
 
-// loginPolicy is the writable field set Zitadel's org login policy accepts,
-// proven against a real instance (these exact fields are what make sign-in
-// deterministic). GET responses wrap this under
-// "policy" alongside read-only fields (isDefault, details, ...); decoding
-// into this struct drops them, which is what makes a GET-then-POST
-// round-trip safe as an update body.
+// loginPolicy is the writable field set; decoding a GET into it drops read-only
+// fields, making GET-then-write safe.
 type loginPolicy struct {
 	AllowUsernamePassword      bool   `json:"allowUsernamePassword"`
 	AllowRegister              bool   `json:"allowRegister"`
@@ -32,21 +28,12 @@ type loginPolicy struct {
 
 type loginPolicyResponse struct {
 	Policy loginPolicy `json:"policy"`
-	// IsDefault reports whether the org has never overridden the instance
-	// default. Proto3 omits false fields, so IsDefault is absent (== false)
-	// once an org-level override exists — verified live: writing an override
-	// makes both this field and policy.isDefault disappear from later GETs.
-	// This is what decides POST (create the org's first override) vs PUT
-	// (update its existing one) in UpdateOrgSettings — POST against an
-	// already-overridden org fails with "Login Policy already exists", and
-	// PUT against a still-default org fails with "not found".
+	// IsDefault is absent (false) once the org has an override. It decides POST
+	// (first override) vs PUT (existing one); the wrong verb fails.
 	IsDefault bool `json:"isDefault"`
 }
 
-// passwordComplexityPolicy is the writable field set for the org password
-// complexity policy. Zitadel's gRPC-gateway serializes the proto uint64
-// MinLength as a JSON string (protobuf JSON mapping for 64-bit integers), so
-// the wire type here is string; OrgSettings exposes it as a real number.
+// MinLength is a string because protobuf JSON encodes uint64 as a string.
 type passwordComplexityPolicy struct {
 	MinLength    string `json:"minLength"`
 	HasUppercase bool   `json:"hasUppercase"`
@@ -67,11 +54,7 @@ type domainSearchResponse struct {
 	} `json:"result"`
 }
 
-// OrgSettings is the operator-facing view of the org settings an operator
-// actually changes: whether MFA is required, whether the platform's IdP
-// accepts self-registration, the password complexity rules, and the org's
-// verified domains (read-only here — verifying a domain is a DNS/HTTP
-// challenge flow this surface does not drive).
+// OrgSettings is the operator-facing org settings view; domains are read-only.
 type OrgSettings struct {
 	ForceMFA                  bool     `json:"forceMfa"`
 	AllowRegister             bool     `json:"allowRegister"`
@@ -83,9 +66,7 @@ type OrgSettings struct {
 	VerifiedDomains           []string `json:"verifiedDomains"`
 }
 
-// UpdateOrgSettingsParams carries only the fields the caller wants to
-// change; nil fields are left at their current Zitadel value by the
-// GET-then-POST round-trip in UpdateOrgSettings.
+// UpdateOrgSettingsParams leaves nil fields unchanged.
 type UpdateOrgSettingsParams struct {
 	ForceMFA                  *bool
 	AllowRegister             *bool
@@ -96,8 +77,6 @@ type UpdateOrgSettingsParams struct {
 	PasswordRequiresSymbol    *bool
 }
 
-// GetOrgSettings reads the org's current login policy, password complexity
-// policy, and verified domains.
 func (c *Client) GetOrgSettings(ctx context.Context) (OrgSettings, error) {
 	login, _, err := c.getLoginPolicy(ctx)
 	if err != nil {
@@ -127,12 +106,8 @@ func (c *Client) GetOrgSettings(ctx context.Context) (OrgSettings, error) {
 	}, nil
 }
 
-// UpdateOrgSettings applies only the fields set in params that actually
-// differ from the org's current value, preserving every other field via a
-// read-modify-write. Writing only on a genuine diff (the same convergence
-// discipline erun-zitadel's oidc-bootstrap sidecar uses for OIDC redirect
-// URIs) sidesteps a real Zitadel behavior: re-sending an unchanged policy
-// answers 400 "NotChanged" rather than a no-op 200.
+// UpdateOrgSettings writes only fields that differ: Zitadel answers 400
+// "NotChanged" to an unchanged policy.
 func (c *Client) UpdateOrgSettings(ctx context.Context, params UpdateOrgSettingsParams) (OrgSettings, error) {
 	if hasLoginPolicyChange(params) {
 		if err := c.updateLoginPolicy(ctx, params); err != nil {
@@ -157,11 +132,6 @@ func hasPasswordComplexityChange(params UpdateOrgSettingsParams) bool {
 		params.PasswordRequiresSymbol != nil
 }
 
-// updateLoginPolicy applies every login-policy field params sets, the same
-// read-modify-write-only-on-diff shape updatePasswordComplexityPolicy
-// already uses: each field is diffed independently via applyBoolField, so
-// adding a new controllable login-policy field means adding one more call
-// here rather than growing a positional parameter list forever.
 func (c *Client) updateLoginPolicy(ctx context.Context, params UpdateOrgSettingsParams) error {
 	login, isDefault, err := c.getLoginPolicy(ctx)
 	if err != nil {
@@ -192,9 +162,7 @@ func (c *Client) updatePasswordComplexityPolicy(ctx context.Context, params Upda
 	return nil
 }
 
-// applyPasswordComplexityParams mutates complexity in place with every field
-// params sets and reports whether any of them was a genuine change from the
-// value already there.
+// applyPasswordComplexityParams applies params in place and reports any real change.
 func applyPasswordComplexityParams(complexity *passwordComplexityPolicy, params UpdateOrgSettingsParams) bool {
 	changed := false
 	if params.MinPasswordLength != nil {
@@ -207,9 +175,6 @@ func applyPasswordComplexityParams(complexity *passwordComplexityPolicy, params 
 	return changed
 }
 
-// applyBoolField sets *field to *value and reports true when that is a
-// genuine change; a nil value (the caller didn't ask to change this field)
-// or a value matching the current one is a no-op that reports false.
 func applyBoolField(field *bool, value *bool) bool {
 	if value == nil || *field == *value {
 		return false
@@ -234,9 +199,7 @@ func (c *Client) getLoginPolicy(ctx context.Context) (loginPolicy, bool, error) 
 	return resp.Policy, resp.IsDefault, nil
 }
 
-// writeLoginPolicy creates the org's first override with POST when it is
-// still on the instance default, or updates its existing override with PUT
-// otherwise — the two verbs are not interchangeable (see IsDefault's doc).
+// writeLoginPolicy POSTs the first override and PUTs an existing one (see IsDefault).
 func (c *Client) writeLoginPolicy(ctx context.Context, policy loginPolicy, isDefault bool) error {
 	method := http.MethodPut
 	if isDefault {

@@ -2,8 +2,7 @@
 
 package core
 
-// platformSessionProcesses reports that this platform has no session-capable
-// source of its own, leaving the session check on its ps fallback.
+// platformSessionProcesses has no native source here; the ps fallback is used.
 func platformSessionProcesses() ([]SessionProcess, bool) {
 	return nil, false
 }

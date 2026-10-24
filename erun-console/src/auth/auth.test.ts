@@ -13,11 +13,7 @@ import {
   storedToken,
 } from './auth';
 
-// Unit coverage for the OIDC Authorization Code + PKCE mechanics with the
-// discovery + token endpoints mocked. The full browser sign-in against a real
-// Zitadel v4 is exercised separately by the Playwright suite in ../../playwright;
-// this locks the callback exchange, state validation, config gating, and the
-// dev-token fallback.
+// OIDC PKCE mechanics with discovery and token endpoints mocked; the real-IdP flow is in ../../playwright.
 
 const DISCOVERY = {
   authorization_endpoint: 'http://localhost:8080/oauth/v2/authorize',
@@ -79,21 +75,14 @@ describe('oidcConfig', () => {
   });
 });
 
-// jsdom's Location.assign is non-configurable, so it cannot be vi.spyOn'd or
-// redefined in place; replacing window.location itself with a stub object is
-// the standard workaround. realLocation lets restoreLocation put the live
-// jsdom Location back afterwards, so later tests' history.replaceState-based
-// navigation (setCallbackUrl) keeps working against the real thing.
+// jsdom's Location.assign is non-configurable, so window.location is replaced with a stub.
 let realLocation: Location | undefined;
 
 function stubLocationAssign(): ReturnType<typeof vi.fn> {
   const assign = vi.fn();
   realLocation = window.location;
-  // beginLogin only ever calls .assign(...) on window.location; origin,
-  // pathname, and search are copied through (plain data properties, unlike
-  // the real Location's own methods) because resolveToken's invalid_scope
-  // retry reads search (via authCallbackError) before calling beginLogin, and
-  // cleanCallbackUrl reads origin/pathname to rewrite the visible URL.
+  // origin, pathname and search are copied because the invalid_scope retry and
+  // cleanCallbackUrl read them.
   Object.defineProperty(window, 'location', {
     value: {
       assign,
@@ -133,10 +122,6 @@ describe('beginLogin', () => {
     expect(url.searchParams.has('prompt')).toBe(false);
   });
 
-  // The tenant switcher (shell/tenantSwitch.ts) passes select_account so the
-  // IdP offers an account/org picker instead of silently reusing whatever
-  // session it already holds — without this, "switch" could never land on a
-  // different tenant for a caller still signed into the browser.
   it('carries an explicit prompt through to the authorization request', async () => {
     vi.stubGlobal(
       'fetch',
@@ -150,10 +135,6 @@ describe('beginLogin', () => {
     expect(url.searchParams.get('prompt')).toBe('select_account');
   });
 
-  // Without this scope a shared, org-scoped issuer's token carries
-  // no org claim, so an already-enrolled operator's console session cannot
-  // resolve its tenant even though the CLI/desktop (which already request
-  // this scope by default) resolve fine.
   it('requests the org-claim scope by default', async () => {
     vi.stubGlobal(
       'fetch',
@@ -213,7 +194,6 @@ describe('completeLogin', () => {
     const token = await completeLogin(config);
     expect(token).toBe('the.jwt.token');
     expect(storedToken()).toBe('the.jwt.token');
-    // The token exchange posts the code + the PKCE verifier to the token endpoint.
     const exchange = calls.find((c) => c.url === DISCOVERY.token_endpoint);
     expect(exchange).toBeDefined();
     const params = new URLSearchParams(exchange?.body as string);
@@ -248,10 +228,6 @@ describe('resolveToken', () => {
     expect(await resolveToken(undefined)).toBeUndefined();
   });
 
-  // A dedicated/BYO issuer has never heard of the org-claim scope
-  // and refuses the authorization request with error=invalid_scope. resolveToken
-  // must retry sign-in once, without that scope, rather than treating the
-  // refusal as "no token" (which would loop back to the landing screen).
   it('retries sign-in without the org-claim scope after an invalid_scope callback', async () => {
     setCallbackUrl('?error=invalid_scope&error_description=nope');
     vi.stubGlobal(
@@ -433,11 +409,6 @@ describe('signOut', () => {
     expect(storedToken()).toBeUndefined();
   });
 
-  // The org-claim scope retry is meant to bound one sign-in attempt, not
-  // survive a sign-out. Without this, a dedicated/BYO issuer that already
-  // consumed its one retry would get no retry on the next sign-in after
-  // sign-out either, and resolveToken would bounce back to the sign-in
-  // screen forever instead of retrying.
   it('clears the org-claim scope retry flag so the next sign-in can retry again', async () => {
     sessionStorage.setItem('erun.console.oidcOrgScopeRetried', '1');
     vi.stubGlobal(

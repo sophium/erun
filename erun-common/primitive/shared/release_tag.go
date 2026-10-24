@@ -57,14 +57,9 @@ func CanSkipExistingReleaseTag(ctx core.Context, spec ReleaseSpec, projectRoot, 
 	return true, nil
 }
 
-// releaseTagMismatchError diagnoses a tag that exists but not at HEAD. When it
-// is unpushed and the release branch's remote history has never incorporated
-// it, that is not a real collision — it is a leftover local tag+commit from a
-// release that was interrupted before it published anything (e.g. the
-// pod holding the worktree was replaced mid-release). Reclaiming it
-// automatically is judged too aggressive for a git tag inside a release flow,
-// so the refusal instead names the diagnosis and the exact remedy, rather than
-// leaving the operator to work out both by hand.
+// releaseTagMismatchError diagnoses a tag not at HEAD. An unpushed tag origin never
+// incorporated is an interrupted release's leftover; the refusal names the remedy rather
+// than reclaiming it automatically.
 func releaseTagMismatchError(ctx core.Context, spec ReleaseSpec, projectRoot, tag, tagCommit, headCommit string, runGit gitx.GitCommandRunnerFunc) error {
 	base := fmt.Errorf("release tag %q already exists at %s, expected current HEAD %s", tag, tagCommit, headCommit)
 	pushed, err := GitRemoteTagExists(ctx, projectRoot, "origin", tag)
@@ -79,12 +74,8 @@ func releaseTagMismatchError(ctx core.Context, spec ReleaseSpec, projectRoot, ta
 		base, tag, tagCommit, spec.Branch, tag)
 }
 
-// releaseBaseBranchIncorporates reports whether commit is already part of the
-// release branch's remote history, fetching it fresh the same way
-// releaseBaseBranchAhead does. known is false when the read was inconclusive
-// (no remote, no network, unresolved ref) — an unknown answer is never
-// treated as "reachable" or "unreachable", since either would risk offering
-// the reclaim message, or withholding it, on a guess.
+// releaseBaseBranchIncorporates reports whether origin's branch contains commit; known is
+// false when inconclusive, which is never treated as either answer.
 func releaseBaseBranchIncorporates(projectRoot, branch, commit string, runGit gitx.GitCommandRunnerFunc) (reachable bool, known bool) {
 	branch = strings.TrimSpace(branch)
 	if branch == "" || commit == "" {
@@ -104,30 +95,14 @@ func releaseBaseBranchIncorporates(projectRoot, branch, commit string, runGit gi
 	return false, false
 }
 
-// ReleaseStampCommitPrefix is the subject newReleaseStage's stamp commit
-// always carries ("[skip ci] release <version>"), so a retry can recognize
-// its own leftover stamp commits sitting at HEAD.
+// ReleaseStampCommitPrefix lets a retry recognise its own leftover stamp commits.
 const ReleaseStampCommitPrefix = "[skip ci] release "
 
-// releaseStampWalkLimit bounds how many leading stamp commits are ever
-// walked past when looking for a leftover. A release stamps at most once per
-// attempt, so a real chain this long could only be repeated failed retries,
-// never legitimate history; the cap keeps a pathological repository from
-// turning this into an unbounded run of fetches.
+// releaseStampWalkLimit bounds the walk; a long chain can only be repeated failed retries.
 const releaseStampWalkLimit = 20
 
-// ResolveReleaseVersionCommit is the commit whose short sha names a
-// candidate/prerelease version (resolveReleaseVersion). Root AGENTS.md
-// "Release Rules" calls the pre-publish stages "recoverable by re-running",
-// but a release that fails after its "release" stage stamp leaves that stamp
-// sitting, unpushed, at HEAD — naming the retry's version after the stamp
-// rather than the change actually being released stacks another stamp on
-// the next attempt (each one resolving yet another wrong version) and
-// invalidates the build fingerprint cache, since the stamp changes tracked
-// files. Skipping past a leading run of such stamps is safe only
-// while each one is unpushed and origin's branch history has never
-// incorporated it — the same leftover-vs-real-collision boundary
-// releaseTagMismatchError already draws for the release tag.
+// ResolveReleaseVersionCommit names the version after the change, skipping leftover
+// unpushed stamp commits at HEAD so a retry neither stacks stamps nor mints a new version.
 func ResolveReleaseVersionCommit(ctx core.Context, projectRoot, branch string, resolveCommit gitx.GitValueResolverFunc, runGit gitx.GitCommandRunnerFunc) (string, error) {
 	base, found, err := FindLeftoverReleaseStampBase(ctx, projectRoot, branch, runGit)
 	if err != nil {
@@ -140,12 +115,8 @@ func ResolveReleaseVersionCommit(ctx core.Context, projectRoot, branch string, r
 	return gitShortCommitOf(ctx, projectRoot, base)
 }
 
-// FindLeftoverReleaseStampBase walks HEAD's parents past a leading run of
-// the release stage's own stamp commits, stopping at the first commit that
-// either is not a stamp or is already reachable from origin/branch — a real,
-// previously published stamp, not an interrupted attempt's leftover. found
-// is false when HEAD carries no such leftover, meaning version resolution
-// should keep using HEAD as before.
+// FindLeftoverReleaseStampBase walks past leading unpushed stamp commits; found is false when
+// HEAD carries none.
 func FindLeftoverReleaseStampBase(ctx core.Context, projectRoot, branch string, runGit gitx.GitCommandRunnerFunc) (string, bool, error) {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
@@ -182,11 +153,7 @@ func FindLeftoverReleaseStampBase(ctx core.Context, projectRoot, branch string, 
 	return base, true, nil
 }
 
-// isLeftoverReleaseStampCommit reports whether commit is one of the release
-// stage's own stamp commits (by subject) that is also unpushed and not yet
-// incorporated by origin/branch — the two conditions that together make it a
-// safe-to-skip-past leftover from an interrupted attempt rather than real,
-// published history.
+// isLeftoverReleaseStampCommit: a stamp subject that origin/branch has not incorporated.
 func isLeftoverReleaseStampCommit(projectRoot, branch, commit string, runGit gitx.GitCommandRunnerFunc) (bool, error) {
 	subject, err := GitCommitSubject(projectRoot, commit)
 	if err != nil {

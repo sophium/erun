@@ -27,16 +27,11 @@ import type { CreateInviteInput, Invite } from '../app/api/identityApi';
 import type { CreateInviteState, InvitesState } from './controller';
 import { useInvitesController } from './controller';
 
-// acceptURL builds the invite link from the current origin — the backend
-// has no reliable notion of its own public console URL, but the browser
-// rendering this page always does.
+// Built from the browser origin: the backend does not know its public console URL.
 function acceptURL(token: string): string {
   return `${window.location.origin}/accept-invite?token=${encodeURIComponent(token)}`;
 }
 
-// InviteLinkDialog shows the accept link once, right after creation — the
-// same "shown once, copyable, dismiss clears it" shape UsersPanel's
-// TemporaryPasswordDialog uses for a one-time credential.
 function InviteLinkDialog({
   invite,
   onDismiss,
@@ -227,11 +222,7 @@ function InvitesBody({
   return <InvitesTable invites={invitesState.invites} onRevoke={onRevoke} />;
 }
 
-// InvitesPanel is the console's invite-only registration surface:
-// create a revocable, single-use invite link for this tenant, list the
-// outstanding ones, and revoke. Unlike Users/OrgSettings/SmtpSettings, this
-// is not restricted to an OPERATIONS tenant — every tenant needs its own way
-// to add members, since self-registration is closed.
+// Not restricted to OPERATIONS: self-registration is closed, so every tenant needs invites.
 export function InvitesPanel({ token }: { token: string }): React.ReactElement {
   const { invitesState, createState, create, revoke, dismissCreated } = useInvitesController(token);
   return (

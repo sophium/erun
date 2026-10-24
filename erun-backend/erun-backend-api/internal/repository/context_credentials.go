@@ -7,8 +7,8 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// ContextCredentialRepository custodies a context's k3s admin token, encrypted at
-// rest and deliberately kept out of the contexts read model. One row per context.
+// ContextCredentialRepository custodies a context's k3s admin token, encrypted
+// at rest and kept out of the contexts read model.
 type ContextCredentialRepository struct {
 	txs    *TxManager
 	cipher *secrets.Cipher
@@ -18,7 +18,7 @@ func NewContextCredentialRepository(txs *TxManager, cipher *secrets.Cipher) *Con
 	return &ContextCredentialRepository{txs: txs, cipher: cipher}
 }
 
-// Set upserts a context's k3s admin token; tenant_id is owned by the RLS default.
+// Set upserts a context's k3s admin token; tenant_id comes from the RLS default.
 func (r *ContextCredentialRepository) Set(ctx context.Context, contextID, k3sAdminToken string) error {
 	encrypted, err := r.cipher.Encrypt([]byte(k3sAdminToken))
 	if err != nil {
@@ -35,19 +35,10 @@ func (r *ContextCredentialRepository) Set(ctx context.Context, contextID, k3sAdm
 	})
 }
 
-// Get returns the decrypted k3s admin token for a context owned by tenantID,
-// or ErrNotFound when that tenant's context has no custodied token.
-//
-// The owning tenant is an explicit argument and an explicit predicate.
-// erun_operations' RLS policy on context_credentials is unconditional
-// (USING (true)), so for an OPERATIONS caller nothing but this WHERE clause
-// scopes the read: without it, naming any tenant's context id released that
-// tenant's cluster-admin token, which is then written into a placement Secret
-// and handed to a Job running kubectl against that tenant's cluster. Every
-// path that reaches here knows the owner without consulting a security
-// context — the environment row carries tenant_id, and the delete reconciler
-// runs with no tenant in context at all — which is why the tenant travels as
-// a parameter rather than being read back from ctx.
+// Get returns the decrypted k3s admin token for tenantID's context, or
+// ErrNotFound. tenantID is an explicit predicate because erun_operations' RLS
+// policy is unconditional and callers (e.g. the delete reconciler) have no
+// tenant in context.
 func (r *ContextCredentialRepository) Get(ctx context.Context, tenantID, contextID string) (string, error) {
 	var encrypted []byte
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {

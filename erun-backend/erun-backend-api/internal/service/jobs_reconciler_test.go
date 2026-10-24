@@ -20,9 +20,6 @@ func (f *fakeJobSweeper) SweepAbandoned(_ context.Context, ttl time.Duration) ([
 	return f.abandoned, f.err
 }
 
-// TestJobAbandonReconcilerReportsHowManyItClosed: the count is what the
-// scheduled fire returns to DBOS, so a sweep that closed jobs must say so
-// rather than reporting a bare success.
 func TestJobAbandonReconcilerReportsHowManyItClosed(t *testing.T) {
 	sweeper := &fakeJobSweeper{abandoned: []model.Job{{JobID: "job-1"}, {JobID: "job-2"}}}
 	r := &JobAbandonReconciler{jobs: sweeper, ttl: DefaultJobAbandonTTL}
@@ -36,8 +33,6 @@ func TestJobAbandonReconcilerReportsHowManyItClosed(t *testing.T) {
 	}
 }
 
-// TestJobAbandonReconcilerUsesTheConfiguredTTL: the TTL is the reconciler's
-// own policy value, passed through to the sweep rather than re-derived there.
 func TestJobAbandonReconcilerUsesTheConfiguredTTL(t *testing.T) {
 	sweeper := &fakeJobSweeper{}
 	r := &JobAbandonReconciler{jobs: sweeper, ttl: 7 * time.Minute}
@@ -50,10 +45,6 @@ func TestJobAbandonReconcilerUsesTheConfiguredTTL(t *testing.T) {
 	}
 }
 
-// TestJobAbandonReconcilerPropagatesASweepFailure: a sweep that could not
-// reach the database must surface as a failed tick, not as a quiet zero. A
-// scheduler that cannot tell the two apart stops retrying work that never
-// happened.
 func TestJobAbandonReconcilerPropagatesASweepFailure(t *testing.T) {
 	sweeper := &fakeJobSweeper{err: errors.New("connection reset")}
 	r := &JobAbandonReconciler{jobs: sweeper, ttl: DefaultJobAbandonTTL}
@@ -68,8 +59,6 @@ func TestJobAbandonReconcilerPropagatesASweepFailure(t *testing.T) {
 	}
 }
 
-// TestJobAbandonReconcilerOfAQuietPlatformIsNotAFailure: the ordinary result
-// on a platform where nothing has been abandoned is zero closed and no error.
 func TestJobAbandonReconcilerOfAQuietPlatformIsNotAFailure(t *testing.T) {
 	r := &JobAbandonReconciler{jobs: &fakeJobSweeper{}, ttl: DefaultJobAbandonTTL}
 

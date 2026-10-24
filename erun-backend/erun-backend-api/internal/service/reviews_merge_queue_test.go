@@ -11,17 +11,11 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// TestMarkBuildResultPromotesTheQueueHeadNotTheBuiltReview: a build succeeding
-// for one review can promote a *different* review — whichever is at the head
-// of that target branch's queue. Every caller of MarkBuildResult has to
-// dispatch the review it actually returns, not assume it is the one the build
-// belonged to.
 func TestMarkBuildResultPromotesTheQueueHeadNotTheBuiltReview(t *testing.T) {
 	reviews := newFakeReviewRepo(
 		model.Review{ReviewID: "review-head", TargetBranch: "main", Status: model.ReviewStatusReady},
 		model.Review{ReviewID: "review-built", TargetBranch: "main", Status: model.ReviewStatusOpen},
 	)
-	// review-head is already queued, ahead of the review this build is for.
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-head"}}
 	reviews.nextID = 1
 	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
@@ -44,8 +38,6 @@ func TestMarkBuildResultPromotesTheQueueHeadNotTheBuiltReview(t *testing.T) {
 	}
 }
 
-// TestMarkBuildResultFailureDequeuesAndPromotesNothing: a failed build must
-// fail its own review and never report a promotion.
 func TestMarkBuildResultFailureDequeuesAndPromotesNothing(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusMerge})
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
@@ -66,12 +58,6 @@ func TestMarkBuildResultFailureDequeuesAndPromotesNothing(t *testing.T) {
 	}
 }
 
-// TestAdvanceMergeQueueRefusesWhileAnotherReviewIsMerging is the invariant the
-// gate's serialisation depends on: only one review may be MERGE per target
-// branch at a time. The refusal must name the review holding the slot — which
-// review it is decides the operator's next move (finish it, or requeue it back
-// to READY), and a bare not-found sends them looking for a missing endpoint, a
-// deleted review, or a mistyped branch instead.
 func TestAdvanceMergeQueueRefusesWhileAnotherReviewIsMerging(t *testing.T) {
 	reviews := newFakeReviewRepo(
 		model.Review{ReviewID: "review-merging", Name: "Land the widget", SourceBranch: "feature/widget", TargetBranch: "main", Status: model.ReviewStatusMerge},
@@ -94,10 +80,6 @@ func TestAdvanceMergeQueueRefusesWhileAnotherReviewIsMerging(t *testing.T) {
 	}
 }
 
-// TestOverrideAdvanceMergeQueueRefusesWhileAnotherReviewIsMerging pins the
-// override to the same occupancy rule: bypassing the thread gate does not
-// bypass the one-MERGE-per-branch invariant, and its refusal names the same
-// blocking review rather than falling through to a not-found.
 func TestOverrideAdvanceMergeQueueRefusesWhileAnotherReviewIsMerging(t *testing.T) {
 	reviews := newFakeReviewRepo(
 		model.Review{ReviewID: "review-merging", Name: "Land the widget", SourceBranch: "feature/widget", TargetBranch: "main", Status: model.ReviewStatusMerge},
@@ -116,9 +98,6 @@ func TestOverrideAdvanceMergeQueueRefusesWhileAnotherReviewIsMerging(t *testing.
 	}
 }
 
-// TestAdvanceMergeQueueRefusesUnresolvedThreads: a review with an open
-// comment thread must not advance, and the refusal must name how many threads
-// and which review, not just "cannot advance".
 func TestAdvanceMergeQueueRefusesUnresolvedThreads(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
@@ -143,18 +122,13 @@ func TestAdvanceMergeQueueRefusesUnresolvedThreads(t *testing.T) {
 	}
 }
 
-// TestAdvanceMergeQueuePromotesWhenAllThreadsResolved is the regression the
-// gate is most likely to introduce: a review with every thread resolved (or
-// whose only open comment is a reply, which never carries its own status)
-// must still advance exactly as it did before the gate existed.
 func TestAdvanceMergeQueuePromotesWhenAllThreadsResolved(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
 	comments := &fakeReviewComments{byReview: map[string][]model.Comment{
 		"review-1": {
 			{CommentID: "c1", ReviewID: "review-1", Status: model.CommentStatusClosed},
-			// A reply on the resolved thread; replies never carry their own
-			// status, so an OPEN one here must not count as unresolved.
+			// Replies never carry their own status, so an OPEN reply is not unresolved.
 			{CommentID: "c2", ReviewID: "review-1", ParentCommentID: "c1", Status: model.CommentStatusOpen},
 		},
 	}}
@@ -172,10 +146,6 @@ func TestAdvanceMergeQueuePromotesWhenAllThreadsResolved(t *testing.T) {
 	}
 }
 
-// TestMarkBuildResultToleratesQueueHeadWithUnresolvedThreads guards the
-// regression the gate would otherwise introduce into build reporting: the
-// queue head being blocked belongs to a different review than the one whose
-// build just succeeded, so reporting that build must not fail.
 func TestMarkBuildResultToleratesQueueHeadWithUnresolvedThreads(t *testing.T) {
 	reviews := newFakeReviewRepo(
 		model.Review{ReviewID: "review-head", TargetBranch: "main", Status: model.ReviewStatusReady},
@@ -203,10 +173,6 @@ func TestMarkBuildResultToleratesQueueHeadWithUnresolvedThreads(t *testing.T) {
 	}
 }
 
-// TestMarkBuildResultToleratesAnotherReviewMerging guards the occupied-slot
-// refusal on the build-reporting path: the review already at MERGE is not
-// necessarily the one whose build just succeeded, so its occupancy must not
-// fail that report any more than a gated queue head does.
 func TestMarkBuildResultToleratesAnotherReviewMerging(t *testing.T) {
 	reviews := newFakeReviewRepo(
 		model.Review{ReviewID: "review-merging", TargetBranch: "main", Status: model.ReviewStatusMerge},
@@ -226,12 +192,7 @@ func TestMarkBuildResultToleratesAnotherReviewMerging(t *testing.T) {
 	}
 }
 
-// TestMarkBuildResultToleratesAnAmbiguousQueue is the same shape of
-// non-failure for the refusal that names no repository: the build is already
-// recorded and its review already READY by the time the promotion is
-// attempted, and the ambiguity is about which repository's queue an
-// unfiltered promotion would be for. Failing the report would tell a caller
-// their build did not land when it did, and a retry would record a second one.
+// Failing the report would make a retry record a second build.
 func TestMarkBuildResultToleratesAnAmbiguousQueue(t *testing.T) {
 	reviews := newFakeReviewRepo(
 		model.Review{ReviewID: "review-erun", Repository: "https://github.com/sophium/erun", TargetBranch: "main", Status: model.ReviewStatusReady},
@@ -256,10 +217,6 @@ func TestMarkBuildResultToleratesAnAmbiguousQueue(t *testing.T) {
 	}
 }
 
-// TestRequeueRefusesAReviewThatIsNotMerging: the missed-merge-window requeue
-// only recovers a review holding the queue's slot. The review was resolved by
-// id, so it exists and the caller can see it — the refusal names the status it
-// actually holds rather than reporting a not-found for a review in plain sight.
 func TestRequeueRefusesAReviewThatIsNotMerging(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
 	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
@@ -277,9 +234,6 @@ func TestRequeueRefusesAReviewThatIsNotMerging(t *testing.T) {
 	}
 }
 
-// TestRequeueMovesAMergingReviewBackToReady is the recovery the occupied-slot
-// refusal points an operator at: a review stuck at MERGE returns to READY and
-// rejoins its target branch's queue, freeing the slot for the next advance.
 func TestRequeueMovesAMergingReviewBackToReady(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusMerge})
 	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
@@ -296,9 +250,6 @@ func TestRequeueMovesAMergingReviewBackToReady(t *testing.T) {
 	}
 }
 
-// TestOverrideAdvanceMergeQueueRequiresReason: the override is the one
-// deliberate escape from the gate, and a blank reason is a quiet bypass, not
-// a deliberate one.
 func TestOverrideAdvanceMergeQueueRequiresReason(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
@@ -318,10 +269,6 @@ func TestOverrideAdvanceMergeQueueRequiresReason(t *testing.T) {
 	}
 }
 
-// TestOverrideAdvanceMergeQueueBypassesGateAndAudits proves the override
-// actually gets past the gate the previous tests confirm is otherwise
-// enforced, and that doing so leaves a durable, reason-carrying audit record
-// rather than a quiet bypass.
 func TestOverrideAdvanceMergeQueueBypassesGateAndAudits(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
@@ -356,8 +303,6 @@ func TestOverrideAdvanceMergeQueueBypassesGateAndAudits(t *testing.T) {
 	}
 }
 
-// TestOverrideAdvanceMergeQueueFailsClosedWithoutAuditLogger: an override with
-// nowhere to record its reason must refuse, not promote unaudited.
 func TestOverrideAdvanceMergeQueueFailsClosedWithoutAuditLogger(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
@@ -371,9 +316,6 @@ func TestOverrideAdvanceMergeQueueFailsClosedWithoutAuditLogger(t *testing.T) {
 	}
 }
 
-// TestOverrideAdvanceMergeQueueRequiresSecurityContext: the audit record needs
-// a caller identity to be worth anything; a request that somehow reached the
-// service with none must refuse rather than log an anonymous override.
 func TestOverrideAdvanceMergeQueueRequiresSecurityContext(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
@@ -387,20 +329,13 @@ func TestOverrideAdvanceMergeQueueRequiresSecurityContext(t *testing.T) {
 	}
 }
 
-// The reported failure: a review recorded no repository, so a tenant serving
-// two repositories had one queue per target branch and a promotion took
-// whichever review happened to sort first. The gate then ran in the wrong
-// repository's checkout — against a branch that need not exist there — and
-// contributed nothing, which the gate reports as a skip rather than a
-// failure. These two cases are the two halves of that: naming the repository
-// takes the right head, and naming none refuses rather than guessing.
+// Naming the repository takes that repository's head; naming none refuses.
 func TestAdvanceMergeQueuePromotesTheNamedRepositorysOwnHead(t *testing.T) {
 	reviews := newFakeReviewRepo(
 		model.Review{ReviewID: "review-erun", Repository: "https://github.com/sophium/erun", TargetBranch: "main", Status: model.ReviewStatusReady},
 		model.Review{ReviewID: "review-other", Repository: "https://github.com/sophium/other", TargetBranch: "main", Status: model.ReviewStatusReady},
 	)
-	// The other repository's review is queued first, so a promotion keyed on
-	// the target branch alone would take it.
+	// Queued first, so a branch-only promotion would take it.
 	reviews.queue = []model.ReviewMergeQueueEntry{
 		{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-other"},
 		{ReviewMergeQueueID: 2, TargetBranch: "main", ReviewID: "review-erun"},
@@ -447,10 +382,6 @@ func TestAdvanceMergeQueueRefusesAQueueThatIsNotOneRepositorys(t *testing.T) {
 	}
 }
 
-// A queue holding reviews from one repository — including the single queue
-// every review created before the platform recorded a repository shares —
-// still promotes exactly as it always has: refusing it would strand work the
-// platform has no other way to advance.
 func TestAdvanceMergeQueuePromotesAnUnrecordedQueueThatIsStillOneRepository(t *testing.T) {
 	reviews := newFakeReviewRepo(
 		model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady},
@@ -471,11 +402,6 @@ func TestAdvanceMergeQueuePromotesAnUnrecordedQueueThatIsStillOneRepository(t *t
 	}
 }
 
-// One named repository beside reviews created before the platform
-// recorded a repository is one repository's queue, not two. Counting the
-// absence as a repository refused a tenant's own queue, and the rows it
-// refused to promote were the legacy ones — which are reachable here, in
-// queue order, exactly as if they had recorded a repository.
 func TestAdvanceMergeQueuePromotesAQueueOfOneRepositoryPlusUnrecordedRows(t *testing.T) {
 	reviews := newFakeReviewRepo(
 		model.Review{ReviewID: "review-legacy", TargetBranch: "main", Status: model.ReviewStatusReady},
@@ -496,10 +422,6 @@ func TestAdvanceMergeQueuePromotesAQueueOfOneRepositoryPlusUnrecordedRows(t *tes
 	}
 }
 
-// A queue that really is several repositories' still refuses, and now names
-// the rows it cannot attribute: they belong to none of the named
-// repositories, so a caller told only the repositories would have to work out
-// for itself which rows are stuck.
 func TestAdvanceMergeQueueNamesTheRowsItCannotAttribute(t *testing.T) {
 	reviews := newFakeReviewRepo(
 		model.Review{ReviewID: "review-erun", Repository: "https://github.com/sophium/erun", TargetBranch: "main", Status: model.ReviewStatusReady},

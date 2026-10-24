@@ -16,9 +16,7 @@ type stubImageChecker struct {
 	calls      int
 	gotImage   string
 	gotControl string
-	// present/presentErr answer ConfirmedPresent, tracked separately from the
-	// ConfirmedMissing fields above since a caller may probe both in one run
-	// (see reportRuntimeImageFallbackSubstitution).
+	// present/presentErr answer ConfirmedPresent; a caller may probe both.
 	present           bool
 	presentErr        error
 	presentCalls      int
@@ -40,9 +38,7 @@ func (c *stubImageChecker) ConfirmedPresent(_ context.Context, image, control st
 	return c.present, c.presentErr
 }
 
-// TestResolveBootstrapImage locks the synchronous precondition Start/StartDeploy
-// run before enqueueing the durable workflow: only a registry-confirmed
-// absence selects bootstrap, matching RuntimeImageChecker's fail-open contract.
+// TestResolveBootstrapImage: only a registry-confirmed absence selects bootstrap.
 func TestResolveBootstrapImage(t *testing.T) {
 	config := EnvDeployConfig{Registry: "ghcr.io/sophium"}
 	input := EnvProvisionInput{Tenant: "acme", Version: "1.2.3"}
@@ -63,9 +59,6 @@ func TestResolveBootstrapImage(t *testing.T) {
 		if checker.gotImage != "ghcr.io/sophium/acme-devops:1.2.3" {
 			t.Fatalf("checker probed %q", checker.gotImage)
 		}
-		// The control reference is the image the bootstrap itself would run, so
-		// the probe's credential is proven against something this deploy already
-		// depends on resolving.
 		if checker.gotControl != "ghcr.io/sophium/erun-devops:1.2.3" {
 			t.Fatalf("checker control reference = %q, want the canonical ghcr.io/sophium/erun-devops:1.2.3", checker.gotControl)
 		}
@@ -86,11 +79,6 @@ func TestResolveBootstrapImage(t *testing.T) {
 	})
 }
 
-// TestReportRuntimeImageFallbackSubstitutionReportsAConfirmedSubstitution
-// locks that the runtime-image fallback names the substitution only when a
-// differently-named image the platform actually publishes is affirmatively
-// confirmed present; the sibling test below locks every case where it must
-// stay silent instead.
 func TestReportRuntimeImageFallbackSubstitutionReportsAConfirmedSubstitution(t *testing.T) {
 	config := EnvDeployConfig{Registry: "ghcr.io/sophium", PlatformTenant: "frs"}
 	operationsInput := EnvProvisionInput{Tenant: "operations", TenantType: string(model.TenantTypeOperations), Version: "1.2.3"}
@@ -114,9 +102,6 @@ func TestReportRuntimeImageFallbackSubstitutionReportsAConfirmedSubstitution(t *
 	}
 }
 
-// assertNoSubstitutionReported drives resolveBootstrapImage and asserts the
-// fallback substitution log line never fires, so each silence scenario below
-// reads as the precondition it violates plus the one assertion that matters.
 func assertNoSubstitutionReported(t *testing.T, p *EnvProvisioner, input EnvProvisionInput, reason string) {
 	t.Helper()
 	output := captureLog(t, func() { p.resolveBootstrapImage(input) })
@@ -125,10 +110,6 @@ func assertNoSubstitutionReported(t *testing.T, p *EnvProvisioner, input EnvProv
 	}
 }
 
-// TestReportRuntimeImageFallbackSubstitutionStaysSilent covers every
-// precondition that must suppress the report: an unconfirmed probe, a
-// non-operations tenant, no declared platform tenant, and a tenant already
-// named the declared tenant.
 func TestReportRuntimeImageFallbackSubstitutionStaysSilent(t *testing.T) {
 	config := EnvDeployConfig{Registry: "ghcr.io/sophium", PlatformTenant: "frs"}
 	operationsInput := EnvProvisionInput{Tenant: "operations", TenantType: string(model.TenantTypeOperations), Version: "1.2.3"}
@@ -160,9 +141,7 @@ func TestReportRuntimeImageFallbackSubstitutionStaysSilent(t *testing.T) {
 	})
 }
 
-// TestNamespaceQuotaQuantityConversion locks the millicore/MiB/GiB -> Kubernetes
-// quantity string rendering deployJobParams uses, and that zero (no cap
-// configured) renders empty rather than "0m"/"0Mi"/"0Gi".
+// Zero (no cap) renders empty rather than "0m"/"0Mi"/"0Gi".
 func TestNamespaceQuotaQuantityConversion(t *testing.T) {
 	params := deployJobParams(
 		EnvDeployConfig{Registry: "ghcr.io/sophium", PlatformNamespace: "erun-prod", DeployerServiceAccount: "erun-env-deployer"},
@@ -181,9 +160,6 @@ func TestNamespaceQuotaQuantityConversion(t *testing.T) {
 	}
 }
 
-// TestDeployJobParams pins the placement the deploy Job runs with: the tenant's
-// own <registry>/<tenant>-devops:<version> runtime image (image-baked config),
-// in the platform namespace, under the cluster-admin deployer ServiceAccount.
 func TestDeployJobParams(t *testing.T) {
 	params := deployJobParams(
 		EnvDeployConfig{
@@ -211,11 +187,6 @@ func TestDeployJobParams(t *testing.T) {
 	}
 }
 
-// TestDeployJobParamsBootstrap locks the fallback: a tenant confirmed to
-// have never published its own image (Bootstrap, set by resolveBootstrapImage
-// before the durable workflow runs) gets a Job that runs the canonical
-// erun-devops image and threads --runtime-image at it, instead of a Job that
-// can only ImagePullBackOff on an image nobody ever pushed.
 func TestDeployJobParamsBootstrap(t *testing.T) {
 	params := deployJobParams(
 		EnvDeployConfig{
@@ -234,10 +205,6 @@ func TestDeployJobParamsBootstrap(t *testing.T) {
 	}
 }
 
-// TestDeployJobParamsExposeTargetIP: the platform's ingress IP threads through
-// to every deploy Job unchanged, so deployexec decides whether to chain
-// expose. An empty config (the default) leaves it empty too, matching a
-// platform with no ERUN_ENV_EXPOSE_TARGET_IP configured.
 func TestDeployJobParamsExposeTargetIP(t *testing.T) {
 	params := deployJobParams(
 		EnvDeployConfig{
@@ -258,10 +225,6 @@ func TestDeployJobParamsExposeTargetIP(t *testing.T) {
 	}
 }
 
-// TestDeployJobParamsExposePlatformCoordinates: the services zone and
-// platform namespace the control plane already knows for its own purposes
-// (DNS-01 cert issuance, Job placement) thread through so the chained expose
-// step can resolve a hostname without a git checkout.
 func TestDeployJobParamsExposePlatformCoordinates(t *testing.T) {
 	params := deployJobParams(
 		EnvDeployConfig{

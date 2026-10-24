@@ -8,11 +8,8 @@ CREATE POLICY invites_tenant_isolation
   USING (tenant_id = erun_current_tenant_id())
   WITH CHECK (tenant_id = erun_current_tenant_id());
 
--- erun_operations also backs the unauthenticated accept endpoint's
--- token lookup: nobody has signed in yet when a token is presented, so
--- there is no tenant to scope the initial SELECT by. See
--- repository.TxManager.WithinSystemTx for the narrow, reviewable place
--- that role is assumed outside a real operations-tenant caller.
+-- Also backs the unauthenticated invite-accept token lookup, which has no tenant yet
+-- (see repository.TxManager.WithinSystemTx).
 CREATE POLICY invites_operations_access
   ON invites
   FOR ALL

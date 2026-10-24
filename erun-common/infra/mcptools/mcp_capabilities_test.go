@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// The table is the allowlist. A tool that writes anything is admin, and a tool
-// nobody has classified is admin too — a new tool must be unreachable to a
-// read-only caller until someone decides otherwise, not silently reachable.
 func TestOnlyObservationIsReadCapability(t *testing.T) {
 	for _, tool := range []string{
 		"version", "list", "idle", "idle_stop_history", "context_list",
@@ -21,10 +18,7 @@ func TestOnlyObservationIsReadCapability(t *testing.T) {
 		}
 	}
 
-	// Remote execution, everything that mutates, and the leases that hold an
-	// environment awake (and therefore spend money). deploy/context_start/
-	// context_stop/resize are deliberately absent here -- they require the
-	// narrower erun:operate tier, covered by TestOperateCapabilityCoversAnExistingEnvironmentsLifecycle.
+	// deploy/context_start/context_stop/resize require erun:operate instead.
 	for _, tool := range []string{
 		"raw", "build", "push", "delete", "init", "release", "upgrade",
 		"expose", "terraform", "publish", "pin", "doctor", "contribute_clone",
@@ -44,11 +38,6 @@ func TestOnlyObservationIsReadCapability(t *testing.T) {
 	}
 }
 
-// A caller that only ever drives the lifecycle of an environment that already
-// exists -- deploying a published version, starting/stopping its cloud context,
-// resizing its runtime pod -- must not need erun:admin, but must still be
-// refused everything that decides what environments exist or runs arbitrary
-// code in one.
 func TestOperateCapabilityCoversAnExistingEnvironmentsLifecycle(t *testing.T) {
 	for _, tool := range []string{"deploy", "context_start", "context_stop", "resize"} {
 		if got := MCPToolCapability(tool); got != MCPCapabilityOperate {
@@ -72,10 +61,6 @@ func TestOperateCapabilityCoversAnExistingEnvironmentsLifecycle(t *testing.T) {
 	}
 }
 
-// Operate is a distinct tier, not a wider read and not implied by read: it
-// grants neither read nor admin, and neither of those grants it back except
-// through admin's blanket implication -- the same isolation erun:attach
-// already established.
 func TestOperateDoesNotImplyReadAndReadDoesNotImplyOperate(t *testing.T) {
 	operate := NewMCPCapabilitySet([]string{string(MCPCapabilityOperate)})
 	if operate.Allows(MCPCapabilityRead) || operate.AllowsTool("version") {
@@ -93,8 +78,6 @@ func TestOperateDoesNotImplyReadAndReadDoesNotImplyOperate(t *testing.T) {
 	}
 }
 
-// Both shapes issuers actually produce, mirroring how the other tiers already
-// reach a token.
 func TestOperateCapabilityComesFromEitherScopeOrRoles(t *testing.T) {
 	fromScope := MCPCapabilitiesFromClaims("openid erun:operate", nil)
 	if !fromScope.Allows(MCPCapabilityOperate) || fromScope.Allows(MCPCapabilityRead) || fromScope.Allows(MCPCapabilityAdmin) {
@@ -107,9 +90,6 @@ func TestOperateCapabilityComesFromEitherScopeOrRoles(t *testing.T) {
 	}
 }
 
-// A role that merely resembles the operate tier's name must not resolve to
-// it -- the same fail-closed-on-unrecognized-role behavior the other tiers
-// already hold.
 func TestANearMissRoleNeverResolvesToOperate(t *testing.T) {
 	set := MCPCapabilitiesFromClaims("", []string{"erun:operating", "mobile:operate"})
 	if !set.Empty() {
@@ -120,8 +100,6 @@ func TestANearMissRoleNeverResolvesToOperate(t *testing.T) {
 	}
 }
 
-// Adding a fourth tier must not widen or narrow what an admin token could
-// already do.
 func TestAddingOperateDoesNotChangeWhatAdminCanDo(t *testing.T) {
 	admin := AdminMCPCapabilitySet()
 	for _, tool := range []string{
@@ -153,9 +131,6 @@ func TestAdminImpliesReadButReadDoesNotImplyAdmin(t *testing.T) {
 	}
 }
 
-// Adding this gate must not lock out a caller that worked yesterday: the
-// desktop mints a token for a single operator who is the tenant admin, and
-// those tokens say nothing about capabilities.
 func TestATokenSayingNothingAboutCapabilitiesIsTheAdminDesktopCase(t *testing.T) {
 	set := MCPCapabilitiesFromClaims("", nil)
 	if !set.AllowsTool("raw") {
@@ -163,7 +138,6 @@ func TestATokenSayingNothingAboutCapabilitiesIsTheAdminDesktopCase(t *testing.T)
 	}
 }
 
-// Both shapes issuers actually produce.
 func TestCapabilitiesComeFromEitherScopeOrRoles(t *testing.T) {
 	fromScope := MCPCapabilitiesFromClaims("openid erun:read", nil)
 	if !fromScope.AllowsTool("list") || fromScope.AllowsTool("deploy") {
@@ -176,9 +150,6 @@ func TestCapabilitiesComeFromEitherScopeOrRoles(t *testing.T) {
 	}
 }
 
-// A token carrying roles, none of them erun's, must not be promoted to admin by
-// the "said nothing" default — that would make an unrelated role a privilege
-// escalation.
 func TestUnrelatedRolesGrantNothingRatherThanEverything(t *testing.T) {
 	set := MCPCapabilitiesFromClaims("openid profile", []string{"billing:reader"})
 	if !set.Empty() {
@@ -189,10 +160,6 @@ func TestUnrelatedRolesGrantNothingRatherThanEverything(t *testing.T) {
 	}
 }
 
-// This is the test that must fail loudly if a future tool is registered under
-// the attach tier without being re-examined against this boundary: a caller
-// scoped to attach only must never reach remote execution or anything that
-// mutates an environment, regardless of what else the tool surface grows into.
 func TestAttachCapabilityCannotReachExecutionOrMutation(t *testing.T) {
 	attach := NewMCPCapabilitySet([]string{string(MCPCapabilityAttach)})
 
@@ -209,9 +176,6 @@ func TestAttachCapabilityCannotReachExecutionOrMutation(t *testing.T) {
 	}
 }
 
-// Attach is a distinct tier, not a wider read: it does not inherit read-only
-// observation, and neither read nor admin is granted just because a caller
-// resolves an attach token -- only admin reaches back down into attach.
 func TestAttachDoesNotImplyReadAndReadDoesNotImplyAttach(t *testing.T) {
 	attach := NewMCPCapabilitySet([]string{string(MCPCapabilityAttach)})
 	if attach.AllowsTool("version") || attach.Allows(MCPCapabilityRead) {
@@ -229,9 +193,6 @@ func TestAttachDoesNotImplyReadAndReadDoesNotImplyAttach(t *testing.T) {
 	}
 }
 
-// Both shapes issuers actually produce, mirroring how erun:read/erun:admin
-// already reach a token -- an issuer that wants to grant a mobile-scoped
-// caller attach only says so explicitly in scope or roles.
 func TestAttachCapabilityComesFromEitherScopeOrRoles(t *testing.T) {
 	fromScope := MCPCapabilitiesFromClaims("openid erun:attach", nil)
 	if !fromScope.Allows(MCPCapabilityAttach) || fromScope.Allows(MCPCapabilityRead) || fromScope.Allows(MCPCapabilityAdmin) {
@@ -244,10 +205,6 @@ func TestAttachCapabilityComesFromEitherScopeOrRoles(t *testing.T) {
 	}
 }
 
-// A role that merely resembles the attach tier's name must not resolve to it --
-// the fail-closed-on-unrecognized-role behavior MCPCapabilitiesFromClaims
-// already applies to erun:read/erun:admin must hold for the new tier too, or
-// adding a third tier would have quietly widened what "unrecognised" means.
 func TestANearMissRoleNeverResolvesToAttach(t *testing.T) {
 	set := MCPCapabilitiesFromClaims("", []string{"erun:attaching", "mobile:attach"})
 	if !set.Empty() {
@@ -258,7 +215,6 @@ func TestANearMissRoleNeverResolvesToAttach(t *testing.T) {
 	}
 }
 
-// The key identifies one distinct tool surface, so servers can be cached by it.
 func TestCapabilityKeyIdentifiesTheToolSurface(t *testing.T) {
 	a := NewMCPCapabilitySet([]string{"erun:read"})
 	b := NewMCPCapabilitySet([]string{"erun:read"})

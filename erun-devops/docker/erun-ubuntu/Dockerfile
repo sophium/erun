@@ -4,21 +4,8 @@ ENV LANG=en_US.utf8
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Europe
 
-# build-essential/pkg-config/libgtk-3-dev/libwebkit2gtk-4.1-dev/libsoup-3.0-dev
-# (Wails/webkit CGO build deps) and dtach live here, not in erun-devops's own
-# Dockerfile: they are stable, rarely-changing OS libraries, and erun-devops's
-# test stage and final stage were each apt-get installing this same set on
-# every build (measured at 247s + 145s of a 7m50s erun-devops build). Baking
-# them into this base, which is rebuilt far less often, pays that cost once
-# instead of twice per build.
-#
-# Removing the docker-clean apt hook and setting Keep-Downloaded-Packages is
-# what makes the cache mounts below actually retain .deb archives and package
-# lists across builds -- Docker's stock apt.conf.d/docker-clean hook purges
-# both after every apt-get invocation specifically to keep container images
-# small, which defeats a cache mount's whole purpose. Safe here because
-# neither /var/cache/apt nor /var/lib/apt/lists ever lands in the committed
-# image layer: both are cache-mount targets regardless of this setting.
+# Wails/webkit CGO build deps live in this rarely rebuilt base, not in erun-devops.
+# Dropping docker-clean lets the apt cache mounts keep packages; they never reach the layer.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists \
     rm -f /etc/apt/apt.conf.d/docker-clean && \

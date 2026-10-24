@@ -11,15 +11,11 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
-// idleStopMCPTimeout bounds every idle-stop MCP round-trip so a stale
-// runtime image or a wedged port-forward surfaces as an error instead
-// of hanging for the app's lifetime; 10 s absorbs a cold-start
-// handshake while still resolving the loading state promptly.
+// idleStopMCPTimeout keeps a stale image or wedged port-forward from hanging;
+// 10s absorbs a cold-start handshake.
 const idleStopMCPTimeout = 10 * time.Second
 
-// cancelStopPendingViaMCP dismisses the grace-period warning for an env.
-// The dismissal is not permanent: the next idle poll re-arms the warning
-// if the env is still idle.
+// The next idle poll re-arms the warning if the env is still idle.
 func cancelStopPendingViaMCP(ctx context.Context, endpoint, bearer, tenant, environment string) error {
 	ctx, cancel := context.WithTimeout(ctx, idleStopMCPTimeout)
 	defer cancel()
@@ -47,9 +43,6 @@ func cancelStopPendingViaMCP(ctx context.Context, endpoint, bearer, tenant, envi
 	return nil
 }
 
-// loadStopHistoryViaMCP reads the stop-history audit trail from the pod,
-// the source of truth the in-pod monitor appends to, so a desktop
-// returning after a break sees the complete history.
 func loadStopHistoryViaMCP(ctx context.Context, endpoint, bearer, tenant, environment string) ([]activity.EnvironmentStopHistoryEntry, error) {
 	ctx, cancel := context.WithTimeout(ctx, idleStopMCPTimeout)
 	defer cancel()
@@ -91,9 +84,6 @@ func loadStopHistoryViaMCP(ctx context.Context, endpoint, bearer, tenant, enviro
 	return payload.Entries, nil
 }
 
-// recordManualStopViaMCP records a manual stop in the audit trail so the
-// History tab distinguishes "you clicked Stop" from auto-stops fired by
-// the in-pod monitor.
 func recordManualStopViaMCP(ctx context.Context, endpoint, bearer, tenant, environment, reason, cloudContextName string) error {
 	ctx, cancel := context.WithTimeout(ctx, idleStopMCPTimeout)
 	defer cancel()
@@ -127,10 +117,8 @@ func recordManualStopViaMCP(ctx context.Context, endpoint, bearer, tenant, envir
 	return nil
 }
 
-// formatIdleStopMCPError translates the common "runtime image predates
-// this desktop and lacks the idle_stop_* tool" failure into a single
-// user-facing line pointing at the rebuild fix; any other error passes
-// through raw so real cluster-side failures still reach the user.
+// formatIdleStopMCPError points a missing idle_stop_* tool at a rebuild; other
+// errors pass through raw.
 func formatIdleStopMCPError(tool string, err error) error {
 	if err == nil {
 		return nil

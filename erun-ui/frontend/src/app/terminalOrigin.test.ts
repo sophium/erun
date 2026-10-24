@@ -9,9 +9,6 @@ import { selectionKey } from './versionSuggestions';
 
 const ENV_KEY = selectionKey({ tenant: 'acme', environment: 'dev' });
 
-// Only the two slices terminalOriginForSession reads; the rest of RootState is
-// irrelevant to it and constructing it would make the test about the store's
-// shape instead.
 function stateWith(
   orchestratorSessionIds: number[],
   tabsByEnv: Record<string, TerminalTab[]>,
@@ -44,9 +41,6 @@ test('the contribute shell tabs are host-side', () => {
   assert.deepEqual(terminalOriginForSession(state, 6), { kind: 'host' });
 });
 
-// The regression this exists to prevent: an environment's ERun/AI/extra tabs
-// run inside that environment's pod, so a path they print must resolve there,
-// never against the host.
 test('an environment ERun, AI, or extra tab is pod-side, scoped to its environment', () => {
   const state = stateWith([], {
     [ENV_KEY]: [tab(5, 'erun'), tab(6, 'ai'), tab(7, 'extra')],

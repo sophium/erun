@@ -10,8 +10,6 @@ import (
 
 func TestBuildOpenCommandQuotesExecutableAndArgs(t *testing.T) {
 	got := buildOpenCommand("/Applications/ERun App/erun", "tenant a", "prod")
-	// The Windows local shell is PowerShell, so buildOpenCommand runs the quoted
-	// exe via the call operator (&); mirror that platform branch here.
 	want := "'/Applications/ERun App/erun' open 'tenant a' 'prod'"
 	if runtime.GOOS == "windows" {
 		want = "& " + want
@@ -56,9 +54,6 @@ func TestBuildDoctorArgsTrimsTenantAndEnvironment(t *testing.T) {
 	}
 }
 
-// The forwarder rebind is machine-initiated, so --reconnect is part of its
-// contract: without it a rebind fired by a stop's own connection drop would
-// start the environment back up.
 func TestBuildOpenNoShellArgsTrimsTenantAndEnvironment(t *testing.T) {
 	got := buildOpenNoShellArgs(" erun ", " local ")
 	want := []string{"open", "erun", "local", "--no-shell", "--no-alias-prompt", "--reconnect"}
@@ -114,8 +109,7 @@ func TestBuildInitArgsClusterRegistryReplacesContainerRegistry(t *testing.T) {
 		Tenant:            "erun",
 		Environment:       "remote",
 		KubernetesContext: "erun-k3s",
-		// ContainerRegistry is ignored when ClusterRegistry is selected; the two
-		// are mutually exclusive and cluster wins.
+		// ClusterRegistry wins over ContainerRegistry.
 		ContainerRegistry: "erunpaas",
 		ClusterRegistry:   true,
 		SetDefaultTenant:  true,
@@ -132,9 +126,7 @@ func TestBuildInitArgsClusterRegistryReplacesContainerRegistry(t *testing.T) {
 }
 
 func TestBuildLocalErunCommandForOSWindowsUsesPowerShell(t *testing.T) {
-	// The Windows local shell is PowerShell: the quoted exe must run via the call
-	// operator and the line must end with CR, or PSReadLine leaves it at ">>" and
-	// the piped init/deploy command never executes.
+	// Without the call operator and CR, PSReadLine leaves the line at ">>".
 	got := buildLocalErunCommandForOS("windows", `C:\erun-cli\bin\erun.exe`, []string{"init", "team", "dev", "--type=remote-agent"})
 	want := "& 'C:\\erun-cli\\bin\\erun.exe' init team dev --type=remote-agent\r"
 	if got != want {
@@ -151,9 +143,6 @@ func TestBuildLocalErunCommandForOSUnixUsesPosix(t *testing.T) {
 }
 
 func TestResolveLocalShellCommandIgnoresPosixShellOnWindows(t *testing.T) {
-	// A Git Bash / MSYS $SHELL is a POSIX path ConPTY cannot launch; on Windows
-	// it must be ignored in favour of a PowerShell command, or starting the local
-	// shell fails with "the system cannot find the file specified".
 	t.Setenv("SHELL", "/usr/bin/bash")
 	shell, args := resolveLocalShellCommand("windows")
 	if shell == "/usr/bin/bash" {
@@ -166,7 +155,6 @@ func TestResolveLocalShellCommandIgnoresPosixShellOnWindows(t *testing.T) {
 	if len(args) == 0 || args[0] != "-NoLogo" {
 		t.Fatalf("windows shell args = %v, want -NoLogo", args)
 	}
-	// A non-Windows host still honors an absolute $SHELL.
 	if got, _ := resolveLocalShellCommand("linux"); got != "/usr/bin/bash" {
 		t.Fatalf("unix shell = %q, want /usr/bin/bash from $SHELL", got)
 	}
@@ -214,9 +202,6 @@ func TestBuildDeployArgsRunsDeploy(t *testing.T) {
 	assertArgsEqual(t, got, want)
 }
 
-// TestBuildDeployArgsThreadsRuntimeImageOverride covers the runtime-image
-// override that lets an operator bootstrap an env on the ERun base image before
-// the tenant's own image is built.
 func TestBuildDeployArgsThreadsRuntimeImageOverride(t *testing.T) {
 	got := buildDeployArgs(uiSelection{
 		Tenant:       "frs",
@@ -228,8 +213,6 @@ func TestBuildDeployArgsThreadsRuntimeImageOverride(t *testing.T) {
 	assertArgsEqual(t, got, want)
 }
 
-// TestBuildDeployArgsOmitsOwnTenantImage covers the counterpart: picking the
-// env's own image is not an override.
 func TestBuildDeployArgsOmitsOwnTenantImage(t *testing.T) {
 	got := buildDeployArgs(uiSelection{
 		Tenant:       "frs",
@@ -281,10 +264,6 @@ func TestResolveCLIExecutableFromPathUsesExecutableSibling(t *testing.T) {
 }
 
 func TestResolveCLIExecutableHonorsAppCLISeam(t *testing.T) {
-	// The Playwright harness sets ERUN_APP_CLI to its inert `erun` stub so the
-	// desktop runs the stub regardless of any real erun-cli/bin/erun build
-	// artifact sitting next to the app binary. The seam wins over the
-	// build-relative + PATH resolution.
 	t.Setenv("ERUN_APP_CLI", "/seam/stub/erun")
 	if got := resolveCLIExecutable(); got != "/seam/stub/erun" {
 		t.Fatalf("resolveCLIExecutable() = %q, want the ERUN_APP_CLI override", got)

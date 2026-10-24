@@ -11,20 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// A real per-process concurrency test is not practical here: the race needs two
-// `erun build --release` runs pushing overlapping layers to one live registry,
-// and the loser's failure is decided by the registry's own blob-commit timing,
-// which no unit-level harness can schedule. What is testable — and what the fix
-// actually decides — is the retry predicate: which push failures are re-pushed,
-// how many times, and what a failure that is not this race does instead. The
-// fake docker below models the observable precondition the race produces (a
-// push rejected with "unknown blob" while a peer's upload commits, then
-// accepted once it has) rather than asserting nothing.
-
-// newCountingFakeDockerOnPath puts a fake `docker` ahead of PATH whose `docker
-// push` fails with pushFailureMessage for the first failuresPerTag pushes of a
-// given tag and succeeds afterwards, recording every attempted tag in
-// attemptedPath. Every other subcommand succeeds unconditionally.
+// newCountingFakeDockerOnPath fails the first failuresPerTag pushes of each tag.
 func newCountingFakeDockerOnPath(t *testing.T, pushFailureMessage string, failuresPerTag int) (attemptedPath string) {
 	t.Helper()
 	binDir := t.TempDir()
@@ -77,16 +64,10 @@ func countDockerPushAttempts(t *testing.T, attemptedPath, tag string) int {
 	return attempts
 }
 
-// noWait keeps the retry decision under test without its backoff; the backoff
-// is a wall-clock pause on a registry-side condition and is not what the fix
-// decides.
 func noWait(int) {}
 
 const concurrentPushTestTag = "ghcr.io/sophium/erun-backend-api:1.0.250-pr.4fa33ad5-arm64"
 
-// TestTheUnknownBlobRetryIsBoundedAndStillFails guards the other half: a blob
-// rejection that re-pushing does not clear is a real failure, reported after a
-// bounded number of attempts rather than retried indefinitely.
 func TestTheUnknownBlobRetryIsBoundedAndStillFails(t *testing.T) {
 	attempted := newCountingFakeDockerOnPath(t, "unknown blob", 99)
 
@@ -107,10 +88,6 @@ func TestTheUnknownBlobRetryIsBoundedAndStillFails(t *testing.T) {
 	}
 }
 
-// TestANonBlobPushFailureIsNotRetried keeps the retry orthogonal to genuine
-// errors: only the registry-refused-a-blob-it-lacks shape is transient, so a
-// server-side failure must surface on its first occurrence with no extra push
-// and no retry note.
 func TestANonBlobPushFailureIsNotRetried(t *testing.T) {
 	attempted := newCountingFakeDockerOnPath(t, "internal server error", 99)
 

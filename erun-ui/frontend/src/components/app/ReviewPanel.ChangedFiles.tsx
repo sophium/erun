@@ -28,17 +28,7 @@ export function ChangedFileTree(): React.ReactElement {
   );
 }
 
-// ChangedFileTreeSection owns one environment's tree and loading state. A
-// stopped environment renders its own empty state in its own section while
-// every other environment keeps rendering, so one unreachable env never
-// blanks them all.
-//
-// It deliberately does NOT duplicate DiffList's actionable DiffErrorAlert: the
-// two surfaces render the same env slot, and rendering the full alert (with
-// its own Retry/Reconnect/Open buttons) in both the tree aside and the main
-// diff panel at once reads as two unrelated reports of the same outage. The
-// tree shows a short status line instead and points at the diff
-// panel, which keeps the one actionable report.
+// ChangedFileTreeSection renders one env's tree; the actionable error alert stays only in the diff panel.
 function ChangedFileTreeSection({
   target,
   showHeader,
@@ -74,10 +64,6 @@ function ChangedFileTreeSection({
   );
 }
 
-// ChangedFileTreeSectionBody is ChangedFileTreeSection's own body, split out
-// so the loading/error/empty/populated branching doesn't grow
-// ChangedFileTreeSection past the shared function-size and complexity budget
-// (eslint.config.mjs).
 function ChangedFileTreeSectionBody({
   envKey,
   slot,
@@ -102,8 +88,7 @@ function ChangedFileTreeSectionBody({
       </ReviewStatus>
     );
   }
-  // Collapsed directories are env-keyed, so a collapsed "app/" in one
-  // environment cannot hide a same-named directory in another.
+  // Env-keyed so a collapsed directory cannot hide a same-named one in another env.
   const collapsedForEnv = new Set(
     collapsedDiffDirs
       .filter((entry) => entry.startsWith(`${envKey}:`))
@@ -169,11 +154,7 @@ function ChangedFileNode({
     );
   }
 
-  // selectedDiffPath is env-keyed (diffPathKey), exactly as the diff panel's
-  // own DiffFileView compares it: two linked environments can both have
-  // AGENTS.md, and comparing the bare path would highlight both of them and,
-  // worse, never match the keyed value every writer stores -- leaving the
-  // tree with no active node at all.
+  // selectedDiffPath is env-keyed; comparing the bare path never matches.
   const selected = diffPathKey(envKey, node.path) === selectedDiffPath;
   return (
     <div className="flex flex-col">

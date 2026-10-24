@@ -12,13 +12,8 @@ import type { CloudNodeOperation, IdleCloudContextAction } from './model';
 import { defaultCloudContextInitInput } from './state';
 import { normalizeDialogValue } from './versionSuggestions';
 
-// idleCloudContextAction resolves what clicking the titlebar's power control
-// would do. It reads the same two inputs idleCloudAction renders — the node's
-// current state, and the operation already in flight against that node — so the
-// control's label and the action behind it cannot describe different things.
-// The two used to read one global `busy` flag with opposite meanings ("no
-// action available" here, "my action is in progress" there); the flag is now the
-// per-node operation record, and both ask it the same question.
+// idleCloudContextAction reads the same inputs idleCloudAction renders, so the
+// power control's label and action cannot disagree.
 export function idleCloudContextAction(
   idleStatus: UIIdleStatus | null,
   inFlight: CloudNodeOperation | null,

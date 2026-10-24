@@ -11,9 +11,6 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// postCreateEnvironmentPreview posts through a fully-wired route (tenant
-// resolver, no provisioner needed since preview never reaches it) with a
-// request-scoped security context, the shape the live server builds.
 func postCreateEnvironmentPreview(t *testing.T, environments *stubEnvironmentRepository, quotas stubTenantQuotaRepository, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/environments", bytes.NewBufferString(body))
@@ -32,10 +29,6 @@ func postCreateEnvironmentPreview(t *testing.T, environments *stubEnvironmentRep
 	return rec
 }
 
-// TestCreateEnvironmentPreviewRendersProvisionPlanWithoutPersisting: the
-// executing path's preview flag must resolve and return the same ordered
-// plan POST /v1/provision renders, without ever calling Create — the plan an
-// operator audits here is the plan a non-preview call then runs.
 func TestCreateEnvironmentPreviewRendersProvisionPlanWithoutPersisting(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 2}
 	rec := postCreateEnvironmentPreview(t, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{
@@ -60,9 +53,6 @@ func TestCreateEnvironmentPreviewRendersProvisionPlanWithoutPersisting(t *testin
 	mustPlanLine(t, response.Plan, "expose: would wire mcp.", "preview plan missing the exposure wiring line")
 }
 
-// TestCreateEnvironmentPreviewStillEnforcesPlacement: preview must apply the
-// same placement check as a real create, not a laxer one — a raw
-// kubernetesContext stays refused everywhere.
 func TestCreateEnvironmentPreviewStillEnforcesPlacement(t *testing.T) {
 	environments := &stubEnvironmentRepository{}
 	rec := postCreateEnvironmentPreview(t, environments, underCapQuota, `{
@@ -73,11 +63,7 @@ func TestCreateEnvironmentPreviewStillEnforcesPlacement(t *testing.T) {
 	}
 }
 
-// runtimeFloorQuotaCases are the exact quota shapes
-// TestCreateEnvironmentRejectsQuotaBelowRuntimeFloor and
-// TestCreateEnvironmentAllowsWithinAggregateBudget already exercise on the
-// executing path, reused here so both preview entry points are checked
-// against the same table rather than a freshly invented one.
+// runtimeFloorQuotaCases reuses the executing-path quota shapes for both preview entry points.
 var runtimeFloorQuotaCases = map[string]struct {
 	quota   stubTenantQuotaRepository
 	floorOK bool
@@ -97,11 +83,7 @@ var runtimeFloorQuotaCases = map[string]struct {
 	},
 }
 
-// TestProvisionPreviewAgreesWithCreateOnRuntimeQuotaFloor: both preview
-// entry points (POST /v1/provision and POST /v1/environments?preview=true)
-// must discharge the same runtime namespace-quota floor the executing create
-// path enforces, across the same quota shapes, so a plan that previews as
-// fine can never then 409 on the real request.
+// A plan that previews as fine must never 409 on the real request.
 func TestProvisionPreviewAgreesWithCreateOnRuntimeQuotaFloor(t *testing.T) {
 	for label, tc := range runtimeFloorQuotaCases {
 		t.Run(label, func(t *testing.T) {

@@ -6,8 +6,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// Both fields are pull-time coordinates the Manage dialog now edits, so an
-// edit has to survive the round trip rather than silently reverting on save.
 func TestPullCoordinatesRoundTripThroughTheEditor(t *testing.T) {
 	existing := config.EnvConfig{
 		RuntimeRegistry:  "old.example.com",
@@ -29,9 +27,6 @@ func TestPullCoordinatesRoundTripThroughTheEditor(t *testing.T) {
 	}
 }
 
-// Clearing the field must clear the config, not leave the previous value in
-// place -- a stale pull secret is how an env keeps failing after the operator
-// believes they fixed it.
 func TestClearingPullCoordinatesClearsTheConfig(t *testing.T) {
 	existing := config.EnvConfig{
 		RuntimeRegistry:  "old.example.com",

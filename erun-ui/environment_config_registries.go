@@ -8,12 +8,8 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
-// applyContainerRegistries routes the registry list by env type: local-agent
-// and host envs store it in project config, where the build/deploy resolvers
-// read it (both have their project root on this machine); remote/runtime envs
-// keep it on the env config because their project config is not on the local
-// machine. A host env never actually deploys against a registry, so this only
-// matters if a project build pushes images independent of any pod.
+// applyContainerRegistries stores local-agent and host lists in project config
+// and remote/runtime lists on the env config, whose project config is not local.
 func (a *App) applyContainerRegistries(selection uiSelection, updated *configpkg.EnvConfig, registries configpkg.ContainerRegistries) error {
 	switch updated.ResolvedType() {
 	case configpkg.EnvironmentTypeLocalAgent, configpkg.EnvironmentTypeHost:
@@ -27,9 +23,6 @@ func (a *App) applyContainerRegistries(selection uiSelection, updated *configpkg
 	}
 }
 
-// saveEnvironmentProjectRegistries writes a local-agent env's registry list to
-// its repo's .erun/config.yaml — the only place such a list can live — so it
-// fails clearly when the project root can't be resolved.
 func (a *App) saveEnvironmentProjectRegistries(tenant string, config configpkg.EnvConfig, registries configpkg.ContainerRegistries) error {
 	projectRoot, store, ok := a.environmentProjectConfigStore(config)
 	if !ok {
@@ -51,9 +44,7 @@ func containerRegistriesToUI(list configpkg.ContainerRegistries) []uiContainerRe
 			roles = append(roles, string(role))
 		}
 		uiEntry := uiContainerRegistryEntry{Registry: strings.TrimSpace(entry.Registry), Roles: roles}
-		// A cluster entry carries no static host, so surface its resolved
-		// service/namespace/port and a legible label instead of an empty
-		// Registry string that would render as a blank text box.
+		// A cluster entry has no static host; show its resolved address instead.
 		if entry.Cluster != nil {
 			cluster := entry.Cluster.WithDefaults()
 			uiEntry.Cluster = &uiContainerRegistryCluster{
@@ -69,9 +60,7 @@ func containerRegistriesToUI(list configpkg.ContainerRegistries) []uiContainerRe
 	return entries
 }
 
-// uiToContainerRegistries builds the marked list from the editor's rows; an
-// empty result (all rows blank) clears the env's override so it inherits the
-// project default.
+// An empty result clears the override so the env inherits the project default.
 func uiToContainerRegistries(entries []uiContainerRegistryEntry) (configpkg.ContainerRegistries, error) {
 	list := make(configpkg.ContainerRegistries, 0, len(entries))
 	for _, entry := range entries {
@@ -81,8 +70,7 @@ func uiToContainerRegistries(entries []uiContainerRegistryEntry) (configpkg.Cont
 				roles = append(roles, configpkg.RegistryRole(trimmed))
 			}
 		}
-		// A cluster entry has no static host: preserve it as a cluster block so a
-		// context-resolved registry is not silently dropped on save.
+		// Preserve a cluster entry so a context-resolved registry is not dropped.
 		if entry.Cluster != nil {
 			list = append(list, configpkg.ContainerRegistryEntry{
 				Cluster: &configpkg.ClusterRegistry{
@@ -110,11 +98,8 @@ func uiToContainerRegistries(entries []uiContainerRegistryEntry) (configpkg.Cont
 	return list, nil
 }
 
-// effectiveEnvironmentContainerRegistries mirrors the container-registry
-// resolution order the build/deploy resolvers use, so the editor shows the same
-// list they will act on. The second return is true when the list was resolved
-// from the project's .erun/config.yaml (inherited-from-project) rather than
-// carried on the env config.
+// effectiveEnvironmentContainerRegistries mirrors the build/deploy resolution
+// order; the bool reports inheritance from the project config.
 func (a *App) effectiveEnvironmentContainerRegistries(tenant, environment string, config configpkg.EnvConfig) (configpkg.ContainerRegistries, bool) {
 	if !config.ContainerRegistries.IsZero() {
 		return config.ContainerRegistries, false

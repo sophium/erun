@@ -8,20 +8,15 @@ import { setReviewUnresolvedThreads } from './slices/tenantDashboardSlice';
 import type { AppThunk } from './store';
 import { reviewDetailUnresolvedThreads } from './tenantDashboardPanels';
 
-// ReviewCallerContext is what every write against a review needs: which
-// tenant to resolve the platform for (the platform read/bearer is resolved
-// server-side from that alone), plus the platform alias to sign into if the
-// write reports a stale identity.
+// ReviewCallerContext: the platform is resolved server-side from the tenant; the
+// alias is only for signing in after a stale-identity failure.
 interface ReviewCallerContext {
   tenant: string;
   platformAlias: string;
 }
 
-// reviewCallerContext resolves the caller context a write against reviewId
-// needs. Once the review has loaded once, its own stored caller fields win —
-// they survive closing the (modal) dialog to browse the diff panel, which the
-// operator may do after navigating away from the tenant dashboard entirely,
-// long past the point state.tenantDashboard still describes this review.
+// reviewCallerContext prefers the loaded review's fields, which outlive the tenant
+// dashboard.
 function reviewCallerContext(
   state: { reviewDetail: ReviewDetailState; tenantDashboard: TenantDashboardState },
   reviewId: string,
@@ -37,11 +32,8 @@ function reviewCallerContext(
   return { tenant, platformAlias: state.tenantDashboard.data?.platformAlias ?? '' };
 }
 
-// callerTenant carries the tenant this review was opened for when the
-// caller cannot rely on the tenant dashboard having ever loaded — the diff
-// panel's "Start a review" affordance reaches this after creating a review
-// without the operator ever opening the Reviews tab this session, so
-// reviewCallerContext's tenantDashboard.tenant fallback would find nothing.
+// callerTenant is passed because the diff panel can reach this without the tenant
+// dashboard ever loading.
 export const openReviewDetail =
   (reviewId: string, callerTenant = ''): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -62,11 +54,7 @@ export const openReviewDetail =
     await dispatch(loadReviewDetail(reviewId));
   };
 
-// closeReviewDetail hides the dialog but keeps the review as the diff
-// panel's active commenting context (reviewId/data/caller fields), so
-// closing it to browse the diff and start a new thread from a line does not
-// lose which review that thread belongs to. Only the dialog's own transient
-// UI state resets.
+// closeReviewDetail keeps the review as the diff panel's commenting context.
 export const closeReviewDetail = (): AppThunk => (dispatch) => {
   dispatch(
     patchReviewDetail({
@@ -112,11 +100,7 @@ export const loadReviewDetail =
           callerPlatformAlias: context.platformAlias,
         }),
       );
-      // The detail's read holds this review's comment threads, so its count
-      // is the authoritative one; write it back to the dashboard row so the
-      // reviews list and the dialog over it cannot report different numbers
-      // for the same review — including after a resolve changes the threads
-      // without the dashboard's own per-row enrichment re-running.
+      // The detail's count is authoritative; write it back so the list agrees.
       const unresolvedThreads = reviewDetailUnresolvedThreads(data);
       if (unresolvedThreads !== undefined) {
         dispatch(setReviewUnresolvedThreads({ reviewId, unresolvedThreads }));
@@ -147,8 +131,6 @@ export const setReviewReplyDraft =
     dispatch(patchReviewDetail({ draftBody: body }));
   };
 
-// clearReviewReplyError mirrors clearCloseReviewError for the reply
-// composer's own write error.
 export const clearReviewReplyError = (): AppThunk => (dispatch) => {
   dispatch(patchReviewDetail({ submitError: '' }));
 };
@@ -179,8 +161,7 @@ export const submitReviewReply = (): AppThunk<Promise<void>> => async (dispatch,
         body,
       }),
     ).unwrap();
-    // Clear the draft only once the reply is durably saved — a failed submit
-    // must keep it so the operator never loses what they typed.
+    // Clear only once saved, so a failed submit keeps the draft.
     dispatch(
       patchReviewDetail({ submitting: false, replyingTo: '', draftBody: '', submitError: '' }),
     );
@@ -190,9 +171,6 @@ export const submitReviewReply = (): AppThunk<Promise<void>> => async (dispatch,
   }
 };
 
-// confirmCloseReview/cancelCloseReview give Close a visible commitment
-// boundary: the operator sees the confirm step before the write fires and can
-// back out of it, matching every other side-effecting dashboard action.
 export const confirmCloseReview = (): AppThunk => (dispatch) => {
   dispatch(patchReviewDetail({ closeConfirming: true, closeError: '' }));
 };
@@ -201,10 +179,7 @@ export const cancelCloseReview = (): AppThunk => (dispatch) => {
   dispatch(patchReviewDetail({ closeConfirming: false, closeError: '' }));
 };
 
-// clearCloseReviewError drops a stale close-review write error once a
-// sign-in it prompted has succeeded, so the operator sees the panel recover
-// rather than the identical error and button — they retry Close
-// themselves from there.
+// clearCloseReviewError keeps the panel in place so the operator retries Close.
 export const clearCloseReviewError = (): AppThunk => (dispatch) => {
   dispatch(patchReviewDetail({ closeError: '' }));
 };
@@ -230,18 +205,13 @@ export const submitCloseReview = (): AppThunk<Promise<void>> => async (dispatch,
   }
 };
 
-// submitResolveComment/submitUnresolveComment resolve or reopen a thread by
-// its root comment id. The dialog only ever offers this on a root — never a
-// reply — so there is no reply-rejection error to translate here, unlike the
-// CLI/MCP paths that accept any comment id.
+// The dialog offers resolve only on a thread root, so there is no reply rejection.
 export const submitResolveComment = (commentId: string): AppThunk<Promise<void>> =>
   submitCommentStatus(commentId, 'resolveReviewComment');
 
 export const submitUnresolveComment = (commentId: string): AppThunk<Promise<void>> =>
   submitCommentStatus(commentId, 'unresolveReviewComment');
 
-// clearResolveCommentError mirrors clearCloseReviewError for a thread's own
-// resolve/unresolve write error.
 export const clearResolveCommentError = (): AppThunk => (dispatch) => {
   dispatch(patchReviewDetail({ resolveError: '', resolveErrorCommentId: '' }));
 };
@@ -291,9 +261,6 @@ function submitCommentStatus(
   };
 }
 
-// startAddReviewer/cancelAddReviewer/setAddReviewerUserId/clearAddReviewerError/
-// submitAddReviewer back the Add reviewers picker. Not destructive, so unlike
-// Close/Remove it opens straight into the picker with no confirm step.
 export const startAddReviewer = (): AppThunk => (dispatch) => {
   dispatch(
     patchReviewDetail({ addReviewerOpen: true, addReviewerUserId: '', addReviewerError: '' }),
@@ -312,8 +279,6 @@ export const setAddReviewerUserId =
     dispatch(patchReviewDetail({ addReviewerUserId: userId }));
   };
 
-// clearAddReviewerError mirrors clearCloseReviewError for the Add reviewers
-// picker's own write error.
 export const clearAddReviewerError = (): AppThunk => (dispatch) => {
   dispatch(patchReviewDetail({ addReviewerError: '' }));
 };
@@ -351,9 +316,6 @@ export const submitAddReviewer = (): AppThunk<Promise<void>> => async (dispatch,
   }
 };
 
-// confirmRemoveReviewer/cancelRemoveReviewer give Remove the same
-// cancel-before-commitment boundary Close gets — it revokes access, not just
-// a passive read.
 export const confirmRemoveReviewer =
   (userId: string): AppThunk =>
   (dispatch) => {
@@ -420,9 +382,6 @@ export const submitRemoveReviewer =
     }
   };
 
-// startReviewComment/cancelReviewComment/setReviewCommentDraft/
-// submitReviewComment mirror the reply flow above, but for opening a brand
-// new top-level thread anchored to a diff line the operator clicked.
 export const startReviewComment =
   (anchor: { commitId: string; filePath: string; line: number }): AppThunk =>
   (dispatch) => {
@@ -447,8 +406,6 @@ export const setReviewCommentDraft =
     dispatch(patchReviewDetail({ newCommentDraft: body }));
   };
 
-// clearReviewCommentError mirrors clearCloseReviewError for the new-thread
-// composer's own write error.
 export const clearReviewCommentError = (): AppThunk => (dispatch) => {
   dispatch(patchReviewDetail({ newCommentSubmitError: '' }));
 };

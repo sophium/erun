@@ -2,10 +2,6 @@ import * as React from 'react';
 
 import { ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 
-// Shared pane plumbing every Diagnostics console tab (erun trace,
-// orchestrator, app log, UI trace) reuses: stick-to-bottom scrolling and a
-// Copy action bound to the pane's own raw content.
-
 export function useStickToBottom(content: string): {
   outputRef: React.RefObject<HTMLDivElement | null>;
   handleScroll: React.UIEventHandler<HTMLDivElement>;

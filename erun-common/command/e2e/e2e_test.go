@@ -20,9 +20,6 @@ func TestE2EServiceURLBuildArgFoldsTheServiceName(t *testing.T) {
 	}
 }
 
-// A local cluster's ingress is only refused on evidence: an address that is
-// loopback. A host that does not resolve here, or resolves to a routable
-// address, is left to the build.
 func TestRefuseLoopbackE2ETarget(t *testing.T) {
 	lookup := func(answers map[string][]string) func(string) ([]string, error) {
 		return func(host string) ([]string, error) {
@@ -55,7 +52,6 @@ func TestRefuseLoopbackE2ETarget(t *testing.T) {
 	}
 }
 
-// An e2e suite run from inside a runtime pod nests under the same CPU cap.
 func TestE2EDockerBuildNestsUnderTheCPUCapWhenOneApplies(t *testing.T) {
 	suite := E2ESuite{Component: "console", Dockerfile: "team-devops/e2e/console/Dockerfile"}
 	args := strings.Join(e2eDockerBuildArgs(suite, "1.2.3", "https://console.example.test", nil, nil, "/docker/erun-build-cpu-cap-pod"), " ")
@@ -67,8 +63,6 @@ func TestE2EDockerBuildNestsUnderTheCPUCapWhenOneApplies(t *testing.T) {
 	}
 }
 
-// A run that resolved no environment logs beside erun's own state, not under
-// a tenant/environment it never read.
 func TestE2ELogPathWithoutAnEnvironment(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

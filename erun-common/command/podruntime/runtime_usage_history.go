@@ -12,25 +12,16 @@ import (
 
 const (
 
-	// runtimeUsageHistorySampleCap bounds the rolling window of raw samples.
-	// The monitor ticks every 30s, so this is roughly two hours of readings —
-	// enough to see recent rates, and a fixed cost rather than a log that grows
-	// for as long as the environment lives. EnvironmentActivitySnapshot's
-	// Clients map is bounded for the same reason.
+	// runtimeUsageHistorySampleCap is roughly two hours at the monitor's 30s tick.
 	runtimeUsageHistorySampleCap = 240
 )
 
-// AppendRuntimeUsageSample folds one reading into the history. Pure, so the
-// retention rules are testable without a container: the caller persists the
-// result. now is the time the reading was taken, threaded in explicitly rather
-// than read from the sample, since RuntimeUsage (a reading also returned
-// verbatim by `erun usage`) carries no timestamp of its own.
+// AppendRuntimeUsageSample folds one reading into the history; RuntimeUsage carries no
+// timestamp, so now is passed in.
 func AppendRuntimeUsageSample(history deploy.RuntimeUsageHistory, sample config.RuntimeUsage, now time.Time) deploy.RuntimeUsageHistory {
 	previous, hasPrevious := history.Latest()
-	// A cumulative counter that went backwards can only mean the container was
-	// replaced. Inferring the restart from the data needs no second source of
-	// truth, and the pod hostname could not supply one anyway: a container
-	// restarted in place keeps its pod's name.
+	// A cumulative counter going backwards means the container was replaced; an in-place
+	// restart keeps the pod name, so the hostname cannot tell.
 	restarted := hasPrevious && runtimeUsageCountersReset(previous, sample)
 	if restarted {
 		history.Restarts++
@@ -63,8 +54,7 @@ func AppendRuntimeUsageSample(history deploy.RuntimeUsageHistory, sample config.
 	return history
 }
 
-// runtimeUsageCounterDelta advances an accumulated total. Across a restart (or
-// on the first sample) the counter began at zero, so its whole value is new.
+// Across a restart or on the first sample the counter began at zero.
 func runtimeUsageCounterDelta(previous, current int64, continuous bool) int64 {
 	if !continuous {
 		return current
@@ -81,8 +71,6 @@ func runtimeUsageCountersReset(previous, current config.RuntimeUsage) bool {
 		current.CPU.Periods < previous.CPU.Periods
 }
 
-// runtimeUsageIntervalCPUMilli converts the CPU time burned between two
-// readings into millicores over the wall time that elapsed between them.
 func runtimeUsageIntervalCPUMilli(previous, current config.RuntimeUsage, elapsed time.Duration) (int64, bool) {
 	usec := current.CPU.UsageUsec - previous.CPU.UsageUsec
 	if usec <= 0 {
@@ -91,9 +79,7 @@ func runtimeUsageIntervalCPUMilli(previous, current config.RuntimeUsage, elapsed
 	return usec * 1000 / elapsed.Microseconds(), true
 }
 
-// appendBoundedUsageSamples keeps the newest samples up to the cap. It copies
-// rather than resliceing so the trimmed prefix is not retained by the backing
-// array for the life of a long-running monitor.
+// Copy rather than reslice so the trimmed prefix is not retained by the backing array.
 func appendBoundedUsageSamples(samples []config.RuntimeUsage, sample config.RuntimeUsage) []config.RuntimeUsage {
 	samples = append(samples, sample)
 	if len(samples) <= runtimeUsageHistorySampleCap {

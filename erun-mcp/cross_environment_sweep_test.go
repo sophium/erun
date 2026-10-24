@@ -16,16 +16,7 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/usage"
 )
 
-// TestCrossEnvironmentToolsRefuseAForeignEnvironment sweeps every remaining
-// MCP tool that accepts tenant/environment but never checked them against
-// this server's own bound environment: doctor, observe, usage,
-// expose, unexpose, and terraform each resolved (or silently defaulted) a
-// caller-supplied tenant/environment on their own, independent of the
-// resolveLocalTarget/scopedTenantEnv guard every other tool in this module
-// already applied. Preview:true keeps each call from reaching kubectl/helm --
-// the refusal must happen before any of that, which this also proves, since a
-// downstream error would be a different message than assertRefusedForeignTarget
-// checks for.
+// Preview keeps calls away from kubectl/helm, so the refusal must come first.
 func TestCrossEnvironmentToolsRefuseAForeignEnvironment(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	xdg.Reload()
@@ -60,9 +51,7 @@ func TestCrossEnvironmentToolsRefuseAForeignEnvironment(t *testing.T) {
 	assertRefusedForeignTarget(t, "terraform", err)
 }
 
-// TestDoctorObserveUsageAcceptTheirOwnScope is the flip side: restating or
-// omitting tenant/environment must keep working exactly as before, since
-// plenty of existing callers pass them redundantly.
+// Many callers restate tenant/environment redundantly.
 func TestDoctorObserveUsageAcceptTheirOwnScope(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	xdg.Reload()
@@ -100,11 +89,7 @@ func TestDoctorObserveUsageAcceptTheirOwnScope(t *testing.T) {
 	}
 }
 
-// TestExposeAndUnexposeAcceptTheirOwnScope mirrors the doctor/observe/usage
-// coverage above for the two tools that resolve their target via
-// resolveLocalTarget directly rather than through an OpenResult. ServicesZone
-// and PlatformNamespace are supplied explicitly (mirroring the CLI's
-// --services-zone/--platform-namespace) so the call needs no project on disk.
+// Explicit ServicesZone/PlatformNamespace avoid needing a project on disk.
 func TestExposeAndUnexposeAcceptTheirOwnScope(t *testing.T) {
 	runtime := shared.RuntimeConfig{
 		Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"},
@@ -148,11 +133,8 @@ func TestExposeAndUnexposeAcceptTheirOwnScope(t *testing.T) {
 	}
 }
 
-// terraformTestStore adds ResolveEffectiveKubernetesContext to listToolStore,
-// the one extra method terraform.TerraformStore needs beyond OpenStore; the
-// terraform tool falls back to a real config.ConfigStore (reading this
-// machine's actual ~/.config/erun) when the wired store does not implement
-// TerraformStore, which is not what a hermetic test wants.
+// terraformTestStore implements TerraformStore so the tool does not fall back to the
+// machine's real ~/.config/erun.
 type terraformTestStore struct {
 	listToolStore
 }
@@ -161,10 +143,7 @@ func (terraformTestStore) ResolveEffectiveKubernetesContext(_, configured string
 	return configured
 }
 
-// TestTerraformAcceptsItsOwnScope exercises terraform's full resolveLocalTarget
-// -> RunTerraform round trip against a real (temp-dir) terraform root, since
-// ValidateTenantName rejects the hyphenated placeholder tenants used above --
-// terraform is the one swept tool that validates the tenant name itself.
+// terraform validates the tenant name itself, so this uses a real temp-dir root.
 func TestTerraformAcceptsItsOwnScope(t *testing.T) {
 	projectRoot := t.TempDir()
 	terraformDir := filepath.Join(projectRoot, "terraform-acme", "dev")

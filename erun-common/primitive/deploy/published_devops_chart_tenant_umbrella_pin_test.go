@@ -9,17 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// tenantUmbrellaTarget is the shape the reported failure was reproduced in: a
-// tenant that publishes its own <tenant>-devops umbrella states it at 1.0.142,
-// and a deploy asks for 1.0.143. The image the same deploy derives is the deploy
-// version, so honoring the stated chart installs a 1.0.143 runtime image under a
-// 1.0.142 umbrella. The umbrella is where the wrapped erun version lives, so the
-// two halves of this one coordinate must move together -- or the deploy must say
-// they did not. The move itself is covered end-to-end by
-// TestDeploy/dry_run_moves_the_tenant_umbrella_pin_with_the_deploy_version and
-// TestDeploy/dry_run_says_when_it_holds_the_tenant_umbrella_back in
-// erun-integration; what is left here are the two no-ops a golden cannot
-// distinguish, where the deploy must do nothing at all.
+// The moving case is covered by erun-integration goldens; these are the no-ops a
+// golden cannot distinguish.
 func tenantUmbrellaTarget() config.OpenResult {
 	return config.OpenResult{
 		Tenant: "frs",
@@ -32,10 +23,7 @@ func tenantUmbrellaTarget() config.OpenResult {
 	}
 }
 
-// TestTenantUmbrellaAtTheDeployVersionIsNotProbed pins the no-op half: a stated
-// umbrella already at the deploy version is the coordinate the deploy wants, so
-// it costs no registry read and prints no hold. Every probe is refused here, so
-// a resolution that reads the registry at all reports a hold instead.
+// Every probe is refused, so any registry read would surface as a hold.
 func TestTenantUmbrellaAtTheDeployVersionIsNotProbed(t *testing.T) {
 	const version = "1.0.143"
 	t.Setenv(PublishedChartProbeOverrideEnv, "")
@@ -55,9 +43,6 @@ func TestTenantUmbrellaAtTheDeployVersionIsNotProbed(t *testing.T) {
 	}
 }
 
-// TestTenantUmbrellaHoldIsNotReportedWhenTheOperatorOverridesTheChart pins the
-// override half: --runtime-chart replaces the coordinate wholesale, so a hold
-// reported against the coordinate about to be replaced would be noise.
 func TestTenantUmbrellaHoldIsNotReportedWhenTheOperatorOverridesTheChart(t *testing.T) {
 	t.Setenv(PublishedChartProbeOverrideEnv, "")
 	var trace bytes.Buffer

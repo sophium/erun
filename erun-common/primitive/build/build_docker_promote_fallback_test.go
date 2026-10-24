@@ -14,20 +14,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// newFakeDockerOnPath puts a fake `docker` executable ahead of PATH so these
-// tests exercise the real promote/build/push call graph in
-// build_docker_commands.go without a real daemon or registry. `docker push`
-// fails with pushFailureMessage for the first dockerPushUnknownBlobRetries+1
-// pushes of a given tag and succeeds on any later push of that same tag
-// (recording state under a temp dir so both this process and the fake script
-// agree on it); every other subcommand (build, tag, manifest) succeeds
-// unconditionally.
-//
-// The count matters: DockerImagePusher already re-pushes a blob rejection
-// (see build_docker_push_race_test.go), so the failure has to outlast that
-// bounded retry for these tests to reach the promote fallback underneath it —
-// which is the point, since a rebuild is the recovery a stale local
-// "already pushed" record needs and a re-push cannot provide.
+// newFakeDockerOnPath fakes docker on PATH; `docker push` of a tag fails with
+// pushFailureMessage until DockerImagePusher's bounded retry is exhausted.
 func newFakeDockerOnPath(t *testing.T, pushFailureMessage string) {
 	t.Helper()
 	binDir := t.TempDir()
@@ -60,12 +48,7 @@ func newFakeDockerOnPath(t *testing.T, pushFailureMessage string) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// newFakeDockerImageStore puts a fake `docker` executable ahead of PATH that
-// models a local image store holding exactly the tags in present: `docker image
-// inspect` succeeds only for those, `docker tag` fails with the daemon's own
-// "No such image" for any other source, and every other subcommand (build,
-// push, manifest) succeeds. Every invocation is appended to invocations.log in
-// the returned state dir, so a test can tell a promote from a rebuild.
+// newFakeDockerImageStore fakes a local store holding only present; invocations are logged.
 func newFakeDockerImageStore(t *testing.T, present ...string) (invocations func() string) {
 	t.Helper()
 	binDir := t.TempDir()
@@ -125,19 +108,11 @@ func newFakeDockerImageStore(t *testing.T, present ...string) (invocations func(
 	}
 }
 
-// fakeDockerStoreKey mirrors the shell fake's key() so both sides agree on which
-// file stands for which tag.
+// fakeDockerStoreKey must match the shell fake's key().
 func fakeDockerStoreKey(tag string) string {
 	return strings.NewReplacer("/", "_", ":", "_", ".", "_").Replace(tag)
 }
 
-// TestPromoteDockerImageRebuildsWhenTheCachedFingerprintImageIsGone reproduces
-// the reported symptom: the fingerprint check that chose promotion ran before
-// every other image in the run built, and by the time the promote runs the
-// cached image is no longer in the local store (a disk-floor prune mid-release
-// is enough). The fix treats that absence as a cache miss and rebuilds the
-// platform from source instead of aborting a release whose other images have
-// all built.
 func TestPromoteDockerImageRebuildsWhenTheCachedFingerprintImageIsGone(t *testing.T) {
 	invocations := newFakeDockerImageStore(t)
 
@@ -172,11 +147,6 @@ func testPromoteBuildInput() shared.DockerBuildSpec {
 	}
 }
 
-// TestPromoteDockerImageFallsBackToARealBuildOnUnknownBlob reproduces the
-// reported symptom: a promote's push is rejected because the registry
-// doesn't hold a blob docker's cache believed was already there. The fix
-// treats that as proof the cache hit cannot be trusted this run and rebuilds
-// the platform from source instead of failing the release.
 func TestPromoteDockerImageFallsBackToARealBuildOnUnknownBlob(t *testing.T) {
 	newFakeDockerOnPath(t, "unknown blob")
 
@@ -192,11 +162,6 @@ func TestPromoteDockerImageFallsBackToARealBuildOnUnknownBlob(t *testing.T) {
 	}
 }
 
-// TestPromoteDockerImageNamesTheTagOnANonBlobPushFailure guards the other
-// half of the fix: a failure that a rebuild could not fix (anything other
-// than the registry-missing-a-blob shape) is not silently retried, and the
-// error it returns names the image and the promote operation instead of a
-// bare daemon message.
 func TestPromoteDockerImageNamesTheTagOnANonBlobPushFailure(t *testing.T) {
 	newFakeDockerOnPath(t, "internal server error")
 
@@ -216,16 +181,6 @@ func TestPromoteDockerImageNamesTheTagOnANonBlobPushFailure(t *testing.T) {
 	}
 }
 
-// TestAPromoteThatRebuiltIsNotReportedAsACacheHit covers the other half of the
-// reported symptom: the timing report called the run a cache hit, because the
-// build's Promote flag was set, even though the promote found nothing to
-// promote and the platform was rebuilt from source. The one artifact an
-// operator reads to diagnose the run asserted the opposite of what it did.
-//
-// This is not an edge case. The decision is made before any image in the run
-// builds and the promote runs minutes later, so a prune under disk pressure
-// mid-release is enough to produce it -- and the run then rebuilds the whole
-// image set while reporting that it rebuilt nothing.
 func TestAPromoteThatRebuiltIsNotReportedAsACacheHit(t *testing.T) {
 	newFakeDockerImageStore(t)
 
@@ -241,16 +196,11 @@ func TestAPromoteThatRebuiltIsNotReportedAsACacheHit(t *testing.T) {
 	}
 	root.Finish(nil)
 
-	// The correction has to reach every row the decision was attached to -- the
-	// image's own step and one child per platform -- because a row that still
-	// read "cache hit" is the same defect one level down. One image step plus
-	// its two platform children.
+	// One image step plus its two platform children.
 	assertCorrectedTimingTable(t, core.RenderStepTimingRows(root, 0), 3)
 	assertCorrectedTimingRecord(t, root.ToRecord("build"))
 }
 
-// assertCorrectedTimingTable requires every row carrying the promoted image's
-// cache decision to report the corrected miss, and no row to still claim a hit.
 func assertCorrectedTimingTable(t *testing.T, rows []string, wantRows int) {
 	t.Helper()
 	joined := strings.Join(rows, "\n")
@@ -262,9 +212,6 @@ func assertCorrectedTimingTable(t *testing.T, rows []string, wantRows int) {
 	}
 }
 
-// assertCorrectedTimingRecord requires the machine-readable record -- the
-// surface tooling diffs between runs -- to carry the same correction rather
-// than the decision taken before the promote ran.
 func assertCorrectedTimingRecord(t *testing.T, record core.TimingRecord) {
 	t.Helper()
 	if len(record.Steps) != 1 {

@@ -8,12 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// The suite must leave the operator's real timing history byte-for-byte
-// unchanged. A record this binary writes there is indistinguishable from a real
-// build or deploy, and because retention prunes on write it is worse than
-// additive: the fabricated record evicts a genuine one to stay inside the cap.
-// This asserts the destination the binary actually resolves, so losing the
-// TestMain redirect fails here rather than silently resuming the writes.
+// Retention prunes on write, so a stray record would evict a genuine one.
 func TestTimingRecordsNeverResolveToTheOperatorsRealHistory(t *testing.T) {
 	dir, err := core.TimingRecordDir()
 	if err != nil {
@@ -30,9 +25,6 @@ func TestTimingRecordsNeverResolveToTheOperatorsRealHistory(t *testing.T) {
 	}
 }
 
-// Redirecting the destination must not be a way of turning the writer off.
-// Given a directory, a finished timing root still produces its record there,
-// with the run's own command and start time intact.
 func TestWriteTimingRecordWritesToTheResolvedDirectory(t *testing.T) {
 	dir := t.TempDir()
 	previous := core.TimingRecordDir

@@ -9,14 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// The mirror image of a false clean exit: a job whose only started work is one it
-// deliberately cancelled must not read as having failed. The inner job runs
-// concurrently with the test (a goroutine, not a real supervisor subprocess
-// -- this package has no built erun binary to re-exec for a real nested
-// `job start`) and records itself as started by the outer job the same way
-// a nested `job start` run from inside the outer's own work would (ERUN_JOB_ID
-// inheritance), set directly here since a goroutine shares this process's
-// env with the test itself.
+// The inner job runs in a goroutine (no erun binary to re-exec) and sets
+// ERUN_JOB_ID directly to mark the outer job as its parent.
 func TestEnvironmentJobDeliberatelyCancelledByItsParentIsNotReportedAsAFailedStartedJob(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("process-group signalling is POSIX-only")
@@ -40,9 +34,6 @@ func TestEnvironmentJobDeliberatelyCancelledByItsParentIsNotReportedAsAFailedSta
 	}
 }
 
-// startCancelTestInnerJob starts the "inner" job in a goroutine (long enough
-// to still be alive when the test cancels it) and returns the channel its
-// eventual RunEnvironmentJobSupervisor error lands on.
 func startCancelTestInnerJob(t *testing.T, tenant, environment, parentID, innerID string) <-chan error {
 	t.Helper()
 	t.Setenv(shared.EnvironmentJobIDEnvVar, parentID)
@@ -69,8 +60,6 @@ func startCancelTestInnerJob(t *testing.T, tenant, environment, parentID, innerI
 	return done
 }
 
-// cancelCancelTestInnerJob signals the inner job, waits for its supervisor to
-// finish, and asserts the finished record carries the cancel's provenance.
 func cancelCancelTestInnerJob(t *testing.T, tenant, environment, innerID string, done <-chan error) {
 	t.Helper()
 	result, err := CancelEnvironmentJob(core.Context{}, CancelEnvironmentJobParams{Tenant: tenant, Environment: environment, ID: innerID})
@@ -96,12 +85,9 @@ func cancelCancelTestInnerJob(t *testing.T, tenant, environment, innerID string,
 	}
 }
 
-// runCancelTestOuterJob runs the outer job (a plain, already-finished
-// command) and returns its own loaded record.
 func runCancelTestOuterJob(t *testing.T, tenant, environment, parentID string) shared.EnvironmentJob {
 	t.Helper()
-	// The outer job itself was never started by anyone -- clear the env
-	// before running it so its own record does not claim a parent of its own.
+	// Clear the env so the outer record claims no parent.
 	t.Setenv(shared.EnvironmentJobIDEnvVar, "")
 	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
 		Tenant:      tenant,

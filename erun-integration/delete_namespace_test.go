@@ -14,14 +14,8 @@ import (
 )
 
 func testDeleteRealRunRetractsChallengesBeforeDeletingTheNamespace(t *testing.T) {
-	// Namespace teardown removes the env's DNS-01 token Secret as
-	// ordinary content, and Kubernetes gives no ordering guarantee against
-	// cert-manager finalizing a still-pending Challenge in the same
-	// namespace. The Challenge's cleanup needs that Secret to retract its
-	// record, so if the namespace goes first the finalizer never clears and
-	// the namespace sits in Terminating for the full 20-minute timeout.
-	// The delete must therefore retract challenges FIRST, while the
-	// credential still exists. This asserts that ordering directly.
+	// Challenges must be retracted before the namespace delete removes the DNS-01
+	// Secret their finalizer needs; otherwise the namespace wedges in Terminating.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -73,15 +67,8 @@ exit 0
 }
 
 func testDeleteRealRunReportsARefusedChallengeReadInsteadOfSkippingSilently(t *testing.T) {
-	// A Forbidden challenge read (e.g. the delete Job's ServiceAccount has no
-	// access to acme.cert-manager.io) must not be folded into "no challenges
-	// here", or the step is skipped silently and the namespace wedges for its
-	// full timeout.
-	//
-	// A cluster without cert-manager must still skip silently; that is the
-	// next scenario. A cluster that HAS it and refuses the read must say so,
-	// because the namespace is about to wedge and the reason is not in the
-	// namespace's own conditions.
+	// A Forbidden challenge read must be reported, not treated as "no challenges":
+	// the namespace is about to wedge for a reason its conditions won't show.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -120,11 +107,7 @@ exit 0
 }
 
 func testDeleteRealRunWithoutCertManagerSkipsTheRetraction(t *testing.T) {
-	// The retraction is an optimization, so a cluster with no cert-manager
-	// (the normal case for a local or test cluster, where the CRDs do not
-	// exist and kubectl reports an unknown resource type) must pay nothing
-	// for it: no certificate delete, no waiting, and the namespace delete
-	// unaffected.
+	// Without cert-manager CRDs the retraction must cost nothing.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -159,8 +142,6 @@ exit 0
 }
 
 func testDeleteRealRunNamespaceDeleteFailureWarnsAndContinues(t *testing.T) {
-	// A failed namespace delete is non-fatal: kubectl's error is surfaced
-	// as a warning on stderr and the local config delete still proceeds.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -181,9 +162,7 @@ func testDeleteRealRunNamespaceDeleteFailureWarnsAndContinues(t *testing.T) {
 }
 
 func testDeleteRealRunWithOutputJSONReportsNamespaceDeleteFailure(t *testing.T) {
-	// The hosted delete Job reads this exact shape back out of its
-	// own captured output to tell a blocked namespace teardown apart from
-	// a clean one, since the command's own exit code stays 0 either way.
+	// The hosted delete Job parses this shape from output, since exit stays 0 either way.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -200,12 +179,8 @@ func testDeleteRealRunWithOutputJSONReportsNamespaceDeleteFailure(t *testing.T) 
 }
 
 func testDeleteRealRunRefusedNamespaceDeleteReportsTheRefusalNotATimeout(t *testing.T) {
-	// A delete the cluster refuses outright -- here RBAC, in milliseconds --
-	// must not be reported as a termination timeout, which would send an
-	// operator to investigate finalizers. It must report kubectl's own refusal and name the permission problem. The
-	// challenge read is refused by the same kubeconfig, which is what proves
-	// the retraction note is left out too: it warns about holding up a delete
-	// that here was never in flight.
+	// An immediate RBAC refusal must not read as a termination timeout, and the
+	// retraction note is omitted since no delete was in flight.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -236,11 +211,7 @@ exit 0
 }
 
 func testDeleteRealRunWedgedNamespaceDeleteStillReportsTheTerminationTimeout(t *testing.T) {
-	// The counterpart to the refusal scenario above, and the one that stops
-	// the two cases being flattened into one: a delete the cluster accepted
-	// and then could not finish must still read as a termination timeout,
-	// carrying the namespace's own conditions and the retraction note in the
-	// single string an operator reads off the environment row.
+	// An accepted delete that cannot finish must still read as a termination timeout.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -273,11 +244,7 @@ exit 0
 }
 
 func testDeleteRealRunNamespaceAlreadyGoneAfterAFailedDeleteReportsSuccess(t *testing.T) {
-	// The benign race the delete is built to tolerate: kubectl's wait fails,
-	// but by the time erun looks the namespace has actually gone. That is a
-	// success, so it must report no warning at all -- neither a refusal nor a
-	// termination timeout. (A delete that simply succeeds is covered by
-	// real_run_with_yes_flag_skips_confirmation_and_removes_config below.)
+	// kubectl's wait fails but the namespace is gone: success, no warning.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"

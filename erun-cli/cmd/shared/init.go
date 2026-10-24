@@ -13,17 +13,8 @@ func ConfirmPrompt(run PromptRunner, label string) (bool, error) {
 	return ConfirmPromptTo(run, label, nil)
 }
 
-// ConfirmPromptTo renders the confirm to out instead of promptui's default
-// (os.Stdout) when out is non-nil. The open --no-shell alias flow routes it to
-// stderr: the confirm writes while the eval-able setup script is printed to
-// stdout immediately afterward, so leaving the prompt on stdout lets the two
-// writers interleave non-deterministically (on Windows the prompt frames fused
-// into the first script line ~1 run in 20). Keeping the UI on stderr leaves
-// stdout carrying only the script.
-//
-// The answer comes from runConfirmPrompt, which drops promptui's repaint prompt
-// for this confirmation (see its comment); the label, the accepted inputs, and
-// the empty-answer default below are unchanged.
+// ConfirmPromptTo renders the confirm to out when non-nil; --no-shell routes it to
+// stderr so it cannot interleave with the eval-able script on stdout.
 func ConfirmPromptTo(run PromptRunner, label string, out io.WriteCloser) (bool, error) {
 	label = strings.TrimRight(strings.TrimSpace(label), "?")
 	prompt := promptui.Prompt{

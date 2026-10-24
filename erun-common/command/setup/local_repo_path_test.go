@@ -9,13 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// hostRepoPathFixture is one value a caller might be handed as a host-machine
-// repository path, with the verdict every caller must reach for it.
-//
-// The same fixture set is driven through the desktop's Manage save path in
-// erun-ui/environment_config_localrepo_test.go, which asserts its verdict
-// against this package's — so the two sides are held to one verdict per value
-// rather than to two hand-written expectation lists that can drift apart.
+// hostRepoPathFixture is shared with erun-ui/environment_config_localrepo_test.go
+// so both sides reach one verdict per value.
 type hostRepoPathFixture struct {
 	name     string
 	path     string
@@ -42,18 +37,13 @@ func hostRepoPathFixtures(t *testing.T) []hostRepoPathFixture {
 	}
 }
 
-// TestInitRetypeRefusesTheSamePaths drives init's own caller — the retype that
-// already refused — through the identical fixture set, so the side the issue
-// held up as correct is shown to be the side the dialog now matches.
 func TestInitRetypeRefusesTheSamePaths(t *testing.T) {
 	for _, tc := range hostRepoPathFixtures(t) {
 		state := &bootstrapRunState{
 			tenant:  "acme",
 			envName: "dev",
 			params:  open.BootstrapInitParams{ProjectRoot: tc.path},
-			// A project already detected, so the empty fixture reaches init's
-			// refusal instead of falling through to a project search that needs a
-			// real working directory to run in.
+			// Pre-detected so the empty fixture reaches init's refusal.
 			detected:  projectContext{loaded: true},
 			envConfig: config.EnvConfig{Name: "dev", Type: config.EnvironmentTypeRemoteAgent},
 		}

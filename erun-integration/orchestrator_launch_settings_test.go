@@ -6,14 +6,8 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/env"
 )
 
-// testOrchestratorLaunchSettings covers the launch-setting writers --
-// `erun orchestrator set-gateway`, `set-model` and `set-effort`, the CLI
-// counterparts of the desktop dialog's launch controls for
-// OrchestratorConfig.UseGateway, .Model and .Effort. Every refusal here is
-// decided by orchestrator.ValidateOrchestratorLaunchSettings against the
-// orchestrator as it would be after the write, so the gateway and model
-// scenarios cross each other: a model refused only because the gateway is on,
-// and a gateway refused only because of the model already recorded.
+// Every refusal validates the orchestrator as it would be after the write, so gateway
+// and model refusals depend on each other.
 func testOrchestratorLaunchSettings(t *testing.T) {
 	t.Run("set_gateway_help", testOrchestratorSetGatewayHelp)
 	t.Run("set_model_help", testOrchestratorSetModelHelp)
@@ -58,8 +52,6 @@ func testOrchestratorSetEffortHelp(t *testing.T) {
 	runOrchestratorScenario(t, setup, []string{"orchestrator", "set-effort", "--help"}, true, "set_effort_help")
 }
 
-// The dry runs validate exactly as a real run does (the catalog is seeded so
-// the gateway write is accepted) and trace the write without making it.
 func testOrchestratorSetGatewayDryRunTracesWrite(t *testing.T) {
 	setup := env.New(t)
 	seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{{id: "eng-1", name: "Eng One"}})
@@ -82,9 +74,6 @@ func testOrchestratorSetEffortDryRunTracesWrite(t *testing.T) {
 	requireOrchestratorsBlockLacks(t, setup, "effort:")
 }
 
-// The real runs persist the setting and `erun list` reads it back, which is
-// what makes each command a writer with a reader rather than a field written
-// into a file nothing shows.
 func testOrchestratorSetGatewayRealRunPersistsAndIsVisibleInList(t *testing.T) {
 	setup := env.New(t)
 	seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{{id: "eng-1", name: "Eng One"}})
@@ -94,9 +83,6 @@ func testOrchestratorSetGatewayRealRunPersistsAndIsVisibleInList(t *testing.T) {
 	runOrchestratorScenario(t, setup, []string{"list"}, true, "set_gateway_real_run_persists_and_is_visible_in_list_erun_list")
 }
 
-// set_model_real_run_persists_a_catalog_model_through_the_gateway records a
-// model the gateway can drive on an orchestrator already routed through it,
-// the accepted side of the reasoning-echo refusal below.
 func testOrchestratorSetModelRealRunPersistsACatalogModelThroughTheGateway(t *testing.T) {
 	setup := env.New(t)
 	seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{{id: "eng-1", name: "Eng One", useGateway: true}})
@@ -114,9 +100,7 @@ func testOrchestratorSetEffortRealRunPersistsAndIsVisibleInList(t *testing.T) {
 	runOrchestratorScenario(t, setup, []string{"list"}, true, "set_effort_real_run_persists_and_is_visible_in_list_erun_list")
 }
 
-// Clearing writes the zero value, which omitempty drops: the key is gone
-// rather than recorded as an explicit default. Turning the gateway off needs
-// no catalog, so none is seeded.
+// Clearing writes the zero value, which omitempty drops.
 func testOrchestratorSetGatewayRealRunCanTurnItOff(t *testing.T) {
 	setup := env.New(t)
 	seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{{id: "eng-1", name: "Eng One", useGateway: true}})
@@ -174,8 +158,6 @@ func testOrchestratorSetEffortUnknownOrchestratorFails(t *testing.T) {
 	runOrchestratorScenario(t, setup, []string{"orchestrator", "set-effort", "nope", "--effort", "high"}, false, "set_effort_unknown_orchestrator_fails")
 }
 
-// A blank id reaches the shared writer (cobra counts it as the one
-// argument), whose refusal names the command to rerun.
 func testOrchestratorSetModelBlankOrchestratorIdFails(t *testing.T) {
 	setup := env.New(t)
 	seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{{id: "eng-1", name: "Eng One"}})
@@ -188,8 +170,7 @@ func testOrchestratorSetGatewayInvalidValueFails(t *testing.T) {
 	runOrchestratorScenario(t, setup, []string{"orchestrator", "set-gateway", "eng-1", "--gateway", "maybe"}, false, "set_gateway_invalid_value_fails")
 }
 
-// An empty --model is neither a model nor the clearing token; it is refused
-// at parse time rather than read as "clear".
+// An empty --model is refused, not read as "clear".
 func testOrchestratorSetModelEmptyValueFails(t *testing.T) {
 	setup := env.New(t)
 	seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{{id: "eng-1", name: "Eng One", model: "sonnet"}})
@@ -204,9 +185,7 @@ func testOrchestratorSetEffortRefusesAnUnknownLevel(t *testing.T) {
 	requireOrchestratorsBlockLacks(t, setup, "effort:")
 }
 
-// set_gateway_on_refused_without_a_catalog: with nothing to route through,
-// the orchestrator would launch on this machine's own sign-in while reading
-// as routed. The refusal names where the catalog is configured.
+// Without a catalog the orchestrator would launch on local sign-in while reading as routed.
 func testOrchestratorSetGatewayOnRefusedWithoutACatalog(t *testing.T) {
 	setup := env.New(t)
 	seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{{id: "eng-1", name: "Eng One"}})
@@ -214,9 +193,7 @@ func testOrchestratorSetGatewayOnRefusedWithoutACatalog(t *testing.T) {
 	requireOrchestratorsBlockLacks(t, setup, "usegateway:")
 }
 
-// A model is passed to `claude --model` on the launch line, so a value that
-// starts with '-' would be read as a flag. Passed with '=' so cobra hands it
-// to --model rather than parsing it as a flag of its own.
+// The model lands on the claude launch line, so a leading '-' would read as a flag.
 func testOrchestratorSetModelRefusesALeadingDash(t *testing.T) {
 	setup := env.New(t)
 	seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{{id: "eng-1", name: "Eng One"}})
@@ -224,9 +201,7 @@ func testOrchestratorSetModelRefusesALeadingDash(t *testing.T) {
 	requireOrchestratorsBlockLacks(t, setup, "    model:")
 }
 
-// The reasoning-echo pair. The model is refused because the gateway is on;
-// the gateway is refused because of the model already recorded. Either way
-// the combination the gateway cannot drive is never written.
+// The gateway cannot drive a reasoning-echo model, so that combination is never written.
 func testOrchestratorSetModelRefusesAReasoningEchoModelWhenTheGatewayIsOn(t *testing.T) {
 	setup := env.New(t)
 	seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{{id: "eng-1", name: "Eng One", useGateway: true}})

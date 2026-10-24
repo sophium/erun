@@ -5,71 +5,31 @@ import (
 	"strings"
 )
 
-// A tool's family and its blast radius are part of the wire contract, not
-// documentation. Before this table every erun tool went out on the MCP spec
-// defaults -- readOnlyHint false, destructiveHint true, openWorldHint true --
-// because the SDK models the latter two as *bool and treats nil as true. So
-// `version` and `list` were advertised as destructive open-world tools and
-// `exec_raw` was indistinguishable from them, which means a client wanting to
-// gate on destructiveHint had to gate everything or nothing.
-//
-// This lives in erun-common for the same reason mcpReadOnlyTools does: the edge
-// and every other transport must read one mapping rather than each keeping its
-// own, which is the drift that has caused tool metadata to disagree across
-// transports before.
+// Tool families and blast-radius hints are wire contract. The SDK treats nil destructive and
+// open-world hints as true, so every tool must be described explicitly.
 
 // MCPToolDescriptor is the wire-visible metadata for one tool.
 type MCPToolDescriptor struct {
-	// Family groups the tool on the surface; empty for a top-level tool.
-	// Exposed as _meta.family so a client groups by reading a field instead of
-	// splitting a name on "_" -- which does not work anyway, since
-	// activity_lease_* and idle_stop_* carry two-segment prefixes.
+	// Family is exposed as _meta.family; tool names cannot be split on "_" reliably.
 	Family string
-	// CLIPath is the erun command behind the tool, as path segments. Nil when
-	// there is no command: eleven tools are wire-only. An absent cliPath is more
-	// informative than a fabricated one -- a client learns the tool is wire-only
-	// rather than being handed a command that does not exist.
+	// CLIPath is the erun command behind the tool; nil for wire-only tools.
 	CLIPath []string
-	// Title is the human display name, so a UI need not render
-	// "platform_context_create" verbatim.
-	Title string
-	// ReadOnly means the tool does not modify its environment. This is a
-	// SEMANTIC claim, deliberately NOT derived from mcpReadOnlyTools: that table
-	// is an authorization allowlist and is stricter on purpose (anything absent
-	// requires admin), so platform_env_list is read-only in meaning while still
-	// requiring admin to call. Deriving one from the other would mark every
-	// platform read as mutating. TestMCPReadOnlyToolsAreSemanticallyReadOnly
-	// enforces the one direction that must hold.
+	Title   string
+	// ReadOnly is semantic, not derived from mcpReadOnlyTools, which is a stricter authorization allowlist.
 	ReadOnly bool
-	// Destructive means the tool may destroy or overwrite state rather than only
-	// adding. Meaningful only when ReadOnly is false.
+	// Destructive is meaningful only when ReadOnly is false.
 	Destructive bool
-	// Idempotent means calling it again with the same arguments changes nothing
-	// further.
-	Idempotent bool
-	// OpenWorld means the tool reaches systems outside this environment: a
-	// registry, a cloud API, the control plane, or arbitrary argv.
+	Idempotent  bool
+	// OpenWorld means the tool reaches outside the environment: a registry, cloud API, control plane, or arbitrary argv.
 	OpenWorld bool
-	// AgentFacing marks a capability whose caller is exclusively automated —
-	// an agent driving MCP, a wrapper script, or the platform's own re-exec
-	// plumbing — never a human clicking through the desktop app. It is the
-	// explicit, reviewable declaration the desktop-surface gate
-	// (erun-integration's TestDesktopSurfaceGate) reads instead of silently
-	// assuming: the zero value (false) means a human can invoke this
-	// capability directly, so erun-ui/frontend must offer a way in, and the
-	// gate flags any false-and-absent capability by name.
+	// AgentFacing exempts an automation-only tool from the desktop-surface gate; false means
+	// erun-ui/frontend must offer a way in.
 	AgentFacing bool
 }
 
-// mcpToolDescriptors covers every registered tool. A tool absent from this map
-// is a programming error, and the transport refuses to register it rather than
-// letting it ship on the spec defaults -- which is exactly how the surface
-// used to drift out of sync with its own metadata.
+// mcpToolDescriptors must cover every registered tool; the transport refuses to register one missing here.
 var mcpToolDescriptors = map[string]MCPToolDescriptor{
-	// The whole exec_* family is an agent's hands inside its own working tree
-	// (raw commands, file writes, git commit/push, job control) -- a human
-	// operator does this from their own IDE and shell, never by clicking
-	// through the desktop app, so every entry here declares AgentFacing.
+	// The exec_* family is an agent's hands in its own worktree, so it is agent-facing.
 	"exec_diff":       {Family: "exec", CLIPath: []string{"exec", "diff"}, Title: "Show repository diff", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"exec_raw":        {Family: "exec", CLIPath: []string{"exec", "raw"}, Title: "Run a raw command in the environment", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	"exec_write":      {Family: "exec", CLIPath: []string{"exec", "write"}, Title: "Write a file in the working tree", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false, AgentFacing: true},
@@ -97,13 +57,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 		Family: "exec", CLIPath: []string{"exec", "route-check"}, Title: "Prove every registered API route is reachable on a deployed plane",
 		ReadOnly: true, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true,
 	},
-	// exec_agent has no CLI path: the CLI already offers this exact
-	// capability as `erun exec job start --agent`, one command covering both
-	// modes via a flag. MCP cannot do the same because each tool has one
-	// fixed schema, which is the whole reason exec_agent exists as a
-	// separate tool from exec_raw in the first place -- adding a CLI command
-	// that only re-exposes an existing flag would be a wrapper, not new
-	// capability.
+	// exec_agent has no CLI path: `erun exec job start --agent` covers it, but MCP needs a fixed schema per tool.
 	"exec_agent":            {Family: "exec", CLIPath: nil, Title: "Run an AI tool as a detached job", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	"exec_job_attach":       {Family: "exec", CLIPath: []string{"exec", "job", "attach"}, Title: "Attach to a running job", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"exec_job_status":       {Family: "exec", CLIPath: []string{"exec", "job", "status"}, Title: "Report a job's state and outcome", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
@@ -117,9 +71,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"cloud_login":           {Family: "cloud", CLIPath: []string{"cloud", "login"}, Title: "Sign in to a cloud provider", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"cloud_oidc":            {Family: "cloud", CLIPath: []string{"cloud", "oidc"}, Title: "Configure OIDC for a provider alias", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"cloud_set":             {Family: "cloud", CLIPath: []string{"cloud", "set"}, Title: "Set an environment's cloud alias", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
-	// Both credential-injection tools are plumbing behind the already-covered
-	// cloud_login flow: the desktop calls these itself to refresh an
-	// environment's credentials, never as a distinct action a human picks.
+	// Credential injection is plumbing behind cloud_login.
 	"cloud_inject_aws_credentials": {Family: "cloud", CLIPath: nil, Title: "Inject AWS credentials into an environment", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false, AgentFacing: true},
 	"cloud_clear_aws_credentials":  {Family: "cloud", CLIPath: nil, Title: "Clear injected AWS credentials", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: false, AgentFacing: true},
 	"context_list":                 {Family: "context", CLIPath: []string{"context", "list"}, Title: "List cloud contexts", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
@@ -130,17 +82,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"platform_version":             {Family: "platform", CLIPath: []string{"platform", "version"}, Title: "Report the erun platform's own version and build", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"platform_tenant_list":         {Family: "platform", CLIPath: []string{"platform", "tenant", "list"}, Title: "List platform tenants", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"platform_tenant_create":       {Family: "platform", CLIPath: []string{"platform", "tenant", "create"}, Title: "Create a platform tenant", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
-	// A break-glass repair, not a recurring operator workflow: it re-org-scopes
-	// an issuer and backfills one already-stuck tenant's own org value, which
-	// changes how every tenant's tokens on that issuer resolve. The operator
-	// runs it directly against the platform whose mapping is dead, the same
-	// shape and the same reasoning as
-	// erun-backend-api/internal/routes/route_audit.go's
-	// "PATCH /v1/tenants/reconcile-bootstrap-name" entry -- there is no ongoing
-	// UI affordance to design here, and erun-console's TenantSwitcher already
-	// names the unreachable membership this repairs. Declared rather than
-	// inferred: the desktop-surface gate used to pass this capability by
-	// accident (see erun-integration/desktop_surface_test.go's capabilityToken).
+	// A break-glass repair run directly against the broken platform, with no ongoing UI affordance.
 	"platform_tenant_repair-org-mapping": {Family: "platform", CLIPath: []string{"platform", "tenant", "repair-org-mapping"}, Title: "Repair a tenant's dead org mapping", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true},
 	"platform_identity_org_create":       {Family: "platform", CLIPath: []string{"platform", "identity", "org", "create"}, Title: "Create an organization on the platform's identity provider", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"platform_user_list":                 {Family: "platform", CLIPath: []string{"platform", "user", "list"}, Title: "List platform users", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
@@ -161,84 +103,43 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"review_create":                      {Family: "review", CLIPath: []string{"review", "create"}, Title: "Open a review", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"review_comment":                     {Family: "review", CLIPath: []string{"review", "comment"}, Title: "Comment on a review", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"review_close":                       {Family: "review", CLIPath: []string{"review", "close"}, Title: "Close a review", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
-	// Recording a build is how `erun build --release` (or an agent driving
-	// the same flow) reports its own result back onto a review; no desktop
-	// surface lets an operator hand-author a build result, so this is
-	// agent-facing the same way the exec_* family is.
-	"review_record-build": {Family: "review", CLIPath: []string{"review", "record-build"}, Title: "Record a build against a review", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
-	// Reporting MERGED is the other half of the same unattended flow: only the
-	// environment a review's merge queue promoted to MERGE ever calls this,
-	// after it has composed, built, and pushed the prospective merge itself —
-	// no desktop surface authors this report either.
-	"review_report-merged": {Family: "review", CLIPath: []string{"review", "report-merged"}, Title: "Report a review MERGED, verified as a queue-driven merge or as work that landed elsewhere", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
-	// Requeue recovers a merge-queue wedge: a review stuck at
-	// MERGE with no desktop button to move it, only ever hit by whichever
-	// tooling drove gate-merge/the merge queue in the first place — the same
-	// agent-only shape as record-build/report-merged above.
-	"review_requeue":                {Family: "review", CLIPath: []string{"review", "requeue"}, Title: "Move a review stuck at MERGE back to READY", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true},
-	"review_reviewers_list":         {Family: "review", CLIPath: []string{"review", "reviewers", "list"}, Title: "List a review's assigned reviewers", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
-	"review_reviewers_add":          {Family: "review", CLIPath: []string{"review", "reviewers", "add"}, Title: "Assign a reviewer to a review", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
-	"review_reviewers_remove":       {Family: "review", CLIPath: []string{"review", "reviewers", "remove"}, Title: "Remove a reviewer from a review", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
-	"review_resolve":                {Family: "review", CLIPath: []string{"review", "resolve"}, Title: "Resolve a comment thread", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
-	"review_unresolve":              {Family: "review", CLIPath: []string{"review", "unresolve"}, Title: "Reopen a comment thread", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
-	"review_queue_list":             {Family: "review", CLIPath: []string{"review", "queue", "list"}, Title: "List a merge queue", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
-	"review_queue_advance":          {Family: "review", CLIPath: []string{"review", "queue", "advance"}, Title: "Advance a merge queue", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
-	"review_queue_override-advance": {Family: "review", CLIPath: []string{"review", "queue", "override-advance"}, Title: "Override the unresolved-thread gate and advance a merge queue", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
-	// The jobs_* tools are the platform-backed queue: what agents and
-	// orchestrators are working on right now, and what recently finished.
-	// jobs_list/jobs_show are human-facing reads with a real operator surface
-	// (erun-console's Jobs section), so they are not AgentFacing.
-	// jobs_start/jobs_finish are the self-report writes an actor makes about
-	// its own work -- an operator watches the queue, never edits someone
-	// else's row -- which is the same AgentFacing exemption review_record-build
-	// carries.
+	"review_record-build":                {Family: "review", CLIPath: []string{"review", "record-build"}, Title: "Record a build against a review", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	"review_report-merged":               {Family: "review", CLIPath: []string{"review", "report-merged"}, Title: "Report a review MERGED, verified as a queue-driven merge or as work that landed elsewhere", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	"review_requeue":                     {Family: "review", CLIPath: []string{"review", "requeue"}, Title: "Move a review stuck at MERGE back to READY", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true},
+	"review_reviewers_list":              {Family: "review", CLIPath: []string{"review", "reviewers", "list"}, Title: "List a review's assigned reviewers", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
+	"review_reviewers_add":               {Family: "review", CLIPath: []string{"review", "reviewers", "add"}, Title: "Assign a reviewer to a review", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
+	"review_reviewers_remove":            {Family: "review", CLIPath: []string{"review", "reviewers", "remove"}, Title: "Remove a reviewer from a review", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
+	"review_resolve":                     {Family: "review", CLIPath: []string{"review", "resolve"}, Title: "Resolve a comment thread", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
+	"review_unresolve":                   {Family: "review", CLIPath: []string{"review", "unresolve"}, Title: "Reopen a comment thread", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
+	"review_queue_list":                  {Family: "review", CLIPath: []string{"review", "queue", "list"}, Title: "List a merge queue", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
+	"review_queue_advance":               {Family: "review", CLIPath: []string{"review", "queue", "advance"}, Title: "Advance a merge queue", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
+	"review_queue_override-advance":      {Family: "review", CLIPath: []string{"review", "queue", "override-advance"}, Title: "Override the unresolved-thread gate and advance a merge queue", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
+	// jobs_list/jobs_show have an erun-console surface; jobs_start/jobs_finish are self-reports.
 	"jobs_list":   {Family: "jobs", CLIPath: []string{"jobs", "list"}, Title: "List jobs: what is being worked on now, and what recently finished", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"jobs_show":   {Family: "jobs", CLIPath: []string{"jobs", "show"}, Title: "Show one job in full", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"jobs_start":  {Family: "jobs", CLIPath: []string{"jobs", "start"}, Title: "Record that this actor is starting a piece of work", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	"jobs_finish": {Family: "jobs", CLIPath: []string{"jobs", "finish"}, Title: "Report a job's progress or its outcome", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true},
 	"idle":        {Family: "idle", CLIPath: []string{"idle"}, Title: "Report an environment's idle and auto-stop state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
-	// The idle_stop_* primitives record and query the auto-stop supervisor's
-	// own decisions; a human reads that history through the already-covered
-	// `idle` report, never by calling these directly.
+	// Humans read auto-stop history through the `idle` report.
 	"idle_stop_history": {Family: "idle", CLIPath: nil, Title: "List recorded auto-stop decisions", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"idle_stop_record":  {Family: "idle", CLIPath: nil, Title: "Record an auto-stop decision", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false, AgentFacing: true},
 	"idle_stop_cancel":  {Family: "idle", CLIPath: nil, Title: "Cancel a pending auto-stop", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false, AgentFacing: true},
 	"whip":              {Family: "whip", CLIPath: []string{"whip"}, Title: "Push this environment's own AI session with the pacing nudge, on demand", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false},
-	// The lease verbs are a shell wrapper's or agent's own busy-signal
-	// primitive (erun-cli/cmd/activity_lease.go); the human-visible effect of
-	// a held lease is the existing "already working here" occupancy prompt,
-	// not a UI over these three calls.
+	// Lease verbs are wrapper and agent busy signals.
 	"activity_lease_list":    {Family: "activity", CLIPath: nil, Title: "List activity leases held on an environment", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"activity_lease_take":    {Family: "activity", CLIPath: nil, Title: "Take an activity lease, deferring auto-stop", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"activity_lease_release": {Family: "activity", CLIPath: nil, Title: "Release an activity lease", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false, AgentFacing: true},
-	// The structured AI-session status a tool's own turn-boundary hooks report
-	// (erun activity ai-session report); an orchestrator or a future mobile
-	// client polls this directly, the way it already polls exec_job_status --
-	// there is no desktop UI over this specific tool call to reference.
-	"ai_sessions":      {Family: "activity", CLIPath: nil, Title: "Report structured AI-session status (busy/idle/awaiting-input/exited/oom-killed)", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
-	"outputs_list":     {Family: "outputs", CLIPath: []string{"outputs", "list"}, Title: "List an environment's build outputs", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
-	"outputs_download": {Family: "outputs", CLIPath: []string{"outputs", "download"}, Title: "Download a build output", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
-	// A build-cost investigation tool: reads the per-step CPU/throttling/I/O
-	// already recorded to ~/.erun/timing/. Its primary caller today is
-	// whoever is diagnosing build slowness -- often an agent, same as the
-	// exec_* family above -- and a desktop Builds view over the same records
-	// is deliberately deferred follow-up work, not yet built; revisit
-	// AgentFacing once that view exists.
+	"ai_sessions":            {Family: "activity", CLIPath: nil, Title: "Report structured AI-session status (busy/idle/awaiting-input/exited/oom-killed)", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
+	"outputs_list":           {Family: "outputs", CLIPath: []string{"outputs", "list"}, Title: "List an environment's build outputs", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	"outputs_download":       {Family: "outputs", CLIPath: []string{"outputs", "download"}, Title: "Download a build output", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	// No desktop Builds view yet; revisit AgentFacing once it exists.
 	"build_profile":    {Family: "build", CLIPath: []string{"build", "profile"}, Title: "Show where a past build spent its time, CPU, and I/O", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"inputs_upload":    {Family: "inputs", CLIPath: []string{"inputs", "upload"}, Title: "Upload a file into an environment", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
 	"sshd_sync":        {Family: "sshd", CLIPath: []string{"sshd", "sync"}, Title: "Sync the working tree over SSH", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
 	"contribute_clone": {Family: "contribute", CLIPath: []string{"contribute", "clone"}, Title: "Clone the erun source into the environment", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"version":          {Family: "", CLIPath: []string{"version"}, Title: "Report erun build metadata", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
-	// OpenWorld: true because controlPlanes reaches outside this environment
-	// -- GET /v1/platform on each configured erun-hosted control plane, its
-	// linked console's GET /version.json, plus a lookup against erun's own
-	// registry -- even though the plain listing (controlPlanes unset) stays
-	// local.
-	"list": {Family: "", CLIPath: []string{"list"}, Title: "List tenants, environments, and the effective target", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
-	// The environment read model composes list/idle/doctor into one resolved
-	// lifecycle state for an orchestrator or a future mobile client polling
-	// this environment -- there is no desktop UI over this specific tool call
-	// to reference, the same shape as ai_sessions above.
+	// OpenWorld: controlPlanes queries control planes, consoles, and the registry.
+	"list":        {Family: "", CLIPath: []string{"list"}, Title: "List tenants, environments, and the effective target", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"environment": {Family: "", CLIPath: nil, Title: "Report the environment read model: list-style summary, resolved lifecycle state, idle status, cloud-context config, and doctor health", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"init":        {Family: "", CLIPath: []string{"init"}, Title: "Initialise an environment", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false},
 	"build":       {Family: "", CLIPath: []string{"build"}, Title: "Build the environment's images", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
@@ -248,23 +149,14 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"upgrade":     {Family: "", CLIPath: []string{"upgrade"}, Title: "Upgrade opted-in environments to the latest version", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"release":     {Family: "", CLIPath: []string{"release"}, Title: "Cut a release and publish its artefacts", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"pin":         {Family: "", CLIPath: []string{"pin"}, Title: "Pin an environment to a version", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
-	// services is the read expose depends on: the desktop's Ports tab renders
-	// the same call as its Service picker, so this entry declares no
-	// AgentFacing -- erun-ui/frontend holds a real way in, and the name it
-	// calls by (ListEnvironmentServices) is the match the desktop-surface gate
-	// looks for.
+	// The desktop's Ports tab calls services as ListEnvironmentServices, which the surface gate matches.
 	"services":  {Family: "", CLIPath: []string{"services"}, Title: "List the Services an environment runs, and which are already exposed", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	"expose":    {Family: "", CLIPath: []string{"expose"}, Title: "Publish a service through the platform edge", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"unexpose":  {Family: "", CLIPath: []string{"unexpose"}, Title: "Withdraw a published service", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
 	"terraform": {Family: "", CLIPath: nil, Title: "Run the environment's Terraform root", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true},
-	// e2e has no desktop surface to reference yet -- AgentFacing here is a
-	// deliberate, temporary scope decision for this feature's CLI/MCP-first
-	// delivery, not a claim that no human ever runs it. A follow-up issue tracks adding a desktop "Run e2e" surface;
-	// remove AgentFacing once it exists.
+	// Temporarily agent-facing until a desktop e2e surface exists.
 	"e2e": {Family: "", CLIPath: []string{"e2e"}, Title: "Run the project's e2e suites against a deployed environment", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
-	// job_start has no working handler: it is a removed-tool stub (see
-	// mcpRemovedTools) whose only behavior is to name the tool that took over
-	// its capability.
+	// job_start is a removed-tool stub (see mcpRemovedTools).
 	"job_start": {Family: "exec", CLIPath: nil, Title: "Removed: use exec_raw or exec_agent", ReadOnly: true, Destructive: false, Idempotent: true, OpenWorld: false, AgentFacing: true},
 	"doctor":    {Family: "", CLIPath: []string{"doctor"}, Title: "Diagnose an environment", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"observe":   {Family: "", CLIPath: []string{"observe"}, Title: "Observe an environment's live state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
@@ -273,36 +165,25 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"delete":    {Family: "", CLIPath: []string{"delete"}, Title: "Delete an environment and its namespace", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
 }
 
-// MCPToolDescriptorFor returns a tool's descriptor. The second result is false
-// for an unknown tool, which a caller must treat as an error rather than
-// substituting a default.
+// MCPToolDescriptorFor returns a tool's descriptor; callers must treat a missing one as an error.
 func MCPToolDescriptorFor(tool string) (MCPToolDescriptor, bool) {
 	descriptor, ok := mcpToolDescriptors[MCPToolCurrentName(tool)]
 	return descriptor, ok
 }
 
-// MCPToolIsMCPOnly reports whether a tool has no erun command behind it.
-// Eleven do: the activity_lease_*, idle_stop_* and three cloud tools are
-// wire-level primitives the CLI expresses differently for a human,
-// `terraform` is a command group rather than a leaf, and `exec_agent`'s
-// capability is already covered by an existing CLI flag (`erun exec job
-// start --agent`) rather than a dedicated command. Surfaced as _meta.mcpOnly.
+// MCPToolIsMCPOnly reports whether a tool has no erun command behind it (_meta.mcpOnly).
 func MCPToolIsMCPOnly(tool string) bool {
 	descriptor, ok := MCPToolDescriptorFor(tool)
 	return ok && descriptor.CLIPath == nil
 }
 
-// MCPToolIsAgentFacing reports whether a tool is declared exempt from needing
-// a desktop entry point. An unknown tool reports false (not exempt) rather
-// than panicking, so a caller auditing the whole surface treats an
-// unregistered name as something to investigate, not as pre-cleared.
+// MCPToolIsAgentFacing reports whether a tool is exempt from needing a desktop entry point; unknown tools are not.
 func MCPToolIsAgentFacing(tool string) bool {
 	descriptor, ok := MCPToolDescriptorFor(tool)
 	return ok && descriptor.AgentFacing
 }
 
-// MCPToolNames returns every tool the descriptor table covers, so a test can
-// assert the table and the registered surface agree.
+// MCPToolNames returns every tool the descriptor table covers.
 func MCPToolNames() []string {
 	names := make([]string, 0, len(mcpToolDescriptors))
 	for name := range mcpToolDescriptors {
@@ -312,16 +193,8 @@ func MCPToolNames() []string {
 	return names
 }
 
-// mcpToolRenames maps a retired tool name to its replacement. The rule across
-// the surface is that a tool's name equals its CLI path with "_" for spaces.
-// The first five broke it because `erun exec` was the only command group
-// whose members dropped their prefix, and it is the group whose members
-// differ most in blast radius -- exec_diff only reads while exec_raw runs
-// arbitrary argv. The job_* five are a later rename of the same shape:
-// `job` becomes a sub-family of `exec`, so its CLI path moves from
-// `erun job <verb>` to `erun exec job <verb>` and the tool names move with
-// it. The old names stay callable for one release so an upgrade does not
-// break a pinned client, then go.
+// mcpToolRenames maps retired names to current ones (name = CLI path with "_" for spaces). Old
+// names stay callable for one release so pinned clients survive an upgrade.
 var mcpToolRenames = map[string]string{
 	"diff":           "exec_diff",
 	"raw":            "exec_raw",
@@ -335,9 +208,7 @@ var mcpToolRenames = map[string]string{
 	"job_cancel":     "exec_job_cancel",
 }
 
-// MCPToolRenames returns the retired-to-current mapping, so a transport can
-// register a deprecated alias beside each renamed tool and a test can assert
-// every alias resolves.
+// MCPToolRenames returns the retired-to-current mapping.
 func MCPToolRenames() map[string]string {
 	renames := make(map[string]string, len(mcpToolRenames))
 	for old, current := range mcpToolRenames {
@@ -346,8 +217,7 @@ func MCPToolRenames() map[string]string {
 	return renames
 }
 
-// MCPToolCurrentName resolves a possibly-retired name to the current one, so
-// authorization and auditing key off a single name whichever the caller used.
+// MCPToolCurrentName resolves a retired name so authorization and auditing key off one name.
 func MCPToolCurrentName(tool string) string {
 	trimmed := strings.TrimSpace(tool)
 	if current, ok := mcpToolRenames[trimmed]; ok {
@@ -356,25 +226,13 @@ func MCPToolCurrentName(tool string) string {
 	return trimmed
 }
 
-// mcpRemovedTools maps a tool this server no longer runs to the guidance a
-// caller needs once it is gone: which live tool now covers its capability.
-// This is deliberately separate from mcpToolRenames: a rename's replacement
-// shares the retired tool's schema and behavior, so aliasing it costs
-// nothing. A removal's capability can split across replacements with
-// incompatible schemas -- job_start's command mode became exec_raw's
-// wait:false path and its agent mode became the separate exec_agent tool, so
-// no single alias could carry both without lying about its own input shape.
-// A tool named here still gets a registration under its retired name (see
-// erun-mcp's registerRemovedTools), so calling it fails with the guidance
-// below rather than the SDK's bare "unknown tool", which names a problem and
-// no action the caller can take.
+// mcpRemovedTools maps removed tools to replacement guidance. Unlike a rename, a removal can
+// split across tools with incompatible schemas, so it gets a stub that fails with guidance.
 var mcpRemovedTools = map[string]string{
 	"job_start": "exec_raw with wait:false for a plain command, or exec_agent for an AI tool",
 }
 
-// MCPRemovedTools returns the retired-to-guidance mapping, so a transport can
-// register a stub under each retired name and a test can assert every stub
-// names a real, described replacement.
+// MCPRemovedTools returns the retired-to-guidance mapping.
 func MCPRemovedTools() map[string]string {
 	removed := make(map[string]string, len(mcpRemovedTools))
 	for name, guidance := range mcpRemovedTools {

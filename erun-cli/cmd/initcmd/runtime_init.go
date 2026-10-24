@@ -12,8 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewRuntimeInitCmd is the erun-devops image's ENTRYPOINT: the init of the
-// runtime container, never something an operator runs.
+// NewRuntimeInitCmd is the erun-devops image's ENTRYPOINT.
 func NewRuntimeInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "runtime-init [devops | COMMAND [ARGS...]]",
@@ -44,7 +43,6 @@ func NewRuntimeInitCmd() *cobra.Command {
 			return runRuntimeInitCommand(shared.CommandContext(cmd), args)
 		},
 	}
-	// Everything after COMMAND belongs to it, not to erun.
 	cmd.Flags().SetInterspersed(false)
 	shared.AddDryRunFlag(cmd)
 	return cmd
@@ -68,15 +66,13 @@ func runRuntimeInitCommand(ctx core.Context, args []string) error {
 		return internal.WithExitCode(err, code)
 	}
 	if code != 0 {
-		// The container's command already reported its own failure; only its
-		// exit code is the entrypoint's to pass on.
+		// The command already reported its failure; pass on only the exit code.
 		return internal.MarkReported(internal.WithExitCode(fmt.Errorf("exit status %d", code), code))
 	}
 	return nil
 }
 
-// NewTrimCacheCmd bounds the go build cache. The runtime entrypoint runs the same
-// trim in-process every half hour; this is the manual form.
+// NewTrimCacheCmd trims the go build cache manually; the entrypoint also runs it periodically.
 func NewTrimCacheCmd() *cobra.Command {
 	var maxBytes int64
 	cmd := &cobra.Command{
@@ -127,9 +123,7 @@ func runTrimCacheCommand(ctx core.Context, args []string, maxBytes int64, maxByt
 	return ctx.WriteResult(result)
 }
 
-// NewInstallSkillsCmd installs erun's skills and reusable agents into the
-// assistants' discovery directories; the runtime entrypoint does the same at
-// every boot.
+// NewInstallSkillsCmd installs erun's skills and agents; the entrypoint also runs it at boot.
 func NewInstallSkillsCmd() *cobra.Command {
 	var skillsDir, agentsDir string
 	cmd := &cobra.Command{

@@ -10,9 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestOrchestratorEnvConfigWithoutRoleLoadsUnchanged locks that an existing
-// link with no `role:` key at all -- the shape every config predating this
-// field has -- loads with an empty (undeclared) role rather than a default.
+// TestOrchestratorEnvConfigWithoutRoleLoadsUnchanged: a link predating the role field loads as
+// undeclared, not a default.
 func TestOrchestratorEnvConfigWithoutRoleLoadsUnchanged(t *testing.T) {
 	const doc = `orchestrators:
   - id: orch-1
@@ -37,7 +36,6 @@ func TestOrchestratorEnvConfigWithoutRoleLoadsUnchanged(t *testing.T) {
 		t.Fatalf("existing fields must load unchanged, got %+v", env)
 	}
 
-	// Re-saving the loaded config must not inject a role key that was never there.
 	data, err := yaml.Marshal(config)
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
@@ -66,19 +64,8 @@ func TestOrchestratorEnvRoleIsValid(t *testing.T) {
 	}
 }
 
-// TestOrchestratorEnvRoleAllowed locks the shared gate erun-ui's link/edit
-// path and the CLI's set-role path both consult: any role -- including
-// undeclared -- works for an agent environment, since it already has a
-// worktree to review and an in-pod agent to delegate to; a host environment
-// takes any role but runtime, which means deploy, pin, and observe and has no
-// pod there for any of them to act on; a runtime environment has no worktree
-// to review and no in-pod agent to delegate to, so only
-// OrchestratorEnvRoleRuntime is allowed for it; an unrecognized type allows
-// nothing.
 func TestOrchestratorEnvRoleAllowed(t *testing.T) {
-	// A host environment is deliberately NOT in this set: it is the one type
-	// that admits a role list which is neither "everything" nor a single value,
-	// so it gets its own cases below rather than being folded into "any role".
+	// Host is excluded: it allows every role but runtime.
 	anyRoleTypes := []configpkg.EnvironmentType{configpkg.EnvironmentTypeLocalAgent, configpkg.EnvironmentTypeRemoteAgent}
 	anyRole := []configpkg.OrchestratorEnvRole{"", configpkg.OrchestratorEnvRoleCode, configpkg.OrchestratorEnvRoleBuild, configpkg.OrchestratorEnvRoleRuntime}
 	for _, envType := range anyRoleTypes {
@@ -89,11 +76,7 @@ func TestOrchestratorEnvRoleAllowed(t *testing.T) {
 		}
 	}
 
-	// A host environment is a real directory on this machine -- so code, build,
-	// and undeclared are all fine -- but it has no pod, and the runtime role is
-	// defined as operating the environment directly: deploy, pin, observe. Every
-	// one of those refuses a host environment, so offering the role would promise
-	// a relationship the link cannot deliver.
+	// Host has no pod, so the runtime role (deploy, pin, observe) is refused.
 	hostCases := []struct {
 		role configpkg.OrchestratorEnvRole
 		want bool
@@ -129,12 +112,8 @@ func TestOrchestratorEnvRoleAllowed(t *testing.T) {
 	}
 }
 
-// TestOrchestratorEnvRoleRequiredFor locks the one-role constraint a runtime
-// environment carries, and that no other type requires a role. Host is in
-// this list on purpose and it is the interesting one: "" here means only that
-// undeclared is legal, NOT that every role is -- host still refuses runtime
-// (TestOrchestratorEnvRoleAllowed above), so a caller must not read "" as
-// "anything goes" and skip the allowed check.
+// TestOrchestratorEnvRoleRequiredFor: for host, "" means only that undeclared is legal; it still
+// refuses runtime.
 func TestOrchestratorEnvRoleRequiredFor(t *testing.T) {
 	if got := configpkg.OrchestratorEnvRoleRequiredFor(configpkg.EnvironmentTypeRuntime); got != configpkg.OrchestratorEnvRoleRuntime {
 		t.Errorf("OrchestratorEnvRoleRequiredFor(runtime) = %q, want %q", got, configpkg.OrchestratorEnvRoleRuntime)
@@ -146,16 +125,6 @@ func TestOrchestratorEnvRoleRequiredFor(t *testing.T) {
 	}
 }
 
-// TestOrchestratorEnvRoleIneligibilityReason locks the operator-facing copy for
-// every type whose eligible set is decided without a host environment: empty
-// when the role is allowed, a concrete reason naming the runtime role as the
-// way out when a runtime environment is refused a different role, and a generic
-// reason for a type this package does not recognize at all.
-//
-// A host environment is refused exactly one role while allowing every other,
-// which is a different rule with a different reason, so it is covered by
-// TestOrchestratorEnvRoleIneligibilityReasonForAHostEnvironment below rather
-// than folded in here.
 func TestOrchestratorEnvRoleIneligibilityReason(t *testing.T) {
 	if got := configpkg.OrchestratorEnvRoleIneligibilityReason(configpkg.EnvironmentTypeRuntime, configpkg.OrchestratorEnvRoleRuntime); got != "" {
 		t.Errorf("OrchestratorEnvRoleIneligibilityReason(runtime, runtime) = %q, want \"\"", got)
@@ -172,12 +141,8 @@ func TestOrchestratorEnvRoleIneligibilityReason(t *testing.T) {
 	}
 }
 
-// TestOrchestratorEnvRoleIneligibilityReasonForAHostEnvironment locks the one
-// refusal a host environment has. The reason must name what is missing (a pod)
-// AND what still works -- an operator told only "not allowed" would have no way
-// to link the environment at all -- and must not reuse the runtime
-// environment's "no worktree" wording, which is false for a host environment:
-// it has a real directory on this machine.
+// TestOrchestratorEnvRoleIneligibilityReasonForAHostEnvironment: the host reason must name the
+// missing pod and what still works, not "no worktree".
 func TestOrchestratorEnvRoleIneligibilityReasonForAHostEnvironment(t *testing.T) {
 	for _, role := range []configpkg.OrchestratorEnvRole{configpkg.OrchestratorEnvRoleCode, configpkg.OrchestratorEnvRoleBuild, ""} {
 		if got := configpkg.OrchestratorEnvRoleIneligibilityReason(configpkg.EnvironmentTypeHost, role); got != "" {
@@ -196,9 +161,6 @@ func TestOrchestratorEnvRoleIneligibilityReasonForAHostEnvironment(t *testing.T)
 	}
 }
 
-// TestSetOrchestratorEnvRoleRefusesRuntimeForAHostEnvironment drives the
-// refusal through the same writer the CLI's `erun orchestrator set-role`
-// calls, proving the CLI inherits it without a line of its own.
 func TestSetOrchestratorEnvRoleRefusesRuntimeForAHostEnvironment(t *testing.T) {
 	hostDir := "/home/erun/host-work"
 	store := newOrchestratorRoleStubStore(t, configpkg.EnvConfig{
@@ -225,8 +187,7 @@ func TestSetOrchestratorEnvRoleRefusesRuntimeForAHostEnvironment(t *testing.T) {
 		t.Error("a refused role write must not reach the config")
 	}
 
-	// The same host environment must still accept the roles that do work, or the
-	// refusal above would be indistinguishable from refusing host links outright.
+	// Otherwise the refusal would be indistinguishable from refusing host links outright.
 	for _, role := range []configpkg.OrchestratorEnvRole{"", configpkg.OrchestratorEnvRoleCode, configpkg.OrchestratorEnvRoleBuild} {
 		if _, err := SetOrchestratorEnvRole(core.Context{}, store, SetOrchestratorEnvRoleParams{
 			OrchestratorID: "orch-1",
@@ -239,11 +200,7 @@ func TestSetOrchestratorEnvRoleRefusesRuntimeForAHostEnvironment(t *testing.T) {
 	}
 }
 
-// orchestratorRoleStubStore is the minimal OrchestratorRoleStore the
-// set-role writer needs: one orchestrator already linked to frs/laptop, plus
-// whatever EnvConfig the test stages as that environment's real type. saved
-// records whether a write actually reached the config, so a refused role can
-// be shown to have written nothing.
+// saved records whether a write reached the config.
 type orchestratorRoleStubStore struct {
 	config configpkg.ERunConfig
 	env    configpkg.EnvConfig

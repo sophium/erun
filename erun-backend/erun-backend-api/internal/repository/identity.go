@@ -22,9 +22,7 @@ type IdentityRepository struct {
 	db      *bun.DB
 	dialect Dialect
 	orgKeys *issuerOrgKeyCache
-	// platformTenant is this instance's own declared tenant identity
-	// (ERUN_TENANT), used to name the tenant empty-database bootstrap enrols.
-	// Empty means that configuration is genuinely absent.
+	// platformTenant (ERUN_TENANT) names the tenant empty-database bootstrap enrols.
 	platformTenant string
 }
 
@@ -40,8 +38,7 @@ func NewIdentityRepository(db *sql.DB, dialect Dialect, platformTenant string) *
 	}
 }
 
-// issuerOrgKeyCacheTTL bounds staleness so an issuer reconfigured between
-// single-tenant and org-scoped converges without a restart.
+// issuerOrgKeyCacheTTL lets an issuer's org-scoping change converge without a restart.
 const issuerOrgKeyCacheTTL = 5 * time.Minute
 
 type issuerOrgKeyCache struct {
@@ -80,10 +77,8 @@ func (c *issuerOrgKeyCache) set(issuer string, entry issuerOrgKeyEntry) {
 	c.entries[issuer] = entry
 }
 
-// orgFieldKeyForIssuer returns the issuer's org-scoping mode: registered=false
-// means the issuer is not in the registry; registered=true with an empty
-// orgFieldKey is a single-tenant issuer; a non-empty orgFieldKey names the token
-// claim whose value selects the tenant.
+// orgFieldKeyForIssuer returns the issuer's org claim key: registered=false for
+// an unknown issuer, empty for single-tenant.
 func (r *IdentityRepository) orgFieldKeyForIssuer(ctx context.Context, issuer string) (orgFieldKey string, registered bool, err error) {
 	if r.orgKeys != nil {
 		if entry, ok := r.orgKeys.get(issuer); ok {
@@ -94,9 +89,7 @@ func (r *IdentityRepository) orgFieldKeyForIssuer(ctx context.Context, issuer st
 	scanErr := r.db.NewRaw(`SELECT org_field_key FROM issuers WHERE issuer = ?`, issuer).Scan(ctx, &key)
 	if scanErr != nil {
 		if errors.Is(normalizeNoRows(scanErr), ErrNotFound) {
-			// Do not cache the unregistered case: an issuer registered by
-			// first-identity bootstrap would otherwise stay falsely unknown for
-			// the whole TTL. Unregistered lookups are rare and cheap.
+			// Not cached: bootstrap may register the issuer within the TTL.
 			return "", false, nil
 		}
 		return "", false, scanErr
@@ -111,12 +104,8 @@ func (r *IdentityRepository) orgFieldKeyForIssuer(ctx context.Context, issuer st
 	return value, true, nil
 }
 
-// ResolveOrg returns the org claim value that, with the issuer, resolves the
-// tenant for an org-scoped issuer; it returns "" for single-tenant or
-// unregistered issuers. It is the authoritative source for the identity cache
-// key's org dimension, so the same (issuer, subject) presenting different org
-// claims cannot collide on one cached tenant. Resolution failures are surfaced
-// as errors so the caller can fall through to full resolution.
+// ResolveOrg returns the org claim value for an org-scoped issuer, or "". It
+// keys the identity cache so differing org claims cannot share a tenant.
 func (r *IdentityRepository) ResolveOrg(ctx context.Context, claims security.Claims) (string, error) {
 	orgFieldKey, registered, err := r.orgFieldKeyForIssuer(ctx, strings.TrimSpace(claims.Issuer))
 	if err != nil {
@@ -142,10 +131,7 @@ func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims securit
 		if !errors.Is(err, ErrNotFound) {
 			return model.Tenant{}, model.User{}, sanitizeResolutionError(err, "user lookup", tenant.TenantID, claims)
 		}
-		// The tenant resolved; this external identity is simply not one of
-		// its users (or, if the tenant has zero users, becomes its first).
-		// Either way this is a user-level outcome, not a tenant-resolution
-		// failure, so it is never wrapped in security.ErrTenantUnresolved.
+		// A user-level outcome, never security.ErrTenantUnresolved.
 		user, err = r.bootstrapFirstTenantUser(ctx, tenant, claims)
 		return tenant, user, sanitizeResolutionError(err, "bootstrap first tenant user", tenant.TenantID, claims)
 	}
@@ -157,29 +143,17 @@ func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims securit
 	}
 	tenant, user, err := r.bootstrapFirstIdentity(ctx, claims)
 	if err != nil {
-		// bootstrapFirstIdentity only ever succeeds against a genuinely empty
-		// tenants table, so a failure here means this token's issuer really
-		// maps to no tenant at all -- the same "unresolved" condition
-		// ResolveTenantByIssuer reports directly for an org-scoped issuer's
-		// missing/unmatched org claim, not "you are not enrolled" (there is
-		// no tenant to be enrolled in).
+		// Bootstrap only succeeds on an empty tenants table, so failure means
+		// the issuer maps to no tenant.
 		err = sanitizeResolutionError(err, "bootstrap first identity", "", claims)
 		return model.Tenant{}, model.User{}, fmt.Errorf("%w: %s", security.ErrTenantUnresolved, err.Error())
 	}
 	return tenant, user, nil
 }
 
-// sanitizeResolutionError logs a raw PostgreSQL error -- a constraint name
-// and SQLSTATE, meaningless to an operator or to the console rendering it as
-// the auth-rejection message -- before ResolveIdentity can return it, and
-// replaces it with ErrIdentityResolutionFailed. step names which internal
-// branch produced it (e.g. "username refresh" vs "bootstrap first tenant
-// user"), since both write to users and can violate the identical
-// users_tenant_username_key constraint, and are otherwise indistinguishable
-// once the error reaches the auth-rejected log line alone.
-// Errors already classified as ErrNotFound or security.ErrTenantUnresolved
-// pass through unchanged -- they are safe, expected outcomes, not internal
-// failures.
+// sanitizeResolutionError logs a raw database error with step for context and
+// returns ErrIdentityResolutionFailed; ErrNotFound and
+// security.ErrTenantUnresolved pass through.
 func sanitizeResolutionError(err error, step string, tenantID string, claims security.Claims) error {
 	if err == nil {
 		return nil
@@ -223,13 +197,8 @@ func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant mod
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
-			// The token's claimed username now collides with a different user
-			// already enrolled under it in this tenant. That is a
-			// display-name refresh failing, not a reason to refuse
-			// authentication for an identity that already resolved — sign the
-			// caller in under the username already on record instead of
-			// surfacing the raw constraint violation as an auth rejection
-			// reason.
+			// A username collision on refresh must not refuse authentication;
+			// keep the username on record.
 			log.Printf("erun api identity username refresh skipped tenant=%q user=%q requestedUsername=%q reason=%q", tenant.TenantID, user.UserID, username, "username already in use by another user in this tenant")
 			return user, nil
 		}
@@ -239,19 +208,9 @@ func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant mod
 	return refreshed, nil
 }
 
-// ResolveTenantByIssuer maps a verified token to its tenant. The issuer's org-scoping
-// mode lives once on issuers.org_field_key: NULL means a single-tenant issuer
-// (resolve by issuer alone, the common BYO/external-IdP case); a set key names
-// the token claim whose value selects the tenant among that issuer's orgs
-// (shared multi-tenant issuer, e.g. a hosted Zitadel). An org-scoped issuer
-// whose token carries no matching org claim, or whose org claim matches no
-// registered tenant, returns security.ErrTenantUnresolved: the issuer is known,
-// but this token cannot be mapped to one of its tenants — distinct from "not
-// enrolled", which requires a tenant to already have been resolved. An
-// unregistered issuer returns plain ErrNotFound, which routes to
-// first-identity bootstrap when the database is empty (ResolveIdentity wraps
-// a failed bootstrap attempt in security.ErrTenantUnresolved too, since that
-// only ever fails once a tenant already exists elsewhere).
+// ResolveTenantByIssuer maps a verified token to its tenant. An org-scoped
+// issuer with a missing or unmatched org claim returns
+// security.ErrTenantUnresolved; an unregistered issuer returns ErrNotFound.
 func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, claims security.Claims) (model.Tenant, error) {
 	issuer := strings.TrimSpace(claims.Issuer)
 	orgFieldKey, registered, err := r.orgFieldKeyForIssuer(ctx, issuer)
@@ -296,9 +255,8 @@ func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, claims s
 	return tenant, nil
 }
 
-// orgClaimValue extracts the org-identifying claim value as a string. JSON
-// numbers (some IdPs emit numeric org/resource-owner IDs) decode as float64;
-// integers render without a decimal so they match the stored org_field_value.
+// orgClaimValue renders the org claim as a string; numeric claims decode as
+// float64 and render without a decimal to match org_field_value.
 func orgClaimValue(raw map[string]any, key string) string {
 	if raw == nil {
 		return ""

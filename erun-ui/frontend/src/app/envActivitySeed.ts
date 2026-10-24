@@ -3,13 +3,8 @@ import type { UITenant } from '@/types';
 import type { EnvObservedActivity } from './slices/envStatusSlice';
 import { selectionKey } from './versionSuggestions';
 
-// planEnvActivitySeed derives the activityByEnv entries a freshly fetched
-// tenant list implies. The environment-activity poller only re-emits its
-// Wails event on a transition, so after a Redux reset that does not restart
-// the Go process (the ErrorBoundary "Reload app" button) a still-busy env
-// would have nothing to seed from until its next transition. uiEnvironment
-// carries the poller's last observation, so a fetch alone reproduces the
-// seed, mirroring planOrchestratorBusySeed.
+// planEnvActivitySeed seeds activity after a Redux reset, since the activity
+// event fires only on transitions.
 export function planEnvActivitySeed(
   tenants: UITenant[],
 ): { key: string; activity: EnvObservedActivity }[] {

@@ -25,9 +25,8 @@ type recordingStatusWriter struct {
 	transitions []string // "status:error" per call
 	updates     []repository.EnvironmentStatusUpdate
 	err         error
-	// failFirst makes the first n calls fail, exercising the bounded retry.
-	failFirst int
-	calls     int
+	failFirst   int
+	calls       int
 }
 
 func (w *recordingStatusWriter) UpdateProvisioningStatus(_ context.Context, _ string, _ string, update repository.EnvironmentStatusUpdate) error {
@@ -56,8 +55,6 @@ func provision(t *testing.T, runner DeployRunner, status *recordingStatusWriter)
 	return provisionVersion(t, runner, status, "")
 }
 
-// provisionVersion drives one deploy with the retry backoff removed, so the
-// bounded-retry path costs no wall-clock in tests.
 func provisionVersion(t *testing.T, runner DeployRunner, status *recordingStatusWriter, version string) error {
 	t.Helper()
 	provisioner := NewEnvironmentProvisioner(runner, status, nil, nil)
@@ -99,10 +96,6 @@ func TestProvisionMarksFailedOnRunError(t *testing.T) {
 	}
 }
 
-// TestProvisionRecordsTheDeploysOwnFailure: the whole point of reading the Job's
-// output back is that the environment's recorded error names what an operator
-// must change — here the version and every registry the chart pull probed — so
-// the reason must carry that text, not just the fact that a Job exited.
 func TestProvisionRecordsTheDeploysOwnFailure(t *testing.T) {
 	const chartFailure = "runtime chart oci://ghcr.io/acme/charts/erun-devops version 1.2.3 could not be pulled from ghcr.io/acme: " +
 		"no chart is published at 1.2.3 at any coordinate the deploy probed — ghcr.io/acme/charts/acme-devops (the tenant's own umbrella), ghcr.io/acme/charts/erun-devops (the shared platform chart)"
@@ -120,8 +113,6 @@ func TestProvisionRecordsTheDeploysOwnFailure(t *testing.T) {
 	}
 }
 
-// TestProvisionSaysWhereToLookWhenTheJobLeftNothing: a reason of last resort must
-// still be actionable, so it names the Job an operator can read for themselves.
 func TestProvisionSaysWhereToLookWhenTheJobLeftNothing(t *testing.T) {
 	status := &recordingStatusWriter{}
 	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeFailed}, status, nil, nil)
@@ -138,8 +129,6 @@ func TestProvisionSaysWhereToLookWhenTheJobLeftNothing(t *testing.T) {
 	}
 }
 
-// TestProvisionRecordsDeployedVersionOnSuccess: reaching running is what makes
-// the version live, so that is where the env records what it is running.
 func TestProvisionRecordsDeployedVersionOnSuccess(t *testing.T) {
 	status := &recordingStatusWriter{}
 	if err := provisionVersion(t, fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, "1.2.3"); err != nil {
@@ -153,8 +142,6 @@ func TestProvisionRecordsDeployedVersionOnSuccess(t *testing.T) {
 	}
 }
 
-// TestProvisionLeavesDeployedVersionOnFailure: a failed deploy does not change
-// what the cluster is running, so it must not claim a new deployed version.
 func TestProvisionLeavesDeployedVersionOnFailure(t *testing.T) {
 	status := &recordingStatusWriter{}
 	if err := provisionVersion(t, fakeRunner{outcome: deployexec.OutcomeFailed}, status, "1.2.3"); err == nil {
@@ -167,10 +154,6 @@ func TestProvisionLeavesDeployedVersionOnFailure(t *testing.T) {
 	}
 }
 
-// TestProvisionRecordsExposeErrorButStaysRunning: a deploy Job that succeeds
-// overall (deployexec's chained expose never fails the Job itself)
-// must still land the environment in `running`, with the chained expose
-// step's own failure recorded distinctly rather than as a provision failure.
 func TestProvisionRecordsExposeErrorButStaysRunning(t *testing.T) {
 	status := &recordingStatusWriter{}
 	output := "audit: erun expose --ip 203.0.113.10 --skip-if-unconfigured acme prod mcp\n" +
@@ -189,9 +172,6 @@ func TestProvisionRecordsExposeErrorButStaysRunning(t *testing.T) {
 	}
 }
 
-// TestProvisionLeavesExposeErrorEmptyOnCleanSuccess: no expose marker in the
-// Job's output means exposure was never attempted or fully succeeded, so
-// nothing should be recorded against it.
 func TestProvisionLeavesExposeErrorEmptyOnCleanSuccess(t *testing.T) {
 	status := &recordingStatusWriter{}
 	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded, output: "==> Deployed acme/prod 1.2.3 in 4s\n"}
@@ -204,10 +184,6 @@ func TestProvisionLeavesExposeErrorEmptyOnCleanSuccess(t *testing.T) {
 	}
 }
 
-// TestProvisionRecordsExposedHostnameOnSuccessfulExpose: once the chained
-// expose step actually runs (all three platform coordinates present) and
-// leaves no failure marker, the environment records the same hostname `erun
-// expose` itself resolves — computed, not scraped from the Job's output.
 func TestProvisionRecordsExposedHostnameOnSuccessfulExpose(t *testing.T) {
 	status := &recordingStatusWriter{}
 	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded, output: "==> Deployed acme/prod 1.2.3 in 4s\n"}
@@ -230,8 +206,6 @@ func TestProvisionRecordsExposedHostnameOnSuccessfulExpose(t *testing.T) {
 	}
 }
 
-// TestProvisionLeavesExposedHostnameEmptyOnExposeFailure: a failed chained
-// expose has no hostname to report, distinct from ExposeError naming why.
 func TestProvisionLeavesExposedHostnameEmptyOnExposeFailure(t *testing.T) {
 	status := &recordingStatusWriter{}
 	output := "audit: erun expose --ip 203.0.113.10 --skip-if-unconfigured acme prod mcp\n" +
@@ -259,9 +233,6 @@ func TestProvisionLeavesExposedHostnameEmptyOnExposeFailure(t *testing.T) {
 	}
 }
 
-// TestProvisionLeavesExposedHostnameEmptyWhenNeverConfigured: no platform
-// ingress IP means the deploy Job never chains an expose at all, so there is
-// no hostname to report and none should be invented.
 func TestProvisionLeavesExposedHostnameEmptyWhenNeverConfigured(t *testing.T) {
 	status := &recordingStatusWriter{}
 	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded, output: "==> Deployed acme/prod 1.2.3 in 4s\n"}
@@ -274,8 +245,6 @@ func TestProvisionLeavesExposedHostnameEmptyWhenNeverConfigured(t *testing.T) {
 	}
 }
 
-// TestProvisionRetriesTransientStatusWrite: a lost lifecycle write strands the
-// env in provisioning under an already-terminal workflow, so the write retries.
 func TestProvisionRetriesTransientStatusWrite(t *testing.T) {
 	status := &recordingStatusWriter{failFirst: 2}
 	if err := provisionVersion(t, fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, "1.2.3"); err != nil {
@@ -284,8 +253,6 @@ func TestProvisionRetriesTransientStatusWrite(t *testing.T) {
 	assertTransitions(t, status.transitions, []string{"provisioning:", "running:"})
 }
 
-// TestProvisionFailsWhenStatusWriteNeverSucceeds: retries are bounded, so a
-// database that stays down surfaces the error rather than looping.
 func TestProvisionFailsWhenStatusWriteNeverSucceeds(t *testing.T) {
 	status := &recordingStatusWriter{failFirst: statusWriteAttempts}
 	if err := provisionVersion(t, fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, "1.2.3"); err == nil {
@@ -296,8 +263,6 @@ func TestProvisionFailsWhenStatusWriteNeverSucceeds(t *testing.T) {
 	}
 }
 
-// TestProvisionRecordsUsageEventOnSuccess: a successful deploy records the
-// namespace resource caps that were applied, for metering.
 func TestProvisionRecordsUsageEventOnSuccess(t *testing.T) {
 	status := &recordingStatusWriter{}
 	usage := &recordingUsageRecorder{}
@@ -317,8 +282,6 @@ func TestProvisionRecordsUsageEventOnSuccess(t *testing.T) {
 	}
 }
 
-// TestProvisionRecordsNoUsageEventOnFailure: only a successful deploy is
-// metered — a failed one never ran the environment.
 func TestProvisionRecordsNoUsageEventOnFailure(t *testing.T) {
 	status := &recordingStatusWriter{}
 	usage := &recordingUsageRecorder{}
@@ -332,8 +295,6 @@ func TestProvisionRecordsNoUsageEventOnFailure(t *testing.T) {
 	}
 }
 
-// TestProvisionSurvivesUsageRecordFailure: a metering write failing must never
-// turn a successful deploy into a reported failure.
 func TestProvisionSurvivesUsageRecordFailure(t *testing.T) {
 	status := &recordingStatusWriter{}
 	usage := &recordingUsageRecorder{err: errors.New("usage store unavailable")}
@@ -344,10 +305,6 @@ func TestProvisionSurvivesUsageRecordFailure(t *testing.T) {
 	}
 }
 
-// TestProvisionRefusesWhenPlacementCredentialUnavailable: an environment
-// naming a context but no resolver configured (e.g. no cipher) must fail
-// clearly rather than silently running the deploy Job unauthenticated
-// against a cluster it cannot reach.
 func TestProvisionRefusesWhenPlacementCredentialUnavailable(t *testing.T) {
 	status := &recordingStatusWriter{}
 	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded}
@@ -363,10 +320,7 @@ func TestProvisionRefusesWhenPlacementCredentialUnavailable(t *testing.T) {
 	}
 }
 
-// TestProvisionResolvesThePlacementTokenFreshOnEveryRun: the admin token is
-// resolved from the credential resolver and threaded onto the Job params —
-// never carried in the caller's params — so a rotated token reaches the very
-// next deploy with no separate sync step.
+// The token must come from the resolver on every run so a rotated token reaches the next deploy.
 func TestProvisionResolvesThePlacementTokenFreshOnEveryRun(t *testing.T) {
 	status := &recordingStatusWriter{}
 	var seenToken string

@@ -10,10 +10,6 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// The environment read model composes list/idle/doctor; what matters here is
-// the transport contract (server-context defaulting, preview skipping the
-// live deploy diagnosis) -- see erun-common's own coverage of
-// ResolveEnvironmentLifecycleState for the state machine itself.
 func TestEnvironmentToolResolvesAgainstServerContext(t *testing.T) {
 	isolateLeaseCache(t)
 	runtime := shared.RuntimeConfig{
@@ -39,11 +35,7 @@ func TestEnvironmentToolResolvesAgainstServerContext(t *testing.T) {
 	}
 }
 
-// TestEnvironmentToolPrefersInjectedPortsOverADefaultedRange is the in-pod
-// case: the config the runtime chart projects carries no localportrangestart,
-// so the port allocation falls back to the 17000 block -- while the chart
-// injected the ports the pod is actually listening on into this very process.
-// The read model must report those, not the default.
+// In-pod config has no localportrangestart; the injected ports must win over the default.
 func TestEnvironmentToolPrefersInjectedPortsOverADefaultedRange(t *testing.T) {
 	isolateLeaseCache(t)
 	t.Setenv("ERUN_TENANT", "tenant-a")
@@ -78,11 +70,7 @@ func TestEnvironmentToolPrefersInjectedPortsOverADefaultedRange(t *testing.T) {
 	}
 }
 
-// TestEnvironmentToolManagedCloudWithoutObservedPowerStateReadsUnknown is the
-// mandatory negative case at the transport level: a managed-cloud
-// environment with no matching cloud context configured (so its power state
-// was never, and can never be, observed by this call) must read as unknown,
-// not as stopped or idle.
+// Unobservable power state must read unknown, not stopped or idle.
 func TestEnvironmentToolManagedCloudWithoutObservedPowerStateReadsUnknown(t *testing.T) {
 	isolateLeaseCache(t)
 	runtime := shared.RuntimeConfig{

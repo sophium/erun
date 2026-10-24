@@ -11,10 +11,7 @@ import (
 	"time"
 )
 
-// runHostAWSCredentialsWriteScript executes the real pod-side write script
-// against homeDir, feeding payload on stdin — exactly what
-// writeHostAWSCredentials streams into the pod over `kubectl exec`, minus the
-// kubectl hop itself.
+// runHostAWSCredentialsWriteScript runs the real pod-side script locally with payload on stdin.
 func runHostAWSCredentialsWriteScript(t *testing.T, homeDir, payload string) error {
 	t.Helper()
 	cmd := exec.Command("/bin/sh", "-c", hostAWSCredentialsWriteScript())
@@ -45,10 +42,6 @@ func readHostAWSCredentialsFile(t *testing.T, homeDir string) string {
 	return string(data)
 }
 
-// TestHostAWSCredentialsWriteScriptConcurrentRefreshesNeverDuplicateProfile:
-// two refreshes landing on the pod at close to the same moment must not leave
-// the erun-host profile written twice. Only the file's content after
-// concurrent writers race proves it; a single successful write does not.
 func TestHostAWSCredentialsWriteScriptConcurrentRefreshesNeverDuplicateProfile(t *testing.T) {
 	homeDir := t.TempDir()
 	const writers = 12
@@ -79,10 +72,6 @@ func TestHostAWSCredentialsWriteScriptConcurrentRefreshesNeverDuplicateProfile(t
 	}
 }
 
-// TestHostAWSCredentialsWriteScriptSequentialRefreshesReplaceProfile locks the
-// documented contract ("the write replaces the erun-host profile in place")
-// for the ordinary, non-racing case: a second refresh must replace the first
-// profile's content, not sit beside it.
 func TestHostAWSCredentialsWriteScriptSequentialRefreshesReplaceProfile(t *testing.T) {
 	homeDir := t.TempDir()
 	if err := runHostAWSCredentialsWriteScript(t, homeDir, hostAWSCredentialsTestPayload("first-session-token")); err != nil {
@@ -105,9 +94,6 @@ func TestHostAWSCredentialsWriteScriptSequentialRefreshesReplaceProfile(t *testi
 	}
 }
 
-// TestHostAWSCredentialsWriteScriptPreservesOtherProfiles guards the other
-// half of the same contract: a refresh must leave every profile that is not
-// erun-host untouched.
 func TestHostAWSCredentialsWriteScriptPreservesOtherProfiles(t *testing.T) {
 	homeDir := t.TempDir()
 	awsDir := filepath.Join(homeDir, ".aws")
@@ -132,11 +118,7 @@ func TestHostAWSCredentialsWriteScriptPreservesOtherProfiles(t *testing.T) {
 	}
 }
 
-// TestHostAWSCredentialsWriteScriptFailedWriteLeavesOriginalProfileIntact
-// proves the atomic-write failure mode is "old profile intact", not
-// "truncated profile": when the write cannot land (here, a read-only .aws
-// directory refuses the mktemp/mv), the existing credentials file must be
-// byte-for-byte unchanged.
+// A read-only .aws directory makes the write fail; the original file must be unchanged.
 func TestHostAWSCredentialsWriteScriptFailedWriteLeavesOriginalProfileIntact(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("running as root ignores directory permission bits, so the write would not fail")

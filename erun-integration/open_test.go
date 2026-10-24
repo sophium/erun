@@ -122,10 +122,7 @@ func testOpenHelp(t *testing.T) {
 
 func testOpenRefusesHostEnvironment(t *testing.T) {
 	t.Parallel()
-	// A host env has no pod and no cluster to open a kubectl-exec shell
-	// into — its worktree is already the operator's own directory, so open
-	// refuses and points there instead of resolving a kubernetes context
-	// (of which it has none) or attempting a port-forward.
+	// A host env has no pod or cluster, so open refuses and points at its directory.
 	setup := env.New(t)
 	fixture.SeedHostTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"open", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -143,16 +140,8 @@ func testOpenNoShellDryRun(t *testing.T) {
 
 func testOpenNoShellStdoutCarriesOnlyTheEvalAbleShell(t *testing.T) {
 	t.Parallel()
-	// The documented alias is
-	// `alias team-dev='eval "$(erun open team dev --no-shell)"'`, so stdout
-	// IS the script: command substitution hands the child a pipe, never a
-	// terminal. An sshd-enabled env's human-readable SSH block on stdout
-	// would be eval'd as commands, and stderr is silenced on purpose and not
-	// captured by the alias, so the block must be terminal-only.
-	//
-	// `bash -n` accepts the tainted stdout — the block is syntactically
-	// valid shell and only fails at run time — so assert the exact script
-	// instead of a syntax check.
+	// The alias evals stdout, so an sshd env's human SSH block must go to the terminal only;
+	// `bash -n` would accept the tainted script, hence the exact-script assertion.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHD(t, setup, "team", "dev")
 	envVars := append(stubKubectlNotFound(t, setup), "SHELL=/bin/bash")
@@ -160,8 +149,6 @@ func testOpenNoShellStdoutCarriesOnlyTheEvalAbleShell(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// The remote env's workspace maps to a local worktree under this
-	// scenario's private HOME, which is what the script cds into.
 	want := "kubectl config use-context 'test-context' >/dev/null &&\n" +
 		"kubectl config set-context --current --namespace='team-dev' >/dev/null &&\n" +
 		"cd '" + filepath.Join(setup.Home, "git", "team") + "'\n"
@@ -172,12 +159,7 @@ func testOpenNoShellStdoutCarriesOnlyTheEvalAbleShell(t *testing.T) {
 
 func testOpenNoShellInteractiveTerminalStillShowsTheSshBlock(t *testing.T) {
 	t.Parallel()
-	// The counterpart to the scenario above: the terminal-only gate must
-	// not delete the block. A human running --no-shell at a terminal still
-	// needs the host, alias, port, user, key and workspace, so the same run
-	// that stays clean for eval keeps printing it. ERUN_FORCE_TTY=1 is the
-	// TTY seam writerIsTerminal already honors, the same lift the
-	// alias-prompt scenarios above rely on.
+	// At a terminal (ERUN_FORCE_TTY=1) --no-shell still prints the SSH block.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHD(t, setup, "team", "dev")
 	envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1", "SHELL=/bin/bash")
@@ -185,9 +167,6 @@ func testOpenNoShellInteractiveTerminalStillShowsTheSshBlock(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// Normalize first: the host address, HOME and temp paths in the block
-	// are host-specific, so the assertions below name the normalized tokens
-	// the goldens use.
 	normalizedStdout := normalize.Apply(result.Stdout)
 	for _, wantLine := range []string{
 		"SSH:\n",
@@ -202,8 +181,6 @@ func testOpenNoShellInteractiveTerminalStillShowsTheSshBlock(t *testing.T) {
 			t.Errorf("interactive stdout must still show the SSH block; missing %q in:\n%s", wantLine, result.Stdout)
 		}
 	}
-	// The script the alias evaluates must still be there too — the block is
-	// additional human output, not a replacement for it.
 	if !strings.Contains(result.Stdout, "cd '"+filepath.Join(setup.Home, "git", "team")+"'\n") {
 		t.Errorf("interactive stdout must still end with the setup script, got:\n%s", result.Stdout)
 	}
@@ -211,14 +188,8 @@ func testOpenNoShellInteractiveTerminalStillShowsTheSshBlock(t *testing.T) {
 
 func testOpenNoTtyDryRunFallsBackToNoShell(t *testing.T) {
 	t.Parallel()
-	// The stale-forward recovery advice names bare `erun open <tenant>
-	// <env>`, which a non-interactive caller (an MCP client, an
-	// orchestrator, a script) runs with no TTY on stdin — this harness's
-	// default piped stdin stands in for that. Without --no-shell on the
-	// command line, open must still take the no-shell branch on its own:
-	// a real kubectl exec -it there would read EOF and return almost
-	// instantly, exiting before anything supervises the port-forwards
-	// just started.
+	// Without a TTY on stdin, bare `erun open` must take the no-shell branch: an exec -it
+	// would read EOF and exit before supervising the forwards.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := stubKubectlNotFound(t, setup)
@@ -228,15 +199,8 @@ func testOpenNoTtyDryRunFallsBackToNoShell(t *testing.T) {
 
 func testOpenNoTtyDryRunFallsBackToNoShellStdinDevNull(t *testing.T) {
 	t.Parallel()
-	// The scenario above already runs with stdin unset, which erun.Run
-	// binds to an in-memory pipe — never a character device, so it cannot
-	// reproduce a stat-based TTY check confusing a non-terminal character
-	// device for a terminal. Binding stdin to the real OS null device
-	// (StdinFromDevNull) is what actually exercises that: /dev/null is a
-	// character device but not a terminal, and a `command < /dev/null`
-	// invocation is the conventional way callers make a command
-	// non-interactive. Same assertion as the scenario above; the point of
-	// this one is the stdin source, not a different resolved plan.
+	// /dev/null is a character device but not a terminal; an in-memory pipe cannot catch
+	// a stat-based TTY check mistaking it for one.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := stubKubectlNotFound(t, setup)
@@ -245,23 +209,9 @@ func testOpenNoTtyDryRunFallsBackToNoShellStdinDevNull(t *testing.T) {
 }
 
 func testOpenNoShellRealRunDeploysPublishedChartAndPersistsVersion(t *testing.T) {
-	// Real-run open against a local env whose runtime deployment does
-	// not exist and whose tenant repo has no devops chart. With the
-	// scaffold retired there is no chart-creation prompt: the
-	// runtime spec resolves to the published erun-devops OCI chart.
-	// Covers, in one pass, the branches dry-run cannot reach:
-	//   - deployRuntime's real helm deploy of the published chart (helm
-	//     stub) wrapped in wrapOpenHelmDeployWithSpinner;
-	//   - persistOpenRuntimeVersion's save branch: --version 9.9.9
-	//     differs from the persisted 1.0.0, so the env config must be
-	//     rewritten with the deployed version (side-effect assert).
-	// The kubectl stub reports the deployment NotFound (decision input
-	// for shouldDeployRuntime) and runs the port-forward simulator for
-	// the post-deploy forwards on the pinned 26100 range.
-	// --no-alias-prompt keeps the alias setup out of the way. The golden
-	// is stdout-only by design: real-run --no-shell silences stderr so
-	// an `eval "$(erun open ... --no-shell)"` alias stays quiet
-	// (shouldSilenceNoShellOutput).
+	// Real-run open of an undeployed local env deploys the published erun-devops chart and
+	// persists the deployed --version. The golden is stdout-only: real-run --no-shell
+	// silences stderr for the eval alias.
 	skipIfPortsBusy(t, 26100, 26133)
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
@@ -273,13 +223,8 @@ func testOpenNoShellRealRunDeploysPublishedChartAndPersistsVersion(t *testing.T)
 	})...)
 	fixture.StubBinary(t, stubsDir, "helm", "")
 	envVars = append(envVars, fixture.StubEnv(stubsDir, "helm")...)
-	// Real-run --no-shell still emits the setup preamble on stdout; pin
-	// DetectHost so its dialect stays POSIX. See openHostOSOverride.
 	envVars = append(envVars, openHostOSOverride)
-	// The runtime chart ladder must confirm erun-devops published at the
-	// version before installing it; the seam stands in for that registry
-	// read. Both the persisted 1.0.0 (the deploy-decision phase) and the
-	// requested 9.9.9 (the actual deploy) are resolved along the way.
+	// Both the persisted 1.0.0 and the requested 9.9.9 are probed.
 	envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0,erun-devops:9.9.9")
 	result := erun.Run(t, []string{"open", "team", "dev", "--version", "9.9.9", "--no-shell", "--no-alias-prompt"}, erun.RunOptions{
 		Cwd: setup.Cwd,
@@ -289,8 +234,6 @@ func testOpenNoShellRealRunDeploysPublishedChartAndPersistsVersion(t *testing.T)
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "open/no_shell_real_run_deploys_published_chart_and_persists_version", normalize.Apply(result.Combined))
-	// The retired scaffold must not reappear (side effect outside the
-	// captured streams).
 	if _, err := os.Stat(filepath.Join(setup.Cwd, "team-devops")); !os.IsNotExist(err) {
 		t.Errorf("expected no devops scaffold in the tenant repo, stat err=%v", err)
 	}
@@ -305,13 +248,8 @@ func testOpenNoShellRealRunDeploysPublishedChartAndPersistsVersion(t *testing.T)
 
 func testOpenNoShellRealRunNotDeployedErrors(t *testing.T) {
 	t.Parallel()
-	// open is a pure primitive and does not deploy. A port-forward that
-	// can't bind is not fatal, so a genuinely undeployed runtime is
-	// caught up front by deployment presence — the run fails fast with an
-	// actionable "run `erun deploy`" error before any forward starts, rather
-	// than being inferred from a downstream port-forward timeout. The kubectl
-	// NotFound stub is the decision input; no ports are needed because the
-	// run errors before the forwards.
+	// open does not deploy: an undeployed runtime fails fast with "run `erun deploy`"
+	// before any forward starts.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := stubKubectlNotFound(t, setup)
@@ -324,15 +262,8 @@ func testOpenNoShellRealRunNotDeployedErrors(t *testing.T) {
 
 func testOpenNoShellRealRunCheckUnreachableErrorsWithoutClaimingAbsence(t *testing.T) {
 	t.Parallel()
-	// The deployment presence check can fail without ever getting an
-	// answer — no context, an unreachable API server, credentials or
-	// permissions refused. That is not evidence the deployment is absent,
-	// so ensureRuntimeDeployed must surface the check's own classified
-	// error (naming the cause, carrying kubectl's real output) rather than
-	// the "is not deployed; run erun deploy" text reserved for a confirmed
-	// absence. The generic-error kubectl stub ("Unable to connect to the
-	// server: ... i/o timeout") is the decision input; no ports are needed
-	// because the run errors before the forwards.
+	// A presence check that got no answer is not evidence of absence: surface the
+	// classified cause, not the "is not deployed" text.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := stubKubectlGenericError(t, setup)
@@ -348,11 +279,7 @@ func testOpenNoShellRealRunCheckUnreachableErrorsWithoutClaimingAbsence(t *testi
 
 func testOpenNoShellRealRunCheckUnreachableSanitizesKlogFramedError(t *testing.T) {
 	t.Parallel()
-	// The same unreachable-cluster path above, but with the exact klog
-	// "Unhandled Error" shape client-go emits (severity, timestamp,
-	// goroutine id, source location wrapping the real cause). The error must
-	// read as the cause alone, with the kube context named from erun's own
-	// config.
+	// The error must read as the cause alone, without client-go's klog framing.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := stubKubectlKlogFramedError(t, setup)
@@ -368,12 +295,6 @@ func testOpenNoShellRealRunCheckUnreachableSanitizesKlogFramedError(t *testing.T
 
 func testOpenRemoteDryRunTracesPortForwards(t *testing.T) {
 	t.Parallel()
-	// Exercises cmd/api_port_forward.go and cmd/mcp_port_forward.go:
-	// for a remote environment, --dry-run must trace the kubectl
-	// port-forward commands that would be started for both API and
-	// MCP. With kubectl stubbed to NotFound the runtime helm upgrade
-	// and the port-forward traces both appear from the same dry-run
-	// output, so the scenario locks both paths in one golden.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	envVars := stubKubectlNotFound(t, setup)
@@ -383,17 +304,8 @@ func testOpenRemoteDryRunTracesPortForwards(t *testing.T) {
 
 func testOpenRemoteDryRunAwsAliasPropagatesHostCredentials(t *testing.T) {
 	t.Parallel()
-	// Locks the deploy plumbing that ships host AWS credentials into a
-	// remote runtime: attaching an AWS cloud alias to the env (the operator
-	// opting it into acting on their behalf) makes the helm command include
-	// `--set cloudContext.useHostCredentials=true` so the chart sets
-	// AWS_PROFILE=erun-host on the runtime container. There is no separate
-	// toggle — the alias association alone drives it. The
-	// desktop refresher writes the matching profile into the pod's
-	// ~/.aws/credentials at runtime — that path is tested in erun-mcp.
-	// The alias here is deliberately not registered in the root config, so
-	// this golden also locks the degraded arm of open's credential refresh:
-	// an unresolvable alias warns and the session still opens.
+	// An AWS alias on the env alone sets cloudContext.useHostCredentials=true. The alias is
+	// not registered in the root config, so this also locks the warn-and-continue refresh path.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithAWSAlias(t, setup, "team", "dev")
 	envVars := stubKubectlNotFound(t, setup)
@@ -403,15 +315,8 @@ func testOpenRemoteDryRunAwsAliasPropagatesHostCredentials(t *testing.T) {
 
 func testOpenDryRunConfiguredAwsAliasRefreshesHostCredentials(t *testing.T) {
 	t.Parallel()
-	// Injected host credentials are temporary and nothing else renews them,
-	// so open refreshes them at the moment the operator declares they are
-	// about to use the env. The plan must show the wait and the exec that
-	// rewrites the erun-host profile, and the resolved region — this env has
-	// a provider alias but no cloud context, the shape that produced both
-	// the expired-credentials and the empty-AWS_REGION failures. The
-	// run-state stub answers the pre-forward replica probe with a running
-	// runtime — an unremarkable answer, because this scenario is about the
-	// credential refresh, not about the wake branch its sibling locks.
+	// Nothing renews injected host credentials, so open refreshes them and resolves the
+	// region; this env has a provider alias but no cloud context.
 	setup := env.New(t)
 	fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
 	envVars := stubKubectlRunState(t, setup, 1, 1)
@@ -422,9 +327,6 @@ func testOpenDryRunConfiguredAwsAliasRefreshesHostCredentials(t *testing.T) {
 	golden.Equal(t, "open/dry_run_configured_aws_alias_refreshes_host_credentials", normalize.Apply(result.Combined))
 }
 
-// seedIntelliJOpenEnv seeds team/dev as a deployed remote environment whose
-// SSHD forward answers ssh-keyscan with hostKey, plus the public key open
-// installs and the IntelliJ options dir, and returns the stubbed environment.
 func seedIntelliJOpenEnv(t *testing.T, setup env.Setup, stubsDir, hostKey, optionsDir string) []string {
 	t.Helper()
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", 26100)
@@ -445,20 +347,13 @@ func seedIntelliJOpenEnv(t *testing.T, setup env.Setup, stubsDir, hostKey, optio
 	})...)
 	fixture.StubBinary(t, stubsDir, "ssh-keyscan", "[127.0.0.1]:26122 ssh-ed25519 "+hostKey)
 	envVars = append(envVars, fixture.StubEnv(stubsDir, "ssh-keyscan")...)
-	// Pre-create the IntelliJ *options* dir: production globs for
-	// JetBrains/IntelliJIdea*/options (open_ide.go::intelliJOptionsCandidates)
-	// and silently skips the jetbrainsconfig writers when no candidate
-	// matches, so seeding only the version dir (without options/) would leave
-	// internal/jetbrainsconfig unexercised while this scenario stays green.
+	// Production silently skips the jetbrainsconfig writers unless an options dir matches.
 	if err := os.MkdirAll(optionsDir, 0o755); err != nil {
 		t.Fatalf("mkdir IntelliJ options: %v", err)
 	}
 	return envVars
 }
 
-// seedFakeIntelliJApp installs a fake IntelliJ IDEA.app: one lib jar so the
-// Gateway classpath resolves, and a java shim that records its argv to the
-// returned log.
 func seedFakeIntelliJApp(t *testing.T, setup env.Setup) (contentsDir, javaLog string) {
 	t.Helper()
 	contentsDir = filepath.Join(setup.Home, "Applications", "IntelliJ IDEA.app", "Contents")
@@ -480,8 +375,6 @@ func seedFakeIntelliJApp(t *testing.T, setup env.Setup) (contentsDir, javaLog st
 	return contentsDir, javaLog
 }
 
-// markIntelliJProjectOpenedWith injects the latestUsedIde block IntelliJ
-// itself records after a successful remote session.
 func markIntelliJProjectOpenedWith(t *testing.T, optionsDir, contentsDir string) {
 	t.Helper()
 	recentPath := filepath.Join(optionsDir, "sshRecentConnections.v2.xml")
@@ -530,29 +423,9 @@ func assertAdoptedPortForwardState(t *testing.T, setup env.Setup) {
 }
 
 func testOpenIntellijGatewayAdoptsForwardsAndLaunchesGateway(t *testing.T) {
-	// Covers the JetBrains Gateway launch path end to end plus foreign
-	// port-forward adoption, in three passes over one seeded env:
-	//   run 1 (real): registerIntelliJProject writes the JetBrains XML
-	//     (no latestUsedIde yet, so the flow falls back to
-	//     `open -a 'IntelliJ IDEA'`) and starts the port-forward
-	//     simulators that the later passes adopt.
-	//   patch: the test injects a latestUsedIde block into
-	//     sshRecentConnections.v2.xml, exactly as IntelliJ itself would
-	//     after a successful remote session, and deletes the per-env
-	//     port-forward state files so the next pass cannot recognise the
-	//     simulators as its own.
-	//   run 2 (dry-run): with lsof/ps probes presenting run 1's live
-	//     simulators as foreign kubectl port-forwards, the dry-run
-	//     previews adoption ("would adopt"), traces the Gateway config
-	//     scaffolding (mkdir/write-xml) WITHOUT creating it, and traces
-	//     the java Gateway launch argv. The golden locks that plan.
-	//   run 3 (real): adoption fires for MCP+SSHD ("adopted existing
-	//     kubectl port-forward" + state files re-written), the Gateway
-	//     scaffolding is created for real, and the fake java binary in
-	//     the seeded IntelliJ IDEA.app records the
-	//     jetbrains-gateway://connect URI.
-	// Pinned to darwin: the standalone Gateway launch
-	// (intelliJGatewayDarwinLaunchCommand) is macOS-only.
+	// Gateway launch plus foreign port-forward adoption: run 1 registers the project and
+	// starts forwards; the test then marks the project opened and drops the state files so
+	// run 2 (dry-run) previews adoption and run 3 adopts and launches. macOS-only Gateway launch.
 	skipIfPortsBusy(t, 26100, 26122, 26133)
 	setup := env.New(t)
 	stubsDir := filepath.Join(setup.Cwd, "stubs")
@@ -570,10 +443,7 @@ func testOpenIntellijGatewayAdoptsForwardsAndLaunchesGateway(t *testing.T) {
 		t.Fatalf("run 1 exit %d: %s", run1.ExitCode, run1.Combined)
 	}
 
-	// Mark the project as previously opened with a concrete IDE, the
-	// precondition for the Gateway URI path.
 	markIntelliJProjectOpenedWith(t, optionsDir, contentsDir)
-	// Drop the state files so the simulators read as foreign forwards.
 	for _, kind := range []string{"mcp", "sshd"} {
 		if err := os.Remove(portForwardStateFile(setup, kind, "team", "dev")); err != nil {
 			t.Fatalf("remove %s port-forward state: %v", kind, err)
@@ -596,11 +466,7 @@ func testOpenIntellijGatewayAdoptsForwardsAndLaunchesGateway(t *testing.T) {
 		t.Fatalf("run 2 exit %d: %s", run2.ExitCode, run2.Combined)
 	}
 	golden.Equal(t, "open/intellij_gateway_dry_run_previews_adoption_and_launch", normalize.Apply(run2.Combined))
-	// The dry-run must not have created the Gateway launch scaffolding
-	// (no writes before the dry-run gate). The config dir
-	// itself already exists — run 1's registerIntelliJProject writes
-	// JetBrains options there for real — so assert on the two artifacts
-	// only the launch path creates: config/info.xml and system/.
+	// run 1 already created the config dir; only the launch path creates info.xml and system/.
 	gatewayCaches := filepath.Join(setup.Home, "Library", "Caches", "JetBrains", "IntelliJIdea2024.3", "tmp", "JetBrainsGateway")
 	assertGatewayScaffoldingUnwritten(t, gatewayCaches)
 

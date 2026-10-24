@@ -140,8 +140,5 @@ func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
 	if _, _, err := store.LoadEnvConfig("frs", "prod"); !errors.Is(err, configpkg.ErrNotInitialized) {
 		t.Fatalf("expected environment config to be deleted, got %v", err)
 	}
-	// Cloud-context Status is no longer persisted; the action log
-	// above already proves `aws ec2 stop-instances` was issued, which
-	// is the authoritative signal that the desktop stopped the linked
-	// context after the namespace was deleted.
+	// Cloud-context Status is not persisted; the stop-instances action above is the signal.
 }

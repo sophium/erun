@@ -5,8 +5,7 @@ import (
 	"testing"
 )
 
-// TestToolNameEqualsItsCLIPath pins that every MCP tool is named after its CLI
-// path, so a tool like `erun exec raw` can never silently surface as `raw`.
+// Guards against a tool like `erun exec raw` surfacing as `raw`.
 func TestToolNameEqualsItsCLIPath(t *testing.T) {
 	for _, name := range MCPToolNames() {
 		descriptor, ok := MCPToolDescriptorFor(name)
@@ -22,14 +21,7 @@ func TestToolNameEqualsItsCLIPath(t *testing.T) {
 	}
 }
 
-// TestMCPOnlyToolsAreTheKnownSet pins the tools with no erun command behind
-// them: wire-level primitives the CLI deliberately expresses differently for
-// a human (or, for ai_sessions and environment, exposes no CLI verb at all --
-// an orchestrator or a future mobile client is the only caller), exec_agent
-// (whose capability the CLI already covers via `erun exec job start
-// --agent`), and job_start (a removed-tool stub with no handler at all, see
-// MCPRemovedTools). Pinning the set makes adding another one a decision
-// rather than an accident.
+// Adding a tool with no CLI path must be a deliberate decision.
 func TestMCPOnlyToolsAreTheKnownSet(t *testing.T) {
 	want := map[string]struct{}{
 		"activity_lease_list":          {},
@@ -59,11 +51,8 @@ func TestMCPOnlyToolsAreTheKnownSet(t *testing.T) {
 	}
 }
 
-// TestMCPReadOnlyToolsAreSemanticallyReadOnly holds the one direction that must
-// be true between the two tables. They are separate on purpose: the capability
-// allowlist is stricter (anything absent requires admin), so platform_env_list
-// is read-only in meaning while still requiring admin. But a tool a read-only
-// TOKEN may call must never be one that modifies its environment.
+// The capability allowlist is stricter than ReadOnly, but a tool a read-only
+// token may call must never modify its environment.
 func TestMCPReadOnlyToolsAreSemanticallyReadOnly(t *testing.T) {
 	for name := range mcpReadOnlyTools {
 		descriptor, ok := MCPToolDescriptorFor(name)
@@ -77,8 +66,6 @@ func TestMCPReadOnlyToolsAreSemanticallyReadOnly(t *testing.T) {
 	}
 }
 
-// TestRenamesResolveToRealTools: an alias that points at nothing is worse than
-// no alias, and a rename key that is still a live tool name would shadow it.
 func TestRenamesResolveToRealTools(t *testing.T) {
 	for old, current := range MCPToolRenames() {
 		if _, ok := mcpToolDescriptors[current]; !ok {
@@ -93,10 +80,7 @@ func TestRenamesResolveToRealTools(t *testing.T) {
 	}
 }
 
-// TestRetiredNameAuthorizesAsItsReplacement: the diff -> exec_diff rename moved
-// an entry in the read-only allowlist. If a retired name did not resolve first,
-// the rename would silently promote a read-only tool to requiring admin and a
-// read-only caller would lose it without any error saying why.
+// Without resolving the retired name first, diff would silently require admin.
 func TestRetiredNameAuthorizesAsItsReplacement(t *testing.T) {
 	if got := MCPToolCapability("diff"); got != MCPCapabilityRead {
 		t.Errorf("MCPToolCapability(\"diff\") = %q, want %q -- the retired name must authorize as exec_diff does", got, MCPCapabilityRead)
@@ -106,8 +90,7 @@ func TestRetiredNameAuthorizesAsItsReplacement(t *testing.T) {
 	}
 }
 
-// TestEveryToolDeclaresATitle: a client renders `title` in preference to `name`,
-// so an empty one puts "platform_context_create" in front of a person.
+// A client renders title in preference to name.
 func TestEveryToolDeclaresATitle(t *testing.T) {
 	for _, name := range MCPToolNames() {
 		descriptor, _ := MCPToolDescriptorFor(name)
@@ -117,8 +100,6 @@ func TestEveryToolDeclaresATitle(t *testing.T) {
 	}
 }
 
-// TestReadOnlyToolsAreNotAlsoDestructive: the two are contradictory, and the
-// spec says destructiveHint is meaningful only when readOnlyHint is false.
 func TestReadOnlyToolsAreNotAlsoDestructive(t *testing.T) {
 	for _, name := range MCPToolNames() {
 		descriptor, _ := MCPToolDescriptorFor(name)
@@ -128,12 +109,7 @@ func TestReadOnlyToolsAreNotAlsoDestructive(t *testing.T) {
 	}
 }
 
-// TestRemovedToolsAreDistinctFromRenames: a rename keeps a working handler
-// under the old name; a removed tool never does. The two tables must never
-// share a key, or a caller's retired name would resolve to two different
-// meanings depending on which table looked it up first. Each removed name
-// also needs a descriptor (registering it would otherwise panic) and
-// non-empty guidance naming what replaced it.
+// A shared key would give a retired name two meanings.
 func TestRemovedToolsAreDistinctFromRenames(t *testing.T) {
 	renames := MCPToolRenames()
 	for name, guidance := range MCPRemovedTools() {

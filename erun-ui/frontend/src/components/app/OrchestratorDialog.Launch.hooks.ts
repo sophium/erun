@@ -15,14 +15,12 @@ import {
 
 import { ListOrchestratorLaunchChoices } from '../../../wailsjs/go/main/App';
 
-// OrchestratorLaunchForm is the dialog's launch settings: whether the session
-// routes through the erun-level gateway catalog, its model and its effort.
+// OrchestratorLaunchForm holds the gateway, model and effort settings.
 export interface OrchestratorLaunchForm {
   choices: OrchestratorLaunchChoices | null;
   choicesError: string;
   choicesLoading: boolean;
-  // retryChoices re-reads the catalog after a failed read, so the operator can
-  // fix the settings and recover without reopening the dialog.
+  // retryChoices re-reads the catalog after a failed read.
   retryChoices: () => void;
   settings: OrchestratorLaunchSettings;
   setGateway: (useGateway: OrchestratorUseGateway) => void;

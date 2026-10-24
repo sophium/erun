@@ -5,41 +5,19 @@ import (
 	"time"
 )
 
-// session_heartbeat.go is the live-but-quiet half of session reconciliation.
-// activity_stale_sessions.go already handles the opposite direction — a shell
-// that died without closing its pty becomes visible in the activity queue. This
-// side handles a session that is very much alive but has stopped printing.
-//
-// The AI busy signal used to be a pure function of stream traffic: five seconds
-// of output latched it on, three seconds of silence latched it off. Silence is
-// not evidence of finishing, though. An agent waiting on a compile, a dtach
-// client detached by another window, a kubectl exec stream that dropped — all
-// look identical to "done" from the stream alone, so the tab could report the
-// work finished while the pod was still crunching, and a rendered session count
-// taken from a different source could disagree with it.
-//
-// So the busy latch is now released only when the pod agrees the session has
-// stopped, and released immediately when the pod says the program is gone. What
-// the UI animates and what it counts are the same observation.
+// Stream silence is not evidence an AI session finished, so the busy latch is
+// released only when a pod heartbeat says the program stopped.
 
-// sessionHeartbeatInterval paces the pod probe. Long enough that an idle
-// desktop is not execing into every open environment every few seconds, short
-// enough that a finished agent turn stops reading as running promptly.
 const sessionHeartbeatInterval = 15 * time.Second
 
-// sessionHeartbeatTTL bounds how long an observation stays authoritative. Past
-// it the observation is treated as absent and the stream-silence rule decides
-// again, so an unreachable pod can never latch a session as "running forever".
+// Past sessionHeartbeatTTL the stream-silence rule decides again, so an unreachable
+// pod can never latch a session as running forever.
 const sessionHeartbeatTTL = 3 * sessionHeartbeatInterval
 
-// sessionHeartbeat is one environment's most recent observation.
 type sessionHeartbeat struct {
 	observedAt time.Time
-	// running holds the app-session ids the pod reported with a live program.
-	running map[string]struct{}
-	// sessions is every socket the pod reported, running or not, so a session
-	// the pod does not know about at all is distinguishable from one it reports
-	// as stopped.
+	running    map[string]struct{}
+	// sessions includes stopped ones, so "unknown to the pod" differs from "stopped".
 	sessions map[string]struct{}
 }
 
@@ -52,58 +30,22 @@ func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
 			return
 		case <-ticker.C:
 			a.reconcileSessionHeartbeatsOnce()
-			// After the heartbeats, so this tick's own view of what the pod is
-			// running is already in hand when the tool's report is weighed
-			// against it. See ai_session_status.go.
+			// After the heartbeats, so this tick's pod view is in hand.
 			a.reconcileAISessionStatusesOnce()
-			// Mirrors are re-enumerated here, not only at boot. An env linked
-			// while the app is already running — the usual case, since linking is
-			// done from the running app — never got a sync worker, so its mirror
-			// stayed silently empty until the next restart, indistinguishable
-			// from an env with no files. startWorkspaceSyncForSelection
-			// re-validates and dedups a running poller, so this settles to a
-			// no-op once every linked env is syncing.
+			// Re-enumerated every tick: an env linked while the app runs gets no sync worker
+			// otherwise. Idempotent once every linked env is syncing.
 			a.reconcileWorkspaceSyncForConfiguredEnvs()
 			a.reconcileOrchestratorActivity()
-			// Runs after reconcileOrchestratorActivity so session.shellRunning is
-			// this tick's fresh report before the pacing decision reads it.
+			// After reconcileOrchestratorActivity so shellRunning is this tick's report.
 			a.reconcileOrchestratorPacing()
-			// Reaps shell-activity reports reconcileOrchestratorActivity itself
-			// will never revisit — orphaned or transient orchestrator ids that
-			// are not, or are no longer, in a.orchestrators at all.
+			// Reaps reports for orchestrator ids no longer in a.orchestrators.
 			a.reconcileOrphanedOrchestratorShellActivity(time.Now())
 		}
 	}
 }
 
-// reconcileOrchestratorActivity publishes what each orchestrator said about
-// itself. The agent writes a turn-boundary report; this turns it into the
-// sidebar's spinner.
-//
-// It re-emits every tick, busy or not, rather than only when the state
-// changes. The spinner used to be lit exclusively by the one
-// false→true transition, and orchestratorInfo — the snapshot the frontend
-// boots and re-renders from — carried no busy flag at all, so anything that
-// lost that single event (a remount after the transition, a window reopen, a
-// listener that attached a beat late, one dropped event on a days-old
-// process) left the row reading "idle" for however long the rest of the turn
-// ran, which for a long turn is tens of minutes or more. At a 15s tick over a
-// handful of orchestrators the extra events are inexpensive, and they make a
-// dropped or mistimed one self-heal within one tick instead of staying wrong
-// until the busy state itself next changes. session.aiBusy is still recorded
-// on every pass — that is the other half of the fix: it is what
-// orchestratorInfoFor now reads into orchestratorInfo.Busy, so a snapshot
-// (ListOrchestrators, runningOrchestratorInfo) carries the true state
-// directly instead of depending solely on this event ever reaching the
-// frontend's listener.
-//
-// The environment rows (recordAIActivity and friends in terminal_sessions.go)
-// have this exact same latent hazard — their busy signal is event-only too,
-// with no equivalent snapshot field — and are only masked by traffic: an
-// env's busy state churns often enough in practice that a missed transition
-// is quickly followed by another. That is luck, not a difference in design.
-// Don't copy the env path's event-only shape when touching it later; fix it
-// the same way this one was fixed instead.
+// reconcileOrchestratorActivity re-emits every tick, not only on change, so a
+// missed event self-heals; session.aiBusy also feeds orchestratorInfo.Busy for snapshots.
 func (a *App) reconcileOrchestratorActivity() {
 	now := time.Now()
 	a.mu.Lock()
@@ -118,10 +60,7 @@ func (a *App) reconcileOrchestratorActivity() {
 		if session == nil || session.transient {
 			continue
 		}
-		// Whether the desktop can still see the session that writes the report
-		// decides which staleness bound it ages out on. A live session's turn is
-		// allowed to be long; a session we can no longer see must not keep its
-		// "working" past the short bound, because nothing will ever clear it.
+		// A session we can no longer see ages out on the short bound, since nothing else will clear it.
 		managed := a.sessions[orchestratorSessionKey(id)]
 		rows = append(rows, row{
 			id:      id,
@@ -136,17 +75,9 @@ func (a *App) reconcileOrchestratorActivity() {
 	for _, r := range rows {
 		activity, ok := readOrchestratorActivity(r.id, now, r.alive)
 		busy := ok && activity.Busy
-		// A background shell is a fact independent of the turn's own busy/idle
-		// state — it can keep running after the turn that started it ends — so
-		// it gets the same re-emit-every-tick treatment on its own, not folded
-		// into the busy report above.
-		//
-		// The report has to name the session that wrote it and be checked against
-		// this orchestrator's own session: sessionAlive alone is computed per
-		// orchestrator id, not per session, so a report a replaced session left
-		// behind -- before a `/clear`, say -- would otherwise borrow its
-		// successor's liveness. The agent's current conversation is what it is
-		// on now.
+		// The shell report is independent of turn busy state, and must name the session
+		// that wrote it: sessionAlive is per orchestrator id, so a replaced session's
+		// report would otherwise borrow its successor's liveness.
 		liveConversationID := conversations[r.agentID]
 		shell, shellOK := readOrchestratorShellActivity(r.id, now, r.alive, liveConversationID)
 		shellRunning := shellOK && shell.Running
@@ -164,11 +95,6 @@ func (a *App) reconcileOrchestratorActivity() {
 	}
 }
 
-// emitOrchestratorShellActivity publishes what an orchestrator's background
-// shell report says. startedAtUnix is only meaningful while running is true;
-// the caller (reconcileOrchestratorActivity) always passes the report's own
-// AtUnix, which is the report's write time either way and harmless to send
-// when not running since the frontend only reads it alongside Running.
 func (a *App) emitOrchestratorShellActivity(sessionID int, running bool, command string, startedAtUnix int64) {
 	a.emitEvent(orchestratorShellEvent, orchestratorShellActivityPayload{
 		SessionID:     sessionID,
@@ -178,15 +104,11 @@ func (a *App) emitOrchestratorShellActivity(sessionID int, running bool, command
 	})
 }
 
-// reconcileSessionHeartbeatsOnce probes every environment with a live pod
-// session and applies the result to the sessions that environment owns.
 func (a *App) reconcileSessionHeartbeatsOnce() {
 	for _, selection := range a.selectionsWithPodSessions() {
 		activity, err := a.probeRuntimeActivity(selection)
 		if err != nil {
-			// An unreadable pod is a diagnostic problem, not a finished
-			// session: leave the previous observation to age out of its TTL
-			// rather than declaring everything stopped.
+			// An unreadable pod is not a finished session; let the observation age out.
 			continue
 		}
 		a.applySessionHeartbeat(selection, activity)
@@ -194,11 +116,8 @@ func (a *App) reconcileSessionHeartbeatsOnce() {
 	a.releaseUnobservedAIActivity()
 }
 
-// releaseUnobservedAIActivity is the safety valve for the observation going
-// away entirely — an environment stopped, its pod replaced, the cluster
-// unreachable. Without it a latch held open by a since-expired observation
-// would never be released, because the silence timer that would have cleared it
-// already fired once and was declined.
+// releaseUnobservedAIActivity releases latches whose observation expired; the
+// silence timer that would have cleared them already fired and was declined.
 func (a *App) releaseUnobservedAIActivity() {
 	a.mu.Lock()
 	var candidates []*managedTerminal
@@ -217,21 +136,14 @@ func (a *App) releaseUnobservedAIActivity() {
 	}
 }
 
-// aiLatchStillSupportedLocked answers whether something the desktop still
-// believes is holding this session's latch open. Caller holds a.mu.
+// Caller holds a.mu.
 func (a *App) aiLatchStillSupportedLocked(managed *managedTerminal) bool {
 	if _, reported := a.aiSessionEvidenceForTabLocked(managed); reported {
-		// The tool's own report is fresh, so the poller owns this latch in both
-		// directions (reconcileAISessionStatusesOnce). Releasing it here as well
-		// would only race the tick that re-asserts it.
+		// A fresh tool report means reconcileAISessionStatusesOnce owns this latch.
 		return true
 	}
 	if managed.aiModelLatch {
-		// A latch the tool raised has nothing left to re-assert it once its
-		// report stops arriving: pod liveness cannot hold it, because a process
-		// blocked on the human is alive too, and holding it there is the exact
-		// false "working" this replaced. So it goes on the silence rule, like
-		// any other latch whose observations have stopped.
+		// Pod liveness cannot hold a tool-raised latch: a process blocked on the human is alive too.
 		return false
 	}
 	heartbeat, ok := a.sessionHeartbeats[selectionKey(managed.selection)]
@@ -257,10 +169,6 @@ func (a *App) selectionsWithPodSessions() []uiSelection {
 	return out
 }
 
-// applySessionHeartbeat stores the observation and releases the busy latch of
-// every AI session the pod reports as no longer running. The reverse direction
-// needs no action here: heartbeatSaysRunning simply stops the silence timer
-// from clearing a session the pod still reports as alive.
 func (a *App) applySessionHeartbeat(selection uiSelection, activity uiRuntimeActivity) {
 	heartbeat := sessionHeartbeat{
 		observedAt: time.Now(),
@@ -293,10 +201,7 @@ func (a *App) applySessionHeartbeat(selection uiSelection, activity uiRuntimeAct
 	}
 }
 
-// reportsFinished answers "this observation says that session's program is
-// gone". A session the observation does not mention at all is not an answer —
-// the pod may simply not have created its socket yet — so it is left alone.
-// Caller holds a.mu.
+// A session the observation does not mention is not finished; its socket may not exist yet. Caller holds a.mu.
 func (h sessionHeartbeat) reportsFinished(managed *managedTerminal, key string) bool {
 	if managed == nil || managed.closed || !aiActivityKind(managed.kind) {
 		return false
@@ -312,10 +217,7 @@ func (h sessionHeartbeat) reportsFinished(managed *managedTerminal, key string) 
 	return !running
 }
 
-// heartbeatSaysRunning reports whether the pod recently observed this session
-// with a live program. A missing, expired, or session-unaware observation
-// answers false so the caller falls back to the stream-silence rule it always
-// used — the heartbeat can only keep a session marked running, never invent one.
+// The heartbeat can only keep a session running, never invent one.
 func (a *App) heartbeatSaysRunning(managed *managedTerminal) bool {
 	if managed == nil {
 		return false
@@ -334,9 +236,6 @@ func (a *App) heartbeatSaysRunning(managed *managedTerminal) bool {
 	return running
 }
 
-// forgetSessionHeartbeats drops an environment's observation when its sessions
-// go away, so a reopened environment starts from a fresh reading rather than
-// one taken before the pod was replaced.
 func (a *App) forgetSessionHeartbeats(selection uiSelection) {
 	key := selectionKey(selection)
 	a.mu.Lock()
@@ -344,10 +243,7 @@ func (a *App) forgetSessionHeartbeats(selection uiSelection) {
 	a.mu.Unlock()
 }
 
-// orchestratorAgentConversations maps each background agent's id to the
-// conversation it is on now, read once per pass. An unreadable listing is no
-// answer rather than an error: the shell report is then accepted without the
-// replaced-session check, as it is for an orchestrator that has no agent.
+// An unreadable listing returns nil and the replaced-session check is skipped.
 func (a *App) orchestratorAgentConversations(needed bool) map[string]string {
 	out := map[string]string{}
 	if !needed {

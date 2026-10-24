@@ -16,10 +16,8 @@ const titlebarButtonClassName =
 const activeTitlebarButtonClassName =
   'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground';
 
-// Contribute mode clones ERun into an agent env so an operator can work on
-// ERun itself from inside the running pod; the launcher then serves that
-// in-pod app to the browser. Both need the pod up, so while the cloud env is
-// down the buttons stay rendered — to preserve titlebar layout — but disabled.
+// ContributeToggle needs the pod up; while it is down the buttons stay rendered
+// but disabled to preserve titlebar layout.
 export function ContributeToggle({
   envRunning,
 }: {
@@ -117,9 +115,7 @@ function ContributeAppLauncher({
         onClick={() => {
           if (disabled) return;
           setBusy(true);
-          // Surface progress immediately: the first build can take ~3
-          // minutes, and without feedback the button just sits disabled
-          // with no sign of life.
+          // The first build can take ~3 minutes; show progress immediately.
           dispatch(
             showNotification(
               'info',

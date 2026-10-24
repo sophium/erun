@@ -21,8 +21,6 @@ func newTestSigner(t *testing.T) *Signer {
 	return signer
 }
 
-// TestSignDNS01RoundTrip proves a minted DNS-01 token self-verifies back to the
-// (tenant, environment) it was minted for, with a long lifetime.
 func TestSignDNS01RoundTrip(t *testing.T) {
 	signer := newTestSigner(t)
 	now := time.Unix(1_700_000_000, 0)
@@ -40,7 +38,6 @@ func TestSignDNS01RoundTrip(t *testing.T) {
 	if tenant != "acme" || environment != "prod" {
 		t.Fatalf("verify = (%q,%q), want (acme,prod)", tenant, environment)
 	}
-	// Long-lived so it survives cert renewals; still valid well beyond an hour.
 	if _, _, err := signer.VerifyDNS01(token, now.Add(48*time.Hour)); err != nil {
 		t.Fatalf("token should still be valid after 48h: %v", err)
 	}
@@ -58,8 +55,6 @@ func TestVerifyDNS01RejectsExpired(t *testing.T) {
 	}
 }
 
-// TestVerifyDNS01RejectsForeignKey proves a token minted by one backend key is
-// rejected by another — the signature check is real.
 func TestVerifyDNS01RejectsForeignKey(t *testing.T) {
 	minter := newTestSigner(t)
 	verifier := newTestSigner(t)
@@ -73,9 +68,6 @@ func TestVerifyDNS01RejectsForeignKey(t *testing.T) {
 	}
 }
 
-// TestVerifyDNS01RejectsMCPToken proves cross-capability replay is blocked: an
-// MCP-audience token (same signing key) is not a valid DNS-01 token, so a leaked
-// MCP token cannot drive DNS writes.
 func TestVerifyDNS01RejectsMCPToken(t *testing.T) {
 	signer := newTestSigner(t)
 	now := time.Unix(1_700_000_000, 0)

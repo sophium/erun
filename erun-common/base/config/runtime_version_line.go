@@ -4,9 +4,7 @@ import (
 	"strings"
 )
 
-// ImageReleaseLine names the release line a bare component name belongs to:
-// "erun" for the stock erun-devops image, or the tenant/component name
-// (stripping "-devops") for any other <name>-devops image.
+// ImageReleaseLine returns "erun" for erun-devops, otherwise the name without "-devops".
 func ImageReleaseLine(name string) string {
 	if name == DefaultRuntimeImageName {
 		return "erun"
@@ -14,13 +12,8 @@ func ImageReleaseLine(name string) string {
 	return strings.TrimSuffix(name, "-devops")
 }
 
-// RuntimeImageComponentName extracts the bare component name from a runtime
-// image reference in any shape RuntimeImage/RuntimeRunningImage may take: a
-// bare name ("erun-devops"), a registry-qualified tagless pin
-// ("ghcr.io/sophium/frs-devops", the self-maintaining form
-// stripRuntimeImageTag/resolveRuntimeImageOverride round-trip), or a fully
-// resolved tagged reference ("ghcr.io/sophium/frs-devops:1.0.86"). Empty
-// when image is empty.
+// RuntimeImageComponentName extracts the bare component name from a bare,
+// registry-qualified, or tagged image reference.
 func RuntimeImageComponentName(image string) string {
 	image = strings.TrimSpace(image)
 	if image == "" {
@@ -38,10 +31,8 @@ func RuntimeImageComponentName(image string) string {
 	return strings.TrimSpace(image)
 }
 
-// RuntimeImageReleaseLine classifies a runtime image reference in any shape
-// (see runtimeImageComponentName) by release line. ok is false when image is
-// empty or names no component -- callers must treat that as undetermined,
-// never guess a line from convention alone.
+// RuntimeImageReleaseLine classifies an image by release line; ok is false when
+// it names no component, and callers must not guess.
 func RuntimeImageReleaseLine(image string) (line string, ok bool) {
 	name := RuntimeImageComponentName(image)
 	if name == "" {

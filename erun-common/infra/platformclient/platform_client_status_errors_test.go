@@ -92,12 +92,6 @@ func TestPlatformClientTrimsTrailingSlashFromBaseURL(t *testing.T) {
 	}
 }
 
-// TestPlatformAuthErrorCodeDistinguishesTheThreeReasonsBehindA401 is the
-// regression for a caller that could only see ErrPlatformUnauthorized: the
-// platform's {code, message} envelope (erun-backend-api's auth.go) reports
-// TENANT_UNRESOLVED, NOT_ENROLLED, and RESOLUTION_FAILED as three different
-// situations behind the same HTTP status, and a caller must be able to tell
-// them apart.
 func TestPlatformAuthErrorCodeDistinguishesTheThreeReasonsBehindA401(t *testing.T) {
 	for _, code := range []string{"TENANT_UNRESOLVED", "NOT_ENROLLED", "RESOLUTION_FAILED"} {
 		t.Run(code, func(t *testing.T) {
@@ -119,9 +113,6 @@ func TestPlatformAuthErrorCodeDistinguishesTheThreeReasonsBehindA401(t *testing.
 	}
 }
 
-// TestPlatformAuthErrorCodeUnclassifiedReturnsEmpty confirms an older
-// platform's plain-text 401 (no {code} envelope at all) reports "" rather
-// than guessing -- callers must treat "" the same as an unclassified 401.
 func TestPlatformAuthErrorCodeUnclassifiedReturnsEmpty(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -138,8 +129,6 @@ func TestPlatformAuthErrorCodeUnclassifiedReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestPlatformAuthErrorCodeNonAuthErrorReturnsEmpty confirms the helper never
-// misreports a non-401 (or non-platform) error as one of the auth codes.
 func TestPlatformAuthErrorCodeNonAuthErrorReturnsEmpty(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)

@@ -1,6 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
 
-// ReviewPanel is the page object for the right-hand review panel.
 export class ReviewPanel {
   constructor(public readonly page: Page) {}
 
@@ -18,17 +17,7 @@ export class ReviewPanel {
     return splitter.first().isVisible();
   }
 
-  // Converge on the panel's own open/closed state before touching anything
-  // inside it, the same shape DebugPanel.waitForOpen/waitForClosed use: the
-  // titlebar toggle and the panel's render are two separate steps under
-  // React, so an assertion on the changed-files tree or a diff section right
-  // after toggleReviewPanel() races that render against expect's fixed 10s
-  // rather than converging against the enclosing test's own budget.
-  //
-  // Unlike DebugPanel's panel, whose mounted handle is the open state's only
-  // witness, this one is also reachable through isOpen() -- callers that
-  // cannot know which way their toggle went (see the smoke suite's
-  // initiallyVisible) read that first and wait for the state they want.
+  // Toggle and render are separate React steps; wait on the panel itself before touching its content.
   async waitForOpen(): Promise<void> {
     await this.resizeHandle().waitFor({ state: 'visible' });
   }
@@ -37,22 +26,14 @@ export class ReviewPanel {
     await this.resizeHandle().waitFor({ state: 'hidden' });
   }
 
-  // The scrollable diff content region (ReviewPanel.tsx); focusable so a
-  // keyboard-only reviewer can scroll past the first screenful of a diff.
   diffContentRegion(): Locator {
     return this.page.getByRole('region', { name: 'Diff content' });
   }
 
-  // One horizontal scroller per hunk (DiffList.tsx), focusable so a keyboard
-  // user can read a line wider than the panel. `filePath` narrows to one
-  // file's hunk(s) when more than one diff section is rendered.
   hunkRegion(filePath: string): Locator {
     return this.page.getByRole('region', { name: new RegExp(`^Diff for ${filePath} `) });
   }
 
-  // hunkRegionAt narrows hunkRegion() to one specific hunk of a file that has
-  // more than one, matching its header text too -- needed for the keyboard
-  // navigation specs, which move between a file's own hunks one at a time.
   hunkRegionAt(filePath: string, header: string): Locator {
     return this.page.getByRole('region', {
       name: `Diff for ${filePath} at ${header}`,
@@ -60,16 +41,11 @@ export class ReviewPanel {
     });
   }
 
-  // The "Keyboard shortcuts" popover DiffList.tsx renders per environment
-  // section (ReviewKeyboardShortcuts.tsx) -- the review surface's
-  // discoverability affordance for its keyboard model.
   keyboardShortcutsButton(): Locator {
     return this.page.getByRole('button', { name: 'Keyboard shortcuts' });
   }
 
-  // Scoped to the popover's own content, not the whole page: the diff panel
-  // already renders "Start a review" as a real button label, which a
-  // page-wide text match would also resolve to.
+  // Scoped to the popover: "Start a review" is also a real button label in the panel.
   keyboardShortcutsPopover(): Locator {
     return this.page.locator('[data-slot="popover-content"]');
   }
@@ -95,19 +71,12 @@ export class ReviewPanel {
     return this.page.getByLabel('Changed files tree');
   }
 
-  // changedFilesEnvLabel locates the changed-files tree's own copy of the
-  // shared ReviewEnvLabel — scoped to the tree container so it can't
-  // also match the diff panel's or the review-layers block's copy of the same
-  // "tenant / environment" text.
+  // Scoped to the tree so it doesn't match other copies of the same label.
   changedFilesEnvLabel(envKey: string): Locator {
     const [tenant, environment] = envKey.split('/');
     return this.changedFilesTree().getByText(`${tenant} / ${environment}`, { exact: true });
   }
 
-  // envLabels locates every rendered copy of the shared ReviewEnvLabel for
-  // one environment across the whole review surface (review-layers block,
-  // changed-files tree, and diff panel section header) — three when more
-  // than one environment is in scope, proving all three share one treatment.
   envLabels(envKey: string): Locator {
     const [tenant, environment] = envKey.split('/');
     return this.page.getByText(`${tenant} / ${environment}`, { exact: true });
@@ -133,31 +102,8 @@ export class ReviewPanel {
     return this.changedFilesTree().locator('[aria-current="true"]');
   }
 
-  // diffScrollSelectionSettled reports whether the diff->tree scrollspy has
-  // applied the selection the diff panel's current scroll position implies:
-  // the diff region has actually scrolled, and the file the tree marks
-  // `aria-current` is one the region is showing.
-  //
-  // It exists because the scrollspy's update is coalesced onto the next
-  // animation frame (TerminalController.queueVisibleDiffSelectionUpdate), so
-  // the tree's active node does not name the file the scroll landed on the
-  // instant the scroll returns -- until that frame runs it still names the
-  // pre-scroll file. A spec that reads the active file there and then asserts
-  // it survives a reload is racing the frame, and loses whenever the renderer
-  // is starved enough to run it after the read: the frame's update then lands
-  // inside the reload wait and the reload correctly preserves a file the spec
-  // has already, wrongly, treated as settled.
-  //
-  // Both halves are needed. The scroll half is the premise -- without it the
-  // tree marking its initial files[0] would satisfy the visibility half on its
-  // own, so a fixture that stopped overflowing would quietly weaken the
-  // assertion instead of failing it. The visibility half is the witness a
-  // stale selection cannot satisfy, because the scroll moved its section out
-  // of the viewport.
-  //
-  // The two selectors are the ones this class's own locators use, read in one
-  // page evaluation so both boxes come from the same layout rather than from
-  // two round trips with a re-render between them.
+  // The scrollspy update is coalesced onto the next animation frame, so the active
+  // file lags the scroll; true once the region scrolled and the active file is visible.
   async diffScrollSelectionSettled(): Promise<boolean> {
     return this.page.evaluate(() => {
       const region = document.querySelector<HTMLElement>(
@@ -185,15 +131,7 @@ export class ReviewPanel {
     });
   }
 
-  // envSectionHeader locates the sticky per-environment header the diff panel
-  // renders above each linked environment's section once more than one target
-  // is shown. Scoped to DiffList's sticky header class combination
-  // (unique in the frontend source) rather than a plain text match: the
-  // changed-files tree renders its own per-env header with the same
-  // ReviewEnvLabel text, and other
-  // surfaces (sidebar rows, tab labels) can also contain it. envKey is the
-  // internal `tenant/environment` form; the rendered label spaces the slash
-  // ("tenant / environment"), so this reformats before matching.
+  // Rendered label spaces the slash ("tenant / environment").
   envSectionHeader(envKey: string): Locator {
     const [tenant, environment] = envKey.split('/');
     return this.page
@@ -201,33 +139,20 @@ export class ReviewPanel {
       .filter({ hasText: `${tenant} / ${environment}` });
   }
 
-  // envActionHeader locates the sticky per-environment header by its
-  // data-env-key attribute (unlike envSectionHeader, which matches by visible
-  // tenant/environment text and so only resolves in the multi-env case).
-  // Scoped with `.sticky` since `data-env-key` also appears on each of that
-  // environment's own diff-file sections (DiffFileView), which are not sticky.
+  // `.sticky` excludes the per-file sections that also carry data-env-key.
   envActionHeader(envKey: string): Locator {
     return this.page.locator(`[data-env-key="${envKey}"].sticky`);
   }
 
-  // reviewStatusChip locates the review-status chip's own label text
-  // (DiffList.ReviewAction.tsx's DiffReviewStatusChip), scoped to one
-  // environment section and matched exactly -- a substring match risks
-  // colliding with a longer label sharing the same word (e.g. "Ready" inside
-  // "Already").
+  // Exact match: a substring could hit a longer label ("Ready" in "Already").
   reviewStatusChip(envKey: string, label: string): Locator {
     return this.envActionHeader(envKey).getByText(label, { exact: true });
   }
 
-  // reviewActionButton locates the diff panel's one action button for an
-  // environment section (DiffReviewAction), by its current accessible name --
-  // "Start a review", "Advance queue", "Resolve N threads", "View review", …
   reviewActionButton(envKey: string, name: string | RegExp): Locator {
     return this.envActionHeader(envKey).getByRole('button', { name });
   }
 
-  // The "Changed files N" collapsible header inside the aside, distinct from
-  // the titlebar's "Toggle changed files list" (which hides the whole aside).
   changedFilesSectionToggle(): Locator {
     return this.page.getByRole('button', { name: /^Changed files/ });
   }
@@ -236,43 +161,21 @@ export class ReviewPanel {
     await this.changedFilesSectionToggle().click();
   }
 
-  // The changed-files tree renders a short status line rather than its own
-  // copy of the diff panel's alert for the same per-env slot — the
-  // diff panel is the one place a linked environment's outage renders as an
-  // actionable alert, so this locator only ever matches once per environment.
-  //
-  // Scoped to the panel's diff region rather than the whole page: the
-  // sidebar's orchestrator restore notices are role="alert" too, and one left
-  // behind by an earlier spec in the same worker would inflate a page-wide
-  // count.
+  // Scoped to the diff region: sidebar notices are also role="alert".
   errorAlerts(): Locator {
     return this.diffContentRegion().getByRole('alert');
   }
 
-  // reachabilityStatuses locates the informational "environment not running"
-  // status DiffErrorAlert renders for the not-open reachability kind.
-  // Unlike errorAlerts() this is role="status", not role="alert": it is not a
-  // fault, so it must not be announced as one (WCAG 4.1.3 / Nielsen #1). Scoped
-  // to the diff region for the same reason errorAlerts() is: toasts announce as
-  // role="status" too, and they belong to no environment's section.
+  // role="status", not alert: not-running is not a fault.
   reachabilityStatuses(): Locator {
     return this.diffContentRegion().getByRole('status');
   }
 
-  // reviewBoundaryButton locates a "Review layers" scope button by its visible
-  // label (e.g. "Current local changes", "All branch changes"). Each linked
-  // environment renders its own control with no per-env accessible label, so
-  // callers scope by DOM order, which matches the environments' configured
-  // order (selectReviewEnvTargets).
+  // Per-env controls have no per-env label; index follows configured env order.
   reviewBoundaryButton(label: string, index: number): Locator {
     return this.page.getByRole('button', { name: new RegExp(label) }).nth(index);
   }
 
-  // noLocalChangesNotice locates DiffEmptyState's "no local changes, but
-  // commits are pending" notice (DiffList.tsx) within a given container --
-  // the same component renders in both the diff panel body and the
-  // changed-files tree aside, so callers scope to diffContentRegion() or
-  // changedFilesTree() to assert each independently.
   noLocalChangesNotice(container: Locator): Locator {
     return container.getByRole('status').filter({ hasText: 'No local changes' });
   }
@@ -281,9 +184,7 @@ export class ReviewPanel {
     return container.getByRole('button', { name: 'View all branch changes' });
   }
 
-  // refreshDiff asks the panel to fetch again. The panel loads its diffs when it
-  // OPENS, so a spec that needs a diff for a scope change that happened while the
-  // panel was already open (a session becoming active, say) has to ask for it.
+  // The panel loads diffs only when it opens.
   async refreshDiff(): Promise<void> {
     await this.page.getByRole('button', { name: 'Refresh diff' }).click();
   }

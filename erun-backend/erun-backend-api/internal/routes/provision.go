@@ -10,25 +10,19 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// ProvisionRoutes serves the combined "provision a hosted env" preview: the
-// single auditable plan the operator sees before provisioning. Plan-only — it
-// resolves and shows the concrete actions but never executes them and never
-// writes to the database.
+// ProvisionRoutes serves the provision preview; it never executes or writes.
 type ProvisionRoutes struct {
 	tenants      ConfigTenantRepository
 	environments EnvironmentRepository
 	quotas       TenantQuotaRepository
 }
 
-// provisionRequest carries the "provision a hosted env" inputs. The tenant is
-// resolved from the caller's token, never from the body. Exactly one of context
-// (a NEW cluster) or kubernetesContext (an EXISTING context) describes where the
-// env lands.
+// provisionRequest takes the tenant from the token. context means a new cluster,
+// kubernetesContext an existing one (ignored when context is set).
 type provisionRequest struct {
-	Environment provisionEnvironment `json:"environment"`
-	Context     *provisionContext    `json:"context,omitempty"`
-	// Ignored when a context block is present.
-	KubernetesContext string `json:"kubernetesContext"`
+	Environment       provisionEnvironment `json:"environment"`
+	Context           *provisionContext    `json:"context,omitempty"`
+	KubernetesContext string               `json:"kubernetesContext"`
 }
 
 type provisionEnvironment struct {
@@ -45,9 +39,7 @@ type provisionContext struct {
 	DiskSizeGB         int    `json:"diskSizeGb"`
 }
 
-// provisionResponse is the preview result. quotaOk is false when the provision
-// would exceed the cap, but the plan is still returned in full — a preview
-// surfaces the blocking decision rather than 4xx-ing it.
+// provisionResponse returns the full plan even when quotaOk is false.
 type provisionResponse struct {
 	Plan    []string `json:"plan"`
 	QuotaOk bool     `json:"quotaOk"`
@@ -73,16 +65,11 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 
 	newCluster, contextPlan, err := resolveProvisionContext(body.Context)
 	if err != nil {
-		// A dry-run bootstrap failure is an input-resolution error (e.g. an
-		// unsupported region/instance type), not a server fault.
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// The one placement rule shared with POST /v1/environments: a raw
-	// kubernetesContext has no known credential, so it is refused. This
-	// preview has no contextId of its own, so the capacity-aware part of
-	// EnvironmentRoutes.resolvePlacement has nothing to preview here.
+	// Same raw-kubernetesContext refusal as POST /v1/environments.
 	placementContext := strings.TrimSpace(body.KubernetesContext)
 	if newCluster != nil {
 		placementContext = newCluster.name
@@ -92,9 +79,6 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// The tenant name (not the UUID) forms the <tenant>-<env> namespace and the
-	// runtime release name; it is RLS-scoped to the caller, so it always belongs
-	// to the caller's tenant.
 	tenant, err := r.tenants.Current(req.Context())
 	if err != nil {
 		writeRepositoryError(w, req, err)
@@ -112,11 +96,8 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// TODO(live): execute this plan (cluster bootstrap → namespace → runtime
-	// deploy → exposure + auth edge); needs a live AWS account + cluster. Do not
-	// persist here — the discrete POST /v1/contexts and POST /v1/environments
-	// endpoints own the config writes; this preview composes their plans without
-	// side effects.
+	// TODO(live): execute this plan. Until then it stays side-effect free; the
+	// discrete context/environment endpoints own the writes.
 	preview := provisionPlanInput{
 		tenantName:        strings.TrimSpace(tenant.Name),
 		envName:           envName,
@@ -131,13 +112,8 @@ func (r ProvisionRoutes) provision(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, provisionResponse{Plan: provisionPlan(preview), QuotaOk: preview.quotaOk()})
 }
 
-// validateProvisionEnvironment returns the requested env name and type. Its error
-// message is the operator-facing 400 reason.
 func validateProvisionEnvironment(environment provisionEnvironment) (string, model.EnvironmentType, error) {
 	envName := strings.TrimSpace(environment.Name)
-	// The env name forms the <tenant>-<env> namespace, so it must be a DNS-1123
-	// label. Tenants are hyphen-free, so the first-hyphen split of the namespace
-	// stays unambiguous.
 	if !validNamespaceLabel(envName) {
 		return "", "", errors.New("environment.name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
 	}
@@ -148,11 +124,7 @@ func validateProvisionEnvironment(environment provisionEnvironment) (string, mod
 	return envName, envType, nil
 }
 
-// validateProvisionPlacement mirrors the "a raw kubernetesContext name is
-// refused" half of EnvironmentRoutes.resolvePlacement: naming an
-// existing cluster is by contextId (POST /v1/environments), never a bare
-// kubernetesContext string, which has no known credential to authenticate
-// with. Only runtime environments are ever server-side deployed.
+// validateProvisionPlacement mirrors resolvePlacement's raw-kubernetesContext refusal.
 func validateProvisionPlacement(envType model.EnvironmentType, kubernetesContext string) error {
 	if envType != model.EnvironmentTypeRuntime {
 		return nil
@@ -163,8 +135,7 @@ func validateProvisionPlacement(envType model.EnvironmentType, kubernetesContext
 	return nil
 }
 
-// resolveProvisionContext plans the new cluster a context block asks for. Both
-// results are empty for an existing-context provision, which bootstraps nothing.
+// resolveProvisionContext returns nils for an existing context.
 func resolveProvisionContext(block *provisionContext) (*contextBootstrapParams, []string, error) {
 	if block == nil {
 		return nil, nil, nil
@@ -187,8 +158,7 @@ func resolveProvisionContext(block *provisionContext) (*contextBootstrapParams, 
 	return &bootstrap, contextPlan, nil
 }
 
-// provisionPlanInput is the resolved provision, ready to render as a plan.
-// newCluster is nil when the env lands on an existing kubernetes context.
+// provisionPlanInput.newCluster is nil for an existing kubernetes context.
 type provisionPlanInput struct {
 	tenantName        string
 	envName           string
@@ -197,11 +167,8 @@ type provisionPlanInput struct {
 	contextPlan       []string
 	kubernetesContext string
 	count             int
-	// runtimeCount is the tenant's existing runtime-environment count, for
-	// the aggregate resource-budget projection; unused for a
-	// non-runtime environment.
-	runtimeCount int
-	quota        model.TenantQuota
+	runtimeCount      int
+	quota             model.TenantQuota
 }
 
 func (in provisionPlanInput) quotaOk() bool {
@@ -219,13 +186,8 @@ func (in provisionPlanInput) quotaOk() bool {
 	return true
 }
 
-// provisionPlan renders the ordered preview: authz (the resolved tenant),
-// quota, placement, namespace, registration, and — for a runtime environment
-// only, since that is the only type this platform ever server-side deploys —
-// the deploy, its auth-edge wiring, and its exposure (DNS + Ingress for the
-// env's MCP edge). This is the single plan renderer both POST /v1/provision
-// and POST /v1/environments?preview=true call, so the plan an operator audits
-// can never diverge from what the executing path does.
+// provisionPlan is the single renderer for both preview paths, so the audited plan
+// cannot diverge from execution.
 func provisionPlan(in provisionPlanInput) []string {
 	plan := make([]string, 0, 8+len(in.contextPlan))
 
@@ -278,13 +240,8 @@ func provisionPlan(in provisionPlanInput) []string {
 	return append(plan, "tls: would provision a per-env wildcard certificate through the DNS-01 broker (skipped when the platform has no ACME email or DNS-01 broker configured)")
 }
 
-// adoptPlan renders the ordered preview for an adopt request: a distinct
-// renderer from provisionPlan, not a branch inside it, because
-// provisionPlan always emits an unconditional "deploy:" line for a runtime
-// environment — exactly wrong for adopt, which never places or deploys
-// anything. Deliberately named "skipped" rather than omitted, so the plan
-// this preview shows and the create it precedes can never disagree about
-// whether a deploy happens.
+// adoptPlan is separate because provisionPlan always renders a deploy for
+// runtime; the deploy is named "skipped" so preview and create agree.
 func adoptPlan(tenantName, envName string, envType model.EnvironmentType, kubernetesContext string, count int, quota model.TenantQuota) []string {
 	plan := []string{fmt.Sprintf("adopt: tenant %s (resolved from token)", tenantName)}
 
@@ -300,10 +257,7 @@ func adoptPlan(tenantName, envName string, envType model.EnvironmentType, kubern
 	return append(plan, "deploy: skipped — adopting an existing environment never starts a deploy")
 }
 
-// contextPlanLine describes where the environment lands and the reference
-// the register line carries. An explicit context or kubernetes context is
-// only reachable here for a non-runtime environment: resolveDeployPlacement
-// already refused the request before provisionPlan runs for a runtime one.
+// contextPlanLine only sees an explicit context for non-runtime environments.
 func contextPlanLine(in provisionPlanInput) (contextRef, line string) {
 	switch {
 	case in.newCluster != nil:

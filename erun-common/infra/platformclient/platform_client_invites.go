@@ -7,12 +7,8 @@ import (
 	"strings"
 )
 
-// PlatformSubmitInviteRequestParams is the unauthenticated-to-tenant
-// invite-request submission input (POST /v1/invite-requests). The caller
-// still authenticates with a bearer token verified against a trusted issuer
-// — it just has no tenant membership yet, which is the whole point of the
-// request. Issuer/Subject are never sent: the platform reads them from the
-// verified token itself.
+// PlatformSubmitInviteRequestParams is the invite-request input for a verified
+// caller with no tenant yet; the platform takes issuer and subject from the token.
 type PlatformSubmitInviteRequestParams struct {
 	Email           string `json:"email,omitempty"`
 	DisplayName     string `json:"displayName,omitempty"`
@@ -22,38 +18,29 @@ type PlatformSubmitInviteRequestParams struct {
 	Note            string `json:"note,omitempty"`
 }
 
-// SubmitInviteRequest submits (or, for a caller with an existing PENDING
-// request, updates in place) a request to join or create a tenant. Requires
-// only a verified bearer, never tenant resolution — errors
-// ErrPlatformRateLimited (with Retry-After on the returned
-// *PlatformStatusError) when the caller's identity is inside the
-// platform-configured submission window.
+// SubmitInviteRequest submits, or updates a PENDING, request to join or create a tenant.
+// It returns ErrPlatformRateLimited (with Retry-After) inside the submission window.
 func (c *PlatformClient) SubmitInviteRequest(ctx context.Context, params PlatformSubmitInviteRequestParams) (PlatformInviteRequest, error) {
 	var request PlatformInviteRequest
 	err := c.do(ctx, http.MethodPost, "/v1/invite-requests", params, true, &request)
 	return request, err
 }
 
-// MyInviteRequest returns the caller's own most recent invite request (any
-// status), resolved from the verified bearer's (issuer, subject) — the one
-// thing a requester with no tenant membership can check while waiting.
-// Errors ErrPlatformNotFound when the caller has never submitted one.
+// MyInviteRequest returns the caller's latest invite request, or ErrPlatformNotFound.
 func (c *PlatformClient) MyInviteRequest(ctx context.Context) (PlatformInviteRequest, error) {
 	var request PlatformInviteRequest
 	err := c.do(ctx, http.MethodGet, "/v1/invite-requests/mine", nil, true, &request)
 	return request, err
 }
 
-// PlatformListInviteRequestsParams filters the operator/admin queue. Kind is
-// honored only for an operations-scoped caller; a tenant-scoped caller
-// always sees only JOIN_TENANT requests naming their own tenant.
+// PlatformListInviteRequestsParams filters the queue; Kind applies only to
+// operations-scoped callers.
 type PlatformListInviteRequestsParams struct {
 	Status string
 	Kind   string
 }
 
-// ListInviteRequests lists invite requests visible to the caller, oldest
-// first. Requires TenantUserClass.
+// ListInviteRequests lists visible invite requests, oldest first.
 func (c *PlatformClient) ListInviteRequests(ctx context.Context, params PlatformListInviteRequestsParams) ([]PlatformInviteRequest, error) {
 	query := url.Values{}
 	if strings.TrimSpace(params.Status) != "" {
@@ -71,29 +58,20 @@ func (c *PlatformClient) ListInviteRequests(ctx context.Context, params Platform
 	return requests, err
 }
 
-// ApproveInviteRequest approves a pending invite request: for a JOIN_TENANT
-// request, enrolls the requester into the caller's own tenant; for a
-// CREATE_TENANT request, registers the tenant (requires an operations-scoped
-// caller) and enrolls the requester as its first user. Either way, mints an
-// invite through the same path POST /v1/invites uses. Requires
-// TenantAdminOnly. Errors ErrPlatformConflict when the request was already
-// decided, ErrPlatformForbidden when the caller lacks authority over it.
+// ApproveInviteRequest enrolls the requester (creating the tenant for
+// CREATE_TENANT) and mints an invite.
 func (c *PlatformClient) ApproveInviteRequest(ctx context.Context, inviteRequestID string) (PlatformInviteRequest, error) {
 	var request PlatformInviteRequest
 	err := c.do(ctx, http.MethodPost, "/v1/invite-requests/"+url.PathEscape(inviteRequestID)+"/approve", nil, true, &request)
 	return request, err
 }
 
-// PlatformDeclineInviteRequestParams carries the required decline reason: a
-// decline with no reason reaches nobody, so the API refuses an empty one.
+// PlatformDeclineInviteRequestParams requires a non-empty reason.
 type PlatformDeclineInviteRequestParams struct {
 	Reason string `json:"reason"`
 }
 
-// DeclineInviteRequest declines a pending invite request with a reason the
-// requester will see. Requires TenantAdminOnly. Errors ErrPlatformConflict
-// when the request was already decided, ErrPlatformForbidden when the caller
-// lacks authority over it.
+// DeclineInviteRequest declines a pending invite request with a reason the requester sees.
 func (c *PlatformClient) DeclineInviteRequest(ctx context.Context, inviteRequestID string, params PlatformDeclineInviteRequestParams) (PlatformInviteRequest, error) {
 	var request PlatformInviteRequest
 	err := c.do(ctx, http.MethodPost, "/v1/invite-requests/"+url.PathEscape(inviteRequestID)+"/decline", params, true, &request)

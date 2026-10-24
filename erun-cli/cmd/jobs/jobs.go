@@ -13,12 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewJobsCmd builds `erun jobs`: the platform-backed view of what agents and
-// orchestrators are working on right now, and what recently finished, across
-// the tenant's whole queue -- including work that never entered an
-// environment, which the environment-scoped `erun exec job` verbs cannot see.
-// That is why it is its own top-level group; `erun job` is the deprecated
-// alias for `erun exec job`, so nothing new is added under it.
+// NewJobsCmd builds `erun jobs`, the platform-backed view of the tenant's whole queue.
 func NewJobsCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
 	cmd := shared.NewCommandGroup(
@@ -205,9 +200,6 @@ func writePlatformJobList(ctx core.Context, jobs []platformclient.PlatformJob) e
 	return nil
 }
 
-// writePlatformJobLine renders one row: what is being done, by whom, and how long it
-// has been going. The summary is the row's whole point, so it leads; the job
-// id trails so it can be copied into `erun jobs show`.
 func writePlatformJobLine(ctx core.Context, job platformclient.PlatformJob) error {
 	suffix := ""
 	if strings.TrimSpace(job.IssueRef) != "" {

@@ -9,10 +9,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// TestAISessionLaunchCommand pins which AI-tab launches compose claude with the
-// environment's flags (bare or claude; the runtime image's claude link resumes)
-// versus launch verbatim (other tools, or claude with explicit
-// flags). Remote Control naming is pinned separately by TestAISessionLaunchRemoteControl.
 func TestAISessionLaunchCommand(t *testing.T) {
 	effort := func(level string) configpkg.EnvironmentClaudeConfig {
 		l := level
@@ -45,8 +41,6 @@ func TestAISessionLaunchCommand(t *testing.T) {
 		assertEffortResolvesToUltracode(t, effort)
 	})
 
-	// ultracode is not a `claude --effort` value; it launches through the
-	// --settings mechanism instead.
 	t.Run("ultracode launches via --settings", func(t *testing.T) {
 		assertUltracodeInBothBranches(t, effort("ultracode"))
 	})
@@ -62,8 +56,7 @@ func TestAISessionLaunchCommand(t *testing.T) {
 func assertDefaultClaudeGuardAtEffort(t *testing.T, config configpkg.EnvironmentClaudeConfig) {
 	t.Helper()
 	got := open.AISessionLaunchCommand("", config, nil, "team", "dev")
-	// One plain launch: the runtime image's claude link decides whether to
-	// resume, so the AI tab carries no shell guard of its own.
+	// The runtime image's claude link decides whether to resume.
 	if want := "CLAUDE_CODE_SUBAGENT_MODEL=opus claude --effort high --model opus --remote-control team/dev"; got != want {
 		t.Fatalf("launch = %q, want %q", got, want)
 	}
@@ -75,8 +68,6 @@ func assertEffortResolvesToUltracode(t *testing.T, effort func(string) configpkg
 	if !strings.Contains(got, `--settings '{"ultracode":true}'`) || strings.Contains(got, "--effort") {
 		t.Fatalf("unset effort must default to ultracode via --settings, got %q", got)
 	}
-	// A bad persisted value must never reach the shell verbatim; it resolves
-	// to the default instead of injecting `--effort turbo`.
 	got = open.AISessionLaunchCommand("", effort("turbo"), nil, "team", "dev")
 	if strings.Contains(got, "turbo") || !strings.Contains(got, `--settings '{"ultracode":true}'`) {
 		t.Fatalf("invalid effort must resolve to ultracode, got %q", got)
@@ -94,8 +85,6 @@ func assertUltracodeInBothBranches(t *testing.T, config configpkg.EnvironmentCla
 	}
 }
 
-// TestAISessionLaunchCommandModelAndDebugFlags pins that the per-env default
-// model and verbose+debug launch flags each inject independently of the other.
 func TestAISessionLaunchCommandModelAndDebugFlags(t *testing.T) {
 	t.Run("default model and verbose debug inject into the launch", func(t *testing.T) {
 		model := "fable"
@@ -117,9 +106,6 @@ func TestAISessionLaunchCommandModelAndDebugFlags(t *testing.T) {
 	})
 }
 
-// TestAISessionLaunchSubagentModelPrefix pins that the subagent model mirrors
-// the launch model (CLAUDE_CODE_SUBAGENT_MODEL is set from --model), and is
-// absent when no model resolves or the tool is not claude.
 func TestAISessionLaunchSubagentModelPrefix(t *testing.T) {
 	model := func(v string) *string { return &v }
 
@@ -134,8 +120,6 @@ func TestAISessionLaunchSubagentModelPrefix(t *testing.T) {
 	})
 
 	t.Run("no prefix when no available model is a safe token", func(t *testing.T) {
-		// A launch carries no model only when every available model is
-		// unusable; nothing unusable is ever started.
 		got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{Models: []string{"a b; rm"}}, nil, "team", "dev")
 		if strings.Contains(got, "CLAUDE_CODE_SUBAGENT_MODEL") || strings.Contains(got, "--model") {
 			t.Fatalf("expected no subagent-model prefix or --model without a safe model, got %q", got)
@@ -156,10 +140,7 @@ func TestAISessionLaunchSubagentModelPrefix(t *testing.T) {
 	})
 }
 
-// TestAISessionLaunchContextFollowsTheOptOut pins that an environment that left
-// the gateway is not sized from the catalog. Its own model shares an id with a
-// catalog listing, but it runs on its own sign-in, so the catalog's context
-// window describes a model this session is not using.
+// An opted-out env runs on its own sign-in, so the catalog's context window does not apply.
 func TestAISessionLaunchContextFollowsTheOptOut(t *testing.T) {
 	model := func(v string) *string { return &v }
 	optOut := false
@@ -177,13 +158,8 @@ func TestAISessionLaunchContextFollowsTheOptOut(t *testing.T) {
 	}
 }
 
-// TestAISessionLaunchRemoteControl pins the default Remote Control launch: the
-// managed claude session is named <tenant>/<env> so the operator can drive it
-// from the Claude iOS app. It is gated off for the Bedrock/Mantle gateways —
-// the claude.ai account relay it pairs through cannot authenticate those — and
-// for a non-claude tool, and falls back to the unnamed flag (Claude Code then
-// names the session from the pod hostname) when the tenant/env is not safe to
-// inline.
+// Remote Control is off for Bedrock/Mantle gateways and non-claude tools, and
+// unnamed when tenant/env is unsafe to inline.
 func TestAISessionLaunchRemoteControl(t *testing.T) {
 	yes := func() *bool { b := true; return &b }
 
@@ -202,8 +178,7 @@ func TestAISessionLaunchRemoteControl(t *testing.T) {
 	})
 
 	t.Run("a leading-dash tenant falls back to the unnamed flag", func(t *testing.T) {
-		// Shell-safe, but Claude Code's own arg parser would read a
-		// "-"-leading name as an option flag, so it is treated as unsafe.
+		// Claude Code would parse a "-"-leading name as a flag.
 		got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, nil, "-rm", "dev")
 		if strings.Count(got, "--remote-control") != 1 || strings.Contains(got, "--remote-control ") {
 			t.Fatalf("leading-dash tenant must yield the unnamed flag, got %q", got)
@@ -217,10 +192,6 @@ func TestAISessionLaunchRemoteControl(t *testing.T) {
 	})
 }
 
-// TestResolveClaudeLaunchModel covers launch-model resolution: a chosen default
-// wins when available, else the first available model — never the agent's own
-// default. fable is opt-in (the env must both list and select it), and an
-// all-unusable set resolves to none.
 func TestResolveClaudeLaunchModel(t *testing.T) {
 	model := func(v string) *string { return &v }
 	cases := []struct {
@@ -245,9 +216,6 @@ func TestResolveClaudeLaunchModel(t *testing.T) {
 	}
 }
 
-// TestResolveClaudeEffort covers the per-env effort resolution: a valid level is
-// used; unset, blank, and invalid fall back to ultracode (the default) so the
-// launch never carries a bad effort flag.
 func TestResolveClaudeEffort(t *testing.T) {
 	level := func(v string) *string { return &v }
 	cases := []struct {
@@ -271,17 +239,12 @@ func TestResolveClaudeEffort(t *testing.T) {
 	}
 }
 
-// TestAISessionLaunchLines pins the AI session's exit wrapper: the tool's exit
-// must never silently fall through to the trailing shell. A real claude exit
-// can't be staged in the headless Playwright harness, so these script-content
-// assertions own the contract; the launcher's composition into the dtach script
-// is locked by the open --ai dry-run goldens.
+// A real claude exit cannot be staged in Playwright, so these assertions own
+// the exit wrapper's contract.
 func TestAISessionLaunchLines(t *testing.T) {
 	t.Run("the wrapper executes: 137 yields the OOM marker and the intact resume", func(t *testing.T) {
 		lines := open.AISessionLaunchLines("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev")
-		// Swap the launch (line index 1 by construction) for a bare 137 exit to
-		// simulate the OOM kill; running the rest through a real sh verifies the
-		// printf escapes and shell-quoted resume end to end.
+		// Replace the launch with a 137 exit to simulate an OOM kill.
 		lines[1] = "(exit 137) || ai_status=$?"
 		out, err := exec.Command("sh", "-c", strings.Join(lines, "\n")).CombinedOutput()
 		if err != nil {
@@ -310,9 +273,6 @@ func TestAISessionLaunchLines(t *testing.T) {
 	})
 }
 
-// TestClaudeBackgroundEffortKeepsMaxAsAFlag pins the split: every level the
-// effortLevel setting accepts goes to the settings file a restart re-reads, and
-// max, which that setting silently drops, stays a launch flag.
 func TestClaudeBackgroundEffortKeepsMaxAsAFlag(t *testing.T) {
 	cases := []struct {
 		effort   string

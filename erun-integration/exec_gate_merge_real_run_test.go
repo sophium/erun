@@ -15,11 +15,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
-// atlasBin resolves the real atlas binary from the host PATH so a scenario
-// can seed and validate a real Atlas migration checksum end to end: the
-// erun-devops Dockerfile's test stage installs atlas for exactly this reason,
-// so — per this suite's "nothing may gate on host capability" rule —
-// this fails loudly rather than skipping when it is unexpectedly absent.
+// atlasBin fails rather than skips when atlas is absent: the suite must not gate on host capability.
 func atlasBin(t testing.TB) string {
 	t.Helper()
 	path, err := osexec.LookPath("atlas")
@@ -29,9 +25,7 @@ func atlasBin(t testing.TB) string {
 	return path
 }
 
-// runAtlasHash regenerates dir's migrations/atlas.sum for real, the same way
-// a migration's author would before committing, so a fixture branch carries a
-// real Atlas checksum rather than a hand-authored placeholder.
+// runAtlasHash regenerates dir's migrations/atlas.sum with real atlas.
 func runAtlasHash(t testing.TB, dir string) {
 	t.Helper()
 	cmd := harnessexec.Command(atlasBin(t), "migrate", "hash", "--dir", "file://migrations")
@@ -41,9 +35,7 @@ func runAtlasHash(t testing.TB, dir string) {
 	}
 }
 
-// captureAtlasValidate runs the real `atlas migrate validate` against dir's
-// migrations directory, so a scenario can assert atlas's own tamper-detection
-// contract end to end rather than trusting that regeneration preserved it.
+// captureAtlasValidate runs the real `atlas migrate validate` in dir.
 func captureAtlasValidate(t testing.TB, dir string) (string, bool) {
 	t.Helper()
 	cmd := harnessexec.Command(atlasBin(t), "migrate", "validate", "--dir", "file://migrations")
@@ -61,8 +53,6 @@ func decodeGateMergeResult(t *testing.T, stdout string) mergequeue.GateMergeWork
 	return parsed
 }
 
-// assertSingleSourceLandedOnMain checks a gate-merge of the lone branch
-// "feature" onto main through origin.
 func assertSingleSourceLandedOnMain(t *testing.T, parsed mergequeue.GateMergeWorkingTreeResult) {
 	t.Helper()
 	if parsed.TargetBranch != "main" || parsed.Remote != "origin" || parsed.Commit == "" || len(parsed.Skipped) != 0 {
@@ -73,15 +63,11 @@ func assertSingleSourceLandedOnMain(t *testing.T, parsed mergequeue.GateMergeWor
 	}
 }
 
-// assertNoOpSourceSkipped checks that the lone skipped source is "already",
-// reported as staging nothing rather than as a conflict.
 func assertNoOpSourceSkipped(t *testing.T, skipped []mergequeue.GateMergeSkippedSource) {
 	t.Helper()
 	if len(skipped) != 1 || skipped[0].SourceBranch != "already" {
 		t.Fatalf("expected already to be skipped, got: %+v", skipped)
 	}
-	// The skip must say it staged nothing — not be misreported as a
-	// conflict, the other thing that produces a skip.
 	if !strings.Contains(skipped[0].Reason, "staged no changes") {
 		t.Fatalf("expected the skip to name the no-op cause, got: %q", skipped[0].Reason)
 	}
@@ -90,8 +76,6 @@ func assertNoOpSourceSkipped(t *testing.T, skipped []mergequeue.GateMergeSkipped
 	}
 }
 
-// assertConflictingMiddleSourceSkipped checks the a/b/c batch where b
-// conflicts on README.md with what a already landed.
 func assertConflictingMiddleSourceSkipped(t *testing.T, parsed mergequeue.GateMergeWorkingTreeResult) {
 	t.Helper()
 	if len(parsed.Landed) != 2 || parsed.Landed[0].SourceBranch != "a" || parsed.Landed[1].SourceBranch != "c" {
@@ -106,9 +90,6 @@ func assertConflictingMiddleSourceSkipped(t *testing.T, parsed mergequeue.GateMe
 }
 
 func testExecGateMergeRealRunSquashMergesOntoTarget(t *testing.T) {
-	// A real bare remote and a real divergent source branch, so "the squash
-	// merge actually landed on target" is an observable fact rather than a
-	// stubbed git call.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedBareOrigin(t, setup)
@@ -142,20 +123,7 @@ func testExecGateMergeRealRunSquashMergesOntoTarget(t *testing.T) {
 }
 
 func testExecGateMergeRealRunCarriesTheBranchsClosesTrailer(t *testing.T) {
-	// The reported failure, on a real repository: the branch's own commit
-	// declares "Closes #N", the merge queue lands it with the review name
-	// as the squash message, and the declaration is gone — the issue stays
-	// open with its fix on the target and no commit there referencing it.
-	// The caller here passes only the review name, which is the state the
-	// report describes; a caller that passes the branch's message verbatim
-	// already carried the trailer by accident.
-	//
-	// The trailers are separated from a trailing "Co-Authored-By:" by a
-	// blank line, because that is the shape the report was observed on: the
-	// carriage read only the final run of non-empty lines, so that run was
-	// the Co-Authored-By: alone and every declaration above it was
-	// discarded. Without that blank line the scenario never reached the
-	// failure it exists for.
+	// The blank line before Co-Authored-By: matters: the trailer block must not be read as only the final paragraph.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedBareOrigin(t, setup)
@@ -175,8 +143,6 @@ func testExecGateMergeRealRunCarriesTheBranchsClosesTrailer(t *testing.T) {
 	if subject := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "-1", "--pretty=%s")); subject != "Assemble the widget in declared order" {
 		t.Fatalf("the squash commit must still lead with the review name, got %q", subject)
 	}
-	// The observable behaviour the report is about: a reader grepping the
-	// target for the issue reference finds the commit that closed it.
 	grepped := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "main", "--grep=Closes #2601", "--format=%s"))
 	if grepped != "Assemble the widget in declared order" {
 		t.Fatalf("expected the landed squash commit to be findable by its issue reference, got %q", grepped)
@@ -196,16 +162,7 @@ func testExecGateMergeRealRunCarriesTheBranchsClosesTrailer(t *testing.T) {
 }
 
 func testExecGateMergeRealRunCarriesTrailersPastATrailingIssueReference(t *testing.T) {
-	// The reported failure, on a real repository: the branch's commit
-	// declares "Closes #N" and the reproduction trailers a defect fix
-	// declares, and closes with a bare "Refs #N" — the same "Token #N"
-	// spelling "Closes #N" uses, so it carries no colon to read as a
-	// trailer token. The block walk stopped at that paragraph, read an
-	// empty block, and squash-merged the branch under the review name
-	// alone: every declaration was gone, the issue stayed open with its fix
-	// on the target, and nothing said so. The "Refs #N" is the whole point
-	// of the scenario — without it the branch lands its trailers and the
-	// failure this exists for is never reached.
+	// The trailing bare "Refs #N" has no colon; the trailer walk must not stop at it.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedBareOrigin(t, setup)
@@ -225,8 +182,6 @@ func testExecGateMergeRealRunCarriesTrailersPastATrailingIssueReference(t *testi
 	if subject := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "-1", "--pretty=%s")); subject != "Assemble the widget in declared order" {
 		t.Fatalf("the squash commit must still lead with the review name, got %q", subject)
 	}
-	// The observable behaviour the report is about: a reader grepping the
-	// target for the issue reference finds the commit that closed it.
 	grepped := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "main", "--grep=Closes #2662", "--format=%s"))
 	if grepped != "Assemble the widget in declared order" {
 		t.Fatalf("expected the landed squash commit to be findable by its issue reference, got %q", grepped)
@@ -240,9 +195,6 @@ func testExecGateMergeRealRunCarriesTrailersPastATrailingIssueReference(t *testi
 			t.Fatalf("expected the landed commit to carry %q, got:\n%s", want, body)
 		}
 	}
-	// The other half of the guarantee: the run says what it carried, so a
-	// carriage that found nothing is never left to be counted out of the
-	// squash message afterwards.
 	parsed := decodeGateMergeResult(t, result.Stdout)
 	if len(parsed.Landed) != 1 {
 		t.Fatalf("expected one landed source, got %+v", parsed.Landed)
@@ -254,21 +206,7 @@ func testExecGateMergeRealRunCarriesTrailersPastATrailingIssueReference(t *testi
 }
 
 func testExecGateMergeRealRunCarriesAHardWrappedTrailerWhole(t *testing.T) {
-	// The reported failure, on a real repository: the branch's own commit
-	// declares a "Reproduces:" whose value is hard-wrapped across four
-	// physical lines, each continuation starting at column 0 — how a long
-	// hand-written value is wrapped, and how the value on the landing this was
-	// observed on was written. The carriage read a trailer entry as ending at the
-	// first line that looked like a "Token value", which nearly every
-	// continuation line does, so the branch landed with only the first
-	// physical line: the commit on the target asserted a reproduction that
-	// ended mid-clause, and the truncation was invisible because the shortened
-	// line still matched the trailer pattern.
-	//
-	// The wrap is the whole point of the scenario — without it the branch
-	// lands its trailer intact and the failure this exists for is never
-	// reached. The assertions read the tail of the value, which is the part
-	// the truncation dropped.
+	// The Reproduces: value is hard-wrapped at column 0; continuation lines must not end the trailer.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedBareOrigin(t, setup)
@@ -291,8 +229,6 @@ func testExecGateMergeRealRunCarriesAHardWrappedTrailerWhole(t *testing.T) {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 
-	// The observable behaviour the report is about: the landed commit's
-	// "Reproduces:" is the value its author wrote, whole.
 	body := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "-1", "--pretty=%B"))
 	if !strings.Contains(body, wrapped) {
 		t.Fatalf("expected the landed commit to carry the branch's wrapped trailer whole, got:\n%s", body)
@@ -309,11 +245,7 @@ func testExecGateMergeRealRunCarriesAHardWrappedTrailerWhole(t *testing.T) {
 }
 
 func testExecGateMergeRealRunAcceptsAUrlRemote(t *testing.T) {
-	// --remote takes a URL, not only a configured remote name. A URL creates
-	// no remote-tracking refs, so "<remote>/<branch>" does not exist for one
-	// and must not be named by the checkout or any squash-merge. A file://
-	// URL carries the ":" and "//" that make it unnameable as a ref without
-	// reaching the network.
+	// A URL remote has no remote-tracking refs, so "<remote>/<branch>" must never be named.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	remoteRoot := seedBareOrigin(t, setup)
@@ -334,8 +266,7 @@ func testExecGateMergeRealRunAcceptsAUrlRemote(t *testing.T) {
 	if parsed.Remote != remoteURL {
 		t.Fatalf("expected the URL remote to be reported back, got %q", parsed.Remote)
 	}
-	// A source that could not be resolved is skipped, not fatal, so a
-	// regression here would otherwise read as a clean empty run.
+	// An unresolvable source is skipped, not fatal, so assert it actually landed.
 	if len(parsed.Landed) != 1 || parsed.Landed[0].SourceBranch != "feature" {
 		t.Fatalf("expected feature to land against the URL remote, got landed=%+v skipped=%+v", parsed.Landed, parsed.Skipped)
 	}
@@ -345,10 +276,6 @@ func testExecGateMergeRealRunAcceptsAUrlRemote(t *testing.T) {
 }
 
 func testExecGateMergeRealRunBatchLandsMultipleSources(t *testing.T) {
-	// Two independent branches, both squashed onto one working tree by one
-	// gate-merge call — the batching this generalization exists for: a
-	// caller no longer has to reset from the target and repeat the call per
-	// branch, which would discard every landed branch but the last.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedBareOrigin(t, setup)
@@ -394,21 +321,11 @@ func testExecGateMergeRealRunBatchLandsMultipleSources(t *testing.T) {
 }
 
 func testExecGateMergeRealRunSkipsASourceThatContributesNothing(t *testing.T) {
-	// The no-op half of the same report. A source whose content is already
-	// on the target — here a branch still at main's own tip, so `git merge
-	// --squash` reports "Already up to date" and stages nothing — used to
-	// abort the whole batch: the code asked git to commit the empty squash
-	// anyway, that commit exited non-zero, and the failure came back as a
-	// bare exit status that named no cause (git explains it on stdout,
-	// which the commit call discarded). A no-op source contributes nothing
-	// and must be skipped like a conflicting one, with the rest of the
-	// batch still gating — an already-landed branch is a no-op, not a dead
-	// gate.
+	// A source that stages nothing is skipped, not a batch failure.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedBareOrigin(t, setup)
 
-	// `already` never diverges from main, so squashing it stages nothing.
 	fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "already")
 	fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "already")
 
@@ -443,11 +360,7 @@ func testExecGateMergeRealRunSkipsASourceThatContributesNothing(t *testing.T) {
 }
 
 func testExecGateMergeRealRunBatchSkipsAConflictingSourceAndLandsTheRest(t *testing.T) {
-	// The conflict-skip path this generalization exists for: a batch of
-	// three, where the middle source conflicts with what the first source
-	// already landed. It is skipped (merge --abort, recorded with a
-	// reason) rather than failing the whole call, and the third source
-	// still lands against the clean tree the abort left behind.
+	// The conflicting middle source is aborted and skipped; the third still lands on the clean tree.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedBareOrigin(t, setup)
@@ -494,11 +407,7 @@ func testExecGateMergeRealRunBatchSkipsAConflictingSourceAndLandsTheRest(t *test
 }
 
 func testExecGateMergeRealRunAllSourcesConflictRefuses(t *testing.T) {
-	// A single conflicting source (the ordinary one-branch gate) is
-	// skipped like any other, but a batch that lands nothing has nothing
-	// to gate, so the command refuses rather than reporting success on an
-	// unchanged target. The worktree is left clean — the conflict was
-	// backed out with `git merge --abort`, not left mid-conflict.
+	// A batch that lands nothing refuses, and the conflict is aborted rather than left in the tree.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedBareOrigin(t, setup)
@@ -529,14 +438,8 @@ func testExecGateMergeRealRunAllSourcesConflictRefuses(t *testing.T) {
 }
 
 func testExecGateMergeRealRunBatchLandsMigrationsWithConflictingAtlasSum(t *testing.T) {
-	// migrations/atlas.sum is a generated checksum over every migration file
-	// in the directory, so two branches that each add a migration conflict on
-	// it by construction; two such branches must batch-gate together with
-	// nothing for a human to resolve. It also proves the resolution doesn't
-	// weaken what
-	// atlas.sum is for: after the batch lands, the real `atlas migrate
-	// validate` still passes, and a migration edited after the fact is
-	// still caught.
+	// atlas.sum conflicts by construction when two branches add migrations; it must resolve automatically
+	// and still validate and catch later tampering.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedBareOrigin(t, setup)
@@ -583,16 +486,10 @@ func testExecGateMergeRealRunBatchLandsMigrationsWithConflictingAtlasSum(t *test
 		t.Fatalf("expected a clean worktree after landing, got status: %q", status)
 	}
 
-	// The regenerated atlas.sum is not a plausible-looking placeholder: it
-	// passes atlas's own real integrity check against the migration files
-	// that actually landed.
 	if out, ok := captureAtlasValidate(t, setup.Cwd); !ok {
 		t.Fatalf("expected the regenerated atlas.sum to validate cleanly, got:\n%s", out)
 	}
 
-	// And the check still does its job: editing a migration after the
-	// fact, with no matching atlas.sum update, is still caught — this fix
-	// teaches the tooling to regenerate on conflict, not to stop checking.
 	mustWriteFile(t, filepath.Join(setup.Cwd, "migrations", "20260102000000_add_bar.sql"), "CREATE TABLE bar (id int, tampered boolean);\n")
 	out, ok := captureAtlasValidate(t, setup.Cwd)
 	if ok {

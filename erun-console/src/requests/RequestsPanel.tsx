@@ -33,9 +33,7 @@ import type { RequestActionState, RequestsState } from './controller';
 import { useRequestsController } from './controller';
 import { RateLimitPanel } from './RateLimitPanel';
 
-// The canonical route templates approve/decline gate on -- exact strings
-// erun-backend-api registers them under (internal/routes/invite_requests.go),
-// matched via capabilityAllows's wildcard-segment comparison.
+// Must match the route templates erun-backend-api registers.
 const APPROVE_PATH_TEMPLATE = '/v1/invite-requests/{invite_request_id}/approve';
 const DECLINE_PATH_TEMPLATE = '/v1/invite-requests/{invite_request_id}/decline';
 
@@ -45,8 +43,6 @@ function kindLabel(request: InviteRequest): string {
     : `Join ${request.tenantName}`;
 }
 
-// formatWaited is a small relative-time helper -- no new dependency needed
-// for the granularity this queue needs (minutes/hours/days).
 function formatWaited(createdAt: string): string {
   const created = new Date(createdAt).getTime();
   if (Number.isNaN(created)) {
@@ -70,13 +66,7 @@ function acceptURL(token: string): string {
   return `${window.location.origin}/accept-invite?token=${encodeURIComponent(token)}`;
 }
 
-// IssuedInviteDialog shows the minted invite link once, right after
-// approval -- the same "shown once, copyable, dismiss clears it" shape
-// InvitesPanel's InviteLinkDialog and UsersPanel's TemporaryPasswordDialog
-// already use for a one-time credential. It has to be a dialog rather than
-// an inline row note: the approved row disappears from the pending list the
-// moment the mutation's own tag invalidation refetches it, so there is no
-// row left for an inline note to sit beside.
+// A dialog, not an inline note: the approved row leaves the pending list on refetch.
 function IssuedInviteDialog({
   request,
   onDismiss,
@@ -137,10 +127,7 @@ function IssuedInviteDialog({
   );
 }
 
-// DeclineRequestDialog mirrors UsersPanel's DeactivateUserDialog shape
-// exactly (outline Cancel first, destructive confirm second, both disabled
-// while busy) but gates the confirm button on a non-empty reason too: a
-// decline with no reason is a dead end the requester can't act on.
+// Confirm requires a reason: a reasonless decline is a dead end for the requester.
 function DeclineRequestDialog({
   request,
   busy,
@@ -411,17 +398,8 @@ interface CapabilityFlags {
   actionsRestricted: boolean;
 }
 
-// capabilityFlags mirrors erun-common's PlatformCapabilities.Known()/Allows()
-// contract (see erun-ui's restrictedTenantDashboardRead, the same rule
-// applied to the desktop's own invite-request actions): `known` is whether
-// the capability *set itself* resolved to a real array, never whether the
-// whoami query merely returned some response -- a 200 with `capabilities:
-// null` (the platform reporting it could not resolve a set) is exactly as
-// unknown as a query that is still loading or has errored outright. An
-// unknown set must never render as "you may not do this": that hides a
-// surface the caller can in fact use. It stays attemptable, and the
-// server's own check on the real approve/decline call is what actually
-// refuses it, same as every other capability-gated read/write in the repo.
+// `known` is whether the capability set itself resolved; a null set is unknown, and an
+// unknown set stays attemptable so the server's check decides.
 function capabilityFlags(capabilities: PlatformCapability[] | undefined): CapabilityFlags {
   const known = capabilities !== undefined;
   if (!known) {
@@ -432,9 +410,6 @@ function capabilityFlags(capabilities: PlatformCapability[] | undefined): Capabi
   return { canApprove, canDecline, actionsRestricted: !canApprove && !canDecline };
 }
 
-// RequestDialogs holds the two dialogs RequestsPanel can show, split out
-// purely to keep RequestsPanel's own branch count under the module's
-// complexity budget.
 function RequestDialogs({
   approved,
   pendingDecline,
@@ -467,11 +442,7 @@ function RequestDialogs({
   );
 }
 
-// RequestsPanel is the operator's invite-request queue: reachable by every
-// tenant (JOIN_TENANT requests naming your own tenant),
-// with Approve/Decline gated on whoami's capability set rather than tenant
-// type -- see shell/sections.ts for the nav-level gate (every tenant sees
-// this panel) and this component for the finer-grained action gate.
+// Every tenant sees the queue; Approve/Decline are gated on whoami capabilities.
 export function RequestsPanel({
   token,
   tenantType,

@@ -11,12 +11,6 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// review.go exposes `erun review`'s operations as MCP tools over the same
-// shared command/review RunReview* functions the CLI drives
-// (erun-cli/cmd/review/review.go), mirroring platform.go's pattern so preview
-// (this module's non-interactive analogue of --dry-run) reuses the exact
-// same trace rather than a separately hand-maintained plan.
-
 type ReviewListInput struct {
 	shared.PlatformAliasInput
 	TargetBranch   string `json:"targetBranch,omitempty" jsonschema:"filter by target branch"`
@@ -114,12 +108,8 @@ func ReviewCreateTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.C
 	}
 }
 
-// ReviewCommentInput's anchor (commitId/filePath/line) is optional, matching
-// `erun review comment`, which sends whatever flags the caller gave it rather
-// than requiring the anchor itself. Only reviewId and body are required here.
-// Whether the platform accepts a comment carrying no anchor is the platform's
-// call, not this transport's: refusing it here made MCP stricter than the CLI
-// over the same shared call, which is the one thing this tool must not do.
+// ReviewCommentInput's anchor is optional, matching the CLI; the platform
+// decides whether an unanchored comment is valid.
 type ReviewCommentInput struct {
 	shared.PlatformAliasInput
 	ReviewID        string `json:"reviewId" jsonschema:"review id to comment on"`
@@ -202,11 +192,8 @@ type ReviewRecordBuildResult struct {
 	Trace   []string                     `json:"trace,omitempty"`
 }
 
-// ReviewRecordBuildTool is the only way an erun client transitions a review
-// off OPEN: recording a build moves it to READY (successful) or FAILED (not),
-// and on to MERGE if it was already the merge queue's head. There is no
-// separate "set review status" tool for this — a READY with no build is a
-// different thing entirely (the missed-merge-window requeue).
+// ReviewRecordBuildTool moves a review off OPEN to READY or FAILED, and to
+// MERGE if it heads the queue.
 func ReviewRecordBuildTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewRecordBuildInput) (*mcp.CallToolResult, ReviewRecordBuildResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewRecordBuildInput) (*mcp.CallToolResult, ReviewRecordBuildResult, error) {
 		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.CommitID) == "" {
@@ -242,11 +229,8 @@ type ReviewReportMergedResult struct {
 	Trace   []string                      `json:"trace,omitempty"`
 }
 
-// ReviewReportMergedTool is for the environment a review's merge queue
-// promoted to MERGE, once it has fetched, built, recorded, and pushed the
-// prospective merge itself, and for work that landed without the queue. The platform verifies rather than trusts this
-// report — see AGENTS.md "Merge Queue" — so a call here is not itself the
-// authority; a MERGE_NOT_VERIFIED refusal leaves the review at MERGE.
+// ReviewReportMergedTool reports a landed merge; the platform verifies it, and
+// MERGE_NOT_VERIFIED leaves the review at MERGE.
 func ReviewReportMergedTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReportMergedInput) (*mcp.CallToolResult, ReviewReportMergedResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewReportMergedInput) (*mcp.CallToolResult, ReviewReportMergedResult, error) {
 		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.RemoteURL) == "" {
@@ -268,12 +252,8 @@ type ReviewRequeueInput struct {
 	ReviewID string `json:"reviewId" jsonschema:"review id to requeue; must currently be at MERGE"`
 }
 
-// ReviewRequeueTool moves a review stuck at MERGE back to READY, freeing its
-// target branch's merge-queue slot so a different review can be promoted —
-// only one review may be at MERGE per target branch at a time. It reuses
-// review_record-build/review_report-merged's own status-transition path
-// rather than a new endpoint, and refuses, naming the review's actual
-// status, when it is not at MERGE.
+// ReviewRequeueTool moves a review from MERGE back to READY, freeing the
+// target branch's single MERGE slot.
 func ReviewRequeueTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewRequeueInput) (*mcp.CallToolResult, ReviewResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewRequeueInput) (*mcp.CallToolResult, ReviewResult, error) {
 		if strings.TrimSpace(input.ReviewID) == "" {

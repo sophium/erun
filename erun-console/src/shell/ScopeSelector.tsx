@@ -10,22 +10,9 @@ export interface ScopeTenant {
   name: string;
 }
 
-// ScopeSelector lets an OPERATIONS caller choose which tenant's rows the
-// console currently administers, without re-authenticating -- distinct from
-// TenantSwitcher (shell/TenantSwitcher.tsx), which trades the held credential
-// for a different one via a fresh OIDC sign-in. Selecting a target here only
-// changes the `tenantId` list queries send (e.g.
-// environmentsApi.useListEnvironmentsQuery); the caller's own identity, and
-// every permission check the API makes with it, never change.
-// `value` is undefined for "my own tenant" (the default); a defined value is a tenant other
-// than the caller's own. `tenants` is fetched once by the caller
-// (shell/AppShell.tsx) and shared with the Environments panel's tenant
-// badges, rather than fetched again here. `active` is the currently rendered
-// section id: the selector renders on every section, but its
-// "Viewing another tenant's rows" claim is only true on the ones that
-// actually thread scopeTenantId server-side (sections.ts's
-// sectionHonorsScope) -- everywhere else it says so plainly instead of
-// implying a reach it does not have.
+// ScopeSelector picks which tenant's rows an OPERATIONS caller views without
+// re-authenticating; `value` undefined means the caller's own tenant. It only
+// claims scope applies on sections that honour it (sectionHonorsScope).
 export function ScopeSelector({
   tenantType,
   tenants,

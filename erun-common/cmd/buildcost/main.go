@@ -1,16 +1,5 @@
-// Command buildcost measures what one edit to erun-common costs every module
-// that builds on it: how much the Go build cache grows and how long the
-// rebuild takes.
-//
-//	buildcost -repo DIR -edit GateMergeWorkingTree -edit RunDeploySpec ...
-//
-// It warms an isolated build cache by running each module's gate commands
-// (build, vet, compile every test) once, then for each edit appends an
-// exported declaration to the file that declares the named function, so the
-// package's export data changes the way a real edit's does, runs the same
-// commands again, and records the cache growth and wall time. The file is
-// restored after every edit. An edit is named by a declaration rather than a
-// path so the same edit can be measured before and after a package move.
+// Command buildcost measures the Go build cache growth and rebuild time one
+// erun-common edit costs every dependent module.
 package main
 
 import (
@@ -27,7 +16,6 @@ import (
 	"time"
 )
 
-// modules are the modules whose gates an erun-common edit reaches.
 var modules = []string{
 	"erun-common",
 	"erun-cli",
@@ -36,7 +24,6 @@ var modules = []string{
 	"erun-backend/erun-backend-api",
 }
 
-// gate is what a developer or a build runs in a module after an edit.
 var gate = [][]string{
 	{"build", "./..."},
 	{"vet", "./..."},
@@ -135,9 +122,8 @@ func (m measurer) measure(out io.Writer, name string) error {
 	return err
 }
 
-// declaringFile is the file that declares function name: erun-common's first,
-// so an edit named before a step keeps meaning the same edit after it, then
-// each other module's in the order they are gated.
+// declaringFile searches erun-common first so an edit keeps its meaning across
+// a package move.
 func (m measurer) declaringFile(name string) (string, error) {
 	decl := regexp.MustCompile(`(?m)^func (\([^)]*\) )?` + regexp.QuoteMeta(name) + `\b`)
 	for _, mod := range modules {
@@ -149,7 +135,6 @@ func (m measurer) declaringFile(name string) (string, error) {
 	return "", fmt.Errorf("no module file declares func %s", name)
 }
 
-// declaringFileIn is the first non-test Go file under root that decl matches.
 func declaringFileIn(root string, decl *regexp.Regexp) (string, error) {
 	var found string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -169,14 +154,11 @@ func declaringFileIn(root string, decl *regexp.Regexp) (string, error) {
 	return found, err
 }
 
-// growth is how much the cache grew in all, and in each module's gate.
 type growth struct {
 	total    int64
 	byModule []int64
 }
 
-// gate runs every module's gate commands and reports how much the cache grew
-// and how long it took.
 func (m measurer) gate() (growth, time.Duration, error) {
 	g := growth{byModule: make([]int64, len(modules))}
 	start := time.Now()

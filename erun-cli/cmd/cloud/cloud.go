@@ -145,10 +145,7 @@ func runCloudLoginCommand(ctx core.Context, store cloud.CloudStore, promptRunner
 	return confirmAndLoginCloudProvider(ctx, store, promptRunner, alias, provider.Alias, status, params, deps)
 }
 
-// confirmAndLoginCloudProvider asks before starting an interactive login, and
-// reports the status unchanged when the operator declines — a refusal is the
-// current state, not a failure. Split out of runCloudLoginCommand so that
-// function stays under the cyclop threshold; the sequence is unchanged.
+// A declined login reports the unchanged status, not a failure.
 func confirmAndLoginCloudProvider(ctx core.Context, store cloud.CloudStore, promptRunner shared.PromptRunner, alias, providerAlias string, status cloud.CloudProviderStatus, params cloud.CloudLoginParams, deps cloud.CloudDependencies) error {
 	login, err := shared.ConfirmPrompt(promptRunner, fmt.Sprintf("Login to %s", providerAlias))
 	if err != nil {
@@ -164,10 +161,7 @@ func confirmAndLoginCloudProvider(ctx core.Context, store cloud.CloudStore, prom
 	return finishCloudLogin(ctx, store, status, deps)
 }
 
-// finishCloudLogin writes the resolved status and, for an active erun-hosted
-// alias, additionally proves the session actually authenticates against the
-// real platform by calling GET /v1/whoami — the smallest end-to-end evidence
-// that a token round-trip worked, not just that a token was obtained.
+// finishCloudLogin proves an active erun-hosted session with GET /v1/whoami.
 func finishCloudLogin(ctx core.Context, store cloud.CloudStore, status cloud.CloudProviderStatus, deps cloud.CloudDependencies) error {
 	if err := writeCloudStatus(ctx, status); err != nil {
 		return err

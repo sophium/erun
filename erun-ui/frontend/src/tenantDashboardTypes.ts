@@ -1,11 +1,4 @@
-// Tenant dashboard read-model types, split out of types.ts to keep that file
-// under eslint's 500-line max-lines cap (see reviewTypes.ts/diffTypes.ts for
-// the same pattern). Nothing here changes shape; types.ts re-exports the
-// whole module so every existing `from './types'` import keeps working.
-
-// UIAccessRemedy is the copyable hand-over a capability denial offers: the
-// grant command already resolved for this caller, and the name of the role it
-// grants so the request can be made in the platform's own vocabulary.
+// UIAccessRemedy is the resolved grant command for a denied capability and the role it grants.
 export interface UIAccessRemedy {
   command?: string;
   roleName?: string;
@@ -16,169 +9,100 @@ export interface UITenantDashboardInput {
   environment?: string;
   mcpUrl?: string;
   kubernetesContext?: string;
-  // platformAlias optionally names which configured erun-type cloud alias's
-  // platform to read; empty defers to the caller's sole configured erun
-  // alias (or reports every alias as a choice when more than one exists).
+  // Empty defers to the sole erun alias, or offers every alias as a choice.
   platformAlias?: string;
-  // reviewFilterMine/reviewFilterWaitingOnMe are the Reviews tab's one-click
-  // discovery filters, resolved server-side to the signed-in user's own id.
+  // Resolved server-side to the signed-in user's id.
   reviewFilterMine?: boolean;
   reviewFilterWaitingOnMe?: boolean;
 }
 
-// UITenantPlatformState names why the platform identity is not ready to load
-// the dashboard, so the UI can render the one action that resolves it. Kept
-// as plain string values (matching the Go side and every other status-like
-// field in this file, e.g. UITenantDashboardPanel) rather than a literal
-// union, since the value crosses the Wails boundary as an untyped string. ""
-// means the platform resolved and the load proceeded.
+// Platform-readiness states, plain strings across the Wails boundary; "" means
+// the platform resolved.
 export const TENANT_PLATFORM_STATE_NOT_CONNECTED = 'not-connected';
 export const TENANT_PLATFORM_STATE_CHOOSE_ALIAS = 'choose-alias';
 export const TENANT_PLATFORM_STATE_NOT_SIGNED_IN = 'not-signed-in';
 export const TENANT_PLATFORM_STATE_NOT_ENROLLED = 'not-enrolled';
 export const TENANT_PLATFORM_STATE_NO_PERMISSION = 'no-permission';
-// The identity resolved and the platform answered, with a tenant that is not
-// the local tenant the dashboard was opened from. The two namespaces are
-// joined only by the alias the credential belongs to, so the platform's own
-// name for the tenant behind the bearer is the only value that can establish
-// correspondence — and when it names a different one, the rows below would be
-// that tenant's, not this local tenant's.
+// The platform resolved the credential to a tenant other than the local one.
 export const TENANT_PLATFORM_STATE_TENANT_MISMATCH = 'tenant-mismatch';
 
 export interface UITenantDashboard {
   tenant: string;
   environment?: string;
   apiUrl?: string;
-  // apiError is a whole-dashboard failure (the caller's identity could not be
-  // read). A single panel's own failure lives on that panel.
+  // Whole-dashboard failure; panel failures live on the panel.
   apiError?: string;
   apiLog?: string;
   apiLogError?: string;
-  // platformState/platformAliasChoices/platformAlias/platformUrl/
-  // platformIssuer/platformSubject describe why the platform identity is not
-  // ready (or, once ready, what was actually resolved) — see the
-  // TENANT_PLATFORM_STATE_* constants above.
   platformState?: string;
   platformAliasChoices?: string[];
   platformAlias?: string;
   platformUrl?: string;
   platformIssuer?: string;
   platformSubject?: string;
-  // accessRemedies keys a restricted route to the copyable grant that would
-  // give the caller the access they were refused, so a restricted tab hands
-  // over the request rather than only naming what is missing. Absent when no
-  // role covers the access or the tenant's roles could not be read.
+  // Copyable grant per restricted route; absent when no role covers it.
   accessRemedies?: Record<string, UIAccessRemedy>;
   user?: UITenantDashboardUser;
-  // users is the Users tab's roster: the tenant's users, from GET /v1/users.
-  // Distinct from user above, which is the caller's own identity — the tab
-  // lists the tenant, and an unreadable roster is reported on the panel rather
-  // than collapsing back to the caller's single row.
+  // The tenant roster, distinct from the caller's own user above.
   users?: UITenantDashboardUser[];
   reviews?: UITenantDashboardReview[];
   mergeQueue?: UITenantDashboardReview[];
   builds?: UITenantDashboardBuild[];
-  // pipeline is the Pipeline tab's own view: every job and review the platform
-  // holds for this tenant, unioned on the issue each belongs to. It spans the
-  // reviews above rather than repeating them — a piece of planned work has no
-  // branch at all, so only this list can show it.
+  // Spans jobs and reviews: planned work has no branch, so only this list shows it.
   pipeline?: UIPipelineIssue[];
   auditEvents?: UITenantDashboardAudit[];
   panels?: UITenantDashboardPanel[];
-  // canCreateReview and canAdvanceMergeQueue report whether the signed-in user
-  // may attempt those writes at all, so the composing actions can be hidden
-  // rather than rendered to fail on submit.
   canCreateReview: boolean;
   canAdvanceMergeQueue: boolean;
-  // canOverrideMergeQueue is a distinct (usually narrower) grant from
-  // canAdvanceMergeQueue's: it gates the unresolved-thread gate's bypass,
-  // authorized on its own platform route.
+  // A separate, usually narrower grant: bypasses the unresolved-thread gate.
   canOverrideMergeQueue: boolean;
-  // mineReviewCount/waitingOnMeReviewCount are the Reviews tab's Mine /
-  // Waiting-on-me filter buttons' own discovery signal — how many reviews
-  // match each, visible before either is clicked. Undefined when the caller
-  // cannot read reviews, or has no signed-in user id to filter by.
+  // Undefined when the caller cannot read reviews or has no user id.
   mineReviewCount?: number;
   waitingOnMeReviewCount?: number;
-  // contexts/environments are the Registration tab's two lists: the
-  // platform's own cloud contexts (managed clusters) and hosted
-  // environments — objects distinct from (and with no automatic link to)
-  // this machine's local tenant/env config. Each degrades independently:
-  // a caller denied one list, or whose read of one failed, still sees the
-  // other (contextsRestricted/contextsError, environmentsRestricted/
-  // environmentsError).
+  // Platform contexts and hosted environments, unlinked to local config; each
+  // degrades independently.
   contexts?: UIPlatformContext[];
   contextsRestricted?: string;
   contextsError?: string;
   environments?: UIPlatformEnvironment[];
   environmentsRestricted?: string;
   environmentsError?: string;
-  // canCreateContext/canRegisterEnvironment/canDeployEnvironment/
-  // canStopEnvironment/canDeleteEnvironment mirror canCreateReview/
-  // canAdvanceMergeQueue above for the Registration tab's own writes.
-  // Previewing an environment (register with preview:true) shares
-  // canRegisterEnvironment's own gate — it is the same POST /v1/environments
-  // route — rather than a separate capability.
+  // Preview shares canRegisterEnvironment: it is the same POST /v1/environments route.
   canCreateContext: boolean;
   canRegisterEnvironment: boolean;
   canDeployEnvironment: boolean;
   canStopEnvironment: boolean;
   canDeleteEnvironment: boolean;
-  // myInviteRequest is the caller's own most recent invite request, set
-  // whenever a bearer minted successfully — including in the not-enrolled and
-  // no-permission states, since a not-yet-enrolled caller is exactly who
-  // needs to see this. Undefined means either never submitted one, or the
-  // read failed — myInviteRequestError distinguishes the two.
+  // Set even when not enrolled; undefined is ambiguous without myInviteRequestError.
   myInviteRequest?: UIInviteRequest;
-  // myInviteRequestError is set when the platform round trip for
-  // myInviteRequest failed for a reason other than "none exists". Must never
-  // be treated as "never requested": the caller could have a request already
-  // pending or approved that this dashboard load just failed to read.
+  // A failed read, never to be treated as "never requested".
   myInviteRequestError?: string;
-  // inviteRequests/pendingInviteRequestCount are the operator/admin queue
-  // (Requests tab): every pending request naming this tenant, or every
-  // tenant for an operations-scoped caller. pendingInviteRequestCount is
-  // undefined (not 0) when the caller cannot read the queue at all.
+  // pendingInviteRequestCount is undefined, not 0, when the queue is unreadable.
   inviteRequests?: UIInviteRequest[];
   pendingInviteRequestCount?: number;
   canApproveInviteRequests: boolean;
   canDeclineInviteRequests: boolean;
-  // inviteRequestRateLimitWindowSeconds is the platform's current
-  // per-identity invite-request submission window, best effort (0 when it
-  // could not be read).
+  // Best effort; 0 when unreadable.
   inviteRequestRateLimitWindowSeconds?: number;
 }
 
-// Per-tenant platform-enrollment states the sidebar status icon renders —
-// distinct from UITenantPlatformState above (which describes why the
-// *dashboard* cannot load): these describe where a local tenant with no
-// platform registration stands in the request/approve loop.
+// Per-tenant enrollment states for the sidebar icon, distinct from UITenantPlatformState.
 export const TENANT_ENROLLMENT_LOCAL_ONLY = 'local-only';
 export const TENANT_ENROLLMENT_PENDING = 'pending';
 export const TENANT_ENROLLMENT_DECLINED = 'declined';
 export const TENANT_ENROLLMENT_ENROLLED = 'enrolled';
-// TENANT_ENROLLMENT_UNKNOWN is a genuine platform round-trip failure, never
-// "never requested" — it must render as its own state rather than collapse
-// into local-only's confident answer.
+// A round-trip failure, never "never requested".
 export const TENANT_ENROLLMENT_UNKNOWN = 'unknown';
-// TENANT_ENROLLMENT_TENANT_MISMATCH is the platform answering this row's own
-// credential with a tenant that is not the row's. It is the same verdict — and
-// deliberately the same value — as TENANT_PLATFORM_STATE_TENANT_MISMATCH: the
-// sidebar row and the dashboard it opens describe one situation, and two
-// spellings of it would be two things to keep in step.
+// Deliberately the same value as TENANT_PLATFORM_STATE_TENANT_MISMATCH.
 export const TENANT_ENROLLMENT_TENANT_MISMATCH = TENANT_PLATFORM_STATE_TENANT_MISMATCH;
 
 export interface UITenantPlatformEnrollmentStatus {
   tenant: string;
   state: string;
   declineReason?: string;
-  // platformHost is the platform this row's credential actually reached,
-  // absent when it reached none — the icon's copy names whichever platform
-  // answered rather than a fixed hostname, which is only ever right for the
-  // one platform it names.
+  // The platform the credential reached; absent when none answered.
   platformHost?: string;
-  // platformTenant is the tenant the platform resolved this row's credential
-  // to, set only on TENANT_ENROLLMENT_TENANT_MISMATCH.
+  // Set only on TENANT_ENROLLMENT_TENANT_MISMATCH.
   platformTenant?: string;
 }
 
@@ -186,16 +110,14 @@ export interface UIListTenantPlatformEnrollmentStatusesInput {
   tenants: string[];
 }
 
-// Invite-request kinds and statuses mirror
-// erun-common's PlatformInviteRequestKind*/PlatformInviteRequestStatus*.
+// Mirror erun-common's PlatformInviteRequestKind*/PlatformInviteRequestStatus*.
 export const INVITE_REQUEST_KIND_JOIN_TENANT = 'JOIN_TENANT';
 export const INVITE_REQUEST_KIND_CREATE_TENANT = 'CREATE_TENANT';
 export const INVITE_REQUEST_STATUS_PENDING = 'PENDING';
 export const INVITE_REQUEST_STATUS_APPROVED = 'APPROVED';
 export const INVITE_REQUEST_STATUS_DECLINED = 'DECLINED';
 
-// UIInviteRequest mirrors eruncommon.PlatformInviteRequest's JSON-safe subset
-// the desktop renders (request dialog status, operator queue rows).
+// UIInviteRequest mirrors the rendered subset of eruncommon.PlatformInviteRequest.
 export interface UIInviteRequest {
   inviteRequestId: string;
   issuer: string;
@@ -213,9 +135,7 @@ export interface UIInviteRequest {
   updatedAt?: string;
 }
 
-// UISubmitInviteRequestInput is "Request an invitation"'s input: names and an
-// optional note only — the requester's identity comes from the verified
-// bearer, never a form field.
+// UISubmitInviteRequestInput omits identity, which comes from the verified bearer.
 export interface UISubmitInviteRequestInput {
   tenant: string;
   kind: string;
@@ -224,10 +144,7 @@ export interface UISubmitInviteRequestInput {
   note?: string;
 }
 
-// UIInviteRequestRateLimited is what SubmitTenantInviteRequest returns
-// instead of a raw error when the platform's per-identity submission window
-// has not elapsed yet — a state to render (disable submit, show the
-// countdown), not a fault.
+// UIInviteRequestRateLimited is a state to render, not a fault.
 export interface UIInviteRequestRateLimited {
   retryAfterSeconds: number;
 }
@@ -253,8 +170,7 @@ export interface UIDeclineInviteRequestInput {
   reason: string;
 }
 
-// UIPlatformContext mirrors a hosted cloud context (managed cluster) the
-// Registration tab lists and can create.
+// UIPlatformContext mirrors a hosted cloud context (managed cluster).
 export interface UIPlatformContext {
   contextId: string;
   name: string;
@@ -267,8 +183,6 @@ export interface UIPlatformContext {
   provisionError?: string;
 }
 
-// UIPlatformEnvironment mirrors a hosted environment the Registration tab
-// lists, registers, and deploys/stops/deletes.
 export interface UIPlatformEnvironment {
   environmentId: string;
   name: string;
@@ -279,14 +193,11 @@ export interface UIPlatformEnvironment {
   status: string;
   provisionError?: string;
   deployedVersion?: string;
-  // deleteError names why a delete attempt did not tear the namespace down,
-  // set only when status is "deletion-blocked".
+  // Set only when status is "deletion-blocked".
   deleteError?: string;
 }
 
-// UICreatePlatformContextInput registers (or, with preview set, only
-// previews) a cloud context, mirroring `erun platform context create
-// [--preview]`.
+// UICreatePlatformContextInput mirrors `erun platform context create [--preview]`.
 export interface UICreatePlatformContextInput {
   tenant: string;
   name: string;
@@ -298,14 +209,8 @@ export interface UICreatePlatformContextInput {
   preview?: boolean;
 }
 
-// UIPlatformContextOutcome is CreatePlatformContext's result. kind
-// "conflict"/"unavailable" is an expected, actionable refusal carried in
-// `message` verbatim from the platform — render it as a recoverable state,
-// never a raw error. Only "accepted" carries `context` (a real create) or
-// `plan` (a preview).
-// kind is plain string (not a literal union), matching every other
-// status-like field crossing the Wails boundary in this file — the Go side
-// carries "accepted" | "conflict" | "unavailable" as an untyped string.
+// UIPlatformContextOutcome: "conflict"/"unavailable" are recoverable refusals
+// with the platform's message; only "accepted" carries context or plan.
 export interface UIPlatformContextOutcome {
   kind: string;
   context?: UIPlatformContext;
@@ -313,22 +218,15 @@ export interface UIPlatformContextOutcome {
   message?: string;
 }
 
-// UIPlatformProvisionResult is always a successful preview; quotaOk names
-// whether the plan can actually register without hitting the tenant's cap.
+// UIPlatformProvisionResult is a preview; quotaOk says whether it fits the tenant's cap.
 export interface UIPlatformProvisionResult {
   plan: string[];
   quotaOk: boolean;
 }
 
-// UIRegisterPlatformEnvironmentInput registers a hosted environment,
-// mirroring `erun platform env register` — or, passed to
-// PreviewPlatformEnvironment instead of RegisterPlatformEnvironment, resolves
-// the plan the exact same fields would submit without creating anything: the
-// preview and the register it precedes share one field set, so the plan an
-// operator sees can never diverge from what submit does. adopt records an
-// environment that already exists — its kubernetesContext is required, and
-// contextId/runtimeVersion must be left unset — instead of asking the
-// platform to provision one; it never starts a deploy.
+// UIRegisterPlatformEnvironmentInput mirrors `erun platform env register`;
+// preview uses the same fields. adopt requires kubernetesContext and forbids
+// contextId/runtimeVersion.
 export interface UIRegisterPlatformEnvironmentInput {
   tenant: string;
   name: string;
@@ -339,29 +237,21 @@ export interface UIRegisterPlatformEnvironmentInput {
   adopt?: boolean;
 }
 
-// UIPlatformEnvironmentActionInput is Deploy/Stop/Delete's shared input.
 export interface UIPlatformEnvironmentActionInput {
   tenant: string;
   environmentId: string;
   version?: string;
 }
 
-// UIPlatformEnvironmentOutcome is the shared result for
-// RegisterPlatformEnvironment/DeployPlatformEnvironment/
-// StopPlatformEnvironment/DeletePlatformEnvironment. kind "conflict" (a
-// quota cap, or another deploy/delete already in flight) and "unavailable"
-// (no deploy executor configured) are expected, actionable outcomes carried
-// in `message` verbatim from the platform — never raw errors; only
-// "accepted" carries `environment`.
+// UIPlatformEnvironmentOutcome: "conflict"/"unavailable" are actionable outcomes
+// with the platform's message; only "accepted" carries environment.
 export interface UIPlatformEnvironmentOutcome {
   kind: string;
   environment?: UIPlatformEnvironment;
   message?: string;
 }
 
-// UITenantDashboardPanel is one panel's own outcome: `restricted` names the API
-// read the signed-in user lacks, so a panel they may not see is never rendered
-// as an empty one.
+// UITenantDashboardPanel: `restricted` names the read the user lacks.
 export interface UITenantDashboardPanel {
   tab: string;
   restricted?: string;
@@ -370,11 +260,7 @@ export interface UITenantDashboardPanel {
 
 export interface UITenantDashboardUser {
   tenantId: string;
-  // tenantName is the platform's own name for the tenant these rows belong
-  // to, from whoami. Set on the caller's own row only. It is what the
-  // dashboard header names so an operator can tell whose reviews, queue,
-  // users and audit they are looking at when the local tenant the dashboard
-  // was opened from is not the platform tenant its credential reaches.
+  // The platform's name for this tenant, set on the caller's own row only.
   tenantName?: string;
   userId: string;
   username?: string;
@@ -389,27 +275,17 @@ export interface UITenantDashboardReview {
   reviewId: string;
   tenantId: string;
   authorUserId?: string;
-  // authorUsername is the tenant user directory's display name for
-  // authorUserId, resolved best-effort. Undefined when it could not be
-  // resolved, so the caller falls back to the raw id.
+  // Best effort; undefined falls back to the raw id.
   authorUsername?: string;
   name: string;
-  // repository is the repository the review's branches belong to, as the
-  // platform records it. Undefined for a review created before the platform
-  // recorded one; the merge-queue panel names it so a queue spanning more
-  // than one repository is visibly not one queue.
+  // Undefined for reviews created before the platform recorded one.
   repository?: string;
   targetBranch: string;
   sourceBranch: string;
   status: string;
-  // unresolvedThreads is undefined when it was not computed for this row
-  // (e.g. the caller cannot read comments) — distinct from 0, which means
-  // every thread is resolved.
+  // Undefined when not computed, distinct from 0.
   unresolvedThreads?: number;
-  // blocked is AdvanceMergeQueue's own report that it refused to promote
-  // this review (unresolvedThreads then carries the count). Every other read
-  // path leaves it undefined — it describes that one call's outcome, not a
-  // property of the review itself.
+  // Set only by AdvanceMergeQueue's refusal, not a property of the review.
   blocked?: boolean;
   lastFailedBuildId?: string;
   lastReadyBuildId?: string;
@@ -418,21 +294,14 @@ export interface UITenantDashboardReview {
   updatedAt?: string;
 }
 
-// UIBuildCgroupMetrics is one step's CPU/throttling/I/O cost. available is
-// false either because the step ran outside a build cgroup entirely (the
-// whole UIBuildProfileStep.cgroup field is then undefined instead) or
-// because a pod-injected build's own cgroup counters could not be read
-// (available: false, unavailable: reason) -- render "not available" for the
-// latter, never zeros, since a zero here would misread as "used no CPU".
+// UIBuildCgroupMetrics: when unavailable, render "not available", never zeros
+// (which would read as "used no CPU").
 export interface UIBuildCgroupMetrics {
   available: boolean;
   unavailable?: string;
   cpuSeconds?: number;
   cpuPercentOfQuota?: number;
-  // throttledPeriods/totalPeriods is the ratio to show, not cpuPercentOfQuota
-  // alone: a step at 100% CPU that is not throttled is sized correctly, and
-  // one at 18% that is throttled is starved -- duration and a single
-  // percentage cannot distinguish those.
+  // The throttle ratio, not CPU percent alone, separates starved from well-sized steps.
   throttledPeriods?: number;
   totalPeriods?: number;
   throttledSeconds?: number;
@@ -441,22 +310,15 @@ export interface UIBuildCgroupMetrics {
   peakMemoryBytes?: number;
 }
 
-// UIBuildProfileStep is one entry in UIBuildProfileSummary's bounded
-// top-N-costliest-steps list. name carries its full ancestry path (e.g.
-// "erun-devops > linux/amd64") so two same-named steps under different
-// parents stay distinguishable once flattened out of the tree.
+// UIBuildProfileStep's name carries its ancestry path so same-named steps stay distinct.
 export interface UIBuildProfileStep {
   name: string;
   durationSeconds: number;
   cgroup?: UIBuildCgroupMetrics;
 }
 
-// UIBuildProfileSummary is the bounded per-build profile a build
-// self-reports alongside its outcome -- a duration/CPU/throttle/IO summary
-// plus the top costliest steps, never the full step tree, so a build with a
-// deep step tree never grows this payload unbounded.
-// truncatedStepCount is the number of steps left out of topSteps; 0 means
-// topSteps is the whole tree.
+// UIBuildProfileSummary is bounded to the top costliest steps; truncatedStepCount
+// counts the rest.
 export interface UIBuildProfileSummary {
   durationSeconds: number;
   failed?: boolean;
@@ -469,8 +331,7 @@ export interface UIBuildProfileSummary {
 export interface UITenantDashboardBuild {
   buildId: string;
   tenantId: string;
-  // reviewId is empty for a build with no review attached -- an ordinary
-  // `erun build` self-report, identified by environmentId instead.
+  // Empty for a plain `erun build` self-report, identified by environmentId.
   reviewId?: string;
   reviewName?: string;
   environmentId?: string;
@@ -478,31 +339,19 @@ export interface UITenantDashboardBuild {
   successful: boolean;
   commitId: string;
   version: string;
-  // profile is undefined for a build reported before this feature existed,
-  // or one whose own caller collected no profile.
   profile?: UIBuildProfileSummary;
   createdAt?: string;
   updatedAt?: string;
 }
 
-// UIConnectERunPlatformInput is the "Connect to erunpaas.com" action's input:
-// the API base URL — discovered against the platform itself the same way
-// `erun cloud init erun` already does — and the tenant the click came from.
-//
-// tenant is omitted only by the machine-wide settings dialog, which attaches
-// the alias globally and has no tenant to attach it to. A click on a tenant's
-// dashboard carries that tenant: an alias attached only machine-globally
-// cannot move a tenant whose own alias selection is already non-empty, so
-// without it the Connect card re-renders unchanged.
+// UIConnectERunPlatformInput's tenant is omitted only by the settings dialog; a
+// machine-global alias cannot move a tenant with its own alias selection.
 export interface UIConnectERunPlatformInput {
   apiUrl: string;
   tenant?: string;
 }
 
-// UIPlatformUserEnrollInput is the "not enrolled" state's enrollment attempt.
-// Every field is prefilled from the identity already in hand
-// (UITenantDashboard.platformIssuer/platformSubject), so the operator never
-// retypes a value erun already knows.
+// UIPlatformUserEnrollInput is prefilled from the identity already resolved.
 export interface UIPlatformUserEnrollInput {
   alias: string;
   username: string;
@@ -516,20 +365,11 @@ export interface UIPlatformUser {
   username: string;
 }
 
-// UIPipelineItem is one piece of work on one rung, with the record it came
-// from. Exactly one of job or review is set: a row that could not say which it
-// was would send an operator looking for a branch that does not exist (a job)
-// or a job that does (a review).
-//
-// rung is the platform's own label — PLANNED, IN_PROGRESS, REVIEW_OPEN,
-// READY, MERGING, MERGED, or an outcome such as FAILED — never re-derived
-// here. Its name and tone come from erun-kit's shared pipelineRungs, so this
-// tab and the console's Pipeline section label one rung the same way.
+// UIPipelineItem has exactly one of job or review. rung is the platform's label,
+// never re-derived here.
 export interface UIPipelineItem {
   issueKey: string;
-  // issueRef/issueRefSource are the item's own link and where it came from.
-  // An INFERRED source means the number was parsed out of a branch name —
-  // a guess about the branch, and it renders as one.
+  // An INFERRED source was parsed from a branch name.
   issueRef?: string;
   issueRefSource?: string;
   rung: string;
@@ -537,9 +377,7 @@ export interface UIPipelineItem {
   review?: UIPipelineReview;
 }
 
-// UIPipelineJob is the job half: work that exists as a record, with its own
-// issue reference and owning actor. It has no branch, and nothing derives one
-// for it.
+// UIPipelineJob has no branch, and nothing derives one.
 export interface UIPipelineJob {
   jobId: string;
   jobType: string;
@@ -549,14 +387,10 @@ export interface UIPipelineJob {
   actorKind: string;
   actorId: string;
   startedAt?: string;
-  // endedAt is set exactly when the job is no longer open. A planned job
-  // carries none, and its absence must not read as a job that failed to
-  // record one.
+  // Unset while the job is open.
   endedAt?: string;
 }
 
-// UIPipelineReview is the review half: work proposed for merge, with the
-// branches it moves between.
 export interface UIPipelineReview {
   reviewId: string;
   repository?: string;
@@ -566,9 +400,7 @@ export interface UIPipelineReview {
   status: string;
 }
 
-// UIPipelineIssue is one issue's own group of pipeline work. issueKey is
-// empty for the single group that names no issue, which the platform orders
-// last — the view shows work without an issue rather than guessing one for it.
+// UIPipelineIssue groups work by issue; empty issueKey is the last, unlinked group.
 export interface UIPipelineIssue {
   issueKey: string;
   items: UIPipelineItem[];

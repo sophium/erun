@@ -28,12 +28,8 @@ function reading(
   };
 }
 
-// reportingClusterStatus is the reported cluster's reading: a node whose
-// container limits sum past its allocatable capacity, so the worst-case reading
-// is zero, while the pods' requests leave ample room for the scheduler to place
-// another one. The panel read the first figure and refused the values the
-// operator had entered (4 CPU / 8.7 GiB), predicting a pending deploy the
-// scheduler would in fact place.
+// A node whose limits overcommit allocatable (worst case zero) while requests
+// leave room for the scheduler.
 function reportingClusterStatus(): UIRuntimeResourceStatus {
   const schedulable = reading(
     13.5,
@@ -64,16 +60,11 @@ test('a limits-saturated node does not refuse values the scheduler would place',
   const status = reportingClusterStatus();
   const entered = { cpu: '4', memory: '8.7' };
 
-  // The reported refusal: "No node currently has 4 CPU and 8.7 GiB free — ...
-  // or you lower the request." Nothing here justifies it. The entered values
-  // size the container's limits, which reserve nothing, and the scheduler
-  // admits a pod on its requests.
+  // Entered values size limits, which reserve nothing; the scheduler admits on requests.
   const validation = runtimeResourceValidation(entered, status);
   assert.equal(validation.blockingError, '');
   assert.equal(validation.capacityWarning, '');
 
-  // The control's own bounds came from the same zero and refused the values a
-  // second way, rendering Min 0.25 beside a max of 0.
   const bounds = runtimeResourceBounds(status, false);
   assert.ok(
     bounds.cpuMax >= 4,
@@ -88,12 +79,9 @@ test('a limits-saturated node does not refuse values the scheduler would place',
 test('the worst-case reading is carried, labelled, and kept apart from scheduling', () => {
   const bounds = runtimeResourceBounds(reportingClusterStatus(), false);
 
-  // The scheduling reading is the headline the controls are bounded by.
   assert.match(bounds.message, /scheduler can admit/);
   assert.equal(bounds.notice, '');
 
-  // The other question keeps its answer, stated as the bursting figure it is
-  // and never offered as a scheduling limit.
   assert.match(bounds.worstCase.message, /declared limit at once/);
   assert.match(bounds.worstCase.notice, /namespace quota/);
   assert.doesNotMatch(bounds.worstCase.notice, /lower (the|your) request/);
@@ -114,8 +102,6 @@ test('the warning names node capacity, and never a smaller limit', () => {
   const { capacityWarning } = runtimeResourceValidation({ cpu: '4', memory: '8.7' }, exhausted);
   assert.match(capacityWarning, /No node has request capacity left/);
   assert.match(capacityWarning, /Stopping an environment nobody is using/);
-  // The remedy the report's operator was offered, and the one direction that
-  // re-creates the out-of-memory kills the runtime limit is sized to avoid.
   assert.doesNotMatch(capacityWarning, /lower (the|your) request/);
 });
 
@@ -136,9 +122,6 @@ test('a node whose requests could not be read is not read as a shortfall', () =>
     },
   ];
 
-  // An unreadable reading cannot be said to admit or refuse anything, so it
-  // makes no claim either way rather than warning about a figure it does not
-  // have.
   const validation = runtimeResourceValidation({ cpu: '4', memory: '8.7' }, status);
   assert.equal(validation.capacityWarning, '');
   assert.match(runtimeResourceBounds(status, false).message, /upper bound/);

@@ -200,12 +200,6 @@ func TestDeploy(t *testing.T) {
 }
 
 func testDeployDryRunCopiesImagesFromToBeforeDeploy(t *testing.T) {
-	// When the project registry list marks a FROM source and a TO
-	// destination, deploy mirrors every image the cluster pulls (the
-	// erun-devops runtime image plus any locally-built component) from FROM
-	// to each TO with a manifest-aware `docker buildx imagetools create`
-	// before the helm upgrade, and the cluster pulls from the DEPLOY (TO)
-	// registry. The copy is a dry-run trace line gated behind real-run.
 	setup := env.New(t)
 	fixture.SeedTenantEnvNoRegistry(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -224,12 +218,6 @@ func testDeployDryRunCopiesImagesFromToBeforeDeploy(t *testing.T) {
 }
 
 func testDeployRealRunCopiesImagesFromToViaStubs(t *testing.T) {
-	// Real-run deploy of an env whose registry list marks a FROM source and
-	// a TO destination: before helm upgrade, the runtime image is mirrored
-	// from FROM to TO with `docker buildx imagetools create` (executed
-	// through the docker stub), and the cluster pulls from the DEPLOY (TO)
-	// registry. This proves the copy ACTION runs in real-run, not just its
-	// dry-run trace.
 	setup := env.New(t)
 	root := filepath.Join(setup.ConfigHome, "erun")
 	tenantDir := filepath.Join(root, "team")
@@ -251,8 +239,6 @@ func testDeployRealRunCopiesImagesFromToViaStubs(t *testing.T) {
 	fixture.StubBinary(t, stubs, "kubectl", "")
 	fixture.StubBinary(t, stubs, "helm", "")
 	fixture.StubBinary(t, stubs, "docker", "")
-	// The ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam marks erun-devops published
-	// so the runtime chart ladder confirms it instead of refusing.
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 	envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 	result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
@@ -263,21 +249,12 @@ func testDeployRealRunCopiesImagesFromToViaStubs(t *testing.T) {
 }
 
 func testDeployRealRunPreflightStartsStoppedCloudContext(t *testing.T) {
-	// Exercises CloudContextPreflight end to end: the env's kubernetes
-	// context belongs to a managed cloud context whose live AWS state is
-	// "stopped", so the deploy must start the instance (full
-	// StartCloudContext flow through the aws stub) before any kubectl or
-	// helm call targets the cluster. Dry-run cannot reach the start: the
-	// dry-run describe-instances canned answer reports "running" by
-	// design so plans never spuriously start contexts.
+	// Dry-run never starts a context (its describe-instances stub reports
+	// "running"), so this runs for real.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
-	// Pin an always-permitting working-hours window so the preflight's
-	// gate clears no matter when the suite runs; without it the default
-	// 08:00-20:00 local window fails this scenario outside office hours.
-	// The permitting and gated arms themselves are locked by
-	// context_test.go with explicit windows.
+	// An always-open working-hours window keeps the preflight gate clear at any time of day.
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
 	envBody, err := os.ReadFile(envConfigPath)
 	if err != nil {
@@ -287,7 +264,6 @@ func testDeployRealRunPreflightStartsStoppedCloudContext(t *testing.T) {
 	if err := os.WriteFile(envConfigPath, envBody, 0o644); err != nil {
 		t.Fatalf("write env config: %v", err)
 	}
-	// The cloud context owns the env's kubernetes context name.
 	seedCloudConfigWithContexts(t, setup, contextYAMLItem("test-context", "dev", "us-east-1", "i-0123456789abcdef0"))
 	stubs := setup.Cwd + "/stubs"
 	profileARN := "arn:aws:iam::123456789012:instance-profile/erun-test-context-host-stop"
@@ -328,8 +304,7 @@ func appendEnvConfig(t *testing.T, setup env.Setup, tenant, environment, body st
 	mustWriteFile(t, envConfigPathFor(setup, tenant, environment), readEnvConfig(t, setup, tenant, environment)+body)
 }
 
-// assertEnvConfigContains checks the env config erun persisted. Persisted state
-// sits outside the streams the goldens snapshot, so it needs its own assertion.
+// assertEnvConfigContains checks persisted env config, which goldens do not capture.
 func assertEnvConfigContains(t *testing.T, setup env.Setup, tenant, environment string, want ...string) {
 	t.Helper()
 	body := readEnvConfig(t, setup, tenant, environment)
@@ -340,8 +315,7 @@ func assertEnvConfigContains(t *testing.T, setup env.Setup, tenant, environment 
 	}
 }
 
-// assertEnvConfigLacks is the other half: a dry run traces what it would write,
-// and the proof that it wrote nothing is on disk, not in the streams.
+// assertEnvConfigLacks checks that nothing was persisted.
 func assertEnvConfigLacks(t *testing.T, setup env.Setup, tenant, environment string, unwanted ...string) {
 	t.Helper()
 	body := readEnvConfig(t, setup, tenant, environment)
@@ -352,9 +326,7 @@ func assertEnvConfigLacks(t *testing.T, setup env.Setup, tenant, environment str
 	}
 }
 
-// deployStubEnv declares the external binaries a real-run deploy reaches. The
-// scenario PATH is scrubbed, so nothing ambient stands in for them; the stubs
-// exit 0 so the rollout completes and the post-deploy persist runs.
+// deployStubEnv stubs the binaries a real-run deploy reaches; the scenario PATH is scrubbed.
 func deployStubEnv(t *testing.T, setup env.Setup, extra ...string) []string {
 	t.Helper()
 	stubs := setup.Cwd + "/stubs"

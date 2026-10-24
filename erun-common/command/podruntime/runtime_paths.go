@@ -26,8 +26,6 @@ func onPath(name string) bool {
 	return err == nil
 }
 
-// readFileIfReadable returns the file content, and false when it cannot be
-// read for any reason.
 func readFileIfReadable(path string) ([]byte, bool) {
 	data, err := os.ReadFile(path)
 	return data, err == nil

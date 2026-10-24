@@ -9,8 +9,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// PlatformRateLimitWriter sets the platform's invite-request rate-limit
-// window. *repository.PlatformRateLimitRepository satisfies it.
+// PlatformRateLimitWriter sets the invite-request rate-limit window.
 type PlatformRateLimitWriter interface {
 	SetInviteRequestWindow(ctx context.Context, windowSeconds int) (model.PlatformRateLimit, error)
 }
@@ -19,14 +18,8 @@ type platformRateLimitRoutes struct {
 	limits PlatformRateLimitWriter
 }
 
-// RegisterPlatformRateLimitRoute registers the first config write route
-// (issue §9: "GET /v1/config exists as the console's read model ... and
-// nothing writes it — so this needs the first config write route"). GET
-// /v1/config already reports the current window (see config.go); this is
-// what changes it. Operations-only, and audited like every other protected
-// write — the acting identity is exactly what audit_events exists to record
-// for a security-relevant change to the only publicly-reachable write's
-// gate.
+// RegisterPlatformRateLimitRoute registers the operations-only, audited write of
+// the invite-request window.
 func RegisterPlatformRateLimitRoute(register ProtectedRouteRegistrar, limits PlatformRateLimitWriter) {
 	routes := platformRateLimitRoutes{limits: limits}
 	register(http.MethodPatch, "/v1/config/invite-request-rate-limit", http.HandlerFunc(routes.setInviteRequestRateLimit))
@@ -36,9 +29,7 @@ type setInviteRequestRateLimitBody struct {
 	WindowSeconds int `json:"windowSeconds"`
 }
 
-// setInviteRequestRateLimit changes the window going forward only — requests
-// already pending stay queued and approvable regardless of the new window
-// (issue §9: "raising it does not destroy pending work").
+// setInviteRequestRateLimit applies going forward; pending requests stay approvable.
 func (r platformRateLimitRoutes) setInviteRequestRateLimit(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {

@@ -15,12 +15,7 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/usage"
 )
 
-// TestUsageToolCarriesTheStandingSizingRecommendation covers the fix for the
-// "verdict but no evidence" gap: a caller reading `usage` to check on an
-// environment's health should not need a separate `resize --preview` call
-// just to see why erun currently recommends what it does. Preview mode short-
-// circuits the live cgroup read (RunRuntimeUsage returns early under DryRun),
-// so this only exercises the new sizing attachment, not the exec path.
+// Preview skips the live cgroup read, so this exercises only the sizing attachment.
 func TestUsageToolCarriesTheStandingSizingRecommendation(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	xdg.Reload()
@@ -47,9 +42,7 @@ func TestUsageToolCarriesTheStandingSizingRecommendation(t *testing.T) {
 	}
 }
 
-// TestUsageToolOmitsSizingWithNoHistory mirrors erun list's advisory-safe
-// contract: an environment nobody has watched yet gets no sizing field, not
-// an error or a zero-value recommendation a caller might mistake for a hold.
+// An unwatched environment gets no sizing field rather than a zero-value recommendation.
 func TestUsageToolOmitsSizingWithNoHistory(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	xdg.Reload()
@@ -69,9 +62,6 @@ func TestUsageToolOmitsSizingWithNoHistory(t *testing.T) {
 	}
 }
 
-// usageToolDescriptionForTest returns the `usage` tool's wire description, so
-// the cross-references it makes can be checked against the surfaces that
-// actually carry what it names.
 func usageToolDescriptionForTest(t *testing.T) string {
 	t.Helper()
 	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityRead))
@@ -84,25 +74,8 @@ func usageToolDescriptionForTest(t *testing.T) string {
 	return ""
 }
 
-// TestUsageDescriptionAgreesWithTheSizingTheToolReturns is the behaviour-
-// anchored guard the description needs, and the one its predecessor was not.
-//
-// The predecessor pinned the absence of one specific stale sentence ("the
-// verdict `erun list` reports"), which is a claim about prose and not about
-// behaviour. When `ddecc03a` gave `erun usage` a `sizing` block, the sentence
-// that replaced it -- "`erun usage` carries no sizing block at all" -- was
-// false the day it was written and nothing in the suite could tell, because
-// no test ever compared a claim in the description against what the tool
-// returns. This one does: it drives the tool and reads the description, and
-// requires the two to agree.
-//
-// What it decides, exactly: that the description embeds the claim generated
-// from usageSizingSurfaces (so prose and enumeration cannot drift apart), and
-// that the tool's own entry in that enumeration is earned -- driving the tool
-// over retained history really must return a `sizing` block. It cannot judge
-// whether the sibling surfaces named in the enumeration are described well,
-// only that this tool's own claim is true and that the text was not typed by
-// hand.
+// The description's sizing claim must be generated from UsageSizingSurfaces and
+// match what the tool actually returns.
 func TestUsageDescriptionAgreesWithTheSizingTheToolReturns(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	xdg.Reload()
@@ -118,18 +91,12 @@ func TestUsageDescriptionAgreesWithTheSizingTheToolReturns(t *testing.T) {
 		t.Fatalf("usageTool returned err: %v", err)
 	}
 
-	// The behaviour half of the biconditional. usageSizingSurfaces opens with
-	// this tool, so if the tool ever stops returning the block the claim
-	// generated from that list is a lie and this is what says so.
 	carried := output.Sizing != nil
 	if !carried {
 		t.Fatalf("usageSizingSurfaces claims %q carries the standing sizing recommendation, but driving the tool over retained history returned none; remove it from that list and say so in the description",
 			usage.UsageSizingSurfaces[0])
 	}
 
-	// The prose half: the description is built from that list, not typed
-	// beside it, so the claim cannot be restated wrongly in one place and
-	// correctly in the other.
 	description := usageToolDescriptionForTest(t)
 	claim := usage.UsageSizingClaim()
 	if !strings.Contains(description, claim) {
@@ -139,10 +106,7 @@ func TestUsageDescriptionAgreesWithTheSizingTheToolReturns(t *testing.T) {
 		t.Errorf("usage tool description carries `sizing` without saying the history behind it is retained by the environment's own pod monitor, which is what makes a read that cannot see that history unable to derive one:\n%s", description)
 	}
 
-	// The overview page restates the same relationship by hand, so it is
-	// checked for the one class of claim this issue was about: denying the
-	// block on a surface that reports usage. A page that names where the
-	// verdict lives is fine; one that says a usage surface has none is not.
+	// The overview page is hand-written, so check it never denies the block on a usage surface.
 	docPath := filepath.Join(repoRootForOverviewDocTest(t), "erun-docs", "docs", "mcp", "overview.md")
 	data, err := os.ReadFile(docPath)
 	if err != nil {
@@ -163,14 +127,7 @@ func TestUsageDescriptionAgreesWithTheSizingTheToolReturns(t *testing.T) {
 	}
 }
 
-// TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment pins the MCP
-// half of the excludes-builds caveat: a build-capable environment's reading
-// cannot see the erun-dind sidecar an image build actually runs in, so the
-// result must carry ExcludesBuilds=true instead of letting the reading imply
-// the environment is idle. The Runtime fixture elsewhere in this file cannot
-// tell a working field from a missing one -- UsesDindSidecar() is false for
-// Runtime either way -- so this is the only case that exercises the disclosure
-// at all, on either transport.
+// A build-capable environment cannot see the erun-dind sidecar, so ExcludesBuilds must be true.
 func TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	xdg.Reload()
@@ -202,10 +159,7 @@ func TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment(t *testing.T
 	}
 }
 
-// usageTestStore builds a store that resolves tenant/environment through the
-// same OpenResult path `usage`/`resize` use, which needs both LoadEnvConfig
-// (envConfigs) and the port-range allocator's ListEnvConfigs (envsByTenant)
-// to agree on the one environment.
+// usageTestStore needs envConfigs and envsByTenant to agree for OpenResult resolution.
 func usageTestStore(tenant, environment string) listToolStore {
 	return usageTestStoreOfType(tenant, environment, config.EnvironmentTypeRuntime, "/home/erun/work")
 }
@@ -226,10 +180,8 @@ func usageTestStoreOfType(tenant, environment string, envType config.Environment
 	}
 }
 
-// seedUsageHistoryForTest writes the on-disk retained-usage shape directly,
-// mirroring erun-integration's seedUsageHistory: a comfortable peak (52% of
-// the limit) over a long, quiet window, which resolves to a low-confidence
-// lower verdict on both resources.
+// seedUsageHistoryForTest seeds a quiet 52%-peak history that resolves to a
+// low-confidence lower verdict.
 func seedUsageHistoryForTest(t *testing.T, tenant, environment string) {
 	t.Helper()
 	dir, err := activity.EnvironmentActivityDir(tenant, environment)

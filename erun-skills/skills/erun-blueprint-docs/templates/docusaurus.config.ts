@@ -2,9 +2,8 @@ import { themes as prismThemes } from 'prism-react-renderer';
 import type { Config } from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
-// Blueprint Docusaurus 3.x config. Substitute __TITLE__, __TAGLINE__, __URL__
-// (production origin), __ORG__, and __REPO__. Keep onBrokenLinks: 'throw' —
-// it is the link checker that gates `yarn build`.
+// Substitute __TITLE__, __TAGLINE__, __URL__, __ORG__, __REPO__. Keep
+// onBrokenLinks: 'throw'; it gates `yarn build`.
 const config: Config = {
   title: '__TITLE__',
   tagline: '__TAGLINE__',

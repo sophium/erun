@@ -8,33 +8,22 @@ import (
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
-// ReleasePublisher is the publish half of a release: it puts the release
-// version's images and charts in the registry, then proves they resolve. A
-// release runs it between its local stages and its outward-facing ones, so the
-// tag that announces a version is only ever pushed for a version that is
-// already deployable.
-// releasePublishTag is one image the publish step will push, alongside
-// whether its registry is plain HTTP — `docker manifest` needs that spelled
-// out on every invocation, unlike the daemon.
+// ReleasePublishTag is one image to push; Insecure must be spelled out to `docker manifest`.
 type ReleasePublishTag struct {
 	Tag      string
 	Insecure bool
 }
 
+// ReleasePublisher publishes the version's images and charts and proves they resolve; the tag
+// is pushed only after it succeeds.
 type ReleasePublisher struct {
-	// Tags names the image references the publish step will push. It is
-	// checked against the release's own resolved images before anything is
-	// mutated: a release whose images nothing publishes must fail while it is
-	// still private, not after it has announced them.
+	// Tags is checked against the resolved images before anything is mutated.
 	Tags    []ReleasePublishTag
 	Publish func(core.Context) error
 	Verify  func(core.Context) error
 }
 
-// ensureReleasePublishesResolvedImages refuses a release that would stamp and
-// tag a version whose images nothing publishes. This is the guard that turns a
-// silently git-only release into a loud failure, and it runs before the first
-// stage so the refusal costs nothing to recover from.
+// ensureReleasePublishesResolvedImages refuses a version whose images nothing publishes, before the first stage.
 func ensureReleasePublishesResolvedImages(spec ReleaseSpec, publisher ReleasePublisher) error {
 	if len(spec.DockerImages) == 0 {
 		return nil
@@ -83,19 +72,8 @@ func runReleasePublication(ctx core.Context, publisher ReleasePublisher) error {
 	return err
 }
 
-// reportAlreadyPublishedReleaseArtifacts probes the registry for each image
-// this release resolves, before Publish does anything, so a release re-run
-// after an interruption (the pod holding the local build/fingerprint
-// cache was replaced mid-release) tells the operator up front what already
-// landed, rather than depending on that cache to have survived and leaving
-// the operator to infer progress from how quickly the rebuild finishes.
-//
-// This is reporting only — a single, non-retried existence probe — and does
-// not change what gets rebuilt: that stays the fingerprint-based
-// promote-and-skip decision inside Publish, which compares content, not just
-// tag existence. A probe here cannot tell "already published with exactly
-// this content" from "a tag with this name exists for some other reason", so
-// it is not trusted to skip work, only to report.
+// reportAlreadyPublishedReleaseArtifacts reports what a re-run already landed. Report only:
+// existence is not content, so Publish's fingerprint decides what to rebuild.
 func reportAlreadyPublishedReleaseArtifacts(ctx core.Context, tags []ReleasePublishTag) {
 	for _, t := range tags {
 		tag := strings.TrimSpace(t.Tag)
@@ -112,11 +90,7 @@ func reportAlreadyPublishedReleaseArtifacts(ctx core.Context, tags []ReleasePubl
 	}
 }
 
-// dockerImageManifestResolves is a single, non-retried existence probe: unlike
-// readBackPublishedArtifact (used to confirm a tag this run just pushed, where
-// a 404 is a transient read-after-write race worth retrying), a tag probed
-// before anything is published is expected to 404 on a first release, and
-// retrying that would slow down every release for the common case.
+// dockerImageManifestResolves is not retried: a 404 is expected on a first release.
 func dockerImageManifestResolves(ctx core.Context, tag string, insecure bool) bool {
 	spec := helm.CommandSpec{Name: "docker", Args: append(DockerManifestArgs("inspect", insecure), tag)}
 	_, err := RunCommandCapturingOutput(ctx, spec)

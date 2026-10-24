@@ -12,13 +12,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// A job's supervisor is the only writer of that job's outcome. Everything this
-// test asserts follows from that: once the supervisor's process is gone, a
-// record it left reading "running" can only be reconciled against that death,
-// and every later read reports EnvironmentJobStateUnknown with no exit status
-// and nothing naming what happened to the work. The supervisor itself does know
-// why it is ending, so that has to be what a reader gets.
-
 const jobSupervisorSetupFailureHelperEnv = "ERUN_COMMON_TEST_JOB_SUPERVISOR_SETUP_FAILURE_HELPER"
 
 func init() {
@@ -30,14 +23,8 @@ func init() {
 	})
 }
 
-// runJobSupervisorSetupFailureHelper re-enters this test binary as a real
-// supervisor process that is handed work it rejects at a point its own running
-// record is already durable (a negative lease TTL, refused by
-// normalizeEnvironmentJobLeaseTTL after registerEnvironmentJob has written the
-// record), and then exits. That is the shape under test -- a supervisor process
-// ending on a path that never reaches finishEnvironmentJob -- reached through
-// the real entrypoint rather than a hand-seeded record, so the pid the record
-// names is a process that genuinely ran and genuinely exited.
+// runJobSupervisorSetupFailureHelper is a real supervisor that fails setup after
+// its running record is durable, then exits.
 func runJobSupervisorSetupFailureHelper() int {
 	id := os.Getenv(jobAliveSupervisorHelperIDEnv)
 	err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
@@ -56,14 +43,7 @@ func runJobSupervisorSetupFailureHelper() int {
 	return 0
 }
 
-// TestEnvironmentJobSupervisorRecordsWhyItsOwnProcessEnded is the reproduction
-// of the operator-visible state this guards: after a supervisor's process is
-// gone, the job must name an outcome rather than reading as unknown. Pre-fix
-// the record the helper's process left behind still says "running", and the
-// load below --
-// the same one `erun job status` and `erun job await` go through -- answers with
-// `unknown: job supervisor N is gone without recording an exit status`, no exit
-// code and no reason.
+// A supervisor that dies after registering must leave an outcome, not "unknown".
 func TestEnvironmentJobSupervisorRecordsWhyItsOwnProcessEnded(t *testing.T) {
 	isolateActivityCache(t)
 	const tenant = "supervisor-failure"
@@ -77,9 +57,7 @@ func TestEnvironmentJobSupervisorRecordsWhyItsOwnProcessEnded(t *testing.T) {
 		jobAliveSupervisorHelperEnvNameEnv+"="+environment,
 		jobAliveSupervisorHelperIDEnv+"="+id,
 	)
-	// Waiting for exit is the point: the supervisor process must be gone before
-	// the record is read, or the reconcile below would be asking the wrong
-	// question.
+	// The supervisor must be gone before the record is read.
 	if out, err := helper.CombinedOutput(); err != nil {
 		t.Fatalf("supervisor helper: %v: %s", err, out)
 	}
@@ -102,10 +80,7 @@ func TestEnvironmentJobSupervisorRecordsWhyItsOwnProcessEnded(t *testing.T) {
 	}
 }
 
-// TestRecordEnvironmentJobSupervisorFailureLeavesADurableOutcomeAlone covers
-// the guard the reproduction above cannot reach: a supervisor whose outcome is
-// already written must not have it replaced by the failure handler, and a
-// supervisor that ended for no reason it observed must not write one at all.
+// The failure handler must not replace a durable outcome.
 func TestRecordEnvironmentJobSupervisorFailureLeavesADurableOutcomeAlone(t *testing.T) {
 	dir := t.TempDir()
 	const id = "settled"
@@ -130,9 +105,6 @@ func TestRecordEnvironmentJobSupervisorFailureLeavesADurableOutcomeAlone(t *test
 		t.Fatalf("settled outcome was overwritten: %+v", job)
 	}
 
-	// An unrecorded job that ended for a cause its supervisor did observe gets
-	// a definite outcome, and the panic leg of the same handler is what a
-	// supervisor crashing in its own finish path goes through.
 	panicked := &jobRecorder{dir: dir, job: shared.EnvironmentJob{ID: "crashed", State: EnvironmentJobStateRunning}}
 	recordEnvironmentJobSupervisorFailure(panicked, nil, "nil map write")
 	crashed := panicked.snapshot()

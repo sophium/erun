@@ -60,17 +60,11 @@ func TestFindComponentDockerBuildContextRefusesTwoRealCandidates(t *testing.T) {
 	}
 }
 
-// A Dockerfile copy that the build context would never contain must not be
-// counted. An agent worktree holds a full second copy of the tree and a
-// third-party package can ship a docker/<name>/Dockerfile of its own; before
-// the shared ignore matcher these made every component ambiguous.
 func TestFindComponentDockerBuildContextIgnoresCopiesInIgnoredTrees(t *testing.T) {
 	root := t.TempDir()
 	writeDockerfile(t, root, "erun-devops/docker/erun-dind/Dockerfile")
-	// Root .gitignore prunes the agent worktree, which duplicates every component.
 	writeComponentTreeFile(t, root, ".gitignore", ".claude\n")
 	writeDockerfile(t, root, ".claude/worktrees/agent-1/erun-devops/docker/erun-dind/Dockerfile")
-	// A nested .gitignore prunes a third-party package's own docker context.
 	writeComponentTreeFile(t, root, "erun-docs/.gitignore", "node_modules\n")
 	writeDockerfile(t, root, "erun-docs/node_modules/comlink/docker/erun-dind/Dockerfile")
 

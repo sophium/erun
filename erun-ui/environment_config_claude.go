@@ -49,11 +49,7 @@ func claudeDefaultsForUI(gateway *configpkg.OpenRouterConfig) uiClaudeDefaults {
 	return uiClaudeDefaults{
 		UseMantle:  configpkg.DefaultClaudeUseMantle,
 		UseBedrock: configpkg.DefaultClaudeUseBedrock,
-		// The environment's own models, which is what an environment without a
-		// gateway (or one that opted out of it) launches from. The catalog's set
-		// travels separately below, because the Anthropic aliases are not models
-		// a gateway necessarily serves and the catalog's ids are not models an
-		// environment's own sign-in can.
+		// The environment's own models; the gateway catalog's set travels separately.
 		Models:          configpkg.DefaultClaudeAvailableModels(),
 		MaxOutputTokens: configpkg.DefaultClaudeMaxOutputTokens,
 		KnownModels:     configpkg.KnownClaudeModels(),
@@ -61,20 +57,16 @@ func claudeDefaultsForUI(gateway *configpkg.OpenRouterConfig) uiClaudeDefaults {
 		MaxTokens:       maxTokens,
 		Effort:          ai.DefaultClaudeEffortLevel,
 		EffortLevels:    ai.ClaudeEffortLevels(),
-		// The per-environment gateway controls override an erun-level catalog, so
-		// they are only meaningful when one exists. Resolved from the catalog,
-		// not the environment's effective gateway, so an environment that opted
-		// out can still opt back in.
+		// Resolved from the catalog, not the effective gateway, so an opted-out
+		// environment can opt back in.
 		GatewayConfigured:   gateway.Configured(),
 		GatewayModels:       gatewayModels,
 		GatewayDefaultModel: gateway.ResolveDefaultModel(),
 	}
 }
 
-// resolveOpenRouterConfig reads the erun-level gateway catalog for the desktop's
-// read models. A root config that cannot be read yields no catalog rather than
-// failing an environment's config view: the unreadable case is the unconfigured
-// one, and every path that acts on a gateway re-resolves it where it matters.
+// resolveOpenRouterConfig treats an unreadable root config as no catalog;
+// gateway actions re-resolve it where it matters.
 func (a *App) resolveOpenRouterConfig() *configpkg.OpenRouterConfig {
 	gateway, err := configpkg.ResolveOpenRouterConfig(a.deps.store)
 	if err != nil {

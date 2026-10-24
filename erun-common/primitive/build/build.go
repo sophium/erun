@@ -31,11 +31,7 @@ func ResolveCurrentDockerBuildSpecs(ctx core.Context, store shared.DockerStore, 
 	return builds, nil
 }
 
-// ErrBuildPlanEmpty reports a build that resolved no work at all: no docker
-// images, no linux packages, no project build script, no charts, no
-// release. Nothing about such a plan is a result -- running it builds nothing
-// and tests nothing -- so both the resolution and execution boundaries refuse it
-// rather than letting the caller's exit code read as a successful build.
+// ErrBuildPlanEmpty reports a build that resolved no work at all.
 var ErrBuildPlanEmpty = errors.New("build resolved nothing to build")
 
 func NewEmptyBuildPlanError(reason string) error {
@@ -47,18 +43,12 @@ func BuildEnvDisablesBuildScript(store shared.DockerStore, findProjectRoot share
 	return env != nil && env.DisableBuildScript
 }
 
-// RecommendBuildEnvIfMissing nudges a project that has no <tenant>-devops build
-// environment toward creating one. Every build path funnels through
-// ResolveBuildExecution, so the advisory fires even when a bare Dockerfile build
-// would otherwise succeed. Best-effort: a detection failure never blocks the build.
+// RecommendBuildEnvIfMissing suggests a <tenant>-devops build environment; detection failures never block.
 func RecommendBuildEnvIfMissing(ctx core.Context, findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) {
 	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
 	}
-	// A configured paths.docker override (or a selected components: entry) means
-	// the project has a build environment at a non-conventional location, so the
-	// advisory would be wrong.
 	if projectDeclaresDockerRoot(projectRoot, target.Component) {
 		return
 	}
@@ -69,12 +59,7 @@ func RecommendBuildEnvIfMissing(ctx core.Context, findProjectRoot shared.Project
 	ctx.Info(`build: this project has no <tenant>-devops build environment — ask Claude to "init erun build environment" to set one up with the erun-build-env skill`)
 }
 
-// projectDeclaresDockerRoot reports whether the project already declares a
-// non-conventional docker build root — via the selected components: entry, or
-// via the project-global paths.docker override when no component selection
-// applies. Best-effort: an ambiguous/unknown component selection is not this
-// advisory's concern — the real build resolution reports that loudly on its
-// own, so this simply falls through to the unchanged paths.docker check.
+// projectDeclaresDockerRoot reports whether config declares a non-conventional docker root.
 func projectDeclaresDockerRoot(projectRoot, selectedComponent string) bool {
 	_, paths, ok, err := config.ResolveProjectComponent(projectRoot, selectedComponent)
 	if err == nil && ok {
@@ -87,15 +72,8 @@ func projectDeclaresDockerRoot(projectRoot, selectedComponent string) bool {
 	return err == nil && strings.TrimSpace(paths.Docker) != ""
 }
 
-// TraceConfiguredBuildPaths surfaces the effective paths.docker/paths.dockercontext/
-// paths.version overrides (or, when the project declares a components: map, the
-// selected component and its docker/dockercontext/version) as dry-run decision
-// lines so the build plan shows the docker build root, build context, and
-// version file were resolved from config rather than convention. A bailout —
-// an unknown or ambiguous --component selection — traces what was attempted
-// before the resolution that follows fails loudly on it. It also warns when
-// the project config itself is gitignored, since that silently voids the very
-// overrides it just traced.
+// TraceConfiguredBuildPaths traces configured build path overrides as dry-run decisions,
+// and warns when the project config is gitignored.
 func TraceConfiguredBuildPaths(ctx core.Context, findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) {
 	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
@@ -153,8 +131,7 @@ func ResolveDockerBuildTarget(findProjectRoot shared.ProjectFinderFunc, target s
 		return shared.DockerCommandTarget{}, nil, fmt.Errorf("release build cannot be combined with an explicit --platform override: a release always publishes every platform erun supports")
 	}
 
-	// Build callers don't surface a Context; the zero value is safe here because
-	// a zero-value Logger silently drops traces.
+	// A zero-value Logger drops traces.
 	releaseSpec, err := shared.ResolveReleaseSpec(core.Context{}, findProjectRoot, shared.ReleaseParams{ProjectRoot: target.ProjectRoot, Force: target.Force})
 	if err != nil {
 		return shared.DockerCommandTarget{}, nil, err
@@ -162,8 +139,7 @@ func ResolveDockerBuildTarget(findProjectRoot shared.ProjectFinderFunc, target s
 
 	target.Release = false
 	target.VersionOverride = releaseSpec.Version
-	// A release publishes to any cluster, so it always builds every platform
-	// erun supports, regardless of any per-environment docker.platforms pin.
+	// A release builds every platform, regardless of any docker.platforms pin.
 	target.Platforms = slices.Clone(shared.MultiPlatformDockerBuilds)
 	return target, &releaseSpec, nil
 }

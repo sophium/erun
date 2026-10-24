@@ -15,9 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// erunTestCloudStore is a mutable CloudStore stub: unlike
-// stubCloudContextStore (whose SaveERunConfig is a no-op), tests here need to
-// observe what a real save persisted.
+// erunTestCloudStore records saves, unlike stubCloudContextStore's no-op SaveERunConfig.
 type erunTestCloudStore struct {
 	config configpkg.ERunConfig
 }
@@ -261,15 +259,8 @@ func TestERunCloudProviderTokenStatusReflectsResolution(t *testing.T) {
 	})
 }
 
-// TestERunCloudProviderTokenStatusRefreshTraceStaysOffStdout guards the erun
-// side of the same corruption already fixed for Cloudflare: a refresh
-// (triggered here by a cached-token miss with a refresh token on file) makes
-// resolveERunAccessToken call FetchOIDCDiscovery/RefreshERunTokens, and each
-// traces a request line via Context.Trace. A zero-value Context leaves that
-// trace's writer unset, which Logger falls back to the real os.Stdout, so the
-// only way to see the regression is to capture the real process stdout (a
-// caller-supplied Context, even one with a captured Stdout field, is not what
-// erunCloudProviderTokenStatus threads into resolveERunAccessToken).
+// A zero-value Context traces to the real os.Stdout, so only capturing the process
+// stdout shows a refresh trace leaking into JSON output.
 func TestERunCloudProviderTokenStatusRefreshTraceStaysOffStdout(t *testing.T) {
 	secrets := NewFileCloudSecretStore(t.TempDir())
 	provider := erunTestProvider()
@@ -296,8 +287,6 @@ func TestERunCloudProviderTokenStatusRefreshTraceStaysOffStdout(t *testing.T) {
 	}
 	os.Stdout = w
 	status := erunCloudProviderTokenStatus(provider, deps)
-	// Mirrors ResolveListResult -> WriteResult: the command's JSON payload is
-	// written to stdout after the status check runs.
 	_, _ = io.WriteString(w, `{"tenant":"erun"}`+"\n")
 	_ = w.Close()
 	os.Stdout = realStdout
@@ -335,8 +324,6 @@ func TestCloudProviderBearerTokenERunDryRunPerformsNoNetworkCall(t *testing.T) {
 }
 
 func TestERunProviderSupportsOIDCIssuerAggregation(t *testing.T) {
-	// erun genuinely participates in OIDC (unlike Cloudflare's scoped API
-	// token), so it must not be exempted from issuer aggregation.
 	if !cloudProviderSupportsOIDC(configpkg.CloudProviderERun) {
 		t.Fatal("cloudProviderSupportsOIDC(erun) = false, want true")
 	}

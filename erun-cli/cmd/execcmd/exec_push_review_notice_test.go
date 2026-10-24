@@ -18,10 +18,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// The push itself is stubbed at the git layer so the whole command body runs:
-// what these cases pin is the command's contract around the notice -- the
-// notice is additive, so a push that succeeded must still report success and
-// return a nil error whether or not a review exists for the branch.
+// The notice is additive: a successful push reports success whether or not a review exists.
 
 const execPushNoticeAlias = "dev@erun"
 
@@ -59,8 +56,6 @@ func execPushNoticeStoreWithAlias(apiURL string) execPushNoticeStore {
 	}}}}
 }
 
-// execPushNoticeDependencies carries the cached access token the notice
-// authenticates with, so the lookup reaches the test server without a login.
 func execPushNoticeDependencies(t *testing.T) cloud.CloudDependencies {
 	t.Helper()
 	cached, err := json.Marshal(struct {
@@ -75,9 +70,6 @@ func execPushNoticeDependencies(t *testing.T) cloud.CloudDependencies {
 	}}
 }
 
-// execPushNoticePushDependencies is the stubbed push: the tree is on the
-// requested branch, and the push and its read-back report that same branch, so
-// the command body reaches the notice with a real result.
 func execPushNoticePushDependencies(branch string) gitx.PushWorkingTreeBranchDependencies {
 	return gitx.PushWorkingTreeBranchDependencies{
 		CurrentBranch: func(core.Context, string) (string, error) { return branch, nil },
@@ -90,9 +82,6 @@ func execPushNoticeFinder(projectRoot string) shared.ProjectFinderFunc {
 	return func() (string, string, error) { return "tenant", projectRoot, nil }
 }
 
-// execPushNoticeContext mirrors the CLI's own wiring: a push's diagnostics --
-// including the warning -- reach the operator on stderr, which is where the
-// logger's writers point.
 func execPushNoticeContext(out *bytes.Buffer) core.Context {
 	return core.Context{
 		Logger: core.NewLoggerWithWriters(core.VerbosityInfo, out, out),
@@ -102,9 +91,6 @@ func execPushNoticeContext(out *bytes.Buffer) core.Context {
 	}
 }
 
-// TestExecPushStillSucceedsAndWarnsWhenTheBranchHasNoReview is the command-half
-// reproduction: the pushed branch has no review, the push must still report
-// success with a nil error, and the warning must reach stderr.
 func TestExecPushStillSucceedsAndWarnsWhenTheBranchHasNoReview(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{})
@@ -129,9 +115,6 @@ func TestExecPushStillSucceedsAndWarnsWhenTheBranchHasNoReview(t *testing.T) {
 	}
 }
 
-// TestExecPushStaysSilentWhenTheBranchHasAReview is the other half: the same
-// command over a branch a review already references must say nothing beyond
-// its own success line.
 func TestExecPushStaysSilentWhenTheBranchHasAReview(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{
@@ -158,9 +141,6 @@ func TestExecPushStaysSilentWhenTheBranchHasAReview(t *testing.T) {
 	}
 }
 
-// TestExecPushIgnoresAMissingPlatformAlias entirely: an environment with no
-// erun platform configured must push exactly as it did before the notice
-// existed -- no warning, no trace line about a check, no failure.
 func TestExecPushIgnoresAMissingPlatformAlias(t *testing.T) {
 	out := &bytes.Buffer{}
 	err := runExecPushCommand(
@@ -181,9 +161,6 @@ func TestExecPushIgnoresAMissingPlatformAlias(t *testing.T) {
 	}
 }
 
-// TestExecPushSurvivesAnUnreachablePlatform pins the best-effort contract at
-// the command boundary: the plane refusing the lookup is a skipped notice, not
-// a failed push.
 func TestExecPushSurvivesAnUnreachablePlatform(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)

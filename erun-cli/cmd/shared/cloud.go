@@ -10,17 +10,12 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// CloudDependencies tolerates a missing secret store: when it can't be created
-// the store stays nil, and Cloudflare operations that need the scoped token then
-// fail clearly rather than crashing.
+// CloudDependencies leaves the secret store nil when it cannot be created; callers needing it fail clearly.
 func CloudDependencies() cloud.CloudDependencies {
 	return cloud.DefaultCloudDependencies()
 }
 
-// RefreshEnvironmentHostCredentials re-injects the operator's short-lived AWS
-// credentials into an env's runtime pod. The root config store and the cloud
-// dependency set are stateless values, so they are constructed here instead of
-// widening open's already-long dependency list.
+// RefreshEnvironmentHostCredentials re-injects the operator's short-lived AWS credentials into the env's pod.
 func RefreshEnvironmentHostCredentials(ctx core.Context, result configpkg.OpenResult) (cloud.HostCredentialsRefresh, error) {
 	return cloud.RefreshHostAWSCredentials(ctx, configpkg.ConfigStore{}, result, CloudDependencies())
 }
@@ -104,8 +99,7 @@ func promptMissingAWSInitParams(promptRunner PromptRunner, params cloud.InitAWSC
 	return params, err
 }
 
-// awsInitParamsNeedPrompt reports whether the AWS SSO wizard will ask the
-// operator for at least one value — used to gate the one-time guidance block.
+// awsInitParamsNeedPrompt reports whether the AWS SSO wizard will prompt for anything.
 func awsInitParamsNeedPrompt(params cloud.InitAWSCloudProviderParams) bool {
 	return strings.TrimSpace(params.SSOStartURL) == "" ||
 		strings.TrimSpace(params.SSORegion) == "" ||
@@ -114,9 +108,6 @@ func awsInitParamsNeedPrompt(params cloud.InitAWSCloudProviderParams) bool {
 		strings.TrimSpace(params.Region) == ""
 }
 
-// awsInitGuidance orients the operator before the AWS SSO prompts: where to find
-// each value in the AWS access portal, and that IAM Identity Center grants the
-// account through a permission set.
 const awsInitGuidance = `Set up an AWS IAM Identity Center (SSO) profile for ERun.
 You'll sign in through your browser when prompted; ERun never sees your AWS password.
 Find each value in your AWS access portal (open the SSO start URL, sign in, then expand the account):

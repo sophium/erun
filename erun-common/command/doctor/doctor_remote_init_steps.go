@@ -20,11 +20,8 @@ func finishRemoteInitProjectRoot(ctx core.Context, path string) error {
 	return os.MkdirAll(path, 0o755)
 }
 
-// finishRemoteInitSkills reinstalls the baked agent skills, mirroring the
-// entrypoint so doctor can recover a pod whose skills never landed (e.g. an
-// image built before the /etc/erun/skills permissions were fixed). A skill
-// whose destination SKILL.md already exists is left untouched so in-env edits
-// survive.
+// finishRemoteInitSkills reinstalls the baked agent skills, leaving any whose
+// SKILL.md already exists so in-env edits survive.
 func finishRemoteInitSkills(ctx core.Context, homeDir string) error {
 	root := bakedSkillsRoot(os.Getenv)
 	entries := readBakedSkillEntries(root)
@@ -58,8 +55,6 @@ func finishRemoteInitSkills(ctx core.Context, homeDir string) error {
 	return nil
 }
 
-// readBakedSkillEntries treats an unreadable skills root as having no skills:
-// an image without baked skills has nothing to reinstall.
 func readBakedSkillEntries(root string) []os.DirEntry {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -86,9 +81,7 @@ func finishRemoteInitSSHKey(ctx core.Context, path string) error {
 	return ensureRemoteInitSSHKeyPermissions(path)
 }
 
-// finishRemoteInitCodeCommitSSHKey generates the RSA 4096 keypair AWS
-// CodeCommit requires, mirroring init so doctor and init produce the same key
-// shape.
+// finishRemoteInitCodeCommitSSHKey generates the RSA 4096 keypair CodeCommit requires.
 func finishRemoteInitCodeCommitSSHKey(ctx core.Context, path string) error {
 	ctx.TraceCommand("", "ssh-keygen", "-t", "rsa", "-b", "4096", "-N", "", "-f", path)
 	if ctx.DryRun {
@@ -107,11 +100,8 @@ func finishRemoteInitCodeCommitSSHKey(ctx core.Context, path string) error {
 	return ensureRemoteInitSSHKeyPermissions(path)
 }
 
-// finishRemoteInitCodeCommitSSHConfig writes the ~/.ssh/config Host stanza
-// CodeCommit needs. Without it, git's ssh has no way to learn which IAM
-// identity to authenticate as and CodeCommit rejects the connection. The
-// contents come from codeCommitSSHConfig, the same helper init uses, so the
-// file is identical whether init or doctor produced it.
+// finishRemoteInitCodeCommitSSHConfig writes the ~/.ssh/config stanza without
+// which CodeCommit cannot resolve the IAM identity.
 func finishRemoteInitCodeCommitSSHConfig(ctx core.Context, homeDir string, repository remoteinit.RemoteRepositorySpec) error {
 	if repository.CodeCommitHost == "" {
 		return nil
@@ -131,14 +121,8 @@ func finishRemoteInitCodeCommitSSHConfig(ctx core.Context, homeDir string, repos
 	return nil
 }
 
-// ensureRemoteInitSSHKeyPermissions re-tightens the SSH key file modes. ssh
-// silently refuses a private key that is group- or world-accessible, and every
-// runtime PVC that was ever mounted under the chart's former pod-wide fsGroup
-// still carries the g+rw the kubelet ORed into each file on pod start. Those
-// bits do not heal themselves when the fsGroup goes away, so doctor re-applies
-// the expected mode every time it touches the key. The runtime entrypoint also
-// heals ~/.ssh on container start, so this stays as a belt-and-braces guarantee
-// for the doctor recovery path.
+// ensureRemoteInitSSHKeyPermissions re-tightens key modes: ssh refuses a
+// group-accessible key, and old PVCs still carry fsGroup's g+rw.
 func ensureRemoteInitSSHKeyPermissions(path string) error {
 	if err := os.Chmod(path, 0o600); err != nil {
 		if os.IsNotExist(err) {
@@ -172,10 +156,8 @@ func finishRemoteInitGitCheckout(ctx core.Context, projectRoot, sshKeyPath strin
 	return capture.Apply(cmd.Run())
 }
 
-// finishRemoteInitGitAccess prints the public key the user must import on the
-// git host, then polls `git ls-remote` until access is active. This mirrors
-// init's key-import wait so the operator sees the same trace and poll cadence
-// whether recovering from inside the pod (doctor) or outside (init).
+// finishRemoteInitGitAccess prints the public key to import and polls
+// `git ls-remote` until access is active.
 func finishRemoteInitGitAccess(ctx core.Context, sshKeyPath, codeCommitKeyPath string, repository remoteinit.RemoteRepositorySpec, sshKeyJustGenerated, codeCommitKeyJustGenerated bool, sleep core.SleepFunc) error {
 	sshCommand := doctorRemoteInitGitSSHCommandFor(repository, sshKeyPath)
 	if ctx.DryRun {
@@ -249,12 +231,8 @@ func defaultRemoteInitCodeCommitSSHKeyPath(homeDir string) string {
 	return filepath.Join(homeDir, ".ssh", "id_rsa_codecommit")
 }
 
-// doctorRemoteInitGitSSHCommandFor renders git's ssh command. For CodeCommit
-// hosts it uses `ssh -F ~/.ssh/config` so the per-host stanza takes effect —
-// pinning a specific identity would bypass IAM user resolution and CodeCommit
-// would reject the auth. For plain SSH hosts it pins the ed25519 identity so
-// ssh does not fall back to other keys in ~/.ssh, with accept-new for the
-// first connection.
+// doctorRemoteInitGitSSHCommandFor uses `ssh -F` for CodeCommit, since pinning
+// an identity bypasses IAM user resolution; other hosts pin the ed25519 key.
 func doctorRemoteInitGitSSHCommandFor(repository remoteinit.RemoteRepositorySpec, sshKeyPath string) string {
 	if repository.CodeCommitHost != "" {
 		return `ssh -F "$HOME/.ssh/config"`

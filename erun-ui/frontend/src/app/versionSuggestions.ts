@@ -48,9 +48,6 @@ export function normalizeVersionSuggestions(values: UIVersionSuggestion[]): UIVe
   return suggestions;
 }
 
-// versionNoticeMessage turns a source failure into an actionable, user-language
-// line: a private image tells the operator how to authenticate; an unreachable
-// registry names the failure.
 export function versionNoticeMessage(notice: UIVersionSuggestionNotice): string {
   if (notice.kind === 'auth') {
     return `${notice.image} is private — ${registrySignInHint(notice.image)} to list its versions.`;
@@ -58,10 +55,7 @@ export function versionNoticeMessage(notice: UIVersionSuggestionNotice): string 
   return `${notice.image} — couldn't reach the registry to list its versions.`;
 }
 
-// registrySignInHint names the sign-in that reaches the image's own registry.
-// One ghcr-worded hint for every source told an operator whose image lives in a
-// private registry elsewhere to authenticate against a registry the image is
-// not in, which is worse than no hint at all.
+// registrySignInHint names the image's own registry, not always ghcr.
 function registrySignInHint(image: string): string {
   const host = registryHostFromImage(image);
   if (host === 'ghcr.io') {
@@ -70,9 +64,8 @@ function registrySignInHint(image: string): string {
   return `run docker login ${host || 'docker.io'}`;
 }
 
-// registryHostFromImage returns the registry an image reference names, applying
-// the rule the backend resolves by: a first segment carrying a dot or a port is
-// a registry host of its own, anything else is a Docker Hub namespace.
+// A first segment with a dot or port is a registry host, else a Docker Hub
+// namespace, matching the backend.
 function registryHostFromImage(image: string): string {
   const first = normalizeDialogValue(image).split('/')[0] ?? '';
   return first.includes('.') || first.includes(':') ? first : '';
@@ -154,12 +147,8 @@ export interface VersionSuggestionGroup {
   suggestions: UIVersionSuggestion[];
 }
 
-// groupVersionSuggestionsBySource splits the flat picker list into per-source
-// groups — this environment's own tenant runtime line vs the upstream ERun line —
-// preserving first-seen order (a tenant env lists its own line first, then the
-// upstream fallback). It lets the picker label the two otherwise-identical
-// "latest stable" rows so the operator can tell the tenant's own stack from the
-// vanilla ERun runtime.
+// groupVersionSuggestionsBySource keeps first-seen order, so a tenant's own line
+// lists before the upstream ERun line.
 export function groupVersionSuggestionsBySource(
   suggestions: UIVersionSuggestion[],
 ): VersionSuggestionGroup[] {
@@ -176,8 +165,6 @@ export function groupVersionSuggestionsBySource(
   return groups;
 }
 
-// versionSourceHeading names a picker group in operator language: the upstream
-// ERun runtime vs this environment's own tenant runtime line.
 export function versionSourceHeading(source: string): string {
   if (!source || source === 'ERun') {
     return 'Upstream ERun';

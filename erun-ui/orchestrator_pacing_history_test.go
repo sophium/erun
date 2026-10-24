@@ -5,12 +5,7 @@ import (
 	"time"
 )
 
-// TestOrchestratorPacingCumulativeHistorySurvivesAnswerRearm pins the fix: a
-// session that gets nudged and then answers must still report having been
-// nudged, even though rearmOrchestratorPacing zeroes the cap's own
-// pacingNudgeCount gauge back to 0. Before this, the hover card read
-// pacingNudgeCount/pacingLastNudgeAtUnix directly, so a healthy session that
-// answers every nudge collapsed back to "Not nudged" a moment after each one.
+// Rearm zeroes the cap gauge; the cumulative history must survive it.
 func TestOrchestratorPacingCumulativeHistorySurvivesAnswerRearm(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -38,8 +33,7 @@ func TestOrchestratorPacingCumulativeHistorySurvivesAnswerRearm(t *testing.T) {
 		t.Fatalf("expected the cap's own gauge to move too, got %d", nudgeCount)
 	}
 
-	// The session answers: a fresh activity report newer than the last nudge
-	// rearms the cap gauge on the next tick.
+	// A fresh report newer than the last nudge rearms on the next tick.
 	writeOrchestratorActivity(t, "agent", orchestratorActivity{Busy: false, AtUnix: lastAutoAt + 10})
 	app.reconcileOrchestratorPacing()
 
@@ -58,10 +52,6 @@ func TestOrchestratorPacingCumulativeHistorySurvivesAnswerRearm(t *testing.T) {
 	}
 }
 
-// TestOrchestratorPacingNeverNudgedReportsNoHistory is the control for
-// TestOrchestratorPacingCumulativeHistorySurvivesAnswerRearm: a session that
-// has never been nudged or whipped must report zero history, so "never
-// nudged" and "nudged, then answered" cannot collapse onto the same reading.
 func TestOrchestratorPacingNeverNudgedReportsNoHistory(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -91,13 +81,6 @@ func TestOrchestratorPacingNeverNudgedReportsNoHistory(t *testing.T) {
 	}
 }
 
-// TestOrchestratorPacingCappedHistorySurvivesRearm is the same
-// survives-the-rearm fix applied to the cap notice itself:
-// rearmOrchestratorPacing clears pacingCapped (the live "currently at the
-// cap" gauge) the same way it clears pacingNudgeCount, but
-// pacingLastCappedAtUnix must not follow it back to zero -- a session that
-// resumed after hitting the cap is a different, more informative state than
-// one that never came close.
 func TestOrchestratorPacingCappedHistorySurvivesRearm(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -124,7 +107,6 @@ func TestOrchestratorPacingCappedHistorySurvivesRearm(t *testing.T) {
 		t.Fatalf("expected the session to be capped with a recorded timestamp, got capped=%v lastCappedAt=%d", capped, lastCappedAt)
 	}
 
-	// A fresh busy report rearms the live gauge.
 	writeOrchestratorActivity(t, "agent", orchestratorActivity{Busy: true, AtUnix: lastCappedAt + 10})
 	app.reconcileOrchestratorPacing()
 

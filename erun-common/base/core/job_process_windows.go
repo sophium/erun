@@ -9,10 +9,8 @@ import (
 	"syscall"
 )
 
-// createNewProcessGroup detaches a child from the console control events the
-// caller's group receives, which is the closest Windows equivalent to a new
-// session: closing the console that started a job no longer takes the job with
-// it.
+// createNewProcessGroup detaches the child from the console's control events,
+// so closing that console does not kill the job.
 const createNewProcessGroup = 0x00000200
 
 func DetachEnvironmentJobSupervisor(cmd *exec.Cmd) {
@@ -35,10 +33,8 @@ func DetachEnvironmentJobChild(cmd *exec.Cmd) {
 	cmd.SysProcAttr.CreationFlags |= createNewProcessGroup
 }
 
-// SignalEnvironmentJobProcessGroup terminates the work by pid. Windows has no
-// signals, so every supported signal name lands on the same termination; the
-// self-signal guard still applies, because naming this process would take the
-// bookkeeping down with the work.
+// SignalEnvironmentJobProcessGroup terminates pid; Windows has no signals, so
+// every signal name terminates. Self-signalling is still refused.
 func SignalEnvironmentJobProcessGroup(pid int, signal string) error {
 	if pid <= 0 {
 		return fmt.Errorf("job process id must be positive")
@@ -51,26 +47,17 @@ func SignalEnvironmentJobProcessGroup(pid int, signal string) error {
 	}
 	kill := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid))
 	HideConsoleWindow(kill)
-	// A process that already exited yields a harmless non-zero taskkill exit; the
-	// record reconciles on the next read either way.
+	// An already-exited process makes taskkill exit non-zero harmlessly.
 	_ = kill.Run()
 	return nil
 }
 
-// EnvironmentJobExitSignal is always empty on Windows: a terminated process
-// reports an exit code, not a signal.
+// EnvironmentJobExitSignal is always empty on Windows.
 func EnvironmentJobExitSignal(state *os.ProcessState) string { return "" }
 
-// EnvironmentJobProcessGroupSurvivors always reports false on Windows: a
-// process group here is a job-object concept with no POSIX-style "signal 0 to
-// probe" equivalent, so a Windows supervisor cannot yet distinguish an
-// abandoned background child from a clean exit this way. Command jobs on
-// Windows fall back to reporting whatever the immediate process's exit status
-// says.
+// EnvironmentJobProcessGroupSurvivors always reports false: Windows has no
+// signal-0 probe for a process group.
 func EnvironmentJobProcessGroupSurvivors(pgid int) bool { return false }
 
-// EnvironmentJobSessionSurvivors always reports false on Windows, for the
-// same reason as environmentJobProcessGroupSurvivors above: no POSIX-style
-// session/signal-0 probe exists here to distinguish an abandoned background
-// child from a clean exit.
+// EnvironmentJobSessionSurvivors always reports false on Windows.
 func EnvironmentJobSessionSurvivors(sid int) bool { return false }

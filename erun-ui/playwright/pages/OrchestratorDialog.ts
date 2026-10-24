@@ -1,9 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-// OrchestratorDialog is the create/edit surface for a host-side orchestrator: a
-// name plus the agent environments it links, each with the host directory it is
-// reviewed in. The dialog title differs between the two modes, so callers say
-// which one they opened.
+// Create/edit dialog for a host-side orchestrator; the title differs per mode.
 export class OrchestratorDialog {
   constructor(public readonly page: Page) {}
 
@@ -23,10 +20,7 @@ export class OrchestratorDialog {
     await this.locator(mode).waitFor({ state: 'hidden' });
   }
 
-  // Each candidate renders as a checkbox row labelled "<tenant> / <environment>"
-  // followed by which kind of review directory it has. mode defaults to
-  // 'New orchestrator' for the same reason locator/waitForOpen/waitForClosed
-  // do -- a caller re-checking a row after reopening in Edit mode must say so.
+  // Callers re-checking a row after reopening in Edit mode must pass the mode.
   envRow(
     tenant: string,
     environment: string,
@@ -49,8 +43,6 @@ export class OrchestratorDialog {
     await this.envCheckbox(tenant, environment).click();
   }
 
-  // The row's own container, which holds the review-directory controls the
-  // checkbox reveals.
   envBlock(
     tenant: string,
     environment: string,
@@ -62,8 +54,7 @@ export class OrchestratorDialog {
       .last();
   }
 
-  // Present only for a mirrored env, whose directory the operator may place
-  // anywhere. A local-agent env's directory is derived and rendered as text.
+  // Only a mirrored env has an editable directory; a local-agent one is text.
   envDirectoryInput(tenant: string, environment: string): Locator {
     return this.envBlock(tenant, environment).getByRole('textbox');
   }
@@ -74,10 +65,6 @@ export class OrchestratorDialog {
     });
   }
 
-  // The orchestrator's own directories: paths it works in that belong to no
-  // environment. "Add directory…" opens the native picker; each row carries its
-  // own remove button, labelled with the path it removes. Mode-aware like the
-  // footer controls, since a directory is read back in Edit mode.
   directoriesAddButton(
     mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
   ): Locator {
@@ -98,16 +85,11 @@ export class OrchestratorDialog {
     return this.locator(mode).getByRole('button', { name: `Remove ${directory}` });
   }
 
-  // The role SelectField's trigger, present only for a checked (linked) env --
-  // id matches OrchestratorDialog.Environments.helpers.ts's envRoleFieldId.
+  // Id matches OrchestratorDialog.Environments.helpers.ts's envRoleFieldId.
   envRoleTrigger(tenant: string, environment: string): Locator {
     return this.page.locator(`#orchestrator-env-role-${tenant}-${environment}`);
   }
 
-  // The orchestrator's own platform alias, which is one field of the dialog
-  // rather than one per linked environment. The trigger is behind the
-  // menu button inside the Shadcn field markup, so clicking it is what opens
-  // the list -- the same interaction envRoleTrigger's callers use.
   aliasTrigger(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
     return this.locator(mode).locator('#orchestrator-alias');
   }
@@ -120,11 +102,7 @@ export class OrchestratorDialog {
     await this.page.getByRole('option', { name: alias, exact: true }).click();
   }
 
-  // The aliases the trigger offers, by their visible words, in render order.
-  // Opened and dismissed in one call, read as a list rather than probed one at
-  // a time, for the same reason envRoleOptionNames is: the property under test
-  // is which aliases are absent (a stored alias this machine no longer
-  // resolves, or another provider's) alongside which are present.
+  // Read as a list: specs assert which aliases are absent as well as present.
   async aliasOptionNames(
     mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
   ): Promise<string[]> {
@@ -136,10 +114,7 @@ export class OrchestratorDialog {
     return names.map((name) => name.trim());
   }
 
-  // The launch settings: the gateway switch, the model and the effort. Ids
-  // match OrchestratorDialog.Launch.helpers.ts. The model is a SelectField
-  // trigger through the gateway and a free-entry textbox off it, both under
-  // the same id, so each mode has its own locator.
+  // The model field is a SelectField through the gateway and a textbox off it, under one id.
   gatewayCheckbox(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
     return this.locator(mode).getByRole('checkbox', { name: 'Use gateway', exact: true });
   }
@@ -148,13 +123,11 @@ export class OrchestratorDialog {
     return this.locator(mode).locator('#orchestrator-gateway-help');
   }
 
-  // The recovery control offered when the gateway catalog could not be read.
   gatewayRetryButton(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
     return this.locator(mode).getByRole('button', { name: 'Retry', exact: true });
   }
 
-  // Every place the dialog renders a piece of text, so a spec can assert a
-  // message is reported once rather than echoed.
+  // Lets a spec assert a message is reported once rather than echoed.
   textOccurrences(
     text: string,
     mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
@@ -186,8 +159,6 @@ export class OrchestratorDialog {
     await this.page.getByRole('option', { name: label, exact: true }).click();
   }
 
-  // Read as one list for the same reason aliasOptionNames is: what the picker
-  // leaves out matters as much as what it offers.
   async gatewayModelOptionNames(
     mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
   ): Promise<string[]> {
@@ -211,7 +182,6 @@ export class OrchestratorDialog {
     await this.page.getByRole('option', { name: label, exact: true }).click();
   }
 
-  // The dialog's own error line: a save the backend refused renders here.
   errorAlert(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
     return this.locator(mode).getByRole('alert');
   }
@@ -225,13 +195,7 @@ export class OrchestratorDialog {
     await this.page.getByRole('option', { name: role, exact: true }).click();
   }
 
-  // The roles the trigger offers for a linked env, by their visible words, in
-  // the order the control renders them. Opened and dismissed in one call so a
-  // spec can assert on the offered SET without leaving the popup covering the
-  // row it is about to drive. Read as a list rather than probed one role at a
-  // time because the property under test is which roles are absent (a host env
-  // must not be offered Runtime) alongside which ones are still present —
-  // a single-role probe cannot tell "not offered" from "the list never opened".
+  // Read as a list: a single-role probe cannot tell "not offered" from "the list never opened".
   async envRoleOptionNames(tenant: string, environment: string): Promise<string[]> {
     await this.envRoleTrigger(tenant, environment).click();
     const options = this.page.getByRole('option');
@@ -241,11 +205,7 @@ export class OrchestratorDialog {
     return names.map((name) => name.trim());
   }
 
-  // An ineligible env (an unrecognized type) is still listed, disabled, with
-  // its reason as a first-class line under the checkbox row rather than a
-  // tooltip. The checkbox carries an accessible name naming both the env and
-  // that it can't be linked, so it never collides with an eligible row's
-  // plain "<tenant> / <environment>" checkbox name.
+  // An ineligible env is listed disabled, with an accessible name distinct from eligible rows.
   ineligibleEnvCheckbox(tenant: string, environment: string): Locator {
     return this.locator().getByRole('checkbox', {
       name: `${tenant} / ${environment} can't be linked`,
@@ -256,10 +216,7 @@ export class OrchestratorDialog {
     return this.envBlock(tenant, environment).locator('p');
   }
 
-  // A runtime environment carries exactly one legal role, so the checked row
-  // states it as a plain fact instead of offering the Select every other
-  // candidate gets — see EnvironmentRowRole in
-  // OrchestratorDialog.Environments.tsx.
+  // A runtime env has one legal role, rendered as text instead of a Select.
   envRequiredRoleText(
     tenant: string,
     environment: string,
@@ -268,8 +225,6 @@ export class OrchestratorDialog {
     return this.envBlock(tenant, environment, mode).getByText(/^Role: Runtime —/);
   }
 
-  // Distinguishes "nothing configured yet" from "several environments, none
-  // eligible" — the two empty states the Environments field must not conflate.
   environmentsEmptyMessage(): Locator {
     return this.locator().getByText('No environments yet. Initialize one to orchestrate it.');
   }
@@ -278,10 +233,6 @@ export class OrchestratorDialog {
     return this.locator().getByText(/environments? found, but none can be linked/);
   }
 
-  // Takes the mode for the same reason locator/waitForOpen/waitForClosed do:
-  // defaulting to 'New orchestrator' silently aimed at a dialog that is not
-  // open, so an Edit-mode caller waited out the full timeout on a Cancel
-  // button that was never going to appear.
   async cancel(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Promise<void> {
     await this.locator(mode).getByRole('button', { name: 'Cancel' }).click();
   }
@@ -307,11 +258,7 @@ export class OrchestratorDialog {
     await this.saveButton().click();
   }
 
-  // The two guidance layers: "role" is this orchestrator's own
-  // CLAUDE.<id>.md, "shared" is the one CLAUDE.md every orchestrator obeys.
-  // Each renders its resolved host path as secondary text and a reveal
-  // button per IDE, labelled with this same title text. Guidance only renders
-  // for a persisted (non-transient) orchestrator, i.e. only in Edit mode.
+  // Guidance renders only in Edit mode.
   private static readonly guidanceTitle: Record<'role' | 'shared', string> = {
     role: 'Role: what this orchestrator does',
     shared: 'Shared contract: rules for every orchestrator',
@@ -323,9 +270,6 @@ export class OrchestratorDialog {
     });
   }
 
-  // The role path is this orchestrator's own CLAUDE.<id>.md; the shared path
-  // is the plain CLAUDE.md every orchestrator obeys — distinguishing substrings
-  // so each resolves to exactly one element without scoping into row markup.
   guidanceRolePath(id: string): Locator {
     return this.locator('Edit orchestrator').getByText(`CLAUDE.${id}.md`, { exact: false });
   }
@@ -340,10 +284,6 @@ export class OrchestratorDialog {
     });
   }
 
-  // The restart-required banner: shown at the top of the form when
-  // this orchestrator's live session was spawned with a scope that no longer
-  // matches what it is linked to now, naming why and carrying its own action
-  // rather than pointing at the footer button below.
   restartRequiredNotice(): Locator {
     return this.locator('Edit orchestrator').getByRole('status').filter({
       hasText: 'Its environments changed while it was running',
@@ -354,9 +294,6 @@ export class OrchestratorDialog {
     return this.restartRequiredNotice().getByRole('button', { name: 'Restart now' });
   }
 
-  // The same banner when only the launch settings changed: a session fixes its
-  // gateway, model and effort at launch, so it names that cause instead of
-  // claiming tools are missing.
   launchSettingsRestartNotice(): Locator {
     return this.locator('Edit orchestrator').getByRole('status').filter({
       hasText: 'Its gateway, model or effort changed while it was running',
@@ -367,8 +304,6 @@ export class OrchestratorDialog {
     return this.launchSettingsRestartNotice().getByRole('button', { name: 'Restart now' });
   }
 
-  // The footer's own restart action, present whenever the session is running;
-  // its label names the remedy explicitly once a restart is actually required.
   footerRestartButton(): Locator {
     return this.locator('Edit orchestrator').getByRole('button', {
       name: /^Restart( to apply)?$/,

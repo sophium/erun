@@ -20,13 +20,7 @@ func initLocalRealRunScenarios(t *testing.T) {
 }
 
 func testInitLocalRealRunPersistsProjectRegistry(t *testing.T) {
-	// Real-run local-agent init: a --container-registry that differs from the
-	// project's base must persist as a per-environment override, and the k8s
-	// deploy plan must round-trip in both its scalar (single step) and
-	// sequence (parallel group) shapes — round-trips dry-run init never
-	// reaches. A pre-existing ~/.claude/settings.json with custom permissions
-	// but no bypass mode drives the merge: the custom allow-list must survive
-	// while bypass mode is stamped in.
+	// Custom Claude permissions must survive while bypass mode is stamped in.
 	setup := env.New(t)
 	claudeDir := filepath.Join(setup.Home, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
@@ -61,8 +55,6 @@ func testInitLocalRealRunPersistsProjectRegistry(t *testing.T) {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "init/local_real_run_persists_project_registry", normalize.Apply(result.Combined))
-	// The rewritten project config is a side effect outside the captured
-	// streams, so assert on the file directly.
 	raw, err := os.ReadFile(filepath.Join(setup.Cwd, ".erun", "config.yaml"))
 	if err != nil {
 		t.Fatalf("read project config: %v", err)
@@ -83,8 +75,6 @@ func testInitLocalRealRunPersistsProjectRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read ~/.claude/settings.json: %v", err)
 	}
-	// JSON re-indentation makes exact-substring asserts brittle; strip
-	// all whitespace before matching the merged keys.
 	flattened := strings.Join(strings.Fields(string(claudeRaw)), "")
 	for _, want := range []string{
 		`"Bash(ls:*)"`,
@@ -98,12 +88,7 @@ func testInitLocalRealRunPersistsProjectRegistry(t *testing.T) {
 }
 
 func testInitLocalRealRunDropsRedundantRegistryOverride(t *testing.T) {
-	// Re-initializing an env whose per-environment registry override equals
-	// the project-wide base must drop the now-redundant override. Production
-	// deletes the whole map entry, so it would also wipe a co-located
-	// k8s/docker block if one were present. A pre-seeded fully-configured
-	// ~/.claude/settings.json must take EnsureClaudeSettings' already-configured
-	// early return and stay byte-identical.
+	// The override equals the base, so it is dropped; configured Claude settings stay byte-identical.
 	setup := env.New(t)
 	claudeDir := filepath.Join(setup.Home, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
@@ -155,8 +140,6 @@ func testInitLocalRealRunDropsRedundantRegistryOverride(t *testing.T) {
 }
 
 func testInitRealRunViaStubs(t *testing.T) {
-	// A real run (through stubs) covers the kubectl namespace check/create
-	// and helm-runner code that dry-run traces but never executes.
 	setup := env.New(t)
 	stubs := setup.Cwd + "/stubs"
 	fixture.StubBinary(t, stubs, "kubectl", "")

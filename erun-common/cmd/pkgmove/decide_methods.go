@@ -42,9 +42,7 @@ func (w *world) placeMethods(m packageMap, d decisions) {
 	}
 }
 
-// inOwnMethod says whether a site is inside a method of the type od declares:
-// a type's own methods go wherever the type goes, so they are not a use that
-// keeps it at home.
+// inOwnMethod: a type's own methods move with it, so they do not keep it home.
 func (w *world) inOwnMethod(s site, od *declTarget, d decisions) bool {
 	at := d.declAt(s.file, s.start)
 	if at == nil || at.method == "" {
@@ -58,11 +56,8 @@ func (w *world) inOwnMethod(s site, od *declTarget, d decisions) bool {
 	return ok && d.declAt(owner.file, offsetOf(m.owner)) == od
 }
 
-// methodsFollowTheirTypes puts every method where its receiver type ended up,
-// copied wherever the type is copied: Go keeps methods with their type, so a
-// method is never placed on its own. A test type's method that nothing calls
-// through an interface is the one exception: it goes only to the packages
-// that call it, so a copy never carries a method none of its users call.
+// methodsFollowTheirTypes places each method with its receiver type. A test
+// type's method not called through an interface goes only where it is called.
 func (w *world) methodsFollowTheirTypes(d decisions) {
 	calledIn := w.methodCallers(d)
 	linked := w.linkedKeys()
@@ -73,8 +68,6 @@ func (w *world) methodsFollowTheirTypes(d decisions) {
 	}
 }
 
-// placeMethod puts one method declaration with its type, narrowed to the
-// packages that call it when narrowing is allowed.
 func (w *world) placeMethod(decl *declTarget, d decisions, narrow bool, calledIn map[string]map[string]bool) {
 	o, ok := w.objects[decl.method]
 	if !ok || o.owner == "" {
@@ -100,7 +93,6 @@ func (w *world) placeMethod(decl *declTarget, d decisions, narrow bool, calledIn
 	w.redirectDeclObjects(decl, d)
 }
 
-// methodCallers are the packages each method is called from directly.
 func (w *world) methodCallers(d decisions) map[string]map[string]bool {
 	out := map[string]map[string]bool{}
 	for _, s := range w.sites {
@@ -117,9 +109,7 @@ func (w *world) methodCallers(d decisions) map[string]map[string]bool {
 	return out
 }
 
-// linkedKeys are the methods that share a name with an interface method they
-// satisfy, or with an implementation of theirs: they stay with their type
-// wherever it goes.
+// linkedKeys are methods linked to an interface method; they always follow their type.
 func (w *world) linkedKeys() map[string]bool {
 	classSize := map[string]int{}
 	for key := range w.links {
@@ -135,8 +125,6 @@ func (w *world) linkedKeys() map[string]bool {
 	return out
 }
 
-// keepCalled narrows the packages a method goes to down to the ones that call
-// it, keeping them in the type's order.
 func keepCalled(dirs []string, called map[string]bool) []string {
 	var out []string
 	for _, dir := range dirs {

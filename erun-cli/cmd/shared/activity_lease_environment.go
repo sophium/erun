@@ -7,19 +7,14 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
-// A lease is a claim on one environment's idle-stop, so it only means anything
-// in that environment's own store. Taken from the operator's machine it would
-// hold the laptop busy and leave the environment reading as untouched — the
-// exact outcome the lease exists to prevent.
+// A lease only means anything in the environment's own store, never the operator's machine.
 
 type EnvironmentActivityLeaseResult struct {
 	Tenant      string                              `json:"tenant"`
 	Environment string                              `json:"environment"`
 	Lease       *activity.EnvironmentActivityLease  `json:"lease,omitempty"`
 	Held        []activity.EnvironmentActivityLease `json:"held"`
-	// Released mirrors erun-mcp's ActivityLeaseResult.Released: set only by a
-	// release call, and only true when a held claim actually existed and was
-	// removed.
+	// Released is set only by a release call, and is true only when a held claim was removed.
 	Released *bool `json:"released,omitempty"`
 }
 

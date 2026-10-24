@@ -50,9 +50,8 @@ func ResolveBuildExecution(ctx core.Context, store shared.DockerStore, findProje
 	return finalizeBuildExecution(ctx, execution, target.NoIncremental)
 }
 
-// BuildExecutionPlansWork reports whether an execution has anything to run. An
-// execution that plans none of these does no work and tests nothing, so its
-// success would be indistinguishable from a real pass.
+// BuildExecutionPlansWork reports whether an execution has anything to run, so
+// an empty run is not mistaken for a pass.
 func BuildExecutionPlansWork(execution shared.BuildExecutionSpec) bool {
 	return execution.Release != nil ||
 		execution.Script != nil ||
@@ -62,9 +61,7 @@ func BuildExecutionPlansWork(execution shared.BuildExecutionSpec) bool {
 		len(execution.ComponentCharts) > 0
 }
 
-// finalizeBuildExecution applies incremental promotion, then resolves the
-// component chart source off the final builds so their release/snapshot version
-// and registry drive the chart specs.
+// finalizeBuildExecution resolves the chart source after promotion so final versions drive it.
 func finalizeBuildExecution(ctx core.Context, execution shared.BuildExecutionSpec, noIncremental bool) (shared.BuildExecutionSpec, error) {
 	execution, err := buildpkg.ApplyIncrementalToBuildExecution(ctx, execution, noIncremental)
 	if err != nil {
@@ -94,11 +91,8 @@ func buildExecutionHasNoBuilds(linuxPackages []shared.LinuxPackageSpec, builds [
 	return len(linuxPackages) == 0 && len(builds) == 0 && releaseSpec == nil
 }
 
-// resolveLinuxPackagesForExecution resolves the linux packages a plain build
-// tests, and which of them reuse a recorded pass (none with --no-incremental,
-// which also records none). A release resolves its own from the release root instead (see
-// discoverReleaseLinuxPackages), because it exports them rather than testing
-// them.
+// resolveLinuxPackagesForExecution resolves a plain build's packages and which
+// reuse a recorded pass; releases export theirs instead.
 func resolveLinuxPackagesForExecution(findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, target shared.DockerCommandTarget, releaseSpec *shared.ReleaseSpec) ([]shared.LinuxPackageSpec, error) {
 	if releaseSpec != nil {
 		return nil, nil
@@ -132,11 +126,8 @@ func resolveBuildExecutionWithoutBuilds(findProjectRoot shared.ProjectFinderFunc
 	if script == nil {
 		return shared.BuildExecutionSpec{}, shared.ErrDockerBuildContextNotFound
 	}
-	// A nested build script only stands in for the image plan when the project
-	// has no docker build module to resolve. When it does, resolving zero images
-	// is a resolution failure, and running the script instead would exit zero
-	// having built no image and run no gate -- a pass a caller cannot tell from
-	// a real one.
+	// With a docker build module present, zero images is a failure; running the
+	// script instead would pass having built nothing.
 	if dockerDir, ok, err := resolveProjectDockerModuleDir(findProjectRoot, target); err != nil {
 		return shared.BuildExecutionSpec{}, err
 	} else if ok {
@@ -165,16 +156,9 @@ func BuildExecutionUsesBuildScript(execution shared.BuildExecutionSpec) bool {
 	return execution.Script != nil
 }
 
-// releaseDockerPushSpecs publishes every image a release builds, not only the
-// images stamped with the release's own version. A version-pinned wrapper
-// (erun-backend-postgres, erun-powerdns, erun-zitadel, erun-oci-registry — see
-// erun-devops/AGENTS.md § "Wrapping And Pinning Third-Party Service Images")
-// keeps its own VERSION file and is therefore never in release.DockerImages,
-// but it is still a real release build whose chart is published and whose
-// image must exist for that chart's deploy to work. Fingerprint promote-and-skip
-// already makes a re-push of an unchanged pinned image a cheap no-op, so
-// pushing everything costs nothing for the common case and closes the gap for
-// the uncommon one: a wrapper published for the first time.
+// releaseDockerPushSpecs pushes every image, including version-pinned wrappers
+// missing from release.DockerImages whose charts still need them; unchanged
+// images are a cheap no-op.
 func releaseDockerPushSpecs(builds []shared.DockerBuildSpec) []shared.DockerPushSpec {
 	if len(builds) == 0 {
 		return nil

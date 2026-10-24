@@ -10,9 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// The failure this locks: a detached gate's only durable artefact is its timing
-// record, and for every one of the builds that prompted this the record said
-// "exit status 1" while the reason lived solely in a stream nobody kept.
 func TestDockerBuildFailureReasonKeepsTheFailingStepsOwnWords(t *testing.T) {
 	output := `#5 [2/3] RUN echo hello
 #5 0.187 hello
@@ -52,7 +49,6 @@ func TestDockerBuildFailureReasonIsBounded(t *testing.T) {
 }
 
 func TestDockerBuildFailureReasonFallsBackToTheLastErrorLine(t *testing.T) {
-	// A daemon that refused before any step ran emits no per-step frame at all.
 	output := `ERROR: failed to solve: failed to resolve source metadata for docker.io/library/nope:1: not found`
 
 	reason := dockerBuildFailureReason(output)
@@ -99,10 +95,6 @@ func TestJoinFailureReasonKeepsBothTheStepAndTheDiagnosis(t *testing.T) {
 	}
 }
 
-// Closes the chain that was broken end to end: BuildKit's output becomes a
-// reason, the reason becomes the error a failed step carries, and that error is
-// what the durable timing record persists. Before this, every link past the
-// first dropped everything but "exit status 1".
 func TestBuildFailureReasonReachesTheDurableTimingRecord(t *testing.T) {
 	output := `#6 [3/3] RUN curl -fsSL -o /tmp/helm.tar.gz "https://get.helm.sh/helm-v4.2.2-linux-amd64.tar.gz"
 #6 31.56 curl: (35) Recv failure: Connection reset by peer

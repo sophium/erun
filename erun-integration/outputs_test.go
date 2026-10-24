@@ -21,30 +21,19 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// outputsListing is the canned `find` output the stubbed kubectl returns. Its
-// input order deliberately differs from the golden's newest-first order, so the
-// golden proves the resolver sorts.
+// Input order differs from the golden's newest-first order, so the golden proves sorting.
 const outputsListing = "f\t1024\t1700000200.0\treport.pdf\n" +
 	"d\t4096\t1700000300.5\tresults\n" +
 	"f\t512\t1700000100.0\tnotes.txt\n"
 
-// stubKubectlPrints makes the outputs commands deterministic without a cluster:
-// their only kubectl call is the remote find/tar/base64 exec, so one fixed
-// stdout regardless of args is enough.
 func stubKubectlPrints(t *testing.T, stubs, stdout string) {
 	t.Helper()
 	fixture.StubBinaryWithScript(t, stubs, "kubectl", "cat <<'EOF'\n"+stdout+"EOF\n")
 }
 
-// podOutputsDir is where the pod keeps agent outputs. The emulator resolves a
-// pod path under a stand-in filesystem root, so a scenario stages its payload
-// at exactly the path erun will ask the pod for.
 const podOutputsDir = "home/erun/.erun/outputs"
 
-// stubPodExecDownload stages one payload inside a stand-in pod filesystem and
-// routes erun's kubectl at the emulator that serves it. A fixed-stdout stub
-// cannot answer a download: it asks the pod what it would send, then reads the
-// payload one bounded range at a time.
+// stubPodExecDownload stages a payload in a stand-in pod filesystem served by the exec emulator.
 func stubPodExecDownload(t *testing.T, setup env.Setup, stubs, name string, payload []byte, spec fixture.PodExecStubSpec) []string {
 	t.Helper()
 	spec.Root = filepath.Join(setup.Cwd, "pod")
@@ -59,10 +48,6 @@ func stubPodExecDownload(t *testing.T, setup env.Setup, stubs, name string, payl
 	return fixture.StubEnv(stubs, "kubectl")
 }
 
-// stubPodExecDownloadDir stages a folder rather than a file, so the download
-// takes the branch that archives it in the pod first.
-// archiveSizePattern is the byte count `erun outputs download` reports for a
-// downloaded archive.
 var archiveSizePattern = regexp.MustCompile(`\(\d+B, `)
 
 func stubPodExecDownloadDir(t *testing.T, setup env.Setup, stubs, name string, files map[string]string) []string {
@@ -81,9 +66,7 @@ func stubPodExecDownloadDir(t *testing.T, setup env.Setup, stubs, name string, f
 	return fixture.StubEnv(stubs, "kubectl")
 }
 
-// incompressiblePayload is the shape the bug report probed with: bytes gzip
-// cannot shrink, so a range's stream carries its full base64 expansion and the
-// transfer has no compression to hide behind.
+// incompressiblePayload makes each range carry its full base64 expansion.
 func incompressiblePayload(size int) []byte {
 	payload := make([]byte, size)
 	source := rand.NewChaCha8([32]byte{'e', 'r', 'u', 'n'})
@@ -258,8 +241,7 @@ func testOutputsDownloadDryRun(t *testing.T) {
 }
 
 func testOutputsDownloadRealRunFile(t *testing.T) {
-	// The reported sha256 normalizes to <HEX>, so the golden can't prove the
-	// bytes; the file read is what confirms "hello" round-tripped.
+	// The sha256 normalizes to <HEX>, so the file read proves the bytes.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -287,22 +269,13 @@ func testOutputsDownloadRealRunDir(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// The archive is what proves the pod staged the folder and the download
-	// read that staged copy, not the folder itself.
 	requireArchiveEntries(t, filepath.Join(setup.Cwd, "results.tar.gz"), []string{"results/", "results/summary.txt"})
-	// The archive is built by the host's own tar, and GNU and BSD tar write
-	// the same entries at different sizes, so its byte count says nothing
-	// about erun: the entries above are what the download is checked by.
+	// Host tar sizes differ between GNU and BSD, so the size is normalized.
 	golden.Equal(t, "outputs/download_real_run_dir", archiveSizePattern.ReplaceAllString(normalize.Apply(result.Combined), "(<SIZE>, "))
 }
 
-// The regression this file exists to hold: a single exec stream breaks as the
-// volume it carries grows, so a whole-file transfer of a real cross-built
-// binary never completes. Measured on the reporting host, a 12 MB payload
-// transferred 6/6 and a 14 MB one 1/4, so the emulator refuses to carry more
-// than 12 MiB in one call — the largest amount observed to be reliable. A 20
-// MB payload (0/6 there) therefore cannot arrive in one stream and can only
-// arrive at all if the download reads it in bounded ranges.
+// One exec stream is unreliable above ~12 MiB (the emulator's cap), so a 20 MB payload
+// arrives only if read in bounded ranges.
 func testOutputsDownloadLargeFileArrivesWhenOneStreamCannotCarryIt(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -315,8 +288,6 @@ func testOutputsDownloadLargeFileArrivesWhenOneStreamCannotCarryIt(t *testing.T)
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// Normalization collapses the digest the command prints, so the file's
-	// own hash is the only thing that can prove the bytes are the pod's.
 	want := sha256.Sum256(payload)
 	if got := fileSHA256(t, filepath.Join(setup.Cwd, "erun-darwin-arm64")); got != hex.EncodeToString(want[:]) {
 		t.Fatalf("downloaded sha256 = %s, want %s", got, hex.EncodeToString(want[:]))
@@ -324,10 +295,7 @@ func testOutputsDownloadLargeFileArrivesWhenOneStreamCannotCarryIt(t *testing.T)
 	golden.Equal(t, "outputs/download_large_file_arrives_when_one_stream_cannot_carry_it", normalize.Apply(result.Combined))
 }
 
-// A broken stream is a transport fault, not a fact about the bytes, so the
-// range is re-read rather than the download lost. The emulator breaks the
-// first read of the second range only, which no single-stream transfer could
-// have recovered from at all.
+// The emulator breaks only the first read of the second range; the range is re-read.
 func testOutputsDownloadRetriesARangeWhoseStreamBreaks(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -348,10 +316,7 @@ func testOutputsDownloadRetriesARangeWhoseStreamBreaks(t *testing.T) {
 	golden.Equal(t, "outputs/download_retries_a_range_whose_stream_breaks", normalize.Apply(result.Combined))
 }
 
-// The reported failure was silent about its cause: a bare stream EOF reads
-// like a stale tunnel and sends an operator to diagnose the wrong thing. A
-// range that never arrives must therefore say how much of the transfer had
-// already succeeded, and must not leave a partial file behind.
+// A range that never arrives must report progress so far and leave no partial file.
 func testOutputsDownloadReportsHowFarItGotWhenARangeNeverArrives(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -369,8 +334,6 @@ func testOutputsDownloadReportsHowFarItGotWhenARangeNeverArrives(t *testing.T) {
 	golden.Equal(t, "outputs/download_reports_how_far_it_got_when_a_range_never_arrives", normalize.Apply(result.Combined))
 }
 
-// The pod says how it encoded each range, so a pod without gzip still serves
-// a download — it just sends more bytes for the same payload.
 func testOutputsDownloadLargeFileArrivesFromAPodWithoutGzip(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -392,22 +355,17 @@ func testOutputsDownloadLargeFileArrivesFromAPodWithoutGzip(t *testing.T) {
 }
 
 func testOutputsDownloadTraversalNeutralized(t *testing.T) {
-	// A parent-traversal entry name must resolve inside the outputs dir and
-	// can never reach /etc/passwd.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"outputs", "download", "../../etc/passwd", "--dry-run", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// The audit line echoes the raw arg the operator typed — that is input,
-	// not the resolved target — so /etc/passwd in the golden is expected.
+	// The audit line echoes the raw arg, so /etc/passwd in the golden is expected.
 	golden.Equal(t, "outputs/download_traversal_neutralized", normalize.Apply(result.Combined))
 }
 
 func testOutputsDownloadInvalidNameRejected(t *testing.T) {
-	// A bare ".." is not a valid entry name and is rejected before any pod
-	// contact.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"outputs", "download", "..", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

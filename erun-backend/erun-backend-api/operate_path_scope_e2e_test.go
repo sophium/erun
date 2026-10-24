@@ -19,20 +19,9 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
-// The operate path — the reads and writes a deploy, stop, delete, or job
-// report drives — used to key every row on an id alone. That is only safe
-// while RLS is the enforcement: contexts, context_credentials, environments,
-// jobs, and builds all carry
-// `FOR ALL TO erun_operations USING (true)`, so an OPERATIONS caller naming a
-// stranger tenant's id was answered with that stranger's row by every one of
-// them. These tests pin the property against a real migrated PostgreSQL and
-// the real erun_operations policy, because that is the only venue in which the
-// difference between "the SQL scopes it" and "RLS would have scoped it" is
-// observable at all.
+// erun_operations RLS is USING (true) on every operate-path table, so the SQL itself
+// must scope by tenant; only real PostgreSQL makes that observable.
 
-// operatePathCipher builds a real AES-256-GCM cipher, so the credential tests
-// exercise the actual encrypt-then-custody-then-decrypt path rather than a
-// stand-in that would agree with whatever it was handed.
 func operatePathCipher(t *testing.T) *secrets.Cipher {
 	t.Helper()
 	cipher, err := secrets.NewCipher(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x5a}, 32)))
@@ -40,11 +29,8 @@ func operatePathCipher(t *testing.T) *secrets.Cipher {
 	return cipher
 }
 
-// TestContextCredentialReadIsScopedToTheOwningTenant is the highest-payload
-// member of this class: naming a context id alone released that context's k3s
-// admin token. The token is written into a placement Secret and handed to a
-// Job that runs kubectl against the cluster it authenticates — so the read
-// itself is the release, whether or not whatever follows it succeeds.
+// TestContextCredentialReadIsScopedToTheOwningTenant: reading the credential is itself the release
+// of the context's k3s admin token.
 func TestContextCredentialReadIsScopedToTheOwningTenant(t *testing.T) {
 	opsCtx, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	txs := repository.NewTxManager(db, repository.DialectPostgres)
@@ -55,15 +41,10 @@ func TestContextCredentialReadIsScopedToTheOwningTenant(t *testing.T) {
 	mustNoErr(t, err, "create stranger context")
 	mustNoErr(t, credentials.Set(strangerCtx, strangerContext.ContextID, "stranger-admin-token"), "custody stranger token")
 
-	// The reputation of the fix: an OPERATIONS caller naming only the
-	// stranger's context id must not be handed the stranger's token, even
-	// though erun_operations' policy makes the row visible to it.
 	if _, err := credentials.Get(opsCtx, opsTenantID, strangerContext.ContextID); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("credential read for a context the caller's tenant does not own = %v, want ErrNotFound", err)
 	}
 
-	// The owning tenant still gets its own token: scoping must not turn into
-	// refusing the legitimate read.
 	token, err := credentials.Get(opsCtx, strangerTenantID, strangerContext.ContextID)
 	mustNoErr(t, err, "read the token on behalf of its owner")
 	if token != "stranger-admin-token" {
@@ -71,10 +52,6 @@ func TestContextCredentialReadIsScopedToTheOwningTenant(t *testing.T) {
 	}
 }
 
-// TestContextReadIsScopedToTheOwningTenant covers the coordinate read every
-// placement resolution starts from — project this id, project this server URL,
-// project this kubernetes context — which is what the credential above is
-// looked up alongside.
 func TestContextReadIsScopedToTheOwningTenant(t *testing.T) {
 	opsCtx, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	contexts := repository.NewContextRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -94,21 +71,13 @@ func TestContextReadIsScopedToTheOwningTenant(t *testing.T) {
 	}
 }
 
-// seedOperatePathRows creates one row of each operate-path class for the
-// tenant ctx names, so the scoping below is proven per class against real rows
-// rather than one id reused across them.
 func seedOperatePathRows(t *testing.T, db *sql.DB, ctx context.Context, txs *repository.TxManager) (model.Job, model.Review, model.Build) {
 	t.Helper()
 	jobs := repository.NewJobRepository(txs)
 	reviews := repository.NewReviewRepository(txs)
 	builds := repository.NewBuildRepository(txs)
 
-	// A review's author_user_id is NOT NULL and database-defaulted from
-	// erun_current_user_id(), which reads the erun.user_id the transaction
-	// wiring sets from the security context. A context naming a tenant but no
-	// user therefore cannot create a review at all, so the seeder plants one
-	// author per tenant and carries it — the same shape reviews_e2e_test.go
-	// uses.
+	// author_user_id defaults from erun_current_user_id(), so reviews need a user in context.
 	authorCtx := operatePathAuthorContext(t, db, ctx)
 
 	job, err := service.NewJobService(jobs).Claim(ctx, model.Job{
@@ -139,13 +108,9 @@ func seedOperatePathRows(t *testing.T, db *sql.DB, ctx context.Context, txs *rep
 	return job, review, build
 }
 
-// operatePathAuthorSeq makes each seeded author's username unique: users is
-// unique per (tenant, username), and several tests seed more than one tenant.
+// operatePathAuthorSeq keeps usernames unique per (tenant, username).
 var operatePathAuthorSeq int
 
-// operatePathAuthorContext plants a user in ctx's tenant and returns ctx
-// carrying it, so a write whose column defaults to erun_current_user_id() has
-// an author to record.
 func operatePathAuthorContext(t *testing.T, db *sql.DB, ctx context.Context) context.Context {
 	t.Helper()
 	securityContext, ok := security.FromContext(ctx)
@@ -163,10 +128,6 @@ func operatePathAuthorContext(t *testing.T, db *sql.DB, ctx context.Context) con
 	return security.WithContext(ctx, securityContext)
 }
 
-// TestJobReadAndUpdateAreScopedToTheOwningTenant covers the job routes' own
-// class: GET and PATCH /v1/jobs/{job_id} both keyed on job_id alone, which for
-// an OPERATIONS caller — whose RLS policy is unconditional — resolved to any
-// tenant's row.
 func TestJobReadAndUpdateAreScopedToTheOwningTenant(t *testing.T) {
 	opsCtx, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	jobs := repository.NewJobRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -176,16 +137,12 @@ func TestJobReadAndUpdateAreScopedToTheOwningTenant(t *testing.T) {
 		t.Fatalf("job read for a tenant that does not own it = %v, want ErrNotFound", err)
 	}
 
-	// The owner still gets its own row: scoping must not turn into refusing
-	// the legitimate read.
 	owned, err := jobs.Get(strangerCtx, strangerTenantID, strangerJob.JobID)
 	mustNoErr(t, err, "read the stranger's job on behalf of its owner")
 	if owned.JobID != strangerJob.JobID {
 		t.Fatalf("job read on behalf of its owner = %q, want %q", owned.JobID, strangerJob.JobID)
 	}
 
-	// The write carries the same scope, so a caller naming another tenant's
-	// job moves nothing.
 	ended := time.Now().UTC()
 	strangerJob.Status = model.JobStatusSucceeded
 	strangerJob.EndedAt = &ended
@@ -202,10 +159,8 @@ func TestJobReadAndUpdateAreScopedToTheOwningTenant(t *testing.T) {
 	}
 }
 
-// TestBuildReadIsScopedToTheOwningTenant covers the nested build route, whose
-// query joined reviews on tenant only to read the review name back — the left
-// half was never a filter, and the {review_id} in the path reached no SQL at
-// all, so the build id was the whole of the lookup.
+// TestBuildReadIsScopedToTheOwningTenant: the {review_id} path segment must scope the lookup, not
+// the build id alone.
 func TestBuildReadIsScopedToTheOwningTenant(t *testing.T) {
 	opsCtx, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	txs := repository.NewTxManager(db, repository.DialectPostgres)
@@ -223,12 +178,6 @@ func TestBuildReadIsScopedToTheOwningTenant(t *testing.T) {
 	}
 }
 
-// TestEnvironmentMutatorsAreScopedToTheOwningTenant covers the six environment
-// mutating methods the operate routes, the delete reconciler, and the delete
-// lifecycle all reach. Their safety used to be inherited rather than stated:
-// every caller fed them an id it had obtained from the scoped Get, so nothing
-// in the methods themselves named a tenant, and the next caller with an id and
-// no scoped Get would have re-opened the hole with no test to catch it.
 func TestEnvironmentMutatorsAreScopedToTheOwningTenant(t *testing.T) {
 	opsCtx, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -250,9 +199,7 @@ func TestEnvironmentMutatorsAreScopedToTheOwningTenant(t *testing.T) {
 		t.Fatal("ClaimDelete claimed an environment outside the caller's tenant")
 	}
 
-	// The unconditional writes report no error when they match no row, so the
-	// property to assert is that the stranger's row is untouched — read back
-	// as its owner — rather than that the call returned an error it never had.
+	// Unconditional writes report no error on zero rows, so assert the row is untouched.
 	mustNoErr(t, environments.UpdateProvisioningStatus(opsCtx, opsTenantID, strangerEnv.EnvironmentID, repository.EnvironmentStatusUpdate{
 		Status: string(model.EnvironmentStatusFailed), ProvisionError: "cross-tenant status write",
 	}), "cross-tenant status write")
@@ -267,8 +214,6 @@ func TestEnvironmentMutatorsAreScopedToTheOwningTenant(t *testing.T) {
 			untouched.Status, untouched.ProvisionError, untouched.DeleteError)
 	}
 
-	// The owner's own writes still land: scoping must not have broken the
-	// reconciler's and the lifecycle's legitimate paths.
 	claimed, err = environments.ClaimDelete(strangerCtx, strangerTenantID, strangerEnv.EnvironmentID, time.Hour)
 	mustNoErr(t, err, "claim a delete on behalf of the owner")
 	if !claimed {
@@ -286,10 +231,8 @@ func TestEnvironmentMutatorsAreScopedToTheOwningTenant(t *testing.T) {
 	}
 }
 
-// TestOperateReadsResolveTheCallersOwnRows is the control for the comparison
-// below: without it, a route that had stopped resolving anything at all would
-// satisfy "a cross-tenant id answers what a missing id answers" by answering
-// 404 to everything.
+// TestOperateReadsResolveTheCallersOwnRows is the control: without it, answering 404 to
+// everything would pass the comparison below.
 func TestOperateReadsResolveTheCallersOwnRows(t *testing.T) {
 	opsCtx, _, opsTenantID, _, db := operationsScopeDatabase(t)
 	txs := repository.NewTxManager(db, repository.DialectPostgres)
@@ -313,17 +256,8 @@ func TestOperateReadsResolveTheCallersOwnRows(t *testing.T) {
 	}
 }
 
-// TestCrossTenantOperateReadsAreIndistinguishableFromMissingOnes is the
-// acceptance property stated as a comparison rather than two separate
-// assertions: for every operate read and write, a valid id naming another
-// tenant's row must answer exactly what a valid id naming nothing answers.
-// Anything that told the two apart — a 403 where a missing id gives 404, a
-// different error code, a response body naming the row — would confirm the row
-// exists, which is the thing the scoping is for.
-//
-// The caller's own rows are read successfully alongside, so a route that had
-// simply stopped working could not satisfy the comparison by answering 404 to
-// everything.
+// TestCrossTenantOperateReadsAreIndistinguishableFromMissingOnes: a cross-tenant id must answer
+// exactly what a missing id answers; any difference confirms the row exists.
 func TestCrossTenantOperateReadsAreIndistinguishableFromMissingOnes(t *testing.T) {
 	_, strangerCtx, opsTenantID, _, db := operationsScopeDatabase(t)
 	txs := repository.NewTxManager(db, repository.DialectPostgres)
@@ -372,7 +306,6 @@ func TestCrossTenantOperateReadsAreIndistinguishableFromMissingOnes(t *testing.T
 		}
 	}
 
-	// Nothing the cross-tenant calls reached wrote anything.
 	untouchedJob, err := repository.NewJobRepository(txs).Get(strangerCtx, strangerJob.TenantID, strangerJob.JobID)
 	mustNoErr(t, err, "read the stranger's job back")
 	if untouchedJob.Status != model.JobStatusRunning || untouchedJob.Summary != strangerJob.Summary {

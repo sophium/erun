@@ -5,8 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderWithStore } from '../test/renderWithStore';
 import { MCPAccessPanel } from './MCPAccessPanel';
 
-// fetch is mocked at the boundary so the flow exercises the real client +
-// controller against the api-protocol.md contract.
+// fetch is mocked at the boundary so the real client and controller run.
 
 interface MockReq {
   method: string;
@@ -71,11 +70,7 @@ describe('MCPAccessPanel', () => {
     expect(post?.url).toBe('/v1/environments/env-1/mcp-token');
     expect(post?.body).toBe(JSON.stringify({ scope: 'erun:operate' }));
 
-    // The version smoke test would always be refused under erun:operate (it
-    // needs erun:read, which erun:operate deliberately does not imply), so
-    // it is replaced by OperateToolForm -- a form that drives
-    // deploy/context_start/context_stop/resize directly instead of handing
-    // the token off to an external MCP client.
+    // erun:operate does not imply erun:read, so the version smoke test is replaced by OperateToolForm.
     expect(screen.queryByRole('button', { name: 'Call the version tool' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Call the tool' })).toBeInTheDocument();
     expect(screen.getByText(/it can deploy an already-published/)).toBeInTheDocument();
@@ -161,9 +156,6 @@ describe('MCPAccessPanel hostname discovery', () => {
   });
 });
 
-// jsonResponseWithHeaders backs the "drive this environment" flow below: it
-// needs response headers (Mcp-Session-Id) that the plain jsonResponse() above
-// never has to carry.
 function jsonResponseWithHeaders(body: unknown, headers: Record<string, string> = {}): Response {
   return {
     ok: true,
@@ -245,11 +237,7 @@ describe('MCPAccessPanel driving a tool over the live edge', () => {
   });
 });
 
-// liveEdgeMockFetch answers the initialize -> notifications/initialized ->
-// tools/call handshake generically, capturing the tools/call request so a
-// test can assert on the exact tool name and arguments the form sent -- the
-// proof that an erun:operate-scoped session drives real operate-shaped work,
-// not just a mint-and-hand-off dead end.
+// Captures the tools/call request so a test can assert the exact tool and arguments.
 function liveEdgeMockFetch(toolResult: { isError: boolean; text: string }): {
   toolCalls: { name: string; arguments: unknown }[];
 } {
@@ -363,9 +351,6 @@ describe('MCPAccessPanel driving an operate tool over the live edge', () => {
   });
 });
 
-// mockFetchByUrl dispatches per-URL, unlike mockFetch's one-handler-for-all --
-// the session-discovery tests below need the ai-sessions GET to answer
-// differently from the mcp-token POST hitting the very same environment.
 function mockFetchByUrl(handlers: Record<string, (req: MockReq) => Response>): MockReq[] {
   const calls: MockReq[] = [];
   vi.stubGlobal(
@@ -450,9 +435,6 @@ describe('MCPAccessPanel attach session discovery', () => {
   });
 });
 
-// FakeWebSocket backs the attach-session tests below -- see
-// attachClient.test.ts for the fuller wire-protocol coverage; this only needs
-// enough to prove the panel wires mint -> connect -> render correctly.
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   binaryType = 'blob';
@@ -469,7 +451,7 @@ class FakeWebSocket {
   }
 
   send(): void {
-    // Not asserted here -- see attachClient.test.ts for send/resize coverage.
+    // Covered by attachClient.test.ts.
   }
 
   close(): void {

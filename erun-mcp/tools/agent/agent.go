@@ -11,9 +11,7 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// AgentInput is the agent-mode job tool's input: a streaming AI tool run has
-// nothing in common with a plain command beyond both starting a job, so it
-// has its own schema rather than carrying command's fields.
+// AgentInput is the agent-mode job tool's input.
 type AgentInput struct {
 	Agent           string            `json:"agent" jsonschema:"AI tool to run: claude or codex. erun invokes it in its streaming mode, so exec_job_output returns events while it works and exec_job_status reports its current activity rather than only running"`
 	Prompt          string            `json:"prompt" jsonschema:"what the agent should do"`
@@ -43,9 +41,7 @@ func AgentTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallTool
 				return nil, shared.JobResult{}, err
 			}
 		}
-		// The MCP server is not itself the erun binary, so the supervisor is the
-		// environment's own erun executable; a missing one fails here rather than
-		// producing a handle to nothing.
+		// emcp is not the erun binary, so the supervisor is the environment's erun.
 		supervisor, err := jobs.ResolveErunExecutable()
 		if err != nil {
 			return nil, shared.JobResult{}, err

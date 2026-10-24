@@ -11,12 +11,8 @@ import type { AppThunk } from './store';
 import { forgetSessionIfDone } from './tabsThunks';
 import { selectionKey } from './versionSuggestions';
 
-// closeEnvironment tears down an env's desktop tabs and session
-// state (the sidebar's "open env" dot). Desktop-only — it does NOT
-// touch cloud state, unlike the cloud-context Stop button.
-// Per-session bookkeeping is unwound separately by handleTerminalExit
-// as each closed session fires its exit event; this thunk owns only
-// the env-scoped state that chain leaves behind.
+// closeEnvironment tears down an env's desktop tabs and state, never cloud state.
+// handleTerminalExit unwinds per-session bookkeeping.
 export const closeEnvironment =
   (selection: UISelection): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -26,12 +22,8 @@ export const closeEnvironment =
       return;
     }
     const key = selectionKey({ tenant, environment });
-    // Marked before the RPC even starts, so it is in place before any of this
-    // close's own terminal-exit events can possibly arrive. Those events land
-    // asynchronously over the SSE stream and race clearTabsForEnv below — an
-    // ERun-tab exit processed first (while the AI tab is still nominally
-    // present) would otherwise read the tear-down as an unexpected death and
-    // respawn a sibling default tab moments after the user closed it.
+    // Marked before the RPC so this close's exit events are not mistaken for
+    // unexpected deaths that respawn a default tab.
     dispatch(markEnvClosing(key));
     try {
       await CloseEnvironmentSessions({ tenant, environment });
@@ -46,10 +38,7 @@ export const closeEnvironment =
       dispatch(forgetSessionIfDone(sessionId));
     }
     dispatch(clearEnvClosing(key));
-    // Close is a definitive teardown of the desktop view; clear the AI-busy
-    // latch so the sidebar row stops spinning even if the backend's busy=false
-    // event is delayed or missed. The pod AI session keeps repainting after
-    // close, so recordAIActivity's idle clear may never fire on its own.
+    // The pod AI session keeps repainting after close, so its idle clear may never fire.
     dispatch(setAIBusyForEnv({ key, busy: false }));
     dispatch(clearSelectedSessionForEnv(key));
     dispatch(clearEnvOpening({ tenant, environment }));

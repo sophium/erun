@@ -1,18 +1,7 @@
 import { expect, test } from '../../../fixtures/erunApp.js';
 
-// The sidebar's stethoscope targets the sidebar's own selection, not the
-// Manage dialog's (which is only ever set together with the dialog opening),
-// and is disabled (not silently inert) when nothing is selected.
-//
-// The CLI actually emitting the underlying `==> Doctor ...` trace lines is
-// Go-side and cannot be observed in this harness: the inert `erun` stub exits
-// immediately for any argument other than `open` and never emits them. See
-// TestActivityTraceLineHandlerStartsAndFinishesDoctor,
-// TestActivityTraceLineHandlerFinalizesDoctorOnFailure, and
-// TestDoctorCompletedEventRecordsLastRunOutcome in
-// erun-ui/activity_queue_app_test.go for that coverage. The frontend's own
-// handling of the resulting `doctor-completed` Wails event is reachable
-// here by firing the event directly, which the third test below does.
+// The stethoscope targets the sidebar's selection, not the Manage dialog's,
+// and is disabled when nothing is selected.
 test.describe('sidebar Run Doctor reachability (#1217)', () => {
   test('runs against the selected environment with no Manage dialog open', async ({
     app,
@@ -26,23 +15,18 @@ test.describe('sidebar Run Doctor reachability (#1217)', () => {
     const erunTab = app.tabStrip.tab('ERun');
     await app.tabStrip.waitForTab('ERun');
 
-    // Move off the Local tab first, so doctor switching back to it is an
-    // observable effect rather than a coincidence of already being there.
+    // Move off Local so doctor switching back to it is observable.
     await erunTab.click();
     await expect(erunTab).toHaveAttribute('aria-selected', 'true');
 
-    // The bug: this dispatched into a guard keyed off the (closed) Manage
-    // dialog's own selection, which is never set outside that dialog.
     await expect(page.getByRole('dialog')).toHaveCount(0);
 
     const doctorButton = app.sidebar.runDoctorButton();
     await expect(doctorButton).toBeEnabled();
     await doctorButton.click();
 
-    // `erun doctor` pipes into the shared Local shell (see
-    // erun-ui/AGENTS.md § "Command Completion And State-Refresh Wiring"),
-    // so the stable, observable effect of the dispatch actually firing is
-    // the terminal switching back to Local.
+    // `erun doctor` pipes into the shared Local shell, so dispatch shows as a
+    // switch back to Local.
     await expect(localTab).toHaveAttribute('aria-selected', 'true');
   });
 
@@ -57,20 +41,8 @@ test.describe('sidebar Run Doctor reachability (#1217)', () => {
     await expect(doctorButton).toHaveAccessibleName('Run doctor');
   });
 
-  // The contended red on the case above, forced on demand instead of waited
-  // for.
-  //
-  // `selection.selected` -- what the line above asserts on -- is set at the top
-  // of openSelection's thunk, while the row's own "opened here" state reads the
-  // desktop's tabs for the env, which only exist once that thunk's StartSession
-  // has resolved. A close issued in between finds no close control, so it
-  // must not match zero dots and declare itself done without pressing
-  // anything; under contention that window is wide enough to lose.
-  //
-  // Holding the session open widens that window from a few milliseconds to a
-  // named, deterministic one. The close must still close: it converges on the
-  // control appearing rather than accepting the row's silence as a finished
-  // close.
+  // The row's opened state lags the selection until StartSession resolves; the
+  // close must wait for its control rather than match zero dots and stop.
   test('a close issued before the row reports the env opened still closes it', async ({
     app,
     page,
@@ -86,8 +58,6 @@ test.describe('sidebar Run Doctor reachability (#1217)', () => {
     });
 
     await app.sidebar.openEnvironment(tenant, environment);
-    // The only precondition the line it reproduces has: the selection is set,
-    // so the caller has every reason to believe the env is open.
     await expect(app.sidebar.runDoctorButton()).toBeEnabled();
 
     await app.sidebar.closeEnvironment(tenant, environment);
@@ -96,10 +66,8 @@ test.describe('sidebar Run Doctor reachability (#1217)', () => {
     await expect(app.sidebar.runDoctorButton()).toBeDisabled();
   });
 
-  // The result is recorded from the `doctor-completed` Wails event, since a
-  // terminal-exit handler never fires for a piped shared-shell command; this
-  // drives that event the way the CLI's `==> Doctor done` / `==> Doctor failed` trace
-  // lines do (see handleDoctorTraceLine in erun-ui/activity_queue_app.go).
+  // The outcome comes from the `doctor-completed` event, since a piped shared-shell
+  // command fires no terminal-exit handler.
   test('records the last-run outcome the Manage dialog Access tab renders', async ({
     app,
     page,

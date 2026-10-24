@@ -20,19 +20,13 @@ import {
 } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 
-// Long error text can't be read or copied from a hover tooltip, so past
-// this length the message escalates to a selectable popover the operator
-// can copy into a bug report.
+// Past this length a tooltip is unreadable, so the message moves to a selectable popover.
 const LONG_STATUS_THRESHOLD = 160;
 
 type TitlebarStatusKind = AppState['terminalStatusKind'];
 
-// TitlebarStatusValue is the currently-running/just-finished CLI command's
-// own status -- distinct from the classified message centre
-// (Titlebar.MessageCenter.tsx, rendered in the titlebar's right-hand group),
-// which owns every notification-queue message. This pill is scoped to the
-// terminal action just taken (piped commands like `erun init`/`erun deploy`,
-// or a dedicated PTY's own result), never a global toast.
+// TitlebarStatusValue is the status of the CLI command just run; notifications
+// belong to the message centre.
 interface TitlebarStatusValue {
   kind: TitlebarStatusKind;
   message: string;
@@ -62,8 +56,6 @@ export function TitlebarStatus(): React.ReactElement | null {
     return null;
   }
   return (
-    // Cap width so the status pill never crowds the right-cluster buttons
-    // on narrow viewports.
     <div
       className="pointer-events-none flex min-w-0 max-w-full [--wails-draggable:no-drag]"
       role={status.kind === 'error' ? 'alert' : 'status'}

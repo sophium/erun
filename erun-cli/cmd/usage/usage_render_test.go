@@ -16,9 +16,7 @@ const (
 	renderGiB = 1024 * renderMiB
 )
 
-// code3Reading is the reading this renderer exists for: `erun/code3` pinned
-// against its 6144Mi limit, peak at the ceiling, no OOM kill recorded yet. The
-// warnings fire; before this change nothing followed them.
+// code3Reading is a memory-saturated reading with warnings and no OOM kill.
 func code3Reading() config.RuntimeUsage {
 	const limit = int64(6144) * renderMiB
 	usage := config.RuntimeUsage{
@@ -39,9 +37,6 @@ func code3Reading() config.RuntimeUsage {
 			Periods:            20000,
 		},
 	}
-	// Verbatim from the issue's own output. That the reader derives exactly
-	// these from this reading is asserted where the derivation lives, in
-	// erun-common; this test is about what the CLI does with them.
 	usage.Warnings = []string{
 		"memory is at 98% of its 6144Mi limit (warns at 85%)",
 		"memory.peak reached 100% of the limit (warns at 95%) -- this environment came close to an OOM kill",
@@ -49,9 +44,6 @@ func code3Reading() config.RuntimeUsage {
 	return usage
 }
 
-// TestUsageRenderingOmitsSizingWhenThereIsNone keeps the honest-silence case:
-// a reading and a history that support no recommendation at all render exactly
-// the output they always did, rather than an empty-headed section.
 func TestUsageRenderingOmitsSizingWhenThereIsNone(t *testing.T) {
 	var out bytes.Buffer
 	if err := shared.WriteUsageResult(core.Context{Stdout: &out, Stderr: &out}, podruntime.RuntimeUsageReport{
@@ -64,10 +56,6 @@ func TestUsageRenderingOmitsSizingWhenThereIsNone(t *testing.T) {
 	}
 }
 
-// TestUsageReportStatesAnUnreadableReservationRatherThanZero covers the case a
-// silently-empty reading would get wrong: a pod spec that could not be read
-// must say so, because "no reservation figures" and "reserves nothing" are
-// different answers and only one of them is true here.
 func TestUsageReportStatesAnUnreadableReservationRatherThanZero(t *testing.T) {
 	usage := code3Reading()
 	usage.Requests = &config.RuntimeUsageRequests{Unavailable: "kubectl get pods: connection refused"}

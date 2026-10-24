@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// writeAndCommit writes name/content into dir and commits it, for building up
-// the exact commit graphs the decision tests below compare against.
 func writeAndCommit(t *testing.T, dir, name, content, message string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
@@ -17,9 +15,7 @@ func writeAndCommit(t *testing.T, dir, name, content, message string) {
 	runGitForTest(t, dir, "commit", "-q", "-m", message)
 }
 
-// newRepoWithBareRemote is newAgentJobTestRepo plus newBareRemoteForTest,
-// returning both paths for scenarios that need a second clone of the same
-// remote (simulating a separate actor merging the branch).
+// newRepoWithBareRemote returns both paths, for scenarios needing a second clone of the remote.
 func newRepoWithBareRemote(t *testing.T) (repo, bare string) {
 	t.Helper()
 	repo = newAgentJobTestRepo(t)

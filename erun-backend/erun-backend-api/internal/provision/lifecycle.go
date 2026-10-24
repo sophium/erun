@@ -11,90 +11,53 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 )
 
-// UsageRecorder records a per-tenant metering event. Optional: a nil
-// recorder simply records nothing.
+// UsageRecorder records a per-tenant metering event.
 type UsageRecorder interface {
 	Record(ctx context.Context, event model.UsageEvent) error
 }
 
-// EnvLifecycleRunner runs a hosted env's stop/delete Job to a terminal result —
-// satisfied by the deployexec Launcher.
+// EnvLifecycleRunner runs a hosted env's stop/delete Job to a terminal result.
 type EnvLifecycleRunner interface {
 	RunStop(ctx context.Context, params deployexec.StopJobParams) (deployexec.Result, error)
 	RunDelete(ctx context.Context, params deployexec.DeleteJobParams) (deployexec.Result, error)
 }
 
-// EnvironmentRowDeleter hard-deletes an environment's row once its namespace
-// (if any) is confirmed torn down, or records why a delete attempt did not
-// reach that point. `running` must never survive a call to Delete:
-// every path through it ends in either the row being gone or MarkDeleteBlocked
-// naming the blocker.
-// Both methods take the owning tenant explicitly: this lifecycle runs behind
-// a durable workflow whose context carries no tenant identity, so the row's
-// own tenant_id is the only thing that can scope the write. See
-// repository.EnvironmentRepository.Delete.
+// EnvironmentRowDeleter removes an environment's row or records why a delete
+// was blocked; `running` must never survive Delete. The tenant is explicit
+// because the durable workflow context carries no tenant identity.
 type EnvironmentRowDeleter interface {
 	Delete(ctx context.Context, tenantID, environmentID string) error
 	MarkDeleteBlocked(ctx context.Context, tenantID, environmentID, reason string) error
 }
 
-// MachineIdentityRevoker removes the platform identity an environment was
-// provisioned with: the erun user a token from it resolves to, and the
-// identity-provider application that mints that token. Satisfied by
-// service.MachineIdentityService.
-//
-// It returns only an error because this package owns the teardown's own
-// ordering and failure semantics; what a revocation removed is the revoker's to
-// report. It must be idempotent — Delete re-runs an attempt that failed partway
-// from the top — and must treat "there was no identity" as success, since most
-// environments existing today were never provisioned one.
+// MachineIdentityRevoker removes an environment's platform identity. It must be
+// idempotent (Delete retries from the top) and treat "no identity" as success.
 type MachineIdentityRevoker interface {
 	Revoke(ctx context.Context, environmentID string) error
 }
 
-// EnvLifecycleInput is the non-secret placement a stop or delete Job needs:
-// the same coordinates a deploy Job uses, without a target version — stop and
-// delete act on whatever the environment is already running.
+// EnvLifecycleInput is the non-secret placement a stop or delete Job needs.
 type EnvLifecycleInput struct {
-	// TenantID owns this environment. It is what the placement's admin-token
-	// credential is fetched for — the Job's own tenant name (Tenant, below)
-	// is a display/namespace value and cannot scope a credential read.
+	// TenantID scopes the credential read; Tenant is only a display/namespace value.
 	TenantID      string
 	Tenant        string
 	Environment   string
 	EnvironmentID string
-	// RunningVersion picks the runtime image the Job runs erun from: the last
-	// version this environment actually deployed. Empty means the environment
-	// never successfully deployed, so there is no namespace to touch.
+	// RunningVersion is the last deployed version; empty means no namespace exists.
 	RunningVersion string
-	// ContextID/PlacementKubernetesContext/PlacementServerURL name the cluster
-	// this environment was placed on, read back from its persisted
-	// context_id — never a fresh placement decision. Empty ContextID means the
-	// platform's own cluster. The admin-token credential is resolved fresh from
-	// PlacementCredentialResolver at Job-build time, never carried here.
+	// ContextID is read back from the persisted row, never re-placed; empty
+	// means the platform's own cluster.
 	ContextID                  string
 	PlacementKubernetesContext string
 	PlacementServerURL         string
-	// DeleteID identifies one explicit delete attempt (see
-	// EnvDeleteInput.DeleteID) and is threaded into the delete Job's name.
-	DeleteID string
-	// StopID identifies one explicit stop attempt, mirroring DeleteID: it is
-	// threaded into the stop Job's name so a fresh stop gets a fresh Job
-	// rather than replaying a prior attempt's terminal outcome. Unlike
-	// delete, stop has no durable workflow of its own to carry it across a
-	// resume, so the caller (routes.EnvironmentRoutes) mints a fresh one on
-	// every explicit stop request; deployexec.Launcher.RunStop is what still
-	// re-watches a genuinely in-flight stop rather than starting a second.
+	DeleteID                   string
+	// StopID gives each explicit stop a fresh Job rather than replaying a prior
+	// attempt's outcome; the caller mints one per request.
 	StopID string
 }
 
-// EnvLifecycle runs a hosted env's stop/delete Job to a terminal outcome and
-// persists the environment row accordingly. Stop still runs synchronously
-// from the HTTP handler that calls it — a scale-to-zero is a short kubectl
-// operation. Delete does not: EnvDeleter wraps it in a durable DBOS workflow
-// precisely because a namespace teardown can run long or wedge
-// entirely (a DNS-01 solver that stops answering, for example), so the HTTP
-// handler that starts one must not be the thing waiting on it.
+// EnvLifecycle runs a hosted env's stop/delete Job and persists the row.
+// Delete runs inside a durable workflow because namespace teardown can wedge.
 type EnvLifecycle struct {
 	runner       EnvLifecycleRunner
 	rows         EnvironmentRowDeleter
@@ -102,27 +65,17 @@ type EnvLifecycle struct {
 	usage        UsageRecorder
 	imageChecker RuntimeImageChecker
 	credentials  deployexec.PlacementCredentialResolver
-	// identities revokes the environment's own platform identity as part of
-	// deleting it. Nil revokes nothing, which is the state of a deployment that
-	// mints no machine identities at all — never a silent half-measure in one
-	// that does, since a provisioned identity has no other revoker.
+	// identities may be nil when the deployment mints no machine identities.
 	identities MachineIdentityRevoker
 }
 
-// NewEnvLifecycle wires stop/delete. usage may be nil, which records no
-// metering event. imageChecker may be nil, which skips the published-image
-// fallback and always names the tenant's own image. credentials may be nil,
-// which refuses (rather than silently deploying unauthenticated) any
-// environment that names a context; every environment placed into
-// the platform's own cluster is unaffected either way. identities may be nil,
-// which revokes no machine identity on delete.
+// NewEnvLifecycle wires stop/delete. usage, imageChecker and identities may be
+// nil. A nil credentials resolver refuses any environment that names a context
+// rather than deploying unauthenticated.
 func NewEnvLifecycle(runner EnvLifecycleRunner, rows EnvironmentRowDeleter, config EnvDeployConfig, usage UsageRecorder, imageChecker RuntimeImageChecker, credentials deployexec.PlacementCredentialResolver, identities MachineIdentityRevoker) *EnvLifecycle {
 	return &EnvLifecycle{runner: runner, rows: rows, config: config, usage: usage, imageChecker: imageChecker, credentials: credentials, identities: identities}
 }
 
-// placement resolves the live admin-token credential for input's target
-// cluster (empty ContextID resolves to the zero PlacementParams, the
-// platform's own cluster).
 func (l *EnvLifecycle) placement(ctx context.Context, input EnvLifecycleInput) (deployexec.PlacementParams, error) {
 	token, err := deployexec.ResolvePlacementToken(ctx, l.credentials, input.TenantID, input.ContextID)
 	if err != nil {
@@ -146,20 +99,14 @@ func (l *EnvLifecycle) recordUsage(ctx context.Context, environmentID string, ev
 	}
 }
 
-// image resolves the runtime image a stop/delete Job runs erun from, applying
-// the same tenant-image-with-published-fallback decision the deploy Job uses
-// (ResolveRuntimeImage) — an environment that was bootstrapped onto the
-// canonical erun-devops image at deploy time is still running it, so its stop
-// and delete Jobs must name the same image rather than the tenant's own image
-// that was already confirmed missing.
+// image applies the same published-image fallback as deploy, so a bootstrapped
+// environment's stop/delete Jobs run the image it is actually running.
 func (l *EnvLifecycle) image(ctx context.Context, tenant, version string) string {
 	image, _ := ResolveRuntimeImage(ctx, l.imageChecker, l.config.Registry, tenant, version)
 	return image
 }
 
-// Stop scales the environment's runtime Deployment to zero. It does not touch
-// the environment's provisioning-lifecycle status: a stopped runtime
-// environment stays "running" — paused, not torn down.
+// Stop scales the runtime Deployment to zero; the environment stays "running".
 func (l *EnvLifecycle) Stop(ctx context.Context, input EnvLifecycleInput) error {
 	if strings.TrimSpace(input.RunningVersion) == "" {
 		return fmt.Errorf("environment has never been deployed; nothing to stop")
@@ -187,20 +134,8 @@ func (l *EnvLifecycle) Stop(ctx context.Context, input EnvLifecycleInput) error 
 	return nil
 }
 
-// Delete tears down the environment's namespace (skipped when it never
-// deployed, since there is nothing to tear down) and, only once that
-// succeeds, removes its row. Every other outcome — the Job itself could not
-// be launched, it ran but did not finish, or it finished but the namespace
-// teardown inside it did not (a namespace stuck on an unsatisfiable
-// finalizer) — moves the row to deletion-blocked naming why, rather than
-// silently leaving a caller unable to tell "still there" from "gone".
-//
-// It also revokes the environment's machine identity, once the namespace is
-// gone and before the row is, so that deleting an environment leaves nothing
-// usable behind. That revocation is part of the attempt rather than a
-// best-effort side effect: a failure blocks the delete and is retried by the
-// reconciler, which is the recoverable half of the choice — deleting the row
-// anyway would orphan the credential with nothing left naming it.
+// Delete tears down the namespace, revokes the machine identity, then removes
+// the row. Any failure moves the row to deletion-blocked naming why.
 func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) error {
 	if strings.TrimSpace(input.RunningVersion) != "" {
 		if err := l.runDeleteJob(ctx, input); err != nil {
@@ -208,28 +143,13 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 		}
 	}
 	l.recordUsage(ctx, input.EnvironmentID, model.UsageEventEnvironmentDeleted)
-	// The environment's own platform identity goes with it. An environment's
-	// credential outliving the environment is not a leak of a secret that has
-	// stopped being one: the client secret keeps minting tokens that keep
-	// resolving to a live user, so nothing else in the system will ever notice
-	// it, and leaving it is what makes a provisioned identity permanent.
-	//
-	// Revoked here rather than before the namespace teardown, because until the
-	// pod is gone the credential is still the one the environment is using; and
-	// before the row removal rather than after, because that removal is the
-	// last thing holding this environment's id — fail afterwards and there is
-	// no retryable record left that names what was not revoked.
+	// Revoke after the pod is gone (it still uses the credential) and before
+	// the row is removed (the last record naming what to revoke).
 	if l.identities != nil {
 		if err := l.identities.Revoke(ctx, input.EnvironmentID); err != nil {
 			return l.blockDelete(ctx, input, fmt.Errorf("namespace torn down but revoking the environment's platform identity failed: %w", err))
 		}
 	}
-	// The namespace is gone but the row is not yet: a failure here would leave
-	// the row in `deleting` with no reason, contradicting this method's own
-	// contract that every non-success outcome names why. Record it, so
-	// a retry has something to act on -- the namespace teardown is already
-	// done, so the retry's own delete is a no-op and only the row removal is
-	// re-attempted.
 	if err := l.rows.Delete(ctx, input.TenantID, input.EnvironmentID); err != nil {
 		return l.blockDelete(ctx, input, fmt.Errorf("namespace torn down but removing the environment row failed: %w", err))
 	}
@@ -260,27 +180,19 @@ func (l *EnvLifecycle) runDeleteJob(ctx context.Context, input EnvLifecycleInput
 	if result.Outcome != deployexec.OutcomeSucceeded {
 		return l.blockDelete(ctx, input, fmt.Errorf("delete job %s: %s", result.Outcome, lifecycleFailureDetail(result)))
 	}
-	// The Job's own exit code is not the whole story: `erun delete` treats
-	// a namespace-teardown failure as non-fatal for itself (its local
-	// config cleanup still runs), so a Job the runner reports as
-	// succeeded can still have left the namespace stuck. This is the only
-	// place that failure is visible.
+	// `erun delete` treats namespace-teardown failure as non-fatal, so a
+	// succeeded Job can still have left the namespace stuck.
 	if blocker := deployexec.NamespaceDeleteFailureFromOutput(result.Output); blocker != "" {
 		return l.blockDelete(ctx, input, errors.New(blocker))
 	}
-	// The environment row is about to be removed, so a failed best-effort
-	// DNS cleanup has nowhere to be recorded once this returns —
-	// the server log is the only place left to name it.
+	// The row is about to be removed, so the log is the only place left.
 	if reason := deployexec.UnexposeFailureFromOutput(result.Output); reason != "" {
 		log.Printf("erun api env lifecycle: dns cleanup for %s/%s did not succeed: %s", input.Tenant, input.Environment, reason)
 	}
 	return nil
 }
 
-// blockDelete records why a delete attempt did not tear the namespace down
-// and returns the same error to the caller. A failure to even record it
-// (best-effort: the environment row still exists to retry against) is
-// logged rather than compounding the original error.
+// blockDelete records why a delete was blocked and returns cause.
 func (l *EnvLifecycle) blockDelete(ctx context.Context, input EnvLifecycleInput, cause error) error {
 	if err := l.rows.MarkDeleteBlocked(ctx, input.TenantID, input.EnvironmentID, cause.Error()); err != nil {
 		log.Printf("erun api env lifecycle: recording delete-blocked for environment=%q did not persist: %v", input.EnvironmentID, err)

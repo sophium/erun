@@ -11,14 +11,8 @@ import (
 	orchestratorpkg "github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
-// orchestratorTestPortWithHost resolves a real port for the host fixture's
-// tenant and delegates every other tenant to the shared stub. It exists because
-// the shared stub answers 0 for a tenant it does not know, which would let the
-// host regression below pass for the wrong reason: an env dropped by the port
-// guard produces exactly the same output as one dropped by the type check, so a
-// builder that consulted the port BEFORE the type would still satisfy every
-// assertion. A host env that resolves a port is the production case too -- port
-// allocation is type-blind and happily allocates one.
+// orchestratorTestPortWithHost gives the host fixture a real port, as production
+// does, so a port-before-type builder cannot pass the host tests.
 func orchestratorTestPortWithHost(tenant, environment string) int {
 	if tenant == "frs" {
 		return 17100
@@ -26,9 +20,6 @@ func orchestratorTestPortWithHost(tenant, environment string) int {
 	return orchestratorTestPort(tenant, environment)
 }
 
-// hostAndOrdinaryEnvs is the fixture for the host tests below: one host tenant
-// and two ordinary ones, every one of which resolves an MCP port through
-// orchestratorTestPortWithHost.
 func hostAndOrdinaryEnvs() []configpkg.OrchestratorEnvConfig {
 	return []configpkg.OrchestratorEnvConfig{
 		{Tenant: "frs", Environment: "host"},
@@ -37,18 +28,6 @@ func hostAndOrdinaryEnvs() []configpkg.OrchestratorEnvConfig {
 	}
 }
 
-// TestBuildOrchestratorMCPConfigSkipsHostEnvBeforeThePortLookup is the
-// regression for the defect this change exists to fix: a host environment was
-// wired as an MCP edge that can never answer. A host env has no pod, so no
-// erun MCP edge runs for it and no port-forward can ever reach one -- but the
-// port resolver is type-blind and happily allocates it one, so the env was
-// wired and then reported as "its edge is not answering", prescribing a
-// deploy or reopen that a host environment refuses.
-//
-// The ordering the name claims is pinned by the port resolver, not by the
-// assertions alone: orchestratorTestPortWithHost gives frs/host a port that
-// resolves, so deleting the type check above the port lookup wires the host env
-// and fails the assertions below.
 func TestBuildOrchestratorMCPConfigSkipsHostEnvBeforeThePortLookup(t *testing.T) {
 	config, _, unreachable := buildOrchestratorMCPConfig(hostAndOrdinaryEnvs(), "/opt/erun/bin/erun", orchestratorTestPortWithHost, orchestratorTestEnvTypeHosts("frs"), orchestratorTestAlwaysReachable)
 
@@ -61,8 +40,7 @@ func TestBuildOrchestratorMCPConfigSkipsHostEnvBeforeThePortLookup(t *testing.T)
 	if _, ok := config.MCPServers["petios-rihards-win-develop"]; !ok {
 		t.Fatalf("expected the ordinary envs unaffected by the host skip: %v", config.MCPServers)
 	}
-	// Not merely unwired -- never probed. Reporting it unreachable would attach
-	// the deploy-or-reopen remedy to an env that refuses deploy.
+	// Never probed: an unreachable report would prescribe a deploy the host env refuses.
 	for _, env := range unreachable {
 		if env.Label == "frs/host" {
 			t.Fatalf("a host env must not be reported as an unreachable edge: %+v", unreachable)
@@ -70,11 +48,6 @@ func TestBuildOrchestratorMCPConfigSkipsHostEnvBeforeThePortLookup(t *testing.T)
 	}
 }
 
-// TestBuildOrchestratorMCPConfigReportsAHostSkipWithoutCallingItAProblem covers
-// the other half of the same wiring decision, which the test above deliberately
-// does not: the two notices an orchestrator launch shows are different, and a
-// host env belongs in the one explaining it has no edge at all rather than the
-// one that lists a wiring problem and prescribes a remedy the host env refuses.
 func TestBuildOrchestratorMCPConfigReportsAHostSkipWithoutCallingItAProblem(t *testing.T) {
 	_, skipped, _ := buildOrchestratorMCPConfig(hostAndOrdinaryEnvs(), "/opt/erun/bin/erun", orchestratorTestPortWithHost, orchestratorTestEnvTypeHosts("frs"), orchestratorTestAlwaysReachable)
 
@@ -95,12 +68,6 @@ func TestBuildOrchestratorMCPConfigReportsAHostSkipWithoutCallingItAProblem(t *t
 	}
 }
 
-// TestOrchestratorMCPOnlyHostSkips locks the distinction the unwired-error
-// path turns on: an orchestrator whose every linked environment is a host
-// environment is a WORKING configuration, so it must not take the "no linked
-// environment resolved an MCP port" error path meant for a real resolution
-// failure. A single non-host skip anywhere in the list is enough to make it a
-// real failure again.
 func TestOrchestratorMCPOnlyHostSkips(t *testing.T) {
 	host := orchestratorMCPSkip{Label: "frs/host", Reason: "it is a host environment", HostEnv: true}
 	problem := orchestratorMCPSkip{Label: "ghost/x", Reason: "it resolved no MCP port"}
@@ -125,11 +92,6 @@ func TestOrchestratorMCPOnlyHostSkips(t *testing.T) {
 	}
 }
 
-// TestSplitOrchestratorMCPHostSkips locks the split the two notices depend on:
-// the host envs must be lifted out of the problem list, in order, with each
-// side keeping every entry that belongs to it -- dropping one would reproduce
-// the silent-drop bug this reporting exists to prevent, just on the other
-// channel.
 func TestSplitOrchestratorMCPHostSkips(t *testing.T) {
 	hostA := orchestratorMCPSkip{Label: "frs/host", HostEnv: true}
 	hostB := orchestratorMCPSkip{Label: "frs/laptop", HostEnv: true}
@@ -150,13 +112,6 @@ func TestSplitOrchestratorMCPHostSkips(t *testing.T) {
 	}
 }
 
-// TestOrchestratorMCPHostEnvNoticeNamesTheEnvironmentsAndTheRecovery: the
-// notice is the only thing that tells an operator a linked environment is
-// absent from the session's toolset on purpose rather than by a wiring
-// failure, so it has to name which one and what to do instead -- "some
-// environments have no tools" is not actionable, and neither is the partial
-// notice's "check those environments still exist, then restart", which
-// prescribes a restart that changes nothing for a host env.
 func TestOrchestratorMCPHostEnvNoticeNamesTheEnvironmentsAndTheRecovery(t *testing.T) {
 	notice := orchestratorMCPHostEnvNotice("erun-issues", []orchestratorMCPSkip{
 		{Label: "frs/host", HostEnv: true},
@@ -171,18 +126,12 @@ func TestOrchestratorMCPHostEnvNoticeNamesTheEnvironmentsAndTheRecovery(t *testi
 		t.Errorf("notice must not prescribe a restart, which fixes nothing for a host env:\n%s", notice)
 	}
 
-	// An unnamed orchestrator still gets a readable line rather than one opening
-	// on a blank label.
 	if unnamed := orchestratorMCPHostEnvNotice("  ", []orchestratorMCPSkip{{Label: "frs/host", HostEnv: true}}); !strings.HasPrefix(unnamed, "The orchestrator ") {
 		t.Fatalf("unnamed notice = %q, want it to fall back to a generic label", unnamed)
 	}
 }
 
-// orchestratorTestAppWithHostEnv is orchestratorTestApp with one extra
-// environment staged in the store: frs/host, a real host env. Built on top of
-// the shared stub rather than added to newOrchestratorStubStore so the host
-// env exists only for the tests that are about it -- every other orchestrator
-// test keeps the exact env set it was written against.
+// orchestratorTestAppWithHostEnv stages frs/host only for these tests.
 func orchestratorTestAppWithHostEnv(t *testing.T) *App {
 	t.Helper()
 	home := t.TempDir()
@@ -211,13 +160,6 @@ func orchestratorTestAppWithHostEnv(t *testing.T) *App {
 	return app
 }
 
-// TestWriteOrchestratorMCPConfigHostOnlyIsAWorkingConfiguration drives the
-// full write path against a real store, because the defect was never in the
-// builder alone: writeOrchestratorMCPConfig turns "nothing wired" into
-// errOrchestratorMCPNoPort, and an orchestrator whose only linked environment
-// is a host environment would have hit exactly that path -- reporting a
-// working link as a failure to resolve a port. It must return no error, and
-// still carry the skip so the notice can be rendered.
 func TestWriteOrchestratorMCPConfigHostOnlyIsAWorkingConfiguration(t *testing.T) {
 	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
 	app := orchestratorTestAppWithHostEnv(t)
@@ -239,13 +181,6 @@ func TestWriteOrchestratorMCPConfigHostOnlyIsAWorkingConfiguration(t *testing.T)
 	}
 }
 
-// TestWireOrchestratorMCPHostEnvGetsAnInfoNoticeNotAWarning is the end-to-end
-// regression for the operator-facing half: a host-only orchestrator launches
-// with no MCP config at all, and the only thing distinguishing that working
-// state from a broken link is the notice. It must be informational, name the
-// environment, and never carry the warning the partial notice uses -- a
-// warning banner here would send an operator to fix a configuration that is
-// already correct.
 func TestWireOrchestratorMCPHostEnvGetsAnInfoNoticeNotAWarning(t *testing.T) {
 	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
 	app := orchestratorTestAppWithHostEnv(t)
@@ -277,11 +212,6 @@ func TestWireOrchestratorMCPHostEnvGetsAnInfoNoticeNotAWarning(t *testing.T) {
 	}
 }
 
-// TestWireOrchestratorMCPHostEnvIsNotCountedAsMissing locks the arithmetic the
-// partial notice rests on. A host env has no MCP edge to lose, so counting it
-// as "missing" would report a healthy orchestrator as one that started with
-// tools for fewer environments than it links. With a working env alongside it,
-// nothing is missing at all and the partial warning must not fire.
 func TestWireOrchestratorMCPHostEnvIsNotCountedAsMissing(t *testing.T) {
 	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
 	app := orchestratorTestAppWithHostEnv(t)

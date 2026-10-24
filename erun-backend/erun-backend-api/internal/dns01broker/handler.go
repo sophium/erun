@@ -9,37 +9,27 @@ import (
 	"time"
 )
 
-// tokenVerifier verifies a per-env DNS-01 token and returns the (tenant,
-// environment) it authorizes. Satisfied by *mcptoken.Signer.
 type tokenVerifier interface {
 	VerifyDNS01(token string, now time.Time) (tenant, environment string, err error)
 }
 
-// recordWriter applies the authorized challenge write. Satisfied by
-// *PowerDNSWriter.
 type recordWriter interface {
 	Present(fqdn, value string) error
 	CleanUp(fqdn, value string) error
 }
 
-// AuditSink records every authorized broker write. Best-effort: a write is not
-// failed if auditing fails, but every write must be offered to the sink.
+// AuditSink records authorized broker writes; an audit failure does not fail the write.
 type AuditSink interface {
 	RecordDNS01(ctx context.Context, tenant, environment, action, fqdn string)
 }
 
-// logAuditSink is the default sink: a structured log line per write. A
-// DB-backed sink can replace it without touching the broker.
 type logAuditSink struct{}
 
 func (logAuditSink) RecordDNS01(_ context.Context, tenant, environment, action, fqdn string) {
 	log.Printf("dns01 broker: tenant=%s env=%s action=%s fqdn=%s", tenant, environment, action, fqdn)
 }
 
-// Broker serves the authenticated DNS-01 present/cleanup endpoints. Each request
-// carries a per-env token; the broker verifies it, authorizes the challenge FQDN
-// against that env's subzone, and only then writes via the centrally-held TSIG
-// credential. This is what makes per-env issuance safe on a shared cluster.
+// Broker serves the authenticated DNS-01 present/cleanup endpoints.
 type Broker struct {
 	verifier tokenVerifier
 	writer   recordWriter
@@ -55,9 +45,7 @@ func NewBroker(verifier tokenVerifier, writer recordWriter, servicesZone string,
 	return &Broker{verifier: verifier, writer: writer, zone: servicesZone, audit: audit, now: time.Now}
 }
 
-// challengeRequest is the broker's own contract; the per-cluster webhook shim
-// marshals cert-manager's ChallengeRequest into it and carries the env token in
-// the Authorization header.
+// challengeRequest is the contract the per-cluster webhook shim marshals into.
 type challengeRequest struct {
 	FQDN  string `json:"fqdn"`
 	Value string `json:"value"`
@@ -87,8 +75,7 @@ func (b *Broker) serve(w http.ResponseWriter, r *http.Request, action string, ap
 		return
 	}
 	if err := AuthorizeChallenge(tenant, environment, b.zone, body.FQDN); err != nil {
-		// 403, not 404: the caller is authenticated but not authorized for this
-		// name. The message names the caller's own scope, never another tenant's.
+		// Never echo the fqdn: it may be another tenant's name.
 		http.Error(w, "challenge fqdn is outside this environment's subzone", http.StatusForbidden)
 		return
 	}
@@ -100,8 +87,6 @@ func (b *Broker) serve(w http.ResponseWriter, r *http.Request, action string, ap
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// authenticate verifies the bearer DNS-01 token and returns the (tenant,
-// environment) it authorizes, writing a 401 and returning ok=false otherwise.
 func (b *Broker) authenticate(w http.ResponseWriter, r *http.Request) (tenant, environment string, ok bool) {
 	token := bearerToken(r)
 	if token == "" {

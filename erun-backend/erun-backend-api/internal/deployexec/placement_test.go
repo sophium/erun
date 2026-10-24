@@ -22,11 +22,8 @@ func TestBootstrapEnvironmentScriptDefaultsToInCluster(t *testing.T) {
 	}
 }
 
-// TestBootstrapEnvironmentScriptTargetsRemoteContext locks the kubeconfig
-// shape for a placed environment: kubectl config commands (never a hand-rolled
-// YAML heredoc interpolating the context name/server URL, which an operator-
-// authored context name could otherwise inject into) and the admin token read
-// back from an env var, never a literal value.
+// TestBootstrapEnvironmentScriptTargetsRemoteContext: context names are
+// operator-authored, so no YAML heredoc may interpolate them.
 func TestBootstrapEnvironmentScriptTargetsRemoteContext(t *testing.T) {
 	placement := PlacementParams{
 		ContextID:         "ctx-1",
@@ -50,10 +47,6 @@ func TestBootstrapEnvironmentScriptTargetsRemoteContext(t *testing.T) {
 	}
 }
 
-// TestBootstrapEnvironmentScriptQuotesUntrustedContextName proves an
-// operator-authored context name cannot break out of its argv position:
-// shellJoin single-quotes it, so a shell metacharacter lands inside the
-// quotes as literal text passed to kubectl, never interpreted by the shell.
 func TestBootstrapEnvironmentScriptQuotesUntrustedContextName(t *testing.T) {
 	placement := PlacementParams{
 		ContextID:         "ctx-1",
@@ -109,12 +102,8 @@ func TestEnsurePlacementSecretNoopForInClusterPlacement(t *testing.T) {
 	}
 }
 
-// TestEnsurePlacementSecretCreatesThenUpdates locks the upsert: the first
-// call creates the Secret, and a second call with a rotated token updates the
-// same object in place rather than erroring on AlreadyExists — a repeat
-// deploy or a token rotation must both reach the very next Job. Asserted via
-// StringData: the real API server converts it to Data on write, but the fake
-// clientset used here stores the object as given, without that conversion.
+// TestEnsurePlacementSecretCreatesThenUpdates asserts StringData: the fake
+// clientset skips the API server's conversion to Data.
 func TestEnsurePlacementSecretCreatesThenUpdates(t *testing.T) {
 	kube := fake.NewSimpleClientset()
 	placement := PlacementParams{ContextID: "ctx-1", AdminToken: "token-v1"}
@@ -156,12 +145,8 @@ func TestResolvePlacementTokenFailsClearlyWithNoResolver(t *testing.T) {
 	}
 }
 
-// TestResolvePlacementTokenRefusesAContextWithNoOwningTenant: a placement
-// credential belongs to the tenant that owns the context, so a caller that
-// names only a context id has nothing that scopes the read — erun_operations'
-// unconditional RLS policy would hand it whichever tenant's context that id
-// names. Refusing before the resolver is reached is what keeps the id from
-// being the only thing the read is keyed on.
+// TestResolvePlacementTokenRefusesAContextWithNoOwningTenant: erun_operations'
+// RLS would otherwise resolve whichever tenant's context the id names.
 func TestResolvePlacementTokenRefusesAContextWithNoOwningTenant(t *testing.T) {
 	resolver := &recordingCredentialResolver{token: "secret-token"}
 	_, err := ResolvePlacementToken(context.Background(), resolver, "  ", "ctx-1")
@@ -173,8 +158,6 @@ func TestResolvePlacementTokenRefusesAContextWithNoOwningTenant(t *testing.T) {
 	}
 }
 
-// recordingCredentialResolver remembers which (tenant, context) pair it was
-// asked for, so a test can assert on the owner rather than only the token.
 type recordingCredentialResolver struct {
 	token string
 	asked []string

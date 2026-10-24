@@ -13,9 +13,6 @@ import (
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
-// TestCreateReviewRefusesAnUnusableRepository: a repository the platform
-// cannot canonicalize names no repository at all, so storing it would key the
-// review to an identity no other caller could ever match.
 func TestCreateReviewRefusesAnUnusableRepository(t *testing.T) {
 	svc := &stubReviewService{prepareErr: &service.InvalidRepositoryError{Reason: "repository remote \"https://github.com/\" names no repository"}}
 	routes := ReviewRoutes{service: svc}
@@ -33,21 +30,7 @@ func TestCreateReviewRefusesAnUnusableRepository(t *testing.T) {
 	}
 }
 
-// TestCreateReviewRefusesACallerSuppliedIssueProvenance is the reproduction of
-// the forgery POST /v1/reviews allowed. The route decoded its body straight
-// into model.Review -- the same struct it returns -- so a derived issue field
-// was reachable from request input, and because nothing persists it the
-// `Returning("*")` that overwrites every stored column with the database's own
-// value could not overwrite this one. A body asserting a provenance came back
-// in the 201 as though the platform had established it.
-//
-// `issueRef` itself is a real request field now -- declaring the issue is what
-// makes the link authoritative, and that is the whole point of the column -- so
-// the claim that stays unforgeable is the one the platform derives: the source.
-// A caller states *which* issue, never *that they stated it*. The source branch
-// here deliberately follows no convention, which is the state where the
-// resolver has nothing of its own to replace a forged value with, so the
-// caller's value would have been the whole answer.
+// The issue source is derived by the platform; a caller can name an issue but not its provenance.
 func TestCreateReviewRefusesACallerSuppliedIssueProvenance(t *testing.T) {
 	reviews := &stubReviewRepository{}
 	routes := ReviewRoutes{reviews: reviews, service: &stubReviewService{}}
@@ -69,26 +52,14 @@ func TestCreateReviewRefusesACallerSuppliedIssueProvenance(t *testing.T) {
 			t.Fatalf("%s = %v in the response, want it absent: a review's issue provenance is the platform's to resolve, and a caller must not be able to assert one", field, value)
 		}
 	}
-	// The forgery has to be stopped at the boundary rather than scrubbed off
-	// the response afterwards: what the repository is handed is what the route
-	// built, and that value carries no declared issue either. The resolver is
-	// the only writer of these two fields on the way out.
+	// The route must not hand the repository a declared issue it did not build.
 	if reviews.gotCreated.DeclaredIssueRef != "" || reviews.gotCreated.IssueRefSource != "" {
 		t.Fatalf("the repository was handed declaredIssueRef=%q issueRefSource=%q, want neither",
 			reviews.gotCreated.DeclaredIssueRef, reviews.gotCreated.IssueRefSource)
 	}
 }
 
-// TestCreateReviewRecordsADeclaredIssueAndItWinsOverTheBranch is the required
-// pair for the stored link: a review that states its issue records it, and
-// that statement beats whatever its source branch looks like. It runs the real
-// ReviewService.PrepareCreate rather than the stub, because "which spelling
-// lands in reviews.issue_ref" is the service's contract and a stub that only
-// echoes would pin nothing about it.
-//
-// The bare-number case is the branch convention's own spelling, kept working:
-// a caller who already writes `feature/2683-...` branches should not have to
-// look up the owner/repo prefix to record the link explicitly.
+// Runs the real PrepareCreate: which spelling lands in reviews.issue_ref is the service's contract.
 func TestCreateReviewRecordsADeclaredIssueAndItWinsOverTheBranch(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -157,10 +128,6 @@ func TestCreateReviewRecordsADeclaredIssueAndItWinsOverTheBranch(t *testing.T) {
 	}
 }
 
-// TestCreateReviewLeavesTheBranchDerivationInferredWhenNothingIsDeclared is the
-// other half of the provenance rule, and the state the pipeline view must not
-// mislabel: with no declaration recorded, the link is the branch's own guess
-// and has to arrive marked as one.
 func TestCreateReviewLeavesTheBranchDerivationInferredWhenNothingIsDeclared(t *testing.T) {
 	reviews := &stubReviewRepository{}
 	routes := ReviewRoutes{reviews: reviews, service: service.NewReviewService(nil, nil, nil, nil, nil, nil)}
@@ -189,10 +156,6 @@ func TestCreateReviewLeavesTheBranchDerivationInferredWhenNothingIsDeclared(t *t
 	}
 }
 
-// TestCreateReviewRefusesAnIssueReferenceItCannotSpell is the trust boundary on
-// the new field: a value that is neither owner/repo#number nor a bare number is
-// refused up front, naming the field, rather than stored as a reference no
-// other pipeline could ever match it against.
 func TestCreateReviewRefusesAnIssueReferenceItCannotSpell(t *testing.T) {
 	cases := []struct{ name, repository, issueRef string }{
 		{name: "prose", repository: "https://github.com/sophium/erun", issueRef: "the jobs issue"},
@@ -228,12 +191,7 @@ func TestCreateReviewRefusesAnIssueReferenceItCannotSpell(t *testing.T) {
 	}
 }
 
-// TestCreateReviewRefusesACallerSuppliedStatus: the same decode also reached
-// the stored status column, which belongs to the merge queue rather than to the
-// caller -- AdvanceMergeQueue is the only thing permitted to promote a review
-// to MERGE, and it refuses while the head has unresolved threads or while
-// another merge holds the branch. A caller could step past all of that by
-// creating the review there. A new review opens OPEN.
+// Status belongs to the merge queue, so a new review opens OPEN regardless of the body.
 func TestCreateReviewRefusesACallerSuppliedStatus(t *testing.T) {
 	reviews := &stubReviewRepository{}
 	routes := ReviewRoutes{reviews: reviews, service: &stubReviewService{}}
@@ -252,9 +210,6 @@ func TestCreateReviewRefusesACallerSuppliedStatus(t *testing.T) {
 	}
 }
 
-// TestCreateReviewCarriesTheBodyFieldsItDoesAccept guards the other direction
-// from the two refusals above: separating the request from the model must not
-// quietly drop the fields a create body is documented to carry.
 func TestCreateReviewCarriesTheBodyFieldsItDoesAccept(t *testing.T) {
 	reviews := &stubReviewRepository{}
 	routes := ReviewRoutes{reviews: reviews, service: &stubReviewService{}}

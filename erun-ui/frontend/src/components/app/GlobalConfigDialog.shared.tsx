@@ -23,8 +23,7 @@ export function CloudAliasAction({
   onLogin,
   onLogout,
   onSwitch,
-  // Cloudflare has no OIDC/SSO identity to swap -- its "login" only re-verifies
-  // a static token -- so the caller omits onSwitch to hide the action.
+  // Omitted for Cloudflare, which has no identity to switch.
   canSwitchIdentity,
   loginLabel,
   loadingLabel,
@@ -38,8 +37,6 @@ export function CloudAliasAction({
   onLogout: () => void;
   onSwitch: () => void;
   canSwitchIdentity: boolean;
-  // Cloudflare re-verifies a stored token instead of running a browser SSO, so
-  // it relabels this action ("Verify token" / "Verifying...").
   loginLabel?: string;
   loadingLabel?: string;
 }): React.ReactElement {
@@ -69,9 +66,6 @@ export function CloudAliasAction({
   );
 }
 
-// CloudAliasActiveActions is the "Connected" row's own action set -- split
-// out of CloudAliasAction so that function stays under the cyclop threshold;
-// the rendered result is unchanged.
 function CloudAliasActiveActions({
   busy,
   logoutLoading,

@@ -15,91 +15,48 @@ import (
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// reconcile_bypass.go implements the read half of the recorded decision on
-// ruleset bypasses (see erun-backend-api/AGENTS.md "GitHub branch protection
-// cannot tell the queue's push from a bypass"): narrowing who holds the
-// bypass grant to a dedicated queue identity is what ruleset_bypass_plan.go
-// resolves, but a bypass is structurally unavoidable for the pull_request
-// rule as long as the queue pushes raw commits instead of merging through
-// the GitHub API. So every bypassed push should be checkable after the fact
-// against a real successful build, rather than trusted because of who pushed it --
-// and once one identity is supposed to be the only one holding the grant,
-// checkable against that too.
-//
-// GitHub's rule-suites API (`GET .../rulesets/rule-suites`) is the ledger of
-// every push GitHub evaluated against a ruleset, including which ones used a
-// bypass; the platform's build history is erun's own record of what actually
-// built green. This cross-references the two: a bypassed push none of whose
-// landed commits has a successful build recorded is reported unreconciled,
-// loudly.
+// The queue pushes raw commits, so a pull_request-rule bypass is unavoidable;
+// this checks each bypassed push in GitHub's rule-suites ledger against the
+// platform's successful builds (erun-backend-api/AGENTS.md).
 
 // ReconcileBypassParams is the `erun exec reconcile-bypass` input.
 type ReconcileBypassParams struct {
-	// RemoteURL is the github.com remote the ruleset lives on.
 	RemoteURL string
-	// RulesetID is the specific ruleset to check bypasses against. Required
-	// and never defaulted: a bypass GitHub attributes to some other ruleset
-	// must not be silently folded into this one's reconciliation.
-	RulesetID int64
-	// TargetBranch is the ruleset's protected branch, e.g. "main".
+	// RulesetID is required so another ruleset's bypasses are never folded in.
+	RulesetID    int64
 	TargetBranch string
-	// Since narrows the GitHub lookup window to one of rule-suites' own
-	// time_period values (hour, day, week, month). Empty keeps GitHub's own
-	// default window.
+	// Since is a rule-suites time_period (hour, day, week, month); empty keeps
+	// GitHub's default.
 	Since string
-	// ExpectedActors names the identities allowed to hold the bypass grant
-	// at all. Empty accepts any actor and reports on evidence alone; naming
-	// them is what makes narrowing the grant to one non-human identity
-	// observable rather than merely configured.
+	// ExpectedActors may hold the bypass grant; empty accepts any actor.
 	ExpectedActors []string
 }
 
-// Verdicts a bypassed push can carry. A push is accounted for when a
-// successful build exists of exactly what landed, or when a release published
-// it; anything else is loud.
+// Bypassed-push verdicts.
 const (
-	// BypassVerdictReconciled means one of the commits this push put on the
-	// branch has a successful build recorded.
 	BypassVerdictReconciled = "RECONCILED"
-	// BypassVerdictRelease means a tag in the repository points at one of
-	// the commits this push carried, so a release -- which stamps, tags and
-	// then pushes -- is what landed it. A release is not a gated merge and
-	// must not be reported as one.
+	// BypassVerdictRelease means a tag points at a pushed commit, so a release,
+	// not a gated merge, landed it.
 	BypassVerdictRelease = "RELEASE"
-	// BypassVerdictUnexpectedActor means the bypass was exercised by an
-	// identity the caller did not name, whatever the evidence says about
-	// the content. That is the failure the dedicated-identity narrowing
-	// exists to make visible.
+	// BypassVerdictUnexpectedActor overrides the evidence verdict.
 	BypassVerdictUnexpectedActor = "UNEXPECTED_ACTOR"
-	// BypassVerdictUnreconciled means nothing accounts for what landed.
-	BypassVerdictUnreconciled = "UNRECONCILED"
+	BypassVerdictUnreconciled    = "UNRECONCILED"
 )
 
-// BypassedPush is one push GitHub's rule-suites ledger recorded as having
-// bypassed a rule that RulesetID enforces on the target branch.
+// BypassedPush is one push that bypassed a rule RulesetID enforces.
 type BypassedPush struct {
 	RuleSuiteID int64  `json:"ruleSuiteId"`
 	Actor       string `json:"actor"`
-	// Commit is the push's after_sha -- the branch tip this push produced.
-	Commit string `json:"commit"`
-	// BeforeCommit is the push's before_sha, the tip it moved from. The two
-	// bound the range of commits the push actually added, which is what has
-	// to be accounted for: a batched merge and every release push carry
-	// more than one commit, so the tip alone is not the whole push.
+	Commit      string `json:"commit"`
+	// BeforeCommit bounds the pushed range with Commit; a batched merge or
+	// release carries more than one commit.
 	BeforeCommit string `json:"beforeCommit"`
 	PushedAt     string `json:"pushedAt"`
-	// BypassedRule names which of the ruleset's own rules was bypassed for
-	// this push, e.g. "pull_request".
 	BypassedRule string `json:"bypassedRule"`
-	// Verdict is one of the BypassVerdict* values.
-	Verdict string `json:"verdict"`
-	// Reason says why, whenever the verdict is not RECONCILED.
-	Reason string `json:"reason,omitempty"`
-	// BuildID names the successful build that accounts for a RECONCILED
-	// verdict.
-	BuildID string `json:"buildId,omitempty"`
-	// ReleaseTag names the tag that accounts for a RELEASE verdict.
-	ReleaseTag string `json:"releaseTag,omitempty"`
+	Verdict      string `json:"verdict"`
+	Reason       string `json:"reason,omitempty"`
+	BuildID      string `json:"buildId,omitempty"`
+	ReleaseTag   string `json:"releaseTag,omitempty"`
 }
 
 // ReconcileBypassResult is the full reconciliation report.
@@ -109,18 +66,13 @@ type ReconcileBypassResult struct {
 	RulesetID    int64          `json:"rulesetId"`
 	TargetBranch string         `json:"targetBranch"`
 	Pushes       []BypassedPush `json:"pushes"`
-	// Unreconciled counts pushes nothing accounts for -- the number a
-	// caller should treat as loud, not zero-value noise.
-	Unreconciled int `json:"unreconciled"`
-	// UnexpectedActors counts pushes an unnamed identity bypassed. Separate
-	// from Unreconciled because they are different failures: one says the
-	// content was never built, the other says the wrong identity can push
-	// at all.
+	Unreconciled int            `json:"unreconciled"`
+	// UnexpectedActors is separate from Unreconciled: wrong identity, not
+	// unbuilt content.
 	UnexpectedActors int `json:"unexpectedActors"`
 }
 
-// ReconcileBypassDependencies lets tests replace the GitHub HTTP call and gh
-// token resolution without a real network or a real gh CLI.
+// ReconcileBypassDependencies are the GitHub HTTP and gh token seams.
 type ReconcileBypassDependencies struct {
 	Client       *http.Client
 	ResolveToken func(owner string) (string, bool)
@@ -136,14 +88,9 @@ func normalizeReconcileBypassDependencies(deps ReconcileBypassDependencies) Reco
 	return deps
 }
 
-// maxRuleSuitePages bounds the rule-suites pagination walk so a long branch
-// history (or a wide --since) cannot make this loop forever. A capped run
-// reports that it stopped early rather than silently mistaking a partial
-// result for a complete one.
+// maxRuleSuitePages caps pagination; a capped run reports it stopped early.
 const maxRuleSuitePages = 20
 
-// reconcileBypassInputs is ReconcileBypass's validated, trimmed input, kept
-// separate from ReconcileBypassParams so validation happens exactly once.
 type reconcileBypassInputs struct {
 	owner, repo, targetBranch, since string
 	rulesetID                        int64
@@ -179,10 +126,6 @@ func resolveReconcileBypassInputs(ctx core.Context, params ReconcileBypassParams
 	}, nil
 }
 
-// resolveGitHubRepoFromRemoteOrOrigin resolves owner/repo from an explicit
-// remote URL, falling back to the checkout's own origin. A command that
-// always runs against the repository the operator is standing in should not
-// make them retype its remote to be usable at all.
 func resolveGitHubRepoFromRemoteOrOrigin(ctx core.Context, remoteURL, traceLabel string) (owner, repo string, err error) {
 	remote := strings.TrimSpace(remoteURL)
 	if remote == "" {
@@ -212,10 +155,8 @@ func trimmedNonEmpty(values []string) []string {
 	return trimmed
 }
 
-// ReconcileBypass cross-references GitHub's own bypass ledger for
-// params.RulesetID/params.TargetBranch against the platform's build history,
-// and reports every bypassed push next to whether a successful build of a
-// commit it landed covers it.
+// ReconcileBypass reports every push that bypassed the ruleset and whether a
+// successful build of a commit it landed covers it.
 func ReconcileBypass(ctx core.Context, store config.CloudReadStore, alias string, params ReconcileBypassParams, cloudDeps cloud.CloudDependencies, deps ReconcileBypassDependencies) (ReconcileBypassResult, error) {
 	inputs, err := resolveReconcileBypassInputs(ctx, params)
 	if err != nil {
@@ -246,10 +187,8 @@ func ReconcileBypass(ctx core.Context, store config.CloudReadStore, alias string
 	return finishReconcileBypass(ctx, client, deps.Client, token, listURL, inputs, result)
 }
 
-// traceReconcileBypassFollowUpCalls names the conditional GitHub reads the
-// reconciliation makes once it knows which pushes the tip commit alone did
-// not account for, so a dry run shows every call a real run can make rather
-// than only the one it always makes.
+// traceReconcileBypassFollowUpCalls makes a dry run show the conditional reads
+// too.
 func traceReconcileBypassFollowUpCalls(ctx core.Context, provider config.CloudProviderConfig, inputs reconcileBypassInputs) {
 	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/rulesets/rule-suites/{ruleSuiteId} per bypassed suite, to confirm ruleset %d's own rule was the bypassed one",
 		registry.GithubAPIBaseURL, inputs.owner, inputs.repo, inputs.rulesetID))
@@ -260,9 +199,6 @@ func traceReconcileBypassFollowUpCalls(ctx core.Context, provider config.CloudPr
 		registry.GithubAPIBaseURL, inputs.owner, inputs.repo, maxReleaseTagPages))
 }
 
-// finishReconcileBypass runs the networked half of ReconcileBypass, isolated
-// so the validation and dry-run branching above it don't inflate that
-// function's complexity -- the same split ClosePullRequest uses.
 func finishReconcileBypass(ctx core.Context, client *platformclient.PlatformClient, httpClient *http.Client, token, listURL string, inputs reconcileBypassInputs, result ReconcileBypassResult) (ReconcileBypassResult, error) {
 	suites, truncated, err := listBypassedRuleSuites(context.Background(), httpClient, token, listURL)
 	if err != nil {
@@ -286,16 +222,8 @@ func finishReconcileBypass(ctx core.Context, client *platformclient.PlatformClie
 	return result, nil
 }
 
-// accountForBypassedPushes decides each push's verdict and returns how many
-// went unaccounted for and how many an unnamed identity made.
-//
-// Two things a queue legitimately does are not one thing. A merge lands
-// exactly the commit the queue built, so its tip has a successful build. A
-// release lands three commits at once (the tagged release commit, the
-// packaging-checksum sync, the next version's stamp) and its tip is the last
-// of them, which nothing built -- reconciling only the tip would report every
-// release this repository has ever cut as unaccounted for, and a report that
-// is permanently red is a report nobody reads.
+// A release lands three commits and its tip was never built, so checking only
+// tips would flag every release.
 func accountForBypassedPushes(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, pushes []BypassedPush, builds *successfulBuildIndex) (unreconciled, unexpectedActors int, err error) {
 	tags := newReleaseTagIndex(ctx, client, token, inputs.owner, inputs.repo)
 	for i := range pushes {
@@ -313,9 +241,7 @@ func accountForBypassedPushes(ctx context.Context, client *http.Client, token st
 	return unreconciled, unexpectedActors, nil
 }
 
-// accountForOneBypassedPush resolves one push's evidence, then lets an
-// unexpected actor override the verdict: content that was really built is
-// still a finding when the wrong identity was able to push it at all.
+// An unexpected actor overrides even a built verdict.
 func accountForOneBypassedPush(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, push *BypassedPush, builds *successfulBuildIndex, tags *releaseTagIndex) error {
 	verdict, reason, err := resolveBypassedPushEvidence(ctx, client, token, inputs, push, builds, tags)
 	if err != nil {
@@ -337,9 +263,8 @@ func accountForOneBypassedPush(ctx context.Context, client *http.Client, token s
 	return nil
 }
 
-// resolveBypassedPushEvidence returns an error only when the platform's build
-// history could not be read: that is not a fact about the push, and reporting
-// it as UNRECONCILED would blame every push for an outage.
+// resolveBypassedPushEvidence errors only on an unreadable build history,
+// which must not be blamed on every push.
 func resolveBypassedPushEvidence(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, push *BypassedPush, builds *successfulBuildIndex, tags *releaseTagIndex) (verdict, reason string, err error) {
 	buildID, err := builds.buildOf(push.Commit)
 	if err != nil {
@@ -374,16 +299,12 @@ func resolveBypassedPushEvidence(ctx context.Context, client *http.Client, token
 	return BypassVerdictUnreconciled, fmt.Sprintf("no successful build and no tag account for the %d commit(s) this push added", len(commits)), nil
 }
 
-// unreconciledBypassedPush turns a failure to read a push's own evidence into
-// its verdict: the push stays unexplained, which is not an outage.
 func unreconciledBypassedPush(reasonPrefix string, cause error) (verdict, reason string, err error) {
 	return BypassVerdictUnreconciled, reasonPrefix + cause.Error(), nil
 }
 
-// successfulBuildIndex answers "which successful build, if any, built exactly
-// this commit", asking the platform at most once per commit: a release push
-// and a batched merge share commits with nothing else, but the tip of one push
-// is often the before-commit of the next.
+// successfulBuildIndex asks the platform once per commit: one push's tip is
+// often the next push's before-commit.
 type successfulBuildIndex struct {
 	ctx      context.Context
 	client   *platformclient.PlatformClient
@@ -418,9 +339,6 @@ func (index *successfulBuildIndex) buildOf(commit string) (string, error) {
 	return buildID, nil
 }
 
-// actorIsExpected treats an empty expectation as "any actor": naming the
-// identities is opt-in, so a caller that has not narrowed the bypass grant
-// yet still gets the evidence half of the report.
 func actorIsExpected(expected []string, actor string) bool {
 	if len(expected) == 0 {
 		return true
@@ -433,14 +351,11 @@ func actorIsExpected(expected []string, actor string) bool {
 	return false
 }
 
-// maxReleaseTagPages bounds the tag walk. Truncation can only ever turn a
-// release into an UNRECONCILED finding, never the reverse, so the bound fails
-// loud rather than silently excusing a push.
+// maxReleaseTagPages bounds the tag walk; truncation can only turn a release
+// into UNRECONCILED, never excuse a push.
 const maxReleaseTagPages = 5
 
-// releaseTagIndex reads the repository's tags at most once, and only when a
-// push actually needs them -- the common case (a merge whose tip is the
-// commit the queue built) never fetches them at all.
+// releaseTagIndex fetches tags lazily, once.
 type releaseTagIndex struct {
 	ctx    context.Context
 	client *http.Client

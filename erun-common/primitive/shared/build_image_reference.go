@@ -15,18 +15,14 @@ import (
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// resolveDockerBuildRegistryForEnvironment errors when no registry is marked
-// for the build role; that message is the user-facing contract and must read
-// identically in dry-run and real runs.
+// resolveDockerBuildRegistryForEnvironment's no-registry error must read the
+// same in dry-run and real runs.
 func resolveDockerBuildRegistryForEnvironment(ctx core.Context, projectRoot, environment string) (string, bool, error) {
 	list, err := config.EffectiveContainerRegistries(projectRoot, environment)
 	if err != nil {
 		return "", false, err
 	}
-	// A cluster registry resolves to its concrete push host: the ClusterIP
-	// directly for an in-pod build, or a host port-forward otherwise. Build uses
-	// the current kube-context (empty resolves to in-cluster config in-pod, or
-	// kubectl's current-context on the host). Plain lists pass through unchanged.
+	// Empty context: in-cluster config in-pod, current-context on the host.
 	list, err = kube.ConcretizeRegistriesForContext(ctx, "", list)
 	if err != nil {
 		return "", false, err
@@ -38,18 +34,13 @@ func resolveDockerBuildRegistryForEnvironment(ctx core.Context, projectRoot, env
 	return registry, list.BuildRegistryInsecure(), nil
 }
 
-// dockerContextRepoRoot / dockerContextComponent are the accepted
-// paths.dockercontext values selecting the Docker build context root.
 const (
 	dockerContextRepoRoot  = "repo-root"
 	dockerContextComponent = "component"
 )
 
-// ResolveDockerBuildContextDirForProject picks the Docker build context root. A
-// configured paths.dockercontext (or the selected components: entry's
-// dockercontext) wins over the positional heuristic; unset keeps the
-// heuristic, which returns the repo root only for the conventional
-// <devops-root>/docker/<component> layout.
+// ResolveDockerBuildContextDirForProject lets a configured dockercontext win
+// over the positional heuristic.
 func ResolveDockerBuildContextDirForProject(buildDir, projectRoot, selectedComponent string) (string, error) {
 	mode, ok, err := resolveComponentAwareDockerContext(projectRoot, selectedComponent)
 	if err != nil {
@@ -69,10 +60,7 @@ func ResolveDockerBuildContextDirForProject(buildDir, projectRoot, selectedCompo
 	return buildDir, nil
 }
 
-// configuredDockerContext resolves the project-global paths.dockercontext
-// override. It returns (mode, true, nil) for a valid value, (,false,nil) when
-// unset, and a loud error for any other value — a misconfigured override fails
-// the build rather than silently falling back to the positional heuristic.
+// configuredDockerContext fails on an invalid value rather than fall back silently.
 func configuredDockerContext(projectRoot string) (string, bool, error) {
 	paths, err := config.LoadProjectPaths(projectRoot)
 	if err != nil {
@@ -81,11 +69,6 @@ func configuredDockerContext(projectRoot string) (string, bool, error) {
 	return validateDockerContextMode(paths.DockerContext, "paths.dockercontext")
 }
 
-// resolveComponentAwareDockerContext resolves the docker build context mode a
-// build/push command should use: the selected components: entry's
-// dockercontext when the project declares one or more (see
-// resolveProjectComponent), otherwise the unchanged paths.dockercontext
-// override via configuredDockerContext.
 func resolveComponentAwareDockerContext(projectRoot, selectedComponent string) (string, bool, error) {
 	name, paths, ok, err := config.ResolveProjectComponent(projectRoot, selectedComponent)
 	if err != nil {
@@ -118,11 +101,8 @@ func ResolveDockerBuildVersion(buildDir, projectRoot, selectedComponent string) 
 
 	candidates := dockerBuildVersionCandidates(buildDir, projectRoot)
 	if hasConfigured {
-		// paths.version (or a selected components: entry's version) relocates the
-		// project-level VERSION: it stands in for the project-root candidate, so a
-		// component's own VERSION and any intermediate <module>/VERSION still take
-		// precedence (most-specific first). This keeps version-pinned base
-		// components (VERSION in their own build dir) pinned.
+		// The configured VERSION replaces only the project-root candidate, so
+		// version-pinned components stay pinned.
 		candidates = replaceProjectRootVersionCandidate(candidates, projectRoot, configured)
 	}
 
@@ -142,9 +122,6 @@ func ResolveDockerBuildVersion(buildDir, projectRoot, selectedComponent string) 
 	return "", false, "", ErrVersionFileNotFound
 }
 
-// replaceProjectRootVersionCandidate swaps the project-root VERSION candidate for
-// the configured paths.version file, leaving the more specific component and
-// module candidates ahead of it so the most-specific VERSION still wins.
 func replaceProjectRootVersionCandidate(candidates []string, projectRoot, configured string) []string {
 	rootVersion := filepath.Clean(filepath.Join(projectRoot, "VERSION"))
 	out := make([]string, 0, len(candidates)+1)
@@ -163,11 +140,6 @@ func replaceProjectRootVersionCandidate(candidates []string, projectRoot, config
 	return out
 }
 
-// resolveComponentAwareVersionFile resolves the VERSION file path a
-// build/push command should use: the selected components: entry's version
-// when the project declares one or more (see resolveProjectComponent),
-// otherwise the unchanged paths.version override. Returns (path, true,
-// configKey, nil) when set, (,false,,nil) when unset.
 func resolveComponentAwareVersionFile(projectRoot, selectedComponent string) (string, bool, string, error) {
 	name, paths, ok, err := config.ResolveProjectComponent(projectRoot, selectedComponent)
 	if err != nil {
@@ -181,9 +153,6 @@ func resolveComponentAwareVersionFile(projectRoot, selectedComponent string) (st
 	return path, hasPath, fmt.Sprintf("components.%s.version", name), nil
 }
 
-// configuredVersionFile resolves the project-global paths.version override to
-// the VERSION file path. A configured directory resolves to <dir>/VERSION.
-// Returns (path, true, nil) when set, (,false,nil) when unset.
 func configuredVersionFile(projectRoot string) (string, bool, error) {
 	paths, err := config.LoadProjectPaths(projectRoot)
 	if err != nil {
@@ -193,9 +162,7 @@ func configuredVersionFile(projectRoot string) (string, bool, error) {
 	return path, ok, nil
 }
 
-// resolveVersionFilePath resolves a configured paths.version-shaped override
-// to the VERSION file path. A configured directory resolves to <dir>/VERSION.
-// Returns (path, true) when set, (,false) when unset.
+// resolveVersionFilePath maps a configured directory to <dir>/VERSION.
 func resolveVersionFilePath(projectRoot, override string) (string, bool) {
 	versionPath := config.ResolveProjectPath(projectRoot, override)
 	if versionPath == "" {
@@ -299,12 +266,8 @@ func IsDockerCreatePackageDenied(message string) bool {
 	return strings.Contains(strings.ToLower(message), "create_package")
 }
 
-// IsDockerUnknownBlobError reports a registry refusing to link a manifest to a
-// blob it does not actually hold — "unknown blob" from the daemon's push
-// output, or the registry's own BLOB_UNKNOWN error code. This is the shape a
-// stale local record of "already pushed" takes: docker skips re-uploading a
-// layer it believes the registry already has, and the registry rejects the
-// resulting manifest because the layer was never there (or no longer is).
+// IsDockerUnknownBlobError matches a registry refusing a manifest whose layer
+// docker skipped as already pushed.
 func IsDockerUnknownBlobError(message string) bool {
 	message = strings.ToLower(message)
 	return strings.Contains(message, "unknown blob") || strings.Contains(message, "blob_unknown")
@@ -324,15 +287,9 @@ func (e DockerRegistryAuthError) Unwrap() error {
 	return e.Err
 }
 
-// dockerVersionRegistryPattern flags a value that looks like a semver/snapshot
-// string rather than a registry hostname. Such values leak in when a helm chart
-// uses .Chart.AppVersion as a namespace prefix; a real registry hostname never
-// starts with DIGIT.DIGIT.DIGIT, so that shape is the tell.
+// dockerVersionRegistryPattern catches .Chart.AppVersion leaking in as a registry.
 var dockerVersionRegistryPattern = regexp.MustCompile(`^\d+\.\d+\.\d+`)
 
-// dockerRegistryLooksLikeVersion guards against a version string masquerading
-// as a registry hostname; pushing to such an address fails because it is not a
-// resolvable host.
 func dockerRegistryLooksLikeVersion(registry string) bool {
 	registry = strings.TrimSpace(registry)
 	if registry == "" {

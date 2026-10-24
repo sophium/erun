@@ -10,10 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// writePushableProjectConfig writes a project whose only configured platform is
-// the amd64 pin, plus one docker build context the push path can resolve. It
-// mirrors the shape a real tenant has: the pin is project-wide, and the build
-// context sits under the devops module's docker/ directory.
 func writePushableProjectConfig(t *testing.T) (projectRoot string, buildContext shared.DockerBuildContext) {
 	t.Helper()
 
@@ -44,14 +40,7 @@ func pushResolversForTest(projectRoot string, buildContext shared.DockerBuildCon
 	return findProjectRoot, resolveBuildContext
 }
 
-// TestPublishPathResolvesEveryPlatformDespiteTheProjectPin is the reproduction
-// of the amd64-only release: `erun release` publishes nothing, so a version's
-// artifacts reach the registry through `erun push --version <v>`. The project
-// pin's own comment promises "published images are unaffected" because a
-// release build never consults it -- but the publish path did, so the released
-// version got an amd64-only manifest and every aarch64 environment was left
-// with no arm64 image to pull, stranded on the last version that still shipped
-// one. The pin may narrow a local build; it must not narrow what is published.
+// The project platform pin may narrow a local build, never what is published.
 func TestPublishPathResolvesEveryPlatformDespiteTheProjectPin(t *testing.T) {
 	projectRoot, buildContext := writePushableProjectConfig(t)
 	findProjectRoot, resolveBuildContext := pushResolversForTest(projectRoot, buildContext)
@@ -76,8 +65,6 @@ func TestPublishPathResolvesEveryPlatformDespiteTheProjectPin(t *testing.T) {
 			got, shared.MultiPlatformDockerBuilds)
 	}
 
-	// The single-context path `erun push` takes when a Dockerfile is in the
-	// current directory resolves the same policy, and must not diverge from it.
 	pushSpec, resolvedBuild, err := ResolveDockerPushSpec(core.Context{}, nil, findProjectRoot, resolveBuildContext, nil, target)
 	if err != nil {
 		t.Fatalf("ResolveDockerPushSpec failed: %v", err)

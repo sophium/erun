@@ -12,10 +12,7 @@ import (
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// The MCP platform tools resolve their alias through the same shared resolver
-// the CLI uses, but the operator reaching them has no --erun-alias flag: the
-// tool's own `alias` input is the only way to select one. A remedy that spells
-// the CLI's flag is not something an MCP caller can act on.
+// MCP callers have no --erun-alias flag, so the remedy must name the `alias` input.
 func mcpAliasMessageFor(t *testing.T, providers ...config.CloudProviderConfig) string {
 	t.Helper()
 	runtime := sharedpkg.RuntimeConfig{Store: listToolStore{toolConfig: config.ERunConfig{CloudProviders: providers}}}
@@ -26,9 +23,6 @@ func mcpAliasMessageFor(t *testing.T, providers ...config.CloudProviderConfig) s
 	return err.Error()
 }
 
-// erunTypeProvider is an alias the platform resolver counts as erun-type; its
-// token status is irrelevant here because resolution fails before any token is
-// minted.
 func erunTypeProvider(alias string) config.CloudProviderConfig {
 	return cloud.NormalizeCloudProviderConfig(config.CloudProviderConfig{
 		Alias:    alias,
@@ -48,11 +42,7 @@ func TestMCPPlatformEnvListNamesTheAliasArgumentNotTheCLIFlag(t *testing.T) {
 	}
 }
 
-// The reported failure: asked for its environments on a host whose config held
-// two erun-type aliases, the MCP tool answered with the zero-alias cause and
-// the zero-alias remedy. Following that remedy adds a third alias to a config
-// that already had too many. The cause it cannot actually distinguish must not
-// be asserted as the one that occurred.
+// With two erun-type aliases, the tool must not assert the zero-alias cause.
 func TestMCPPlatformEnvListDoesNotAssertASingleCauseWhenNoneIsSelected(t *testing.T) {
 	message := mcpAliasMessageFor(t)
 
@@ -68,9 +58,6 @@ func TestMCPPlatformEnvListDoesNotAssertASingleCauseWhenNoneIsSelected(t *testin
 	}
 }
 
-// The CLI keeps the message it has always emitted, so the integration goldens
-// for the genuinely-zero-alias scenarios and the documented contract are
-// untouched. This pins that boundary rather than inferring it.
 func TestCLIKeepsItsAliasRemedyWording(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

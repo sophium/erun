@@ -24,14 +24,8 @@ import type { UIDiffReviewStatus } from '@/types';
 import { PermissionNotice } from './InlineAlert';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 
-// DiffReviewStatusChip is the diff panel's honest read of where this
-// environment section's branch pair sits on the review ladder -- it starts
-// "Checking status…" while DiffReviewStatus resolves, then "No review" only
-// once that read confirms one doesn't exist, never defaulting an unresolved
-// answer to a value that looks authoritative. Clickable straight into the
-// review's own detail whenever one exists, the same navigation a Reviews-tab
-// row's own click uses (openReviewDetail), so the chip is also a way in, not
-// only a status label.
+// DiffReviewStatusChip shows "Checking status…" until the read resolves, never
+// a default that looks authoritative.
 export function DiffReviewStatusChip({
   envKey,
   tenant,
@@ -62,13 +56,8 @@ export function DiffReviewStatusChip({
   );
 }
 
-// DiffReviewAction is the diff panel's single action per environment section,
-// StartReviewFromDiffAction's own successor: the label and the operation it
-// runs now follow the chip's status instead of a fixed "Start a review"
-// button that discovered a live review only from the 409 submitCreateReview's
-// catch reports, after the operator had already committed and pushed. Every
-// branch reuses an existing write path (openCreateReviewDialog,
-// submitAdvanceMergeQueue, openReviewDetail) rather than a new one.
+// DiffReviewAction follows the chip's status, so a live review is found before
+// the operator pushes rather than from a 409.
 export function DiffReviewAction({
   tenant,
   environment,
@@ -101,10 +90,7 @@ export function DiffReviewAction({
     case 'failed':
       return <DiffViewReviewAction tenant={tenant} status={status} />;
     default:
-      // 'checking' / 'unavailable' / 'none': the honest answer isn't in yet,
-      // or is confirmed empty -- either way, the dialog itself resolves
-      // whether this caller may create a review at all (Restricted state),
-      // so this stays the one affordance that always renders.
+      // The dialog itself resolves whether this caller may create a review.
       return (
         <StartReviewFromDiffAction
           tenant={tenant}
@@ -163,10 +149,7 @@ function DiffResolveThreadsAction({
   );
 }
 
-// DiffAdvanceQueueBlocked is AdvanceMergeQueue's own unresolved-thread
-// refusal (a race between this chip's own read and the click), rendered the
-// same way MergeQueueBlockedAlert renders it for the Reviews tab: a state
-// with a way forward, not a fault -- role="status", not role="alert".
+// A refusal with a way forward, so role="status", not "alert".
 function DiffAdvanceQueueBlocked({
   tenant,
   status,
@@ -202,11 +185,7 @@ function DiffAdvanceQueueBlocked({
   );
 }
 
-// DiffAdvanceQueueAction reuses the Reviews tab's own confirm-then-submit
-// merge-queue write (mergeQueueThunks.ts, state.mergeQueueAction) rather than
-// a parallel one -- degrading by permission the same way that tab's
-// AdvanceMergeQueueAction does, instead of rendering a control that fails
-// with a 403 after the click.
+// DiffAdvanceQueueAction degrades by permission rather than failing with a 403.
 function DiffAdvanceQueueAction({
   tenant,
   environment,
@@ -251,9 +230,7 @@ function DiffAdvanceQueueAction({
           size="sm"
           disabled={action.busy}
           onClick={() => {
-            // Refreshes the chip once the write settles regardless of
-            // outcome (advanced, blocked, or failed) -- the chip must never
-            // keep showing "Ready" once the platform's own answer changed.
+            // Refresh the chip whatever the outcome.
             void dispatch(
               submitAdvanceMergeQueue(tenant, status.repository ?? '', targetBranch),
             ).then(() => {
@@ -294,13 +271,6 @@ function DiffAdvanceQueueAction({
   );
 }
 
-// StartReviewFromDiffAction is the diff panel's own entry point into the
-// "Open a review" dialog: the panel already knows the environment and the
-// branch it is diffing against, so opening the dialog from here carries both
-// instead of sending the operator to the Reviews tab to re-specify what they
-// were already looking at. It composes the existing dialog and its thunks
-// (openCreateReviewDialog) rather than duplicating them -- the dialog itself
-// resolves whether this caller may create a review at all (Restricted state).
 export function StartReviewFromDiffAction({
   tenant,
   environment,
@@ -317,9 +287,7 @@ export function StartReviewFromDiffAction({
         type="button"
         variant="outline"
         size="sm"
-        // Queried by the review surface's `S` keyboard shortcut
-        // (reviewDiffKeyboardNav's startReviewForFocusedEnv) to activate this
-        // exact section's action without duplicating its dialog-opening logic.
+        // Queried by the `S` shortcut (reviewDiffKeyboardNav).
         data-review-action="start-review"
         onClick={() => {
           void dispatch(openCreateReviewDialog({ tenant, environment, targetBranch }));

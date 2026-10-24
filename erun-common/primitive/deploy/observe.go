@@ -8,9 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// RunObserveKubectl runs a read-only kubectl get, returning stderr alongside
-// any error so callers can distinguish "not found" and "unknown resource
-// type" from a real failure without re-parsing a wrapped error string.
+// RunObserveKubectl returns stderr separately so callers can classify "not found" without parsing a wrapped error.
 func RunObserveKubectl(args []string) (stdout []byte, stderr string, err error) {
 	cmd := core.Command("kubectl", args...)
 	var errBuf bytes.Buffer
@@ -19,11 +17,8 @@ func RunObserveKubectl(args []string) (stdout []byte, stderr string, err error) 
 	return out, strings.TrimSpace(errBuf.String()), runErr
 }
 
-// KubectlErrorMessage folds stderr into err, sanitizing kubectl's raw output
-// through sanitizeKubectlFailureOutput first: an unreachable API server makes
-// kubectl retry and emit klog's "Unhandled Error" frame once per retry, and
-// without this every goroutine id and source location would reach the
-// operator verbatim, repeated.
+// KubectlErrorMessage folds sanitized stderr into err, collapsing klog's per-retry
+// "Unhandled Error" frames.
 func KubectlErrorMessage(err error, stderr string) error {
 	if stderr == "" {
 		return err

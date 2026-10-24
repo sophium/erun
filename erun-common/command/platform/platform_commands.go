@@ -13,7 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// RunPlatformWhoami resolves the caller's identity against the erun platform.
+// RunPlatformWhoami resolves the caller's identity.
 func RunPlatformWhoami(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) (platformclient.PlatformWhoami, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -26,18 +26,8 @@ func RunPlatformWhoami(ctx core.Context, store configpkg.CloudReadStore, alias s
 	return client.Whoami(context.Background())
 }
 
-// RunPlatformVersion reports the build actually serving a hosted erun
-// platform's own API, over GET /v1/platform — the same unauthenticated route
-// `erun cloud init erun` already calls to discover the issuer and client ids.
-// Unlike `whoami`, which returns identity, it reports the build.
-// Unauthenticated on purpose: a client has to be able to compare the plane's
-// version before it can even mint a token against it (the same reason
-// PlatformInfo's other discovery fields -- issuer, client ids -- are
-// unauthenticated), and the fields it returns are this instance's own
-// self-description, never tenant data. This still goes through the resolved
-// alias (not a bare --api-url) so the same call keeps working when the alias's
-// cached credentials are stale or expired -- exactly the state a caller
-// troubleshooting a 404/401 on some other route is likely to be in.
+// RunPlatformVersion reports the build serving the platform API. It is
+// unauthenticated so it works before a token can be minted or with stale credentials.
 func RunPlatformVersion(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) (platformclient.PlatformInfo, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -50,8 +40,7 @@ func RunPlatformVersion(ctx core.Context, store configpkg.CloudReadStore, alias 
 	return client.Platform(context.Background())
 }
 
-// RunPlatformCreateTenant registers a new tenant. Requires an
-// operations-tenant caller.
+// RunPlatformCreateTenant registers a tenant; requires an operations-tenant caller.
 func RunPlatformCreateTenant(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformCreateTenantParams, deps cloud.CloudDependencies) (platformclient.PlatformTenant, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -65,9 +54,7 @@ func RunPlatformCreateTenant(ctx core.Context, store configpkg.CloudReadStore, a
 	return client.CreateTenant(context.Background(), params)
 }
 
-// RunPlatformCreateOrg creates an organization on the platform's own IdP —
-// the org an org-scoped tenant mapping needs before CreateTenant can produce
-// one any token will ever resolve to. Requires an operations-tenant caller.
+// RunPlatformCreateOrg creates an org on the platform IdP; requires an operations-tenant caller.
 func RunPlatformCreateOrg(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformCreateOrgParams, deps cloud.CloudDependencies) (platformclient.PlatformOrg, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -80,11 +67,8 @@ func RunPlatformCreateOrg(ctx core.Context, store configpkg.CloudReadStore, alia
 	return client.CreateOrg(context.Background(), params)
 }
 
-// RunPlatformRepairTenantIssuerOrgMapping fixes a tenant already stuck with
-// an unresolvable (issuer, org) mapping -- the repair path for a tenant a
-// pre-fix `platform tenant create` produced with no org value, or one whose
-// issuer was converted to org-scoped after it registered. Requires an
-// operations-tenant caller.
+// RunPlatformRepairTenantIssuerOrgMapping fixes a tenant with an unresolvable (issuer, org)
+// mapping; requires an operations-tenant caller.
 func RunPlatformRepairTenantIssuerOrgMapping(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformRepairTenantIssuerOrgMappingParams, deps cloud.CloudDependencies) (platformclient.PlatformTenantIssuer, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -131,9 +115,7 @@ func RunPlatformCreateUser(ctx core.Context, store configpkg.CloudReadStore, ali
 	return client.CreateUser(context.Background(), params)
 }
 
-// RunPlatformListRoles lists the caller's tenant's roles and their
-// permissions, the lookup a client needs to turn a missing capability into the
-// role id a grant command takes.
+// RunPlatformListRoles lists the caller's tenant's roles and permissions.
 func RunPlatformListRoles(ctx core.Context, store configpkg.CloudReadStore, alias string, deps cloud.CloudDependencies) ([]platformclient.PlatformRole, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -146,8 +128,7 @@ func RunPlatformListRoles(ctx core.Context, store configpkg.CloudReadStore, alia
 	return client.ListRoles(context.Background())
 }
 
-// RunPlatformGrantUserRole grants one role to one already-enrolled user, the
-// post-enrollment grant `erun platform user enroll` cannot perform.
+// RunPlatformGrantUserRole grants one role to an enrolled user.
 func RunPlatformGrantUserRole(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformGrantUserRoleParams, deps cloud.CloudDependencies) error {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -204,22 +185,14 @@ func RunPlatformGetEnvironment(ctx core.Context, store configpkg.CloudReadStore,
 	return client.GetEnvironment(context.Background(), environmentID)
 }
 
-// RunPlatformRegisterEnvironment registers an environment, optionally
-// starting a server-side deploy (see PlatformClient.CreateEnvironment).
+// RunPlatformRegisterEnvironment registers an environment, optionally deploying it.
 func RunPlatformRegisterEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformCreateEnvironmentParams, deps cloud.CloudDependencies) (platformclient.PlatformEnvironment, error) {
 	environment, _, err := RunPlatformRegisterEnvironmentWithDefinition(ctx, store, alias, params, nil, deps)
 	return environment, err
 }
 
-// RunPlatformRegisterEnvironmentWithDefinition registers (or adopts) an
-// environment and, when local names a local environment, uploads that
-// environment's portable settings and records its hosted marker in the same
-// step.
-//
-// The two are one call rather than two the caller sequences because recording
-// the marker only after the upload succeeds is what makes the marker mean "the
-// platform holds this revision": a marker written first would claim a sync that
-// never happened.
+// RunPlatformRegisterEnvironmentWithDefinition registers an environment and uploads a
+// local definition. The marker is recorded only after the upload succeeds.
 func RunPlatformRegisterEnvironmentWithDefinition(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformCreateEnvironmentParams, local *EnvDefinitionAdoptParams, deps cloud.CloudDependencies) (platformclient.PlatformEnvironment, EnvDefinitionPushResult, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -252,10 +225,7 @@ func RunPlatformRegisterEnvironmentWithDefinition(ctx core.Context, store config
 	return environment, result, nil
 }
 
-// checkAdoptInput mirrors the platform's own adopt contract before the request
-// is sent, so a caller that omitted the context gets the reason rather than a
-// 400 it has to interpret. The platform remains the authority; this is the
-// same early refusal the desktop's registration flow performs.
+// checkAdoptInput mirrors the platform's adopt contract so the caller gets a reason, not a 400.
 func checkAdoptInput(params platformclient.PlatformCreateEnvironmentParams) error {
 	if !params.Adopt {
 		return nil
@@ -266,10 +236,6 @@ func checkAdoptInput(params platformclient.PlatformCreateEnvironmentParams) erro
 	return nil
 }
 
-// checkRegistrationDefinitionInput runs the two client-side preconditions both
-// halves of a registration share, before anything is sent: adopting records the
-// context the environment already runs against, and uploading a definition is
-// what records this machine as following the row.
 func checkRegistrationDefinitionInput(params platformclient.PlatformCreateEnvironmentParams, local *EnvDefinitionAdoptParams) error {
 	if err := checkAdoptInput(params); err != nil {
 		return err
@@ -280,10 +246,6 @@ func checkRegistrationDefinitionInput(params platformclient.PlatformCreateEnviro
 	return nil
 }
 
-// tracePlatformRegistration traces the registration call itself, shared by the
-// plain and definition-carrying paths so the two cannot drift in what they
-// report. The adopt/tenant/context keys appear only when they carry a value, so
-// an ordinary registration's trace is exactly what it has always been.
 func tracePlatformRegistration(ctx core.Context, provider configpkg.CloudProviderConfig, params platformclient.PlatformCreateEnvironmentParams) {
 	details := []string{
 		"name=" + params.Name,
@@ -303,10 +265,8 @@ func tracePlatformRegistration(ctx core.Context, provider configpkg.CloudProvide
 	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/environments", details...)
 }
 
-// populatedPortableFieldsForLocal reports which portable fields a named local
-// environment would upload, for the dry-run trace. A local environment that
-// cannot be read reports nothing rather than failing the whole dry run: the
-// trace is a plan, and the real run is where a missing config is a refusal.
+// populatedPortableFieldsForLocal reports nothing for an unreadable local environment:
+// the dry run is a plan, the real run refuses.
 func populatedPortableFieldsForLocal(local EnvDefinitionAdoptParams) []string {
 	config, _, err := configpkg.ConfigStore{}.LoadEnvConfig(local.Tenant, local.Environment)
 	if err != nil {
@@ -315,13 +275,7 @@ func populatedPortableFieldsForLocal(local EnvDefinitionAdoptParams) []string {
 	return configpkg.PopulatedPortableEnvConfigFields(config)
 }
 
-// RunPlatformPushEnvDefinition uploads a local environment's portable settings
-// to the platform row its hosted marker names.
-//
-// Under --dry-run it traces the resolved local environment, the row the marker
-// names, and the portable fields that would travel — never the fields that
-// would not, so the trace reads as the allowlist itself rather than as an
-// inventory of the config.
+// RunPlatformPushEnvDefinition uploads a local environment's portable settings to its hosted row.
 func RunPlatformPushEnvDefinition(ctx core.Context, store configpkg.CloudReadStore, alias string, params EnvDefinitionPushParams, deps cloud.CloudDependencies) (EnvDefinitionPushResult, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -348,13 +302,8 @@ func RunPlatformPushEnvDefinition(ctx core.Context, store configpkg.CloudReadSto
 	return PushEnvironmentDefinition(context.Background(), configpkg.ConfigStore{}, client, params)
 }
 
-// RunPlatformPullEnvDefinition pulls the platform's stored definition into a
-// local environment, creating it first when it does not exist yet.
-//
-// The confirmation rides in through confirm: a two-sided portable edit is a
-// question for the operator, and a transport with no way to ask (MCP, a
-// non-interactive run) passes nil and gets a refusal carrying the diff instead
-// of a silent overwrite.
+// RunPlatformPullEnvDefinition pulls the stored definition into a local environment.
+// A nil confirm refuses a two-sided edit with the diff instead of overwriting.
 func RunPlatformPullEnvDefinition(ctx core.Context, store configpkg.CloudReadStore, alias string, params EnvDefinitionPullParams, confirm func(configpkg.EnvDefinitionPlan) (bool, error), deps cloud.CloudDependencies) (EnvDefinitionPullResult, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -393,8 +342,7 @@ func RunPlatformPullEnvDefinition(ctx core.Context, store configpkg.CloudReadSto
 	return PullEnvironmentDefinition(context.Background(), configpkg.ConfigStore{}, client, params)
 }
 
-// RunPlatformDeployEnvironment starts a server-side deploy of an
-// already-registered runtime environment.
+// RunPlatformDeployEnvironment starts a server-side deploy of a registered environment.
 func RunPlatformDeployEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, params platformclient.PlatformDeployEnvironmentParams, deps cloud.CloudDependencies) (platformclient.PlatformEnvironment, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -407,8 +355,7 @@ func RunPlatformDeployEnvironment(ctx core.Context, store configpkg.CloudReadSto
 	return client.DeployEnvironment(context.Background(), environmentID, params)
 }
 
-// RunPlatformStopEnvironment scales a runtime environment's Deployment to
-// zero, the server-side equivalent of `erun stop`.
+// RunPlatformStopEnvironment scales a runtime environment to zero.
 func RunPlatformStopEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, deps cloud.CloudDependencies) (platformclient.PlatformEnvironment, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -421,11 +368,7 @@ func RunPlatformStopEnvironment(ctx core.Context, store configpkg.CloudReadStore
 	return client.StopEnvironment(context.Background(), environmentID)
 }
 
-// RunPlatformDeleteEnvironment starts tearing down a runtime environment's
-// namespace and its row, the server-side equivalent of `erun delete`. See
-// PlatformClient.DeleteEnvironment: the teardown itself runs asynchronously, so
-// the returned environment reflects the claim (status "deleting"), not a
-// completed removal.
+// RunPlatformDeleteEnvironment starts an asynchronous teardown; the result reflects the claim.
 func RunPlatformDeleteEnvironment(ctx core.Context, store configpkg.CloudReadStore, alias, environmentID string, deps cloud.CloudDependencies) (platformclient.PlatformEnvironment, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -464,10 +407,8 @@ func RunPlatformGetContext(ctx core.Context, store configpkg.CloudReadStore, ali
 	return client.GetContext(context.Background(), contextID)
 }
 
-// RunPlatformCreateContext registers a cloud context, or — with
-// params.Preview set — only resolves and returns its bootstrap plan. Preview
-// is a server-side dry run (it still reaches the platform); ctx.DryRun is the
-// CLI/MCP-side one and skips the network call entirely.
+// RunPlatformCreateContext registers a cloud context. params.Preview is a server-side dry
+// run; ctx.DryRun skips the network call.
 func RunPlatformCreateContext(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformCreateContextParams, deps cloud.CloudDependencies) (platformclient.PlatformCreateContextResult, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
@@ -481,8 +422,7 @@ func RunPlatformCreateContext(ctx core.Context, store configpkg.CloudReadStore, 
 	return client.CreateContext(context.Background(), params)
 }
 
-// RunPlatformProvision resolves and returns the full ordered plan for
-// provisioning a hosted environment, without executing any of it.
+// RunPlatformProvision returns the ordered provisioning plan without executing it.
 func RunPlatformProvision(ctx core.Context, store configpkg.CloudReadStore, alias string, params platformclient.PlatformProvisionParams, deps cloud.CloudDependencies) (platformclient.PlatformProvisionResult, error) {
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {

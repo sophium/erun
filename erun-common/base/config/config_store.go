@@ -82,10 +82,7 @@ func SaveERunConfig(config ERunConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	// Best-effort backup of the previous live file before overwrite: a backup
-	// failure must not block the save, because the bug we guard against is data
-	// loss and refusing to save when the backup dir is full would itself lose data.
-	// Idempotent across repeated saves within one local day.
+	// Best-effort daily backup; a backup failure must not block the save.
 	_ = WriteRootConfigBackupIfDue(configFilePath, TimeNow)
 
 	if err := WriteFileAtomic(configFilePath, data, ConfigFilePerm); err != nil {
@@ -102,13 +99,8 @@ func LoadERunConfig() (ERunConfig, string, error) {
 		return config, configFilePath, ErrNoUserDataFolder
 	}
 
-	// A zero-length or unparseable file is the residue of an interrupted
-	// write, possibly one not even erun's own -- loadConfigFile retries it a
-	// few times before giving up. Treating it as "successfully loaded empty
-	// config" lets the next writer rebuild a fresh ERunConfig{} with only the
-	// field it cares about, silently dropping every other section, so a read
-	// that never recovers is surfaced as corruption instead, routing callers
-	// into the doctor recovery path.
+	// An empty or unparseable file is an interrupted write; treating it as empty
+	// would let the next writer drop every other section, so report corruption.
 	if err := LoadConfigFile(configFilePath, &config); err != nil {
 		return config, configFilePath, err
 	}
@@ -245,12 +237,7 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	// Best-effort backup of the previous live env config before overwrite, like
-	// SaveERunConfig. Idempotent within one local day; it guards against a wrong
-	// value (e.g. a type silently resolved to "runtime" on a remote-agent env)
-	// being persisted with no way back. A backup failure must not block the save,
-	// since the bug guarded against is data loss and refusing to save when the
-	// backup dir is unwritable would be worse.
+	// Best-effort daily backup, as in SaveERunConfig.
 	_ = WriteEnvConfigBackupIfDue(configFilePath, TimeNow)
 
 	if err := WriteFileAtomic(configFilePath, data, ConfigFilePerm); err != nil {
@@ -354,8 +341,7 @@ func SaveProjectConfig(projectRoot string, config ProjectConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	// Project config is the repository .erun/config.yaml: often tracked and
-	// shared, and carrying no credential, it keeps the ordinary 0644 mode.
+	// Project config is often tracked and holds no credential, so 0644.
 	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
@@ -377,13 +363,8 @@ func LoadProjectConfig(projectRoot string) (ProjectConfig, string, error) {
 	return config, configFilePath, nil
 }
 
-// FindProjectRoot resolves the project root, preferring ERUN_REPO_PATH when it
-// is set and names an existing directory. A sourceless runtime pod surfaces the
-// image-baked release tree at that path (a symlink into /opt/erun/release, with
-// no .git), so the cwd .git walk would fail there; honoring the env var lets
-// in-pod commands like `erun terraform` resolve the tree the same way the MCP
-// server does. The var is set only inside the pod, so laptop behavior (walk up
-// from cwd to the nearest .git) is unchanged.
+// FindProjectRoot prefers ERUN_REPO_PATH when it names a directory: a sourceless
+// runtime pod has the release tree there with no .git to walk up to.
 func FindProjectRoot() (string, string, error) {
 	if root := strings.TrimSpace(os.Getenv("ERUN_REPO_PATH")); root != "" {
 		root = filepath.Clean(root)

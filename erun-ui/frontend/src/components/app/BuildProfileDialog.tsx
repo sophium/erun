@@ -22,13 +22,7 @@ import type { UIBuildProfileStep, UIBuildProfileSummary, UITenantDashboardBuild 
 
 import { DataCell, DataTable } from './TenantDashboardMessage';
 
-// BuildProfileDialog is the Builds tab's and a review's build list's "select
-// a build, see what consumed CPU or hit an I/O bottleneck" surface. It is
-// opened from a build row's own "View profile"
-// button (BuildProfileViewButton below) -- never a bare clickable row, which
-// would fail both recognition-over-recall and keyboard operability -- and it
-// renders data the dashboard already loaded, so it needs no fetch and no
-// loading state.
+// BuildProfileDialog renders already-loaded data, so it needs no fetch.
 export function BuildProfileDialog({
   build,
   onClose,
@@ -107,10 +101,7 @@ function BuildProfileSummaryView({
   );
 }
 
-// buildProfileHasCgroupData decides whether the "not available" notice
-// renders: true as soon as one step (or the build total) carries a usable
-// cgroup reading, since a mixed build (some steps read, some not) should not
-// be told it has no data at all.
+// True if any step carries cgroup data, so a mixed build is not told it has none.
 function buildProfileHasCgroupData(profile: UIBuildProfileSummary): boolean {
   if (cgroupIsUsable(profile.cgroup)) {
     return true;

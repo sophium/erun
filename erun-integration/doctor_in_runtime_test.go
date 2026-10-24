@@ -27,14 +27,8 @@ func doctorInRuntimeScenarios(t *testing.T) {
 }
 
 func testDoctorRepairWorkspaceSyncDryRun(t *testing.T) {
-	// Exercises doctor.go --repair-workspace-sync for a remote-agent env
-	// with workspace sync enabled: --dry-run must trace the non-destructive
-	// provisioning it would run — write the local ssh config alias, install
-	// the pod authorized_keys through the runtime container (never a helm
-	// redeploy), ensure the SSH port-forward, and re-check reachability —
-	// then short-circuit before the deploy diagnosis and prune prompts. The
-	// high localportrangestart pins the SSH port so the port-forward preview
-	// never collides with a developer's live erun session.
+	// Repair installs authorized_keys through the runtime container, never a helm
+	// redeploy. The high port range keeps the port-forward off a live session's ports.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithWorkspaceSync(t, setup, "team", "dev", 26100)
 	result := erun.Run(t, []string{"doctor", "team", "dev", "--repair-workspace-sync", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -45,10 +39,6 @@ func testDoctorRepairWorkspaceSyncDryRun(t *testing.T) {
 }
 
 func testDoctorInRuntimeCompleteMarkerDryRun(t *testing.T) {
-	// When the runtime env reports ERUN_REPO_REMOTE=true and the
-	// bootstrap marker shows the previous init finished, doctor
-	// should report 'complete' without offering to finish anything
-	// and without falling through to the kubectl-driven dind path.
 	setup := env.New(t)
 	projectRoot := filepath.Join(setup.Home, "git", "team")
 	if err := os.MkdirAll(filepath.Join(projectRoot, ".git"), 0o755); err != nil {
@@ -86,10 +76,6 @@ func testDoctorInRuntimeCompleteMarkerDryRun(t *testing.T) {
 }
 
 func testDoctorInRuntimeFinishRemoteInitDryRun(t *testing.T) {
-	// The bootstrap marker exists but bootstrap_complete=false and
-	// the SSH key + .git checkout are missing. With
-	// --finish-remote-init in dry-run mode doctor must trace the
-	// ssh-keygen, git clone, and marker write it would perform.
 	setup := env.New(t)
 	projectRoot := filepath.Join(setup.Home, "git", "team")
 	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
@@ -121,10 +107,6 @@ func testDoctorInRuntimeFinishRemoteInitDryRun(t *testing.T) {
 }
 
 func testDoctorInRuntimeSkillsInstalledDryRun(t *testing.T) {
-	// ERUN_SKILLS_DIR points doctor at the runtime image's baked-skills
-	// seam (/etc/erun/skills). When every baked skill is installed under
-	// ~/.claude/skills the workability check reports OK with nothing to
-	// finish.
 	setup := env.New(t)
 	projectRoot := filepath.Join(setup.Home, "git", "team")
 	bakedSkills := filepath.Join(setup.Home, "baked-skills")
@@ -159,11 +141,6 @@ func testDoctorInRuntimeSkillsInstalledDryRun(t *testing.T) {
 }
 
 func testDoctorInRuntimeFinishSkillsDryRun(t *testing.T) {
-	// Baked skills exist but none are installed under ~/.claude/skills, so
-	// the workability check is MISSING. Project root, git, and ssh are in
-	// place so skills are the only missing artifact; with
-	// --finish-remote-init in dry-run doctor must trace the cp into both
-	// ~/.claude/skills and ~/.codex/skills.
 	setup := env.New(t)
 	projectRoot := filepath.Join(setup.Home, "git", "team")
 	bakedSkills := filepath.Join(setup.Home, "baked-skills")
@@ -196,13 +173,6 @@ func testDoctorInRuntimeFinishSkillsDryRun(t *testing.T) {
 }
 
 func testDoctorInRuntimeFinishRemoteInitCodecommitDryRun(t *testing.T) {
-	// The marker records a CodeCommit URL and the IAM SSH public
-	// key ID, but bootstrap_complete=false and the .git checkout
-	// plus both SSH keypairs are missing. With --finish-remote-init
-	// in dry-run mode doctor must trace ssh-keygen for the ed25519
-	// key, ssh-keygen -t rsa -b 4096 for the codecommit key, the
-	// ~/.ssh/config write, and an ls-remote + clone routed through
-	// ssh -F "$HOME/.ssh/config" against the codecommit host.
 	setup := env.New(t)
 	projectRoot := filepath.Join(setup.Home, "git", "petios")
 	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
@@ -236,10 +206,6 @@ func testDoctorInRuntimeFinishRemoteInitCodecommitDryRun(t *testing.T) {
 }
 
 func testDoctorInRuntimeNoMarkerDryRun(t *testing.T) {
-	// When ERUN_REPO_REMOTE=true but no marker exists on disk,
-	// doctor falls back to the runtime-env vars to identify the
-	// target and reports that the marker is missing without
-	// attempting recovery.
 	setup := env.New(t)
 	projectRoot := filepath.Join(setup.Home, "git", "team")
 	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
@@ -259,11 +225,6 @@ func testDoctorInRuntimeNoMarkerDryRun(t *testing.T) {
 }
 
 func testDoctorInRuntimeMultiTenantMarkersDryRun(t *testing.T) {
-	// Two tenants share one $HOME (developer machine or shared runtime
-	// host). Each writes its own bootstrap marker under
-	// $HOME/.erun/<tenant>/<env>/bootstrap.yaml. doctor for tenant
-	// "team" must see the team marker and ignore the other tenant's
-	// marker even though both live under the same .erun root.
 	setup := env.New(t)
 	teamRoot := filepath.Join(setup.Home, "git", "team")
 	otherRoot := filepath.Join(setup.Home, "git", "other")
@@ -316,11 +277,6 @@ func testDoctorInRuntimeMultiTenantMarkersDryRun(t *testing.T) {
 }
 
 func testDoctorInRuntimeNoGitMarkerDryRun(t *testing.T) {
-	// `erun init --remote --no-git` records no_git: true in the
-	// marker. doctor must report the git checkout and SSH keypair
-	// rows as N/A (not MISSING) and conclude the init is complete,
-	// covering the NotApplicable arms of inspectGitCheckout /
-	// inspectSSHKey that the other in-runtime scenarios never hit.
 	setup := env.New(t)
 	projectRoot := filepath.Join(setup.Home, "git", "team")
 	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
@@ -346,12 +302,8 @@ func testDoctorInRuntimeNoGitMarkerDryRun(t *testing.T) {
 }
 
 func testDoctorInRuntimeIncompleteMarkerAllArtifactsPresentDryRun(t *testing.T) {
-	// The marker says bootstrap_complete=false but every artifact is
-	// already on disk (init was interrupted after the work finished
-	// but before the marker rewrite). doctor must not offer recovery
-	// — there is nothing to redo — and instead point the user at
-	// re-running `erun init --remote` to refresh the marker. Covers
-	// the MissingItems()==0 arm of writeRemoteInitShortCircuit.
+	// Every artifact exists but the marker was never rewritten: point at
+	// `erun init --remote`, offer no recovery.
 	setup := env.New(t)
 	projectRoot := filepath.Join(setup.Home, "git", "team")
 	if err := os.MkdirAll(filepath.Join(projectRoot, ".git"), 0o755); err != nil {
@@ -383,11 +335,7 @@ func testDoctorInRuntimeIncompleteMarkerAllArtifactsPresentDryRun(t *testing.T) 
 }
 
 func testDoctorInRuntimeFinishWithoutIdentityError(t *testing.T) {
-	// ERUN_REPO_REMOTE=true but neither a marker nor
-	// ERUN_TENANT/ERUN_ENVIRONMENT identify the target. The report
-	// must render <unknown>/<unknown> and --finish-remote-init must
-	// fail with the explicit missing-identity error from
-	// RunRemoteInitFinish instead of recovering into a wrong path.
+	// With no identity, --finish-remote-init fails rather than recovering into a wrong path.
 	setup := env.New(t)
 	envVars := append(setup.Env(), "ERUN_REPO_REMOTE=true")
 	result := erun.Run(t, []string{"doctor", "--finish-remote-init"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})

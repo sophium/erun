@@ -23,19 +23,13 @@ func loadKubernetesNodes(ctx context.Context, kubernetesContext string) (kuberne
 	return nodes, nil
 }
 
-// kubernetesContainerUsage is measured per-container consumption, keyed by
-// namespace/pod/container. Empty when the cluster has no metrics source.
+// kubernetesContainerUsage is empty when the cluster has no metrics source.
 type kubernetesContainerUsage map[string]runtimeResourceTotals
 
 func containerUsageKey(pod kubernetesPod, container kubernetesContainer) string {
 	return strings.TrimSpace(pod.Metadata.Namespace) + "/" + strings.TrimSpace(pod.Metadata.Name) + "/" + strings.TrimSpace(container.Name)
 }
 
-// loadKubernetesContainerUsage reads what containers are actually consuming, so
-// a container that declares no limits is counted at its real usage instead of
-// being treated as free. Deliberately fail-soft: a cluster without
-// metrics-server still gets the limits-based reading, flagged as incomplete
-// rather than presented as exact.
 func loadKubernetesContainerUsage(ctx context.Context, kubernetesContext string) kubernetesContainerUsage {
 	output, err := kubectlJSON(ctx, kubernetesContext, "top", "pod", "--all-namespaces", "--containers", "--no-headers")
 	if err != nil {
@@ -44,8 +38,7 @@ func loadKubernetesContainerUsage(ctx context.Context, kubernetesContext string)
 	return parseKubernetesContainerUsage(string(output))
 }
 
-// parseKubernetesContainerUsage reads `kubectl top pod --containers` rows:
-// NAMESPACE POD CONTAINER CPU MEMORY.
+// Parses `kubectl top pod --containers` rows: NAMESPACE POD CONTAINER CPU MEMORY.
 func parseKubernetesContainerUsage(output string) kubernetesContainerUsage {
 	usage := kubernetesContainerUsage{}
 	for _, line := range strings.Split(output, "\n") {
@@ -134,9 +127,7 @@ type kubernetesPod struct {
 	Spec struct {
 		NodeName   string                `json:"nodeName"`
 		Containers []kubernetesContainer `json:"containers"`
-		// InitContainers are read because Kubernetes admits a pod on
-		// max(max over these, sum over Containers); a request reading that
-		// skipped them would understate what the node has committed.
+		// Admission takes max(init containers, sum of containers), so init containers count.
 		InitContainers []kubernetesContainer `json:"initContainers"`
 	} `json:"spec"`
 }
@@ -144,9 +135,6 @@ type kubernetesPod struct {
 type kubernetesContainer struct {
 	Name      string `json:"name"`
 	Resources struct {
-		// Limits is the cgroup ceiling the worst-case reading sums. Requests is
-		// what the scheduler admits the pod on, and no cgroup file carries it --
-		// it is read from the pod spec, where it exists.
 		Limits   kubernetesResourceQuantity `json:"limits"`
 		Requests map[string]string          `json:"requests"`
 	} `json:"resources"`

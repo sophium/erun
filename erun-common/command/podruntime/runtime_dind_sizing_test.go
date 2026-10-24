@@ -6,13 +6,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestRuntimeDindCPULimitSizesFromNodeCapacityAndCoTenants is the sizing rule
-// itself: the node's CPUs divided by the build-capable environments expected
-// to be building on it at once, floored at MinimumRuntimeDindCPU and rounded
-// up to whole cores. Both inputs are injected so the rule is exercised
-// independently of whatever node the fleet currently runs on -- the rule is
-// the contract, the reference node's own answer (DefaultRuntimeDindCPU) is
-// only one point on it.
 func TestRuntimeDindCPULimitSizesFromNodeCapacityAndCoTenants(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -28,18 +21,11 @@ func TestRuntimeDindCPULimitSizesFromNodeCapacityAndCoTenants(t *testing.T) {
 		{name: "six co-tenants land exactly on the floor", nodeCPU: 24000, coTenants: 6, wantCPU: "4"},
 		{
 			name: "many co-tenants clamp to the floor rather than to a fraction of a core",
-			// 24000/12 is 2 cores, which is under the floor. A cap below it
-			// throttles every build on a node that is otherwise idle, which is
-			// the shape this rule replaced; the floor is a ceiling that is
-			// simply never reached when all twelve really do build, and the
-			// proportional sharing that happens then is the kernel's job.
+			// 24000/12 is 2 cores, under the floor.
 			nodeCPU: 24000, coTenants: 12, wantCPU: "4",
 		},
 		{
-			name: "a small node divided across several co-tenants still floors",
-			// 8000/4 is 2 cores: a node small enough that proportional sharing
-			// would size every build on it under the floor, which is the same
-			// throttled shape at a smaller scale.
+			name:    "a small node divided across several co-tenants still floors",
 			nodeCPU: 8000, coTenants: 4, wantCPU: "4",
 		},
 		{
@@ -49,15 +35,11 @@ func TestRuntimeDindCPULimitSizesFromNodeCapacityAndCoTenants(t *testing.T) {
 			wantCPU:   "5",
 		},
 		{
-			name: "an unestablished node capacity is the floor, not an invented size",
-			// Nothing has measured this node; the honest answer is the
-			// conservative constant, the same posture every other unresolved
-			// dind value takes.
+			name:    "an unestablished node capacity is the floor, not an invented size",
 			nodeCPU: 0, coTenants: 2, wantCPU: config.MinimumRuntimeDindCPU,
 		},
 		{
-			name: "a missing co-tenant count is one, not zero",
-			// A zero divisor would either panic or resolve an enormous cap.
+			name:    "a missing co-tenant count is one, not zero",
 			nodeCPU: 24000, coTenants: 0, wantCPU: "24",
 		},
 		{
@@ -75,10 +57,6 @@ func TestRuntimeDindCPULimitSizesFromNodeCapacityAndCoTenants(t *testing.T) {
 	}
 }
 
-// TestRuntimeDindCPULimitNeverSizesBelowTheFloor pins the floor as a property
-// rather than as one case above: no node capacity or co-tenant count may
-// produce a cap under it, so a rule change cannot reintroduce a throttled
-// default through an input the table does not happen to name.
 func TestRuntimeDindCPULimitNeverSizesBelowTheFloor(t *testing.T) {
 	t.Parallel()
 	floor, err := config.ParseKubernetesCPUToMilli(config.MinimumRuntimeDindCPU)
@@ -102,11 +80,6 @@ func TestRuntimeDindCPULimitNeverSizesBelowTheFloor(t *testing.T) {
 	}
 }
 
-// TestDefaultRuntimeDindCPUIsTheRulesAnswerForTheReferenceNode keeps the
-// shipped default from drifting away from the rule that is supposed to
-// produce it. The default is what every environment that has never been sized
-// gets, so a default edited by hand would be a sizing decision nothing
-// derives -- exactly what the flat "4" was.
 func TestDefaultRuntimeDindCPUIsTheRulesAnswerForTheReferenceNode(t *testing.T) {
 	t.Parallel()
 	want := config.RuntimeDindCPULimit(config.DefaultRuntimeDindCPUNodeCPUMilli, config.DefaultRuntimeDindCPUCoTenants)
@@ -121,10 +94,7 @@ func TestDefaultRuntimeDindCPUIsTheRulesAnswerForTheReferenceNode(t *testing.T) 
 	}
 }
 
-// TestMinimumRuntimeNamespaceQuotaAdmitsTheDefaultPod is the coupling the
-// default's own size moves: a namespace ResourceQuota counts every container
-// in the pod, so a tenant quota at the floor has to admit the dind sidecar at
-// the *sized* default rather than at the old constant.
+// A namespace ResourceQuota counts every container, so the floor must admit the sized dind default.
 func TestMinimumRuntimeNamespaceQuotaAdmitsTheDefaultPod(t *testing.T) {
 	t.Parallel()
 	cpu, _, _ := config.MinimumRuntimeNamespaceQuota()

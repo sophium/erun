@@ -9,22 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
-// The three TestListOrchestratorEnvCandidates* tests below lock the
-// capability: an orchestrator can link either agent type, and each candidate
-// carries where that env is reviewed — a mirror the operator may place
-// anywhere, or the local-agent worktree already on this machine. A runtime
-// env is still listed, disabled, with a reason rather than dropped without
-// trace.
-// TestOrchestratableEnvCoversHost locks in that a host env links like
-// local-agent and remote-agent: a host env's worktree is already the operator's
-// own checkout, so the orchestrator works it in place, the same as a
-// local-agent worktree, never a synced mirror (which only makes sense for a pod
-// whose worktree lives somewhere else). None of these three types requires a
-// particular role, so all three are eligible undeclared; a host env is still
-// refused the runtime role when one is chosen, but that is the shared gate's
-// question, not eligibility's. A runtime env is the odd one out and is covered
-// by its own test below (TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole)
-// since its answer depends on the role, not just the type.
+// Host, local-agent, and remote-agent envs are eligible without a role.
 func TestOrchestratableEnvCoversHost(t *testing.T) {
 	cases := []struct {
 		envType configpkg.EnvironmentType
@@ -46,12 +31,6 @@ func TestOrchestratableEnvCoversHost(t *testing.T) {
 	}
 }
 
-// TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole locks the fix: a runtime
-// env, which has no worktree to review and no in-pod agent to delegate to,
-// may only be linked with the runtime role. code, build, and undeclared are
-// all still refused — the same refusal the gate previously applied
-// unconditionally, now narrowed to every role except runtime rather than
-// dropped.
 func TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole(t *testing.T) {
 	env := configpkg.EnvConfig{Type: configpkg.EnvironmentTypeRuntime}
 	cases := []struct {
@@ -70,9 +49,6 @@ func TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole(t *testing.T) {
 	}
 }
 
-// TestOrchestratorReviewDirectoryReviewsAHostEnvInPlace mirrors the
-// local-agent case: a host env's review directory is exactly its local repo
-// path, with mirrored=false — there is no pod to sync from.
 func TestOrchestratorReviewDirectoryReviewsAHostEnvInPlace(t *testing.T) {
 	env := configpkg.EnvConfig{Type: configpkg.EnvironmentTypeHost, LocalRepoPath: "/home/erun/work"}
 	dir, mirrored := orchestratorReviewDirectory("frs", env)
@@ -81,11 +57,7 @@ func TestOrchestratorReviewDirectoryReviewsAHostEnvInPlace(t *testing.T) {
 	}
 }
 
-// TestOrchestratorReviewDirectoryHasNoneForARuntimeEnv locks scope item 3: a
-// runtime-role link resolves no review directory, asserted on the resolved
-// value itself rather than the absence of an error — it must not fall
-// through to the mirror default meant for a remote-agent env that does have
-// a pod to sync a mirror from.
+// A runtime link must not fall through to the remote-agent mirror default.
 func TestOrchestratorReviewDirectoryHasNoneForARuntimeEnv(t *testing.T) {
 	env := configpkg.EnvConfig{Type: configpkg.EnvironmentTypeRuntime}
 	dir, mirrored := orchestratorReviewDirectory("frs", env)
@@ -94,9 +66,7 @@ func TestOrchestratorReviewDirectoryHasNoneForARuntimeEnv(t *testing.T) {
 	}
 }
 
-// listOrchestratorTestCandidates is the shared fixture read for the
-// candidate-shape assertions below: dev (remote-agent), laptop (local-agent),
-// runtime (eligible only for the runtime role), in that sorted order.
+// listOrchestratorTestCandidates returns dev (remote-agent), laptop (local-agent), runtime.
 func listOrchestratorTestCandidates(t *testing.T) (dev, laptop, rt orchestratorEnvCandidate, laptopRepo string) {
 	t.Helper()
 	app, repo := orchestratorTestAppWithLocalRepo(t)
@@ -136,11 +106,6 @@ func TestListOrchestratorEnvCandidatesReviewsALocalAgentEnvInPlace(t *testing.T)
 	}
 }
 
-// TestListOrchestratorEnvCandidatesOffersARuntimeEnvForTheRuntimeRole locks
-// scope item 5: a runtime env is no longer greyed out in the picker. It stays
-// eligible (the dialog offers the role picker for it, not the ineligibility
-// notice), carries no review directory or mirror flag, and names the one
-// role — runtime — the operator must pick for it to actually link.
 func TestListOrchestratorEnvCandidatesOffersARuntimeEnvForTheRuntimeRole(t *testing.T) {
 	_, _, rt, _ := listOrchestratorTestCandidates(t)
 	if !rt.Eligible {
@@ -157,12 +122,6 @@ func TestListOrchestratorEnvCandidatesOffersARuntimeEnvForTheRuntimeRole(t *test
 	}
 }
 
-// TestOrchestratorIneligibilityReasonExplainsEachRejectedType locks the
-// operator-facing copy: an eligible env/role pair carries no reason, a
-// runtime env refused a non-runtime role names the concrete gap (no
-// worktree, no in-pod agent) and points at the role that does work, and an
-// unresolved type still gets an actionable — if generic — explanation rather
-// than "".
 func TestOrchestratorIneligibilityReasonExplainsEachRejectedType(t *testing.T) {
 	cases := []struct {
 		envType    configpkg.EnvironmentType

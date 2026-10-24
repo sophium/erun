@@ -80,8 +80,6 @@ func testTerraformHelpInit(t *testing.T) {
 }
 
 func testTerraformRefusesHostEnvironment(t *testing.T) {
-	// A host env has no pod and no cluster at all, so terraform must refuse
-	// it by name instead of resolving a plan directory it cannot apply.
 	setup := env.New(t)
 	fixture.SeedHostTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -91,15 +89,8 @@ func testTerraformRefusesHostEnvironment(t *testing.T) {
 }
 
 func testTerraformRuntimeEnvironmentDispatchesFromHost(t *testing.T) {
-	// Regression: a runtime env's terraform state lives on its own runtime
-	// pod's home PVC, so invoked from the host (no injected ERUN_TENANT/
-	// ERUN_ENVIRONMENT pod identity) erun must never resolve this host's own
-	// home directory and silently treat real, applied state as empty. This
-	// used to refuse outright; it now dispatches non-interactively into the
-	// env's own pod (via kubectl exec) instead, since the refusal's only
-	// named remedy, `erun open`, cannot be driven from a script or host
-	// orchestrator at all. init is read-only, so it dispatches with no
-	// confirmation gate.
+	// Runtime state lives on the pod's PVC, so a host invocation dispatches into the pod
+	// instead of resolving the host's empty home. init is read-only, so no confirm gate.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -112,11 +103,7 @@ func testTerraformRuntimeEnvironmentDispatchesFromHost(t *testing.T) {
 }
 
 func testTerraformRuntimeEnvironmentAllowedInPod(t *testing.T) {
-	// The same runtime env's terraform must still work — and still initialize
-	// fresh state on a genuinely first-time environment — when invoked from
-	// inside its own pod, signaled the same way deploy's in-pod guard detects
-	// it: the chart-injected ERUN_TENANT/ERUN_ENVIRONMENT pair matching the
-	// target env.
+	// Inside its own pod (matching injected ERUN_TENANT/ERUN_ENVIRONMENT) it resolves locally.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -130,14 +117,7 @@ func testTerraformRuntimeEnvironmentAllowedInPod(t *testing.T) {
 }
 
 func testTerraformRuntimeEnvironmentDispatchesFromADifferentEnvironmentsPod(t *testing.T) {
-	// Being inside *some* runtime pod is not enough to resolve state locally —
-	// the injected identity must match the targeted tenant/environment exactly,
-	// or an operator shelled into team/dev could have applied against team/
-	// prod's never-resolved host-side state. The mismatch no longer refuses
-	// either: it dispatches into prod's own pod via kubectl exec, which
-	// resolves correctly regardless of which pod the command was initiated
-	// from, because the dispatched command's identity is established fresh
-	// once it actually lands in prod's pod.
+	// The injected identity must match the target exactly; otherwise it dispatches.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -151,9 +131,7 @@ func testTerraformRuntimeEnvironmentDispatchesFromADifferentEnvironmentsPod(t *t
 }
 
 func testTerraformRemoteAgentEnvironmentDispatchesFromHost(t *testing.T) {
-	// A remote-agent env's worktree — and terraform state — is PVC-backed
-	// inside its own pod too, same as runtime; the host-side dispatch must
-	// cover it as well, not just type "runtime" by name.
+	// Remote-agent state is PVC-backed too, so dispatch covers it, not just runtime.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -166,11 +144,7 @@ func testTerraformRemoteAgentEnvironmentDispatchesFromHost(t *testing.T) {
 }
 
 func testTerraformApplyDispatchFromHostWithoutConfirmationRefuses(t *testing.T) {
-	// apply/destroy mutate real infra, so a host-invoked dispatch must not be
-	// an implicit unattended apply — dispatch is explicit-opt-in only: with
-	// no --confirm-environment and no TTY to prompt on, the same confirm
-	// gate the local path already uses reads empty stdin and refuses before
-	// anything is dispatched into the pod.
+	// Mutating dispatch is opt-in: with no --confirm-environment and no TTY it refuses.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -183,10 +157,7 @@ func testTerraformApplyDispatchFromHostWithoutConfirmationRefuses(t *testing.T) 
 }
 
 func testTerraformApplyDispatchDryRunWithConfirmation(t *testing.T) {
-	// --confirm-environment is the explicit opt-in dispatch needs for a
-	// mutating op: dry-run traces the dispatched command with
-	// --confirm-environment already embedded, so the in-pod run (which has no
-	// stdin to prompt on) never re-prompts for what the host already confirmed.
+	// The dispatched command embeds --confirm-environment so the in-pod run never re-prompts.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -199,9 +170,6 @@ func testTerraformApplyDispatchDryRunWithConfirmation(t *testing.T) {
 }
 
 func testTerraformPlanDispatchRealRunViaStub(t *testing.T) {
-	// The real (non-dry-run) dispatch path: a stubbed kubectl captures the
-	// exact exec invocation and returns fixed output, which erun relays as its
-	// own stdout — the plan a host orchestrator would actually see.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -217,10 +185,7 @@ func testTerraformPlanDispatchRealRunViaStub(t *testing.T) {
 }
 
 func testTerraformPlanDispatchRealRunSurfacesRemoteFailure(t *testing.T) {
-	// A dispatched command that fails in the pod (e.g. a real terraform error)
-	// must surface as a non-zero exit and the remote stderr, not a silent
-	// success — the orchestrator use case this dispatch path exists for
-	// depends on being able to trust the exit code.
+	// Orchestrators rely on a remote failure surfacing as a non-zero exit.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -239,11 +204,7 @@ func testTerraformPlanDispatchRealRunSurfacesRemoteFailure(t *testing.T) {
 }
 
 func testTerraformLocalAgentEnvironmentStillResolvesOnHost(t *testing.T) {
-	// The default fixture is local-agent, whose worktree is hostPath-mounted
-	// from this same machine — its terraform state genuinely is this host's
-	// own home directory, so it must keep resolving directly, with no injected
-	// pod identity required. Regression guard: the RemoteWorktree gate must
-	// not sweep local-agent envs into the dispatch path above.
+	// Local-agent state is on this host, so it must resolve directly, not dispatch.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -256,10 +217,7 @@ func testTerraformLocalAgentEnvironmentStillResolvesOnHost(t *testing.T) {
 }
 
 func testTerraformInitDryRun(t *testing.T) {
-	// init is its own operation now (apply/plan/destroy no longer init). With no
-	// committed lock yet, init generates one and records provider hashes for both
-	// deploy arches via `providers lock`, so a single committed lock initializes
-	// on any env's architecture.
+	// init locks providers for both deploy arches so one committed lock works everywhere.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -272,9 +230,7 @@ func testTerraformInitDryRun(t *testing.T) {
 }
 
 func testTerraformInitDryRunLockfileReadonly(t *testing.T) {
-	// A committed .terraform.lock.hcl in the (read-only) playbook tree pins
-	// providers, so init runs -lockfile=readonly and only refreshes the PVC
-	// provider cache — it never rewrites the tree and skips `providers lock`.
+	// A committed lock means -lockfile=readonly and no `providers lock`.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -288,8 +244,6 @@ func testTerraformInitDryRunLockfileReadonly(t *testing.T) {
 }
 
 func testTerraformInitRealRunViaStub(t *testing.T) {
-	// The real (non-dry-run) init path locks the writability pre-check, the init
-	// step, the cross-arch `providers lock` step, and the success line.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -305,10 +259,7 @@ func testTerraformInitRealRunViaStub(t *testing.T) {
 }
 
 func testTerraformApplyDryRunNoBackendWarns(t *testing.T) {
-	// Without a `backend "local"` block, terraform's -backend-config=path override
-	// doesn't persist, so state would land in ./terraform.tfstate inside the
-	// (read-only) tree. erun warns so the operator adds the block before apply
-	// fails on a read-only tree.
+	// Without a `backend "local"` block, state would land in the read-only tree.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -322,8 +273,6 @@ func testTerraformApplyDryRunNoBackendWarns(t *testing.T) {
 }
 
 func testTerraformApplyDryRun(t *testing.T) {
-	// apply's full plan runs behind a type-the-env-name confirm gate and
-	// performs no side effects in dry-run.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -333,7 +282,6 @@ func testTerraformApplyDryRun(t *testing.T) {
 }
 
 func testTerraformApplyDryRunDefaultScope(t *testing.T) {
-	// With no tenant/environment args, apply resolves the configured default scope.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -343,8 +291,6 @@ func testTerraformApplyDryRunDefaultScope(t *testing.T) {
 }
 
 func testTerraformApplyDryRunNoTfvars(t *testing.T) {
-	// A missing <environment>.tfvars makes plan run without it rather than
-	// pass a path that doesn't exist.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -357,8 +303,7 @@ func testTerraformApplyDryRunNoTfvars(t *testing.T) {
 }
 
 func testTerraformApplyDryRunWithCloudflareToken(t *testing.T) {
-	// A Cloudflare token is forwarded to terraform but its value never appears
-	// in the trace — it rides in the environment, not argv.
+	// The Cloudflare token rides in the environment, not argv.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -369,9 +314,7 @@ func testTerraformApplyDryRunWithCloudflareToken(t *testing.T) {
 }
 
 func testTerraformApplyDryRunUnderDevops(t *testing.T) {
-	// A tenant that keeps its whole devops footprint under <tenant>-devops/
-	// (docker/, k8s/, terraform-<tenant>/) resolves via the -devops convention
-	// when no repo-root terraform-<tenant>/ exists — the sourceless-pod layout.
+	// The sourceless-pod layout: terraform-<tenant>/ under <tenant>-devops/.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -384,8 +327,7 @@ func testTerraformApplyDryRunUnderDevops(t *testing.T) {
 }
 
 func testTerraformApplyDryRunLegacyStateWarning(t *testing.T) {
-	// A pre-relocation terraform.tfstate left in the tree is ignored (state now
-	// lives on the PVC) and surfaced as a warning so old state isn't orphaned silently.
+	// Old in-tree state is ignored but warned about so it is not silently orphaned.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -399,7 +341,6 @@ func testTerraformApplyDryRunLegacyStateWarning(t *testing.T) {
 }
 
 func testTerraformPlanDryRun(t *testing.T) {
-	// plan is read-only: no fmt mutation and no confirm gate, unlike apply.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -409,7 +350,6 @@ func testTerraformPlanDryRun(t *testing.T) {
 }
 
 func testTerraformDestroyDryRun(t *testing.T) {
-	// destroy is gated behind the same type-the-env-name confirm as apply.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -419,9 +359,6 @@ func testTerraformDestroyDryRun(t *testing.T) {
 }
 
 func testTerraformPlanDryRunConfiguredPath(t *testing.T) {
-	// A paths.terraform override in .erun/config.yaml relocates the Terraform
-	// base: erun resolves <base>/<environment> (no terraform-<tenant> dir
-	// exists) and traces the configured base as a decision line.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -435,9 +372,6 @@ func testTerraformPlanDryRunConfiguredPath(t *testing.T) {
 }
 
 func testTerraformConfiguredPathMissingRoot(t *testing.T) {
-	// A paths.terraform override with no resolvable <base>/<environment> dir
-	// fails with an error naming the configured base, not the terraform-<tenant>
-	// scaffold hint.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -450,8 +384,6 @@ func testTerraformConfiguredPathMissingRoot(t *testing.T) {
 }
 
 func testTerraformMissingRoot(t *testing.T) {
-	// With no terraform root present, fail with an actionable error pointing at
-	// the blueprint skill, not an opaque stat error.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -463,11 +395,7 @@ func testTerraformMissingRoot(t *testing.T) {
 }
 
 func testTerraformApplyDryRunRepoPathEnv(t *testing.T) {
-	// A sourceless runtime pod has no .git: the image-baked release tree is
-	// surfaced at ERUN_REPO_PATH. Root resolution must come from that env var
-	// (not the cwd .git walk), so terraform runs against
-	// <ERUN_REPO_PATH>/terraform-team/dev even though neither the cwd nor the
-	// repo dir is a git repository.
+	// A sourceless runtime pod has no .git; root resolution comes from ERUN_REPO_PATH.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	repoDir := filepath.Join(setup.Home, "git", "team")
@@ -477,10 +405,7 @@ func testTerraformApplyDryRunRepoPathEnv(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// The resolved dir normalizes to <TMP>, so the snapshot alone can't prove
-	// resolution came from ERUN_REPO_PATH rather than the cwd. Assert on the
-	// un-normalized path (the masked-value case) to lock that the repo-dir
-	// tree — distinct from the cwd — drove the plan.
+	// The snapshot normalizes both paths to <TMP>, so assert the raw repo-dir path.
 	if terraformDir := filepath.Join(repoDir, "terraform-team", "dev"); !strings.Contains(result.Combined, terraformDir) {
 		t.Fatalf("expected terraform to resolve %s from ERUN_REPO_PATH, got:\n%s", terraformDir, result.Combined)
 	}
@@ -488,9 +413,6 @@ func testTerraformApplyDryRunRepoPathEnv(t *testing.T) {
 }
 
 func testTerraformNotInGitWithoutRepoPath(t *testing.T) {
-	// The laptop fallback is unchanged: with no .git up the tree and
-	// ERUN_REPO_PATH unset, root resolution still fails with "cannot find git
-	// project" before any terraform work.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -501,8 +423,6 @@ func testTerraformNotInGitWithoutRepoPath(t *testing.T) {
 }
 
 func testTerraformApplyRealRunViaStub(t *testing.T) {
-	// The real (non-dry-run) path locks the execution sequence, the confirm
-	// gate, and the success line.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -518,11 +438,8 @@ func testTerraformApplyRealRunViaStub(t *testing.T) {
 }
 
 func testTerraformApplyDryRunRfc2136InjectsTsigSecret(t *testing.T) {
-	// A resolved dns01_provider of "powerdns-rfc2136" makes erun read the
-	// cluster-edge module's own materialized TSIG Secret back and inject it as
-	// TF_VAR_rfc2136_tsig_secret, the same way it already injects the Cloudflare
-	// token — so the operator never has to export it by hand. The Secret name is
-	// derived from issuer_name (default "erun-cloudflare"), never hardcoded.
+	// powerdns-rfc2136 injects the TSIG Secret as TF_VAR_rfc2136_tsig_secret; the Secret name
+	// derives from issuer_name.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -532,7 +449,6 @@ func testTerraformApplyDryRunRfc2136InjectsTsigSecret(t *testing.T) {
 		t.Fatalf("write tfvars: %v", err)
 	}
 	stubs := setup.Cwd + "/stubs"
-	// base64 of "supersecret", read back from data.tsig-secret.
 	fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{Stdout: "c3VwZXJzZWNyZXQ="})
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
 	result := erun.Run(t, []string{"terraform", "apply", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -543,11 +459,8 @@ func testTerraformApplyDryRunRfc2136InjectsTsigSecret(t *testing.T) {
 }
 
 func testTerraformApplyDryRunRfc2136MissingSecretFailsUpFront(t *testing.T) {
-	// terraform itself would only fail this precondition mid-plan, after
-	// printing a partial plan whose "N to add" summary omits every module it
-	// never reached — reviewing that summary reviews an incomplete plan. erun
-	// must fail before tracing or running any terraform command at all, naming
-	// the Secret and key that are missing.
+	// terraform would fail mid-plan with an incomplete "N to add" summary, so erun must fail
+	// before running anything.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -570,12 +483,7 @@ func testTerraformApplyDryRunRfc2136MissingSecretFailsUpFront(t *testing.T) {
 }
 
 func testTerraformApplyDryRunRfc2136ForbiddenSecretNamesPermissionProblem(t *testing.T) {
-	// A Secret that exists but is denied by RBAC (kubectl's "Forbidden", not
-	// "NotFound") must produce a different, distinguishable message from the
-	// missing-secret case above: the remedy for a permissions/context problem
-	// is not "create the secret". kubectl's own Forbidden stderr already names
-	// the exact denied principal, so erun surfaces it verbatim rather than
-	// guessing.
+	// Forbidden needs a different remedy than NotFound; kubectl's stderr names the principal.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -598,8 +506,6 @@ func testTerraformApplyDryRunRfc2136ForbiddenSecretNamesPermissionProblem(t *tes
 }
 
 func testTerraformApplyConfirmMismatch(t *testing.T) {
-	// A confirm value that doesn't match the target env aborts before the
-	// mutating apply.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)

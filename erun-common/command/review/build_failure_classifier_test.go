@@ -10,10 +10,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// A loaded Docker daemon can fail a test stage's Testcontainers startup before
-// any test ran -- the reaper never leaves status "created", or the network it
-// guards is refused. That says nothing about the change, so recording it as a
-// FAILED build is refused before any platform call.
+// A Docker daemon startup failure says nothing about the change, so it must not
+// be recorded as a FAILED build.
 func TestRunReviewRecordBuildRefusesADockerDaemonStartupFailure(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

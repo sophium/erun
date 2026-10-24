@@ -12,20 +12,12 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// Every job, lease and idle tool takes a tenant/environment, and none of them can
-// honour one that names a different environment: the work runs in this pod,
-// against this pod's repo and this pod's erun binary, so accepting a foreign
-// target would hand back a handle asserting a target the work never reached.
-// Each of these must refuse.
+// Work runs in this pod, so a foreign target must be refused.
 func TestJobLeaseAndIdleToolsRefuseAForeignEnvironment(t *testing.T) {
 	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 	ctx := context.Background()
 
-	// Assert on the REFUSAL, not merely on "an error". Several of these tools fail
-	// for unrelated downstream reasons when handed a foreign target -- a missing
-	// job, an unresolvable repo -- so a bare err != nil passes even against the
-	// unfixed code and proves nothing. The error has to be the one that names both
-	// scopes.
+	// Several tools fail downstream on a foreign target, so assert the specific refusal.
 	_, _, err := jobs.JobStatusTool(runtime)(ctx, nil, jobs.JobStatusInput{Tenant: "tenant-b", Environment: "prod", ID: "x"})
 	assertRefusedForeignTarget(t, "job_status", err)
 
@@ -49,10 +41,7 @@ func TestJobLeaseAndIdleToolsRefuseAForeignEnvironment(t *testing.T) {
 	assertRefusedForeignTarget(t, "exec_agent", err)
 }
 
-// assertRefusedForeignTarget insists the tool refused BECAUSE the target is not
-// this server's, naming the server's scope and the requested one. Any other
-// error -- including a plausible downstream one -- is a failure, because it means
-// the tool went on to act rather than refusing up front.
+// assertRefusedForeignTarget fails on any other error: it means the tool acted first.
 func assertRefusedForeignTarget(t *testing.T, tool string, err error) {
 	t.Helper()
 	if err == nil {
@@ -64,19 +53,11 @@ func assertRefusedForeignTarget(t *testing.T, tool string, err error) {
 	}
 }
 
-// TestExecRawBackgroundAndExecAgentResolveTenantEnvironmentLikeOtherJobTools
-// guards against exec_raw's wait:false path and exec_agent reading
-// runtime.Context.Tenant/Environment directly again, with no field a caller
-// could use to supply or restate them and no foreign-target refusal --
-// unlike every sibling job tool, which resolves through resolveLocalTarget.
-// Preview mode and a placeholder supervisor path (never exec'd, since preview
-// short-circuits before the process would start) let this exercise the same
-// resolution the live call makes without spawning anything.
+// exec_raw (wait:false) and exec_agent must resolve through resolveLocalTarget like the
+// other job tools.
 func TestExecRawBackgroundAndExecAgentResolveTenantEnvironmentLikeOtherJobTools(t *testing.T) {
 	t.Setenv("ERUN_ERUN_BIN", "erun-test-supervisor-stub")
-	// ensureAgentJobToolAvailable resolves "claude" before the preview
-	// short-circuit, so it needs a real binary on PATH even though nothing
-	// actually execs it in this test.
+	// ensureAgentJobToolAvailable resolves "claude" before the preview short-circuit.
 	t.Setenv("ERUN_CLAUDE_BIN", "true")
 	runtime := normalizeRuntimeConfig(shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: t.TempDir()}})
 	ctx := context.Background()

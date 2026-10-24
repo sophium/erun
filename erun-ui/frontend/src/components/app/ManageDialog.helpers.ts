@@ -6,8 +6,7 @@ export function isClaudeOverridden(claude: UIEnvironmentConfig['claude']): boole
   return hasClaudeTriStateOverride(claude) || hasClaudeTypedOverride(claude);
 }
 
-// The tri-state overrides carry their own "inherit" value, so any of them being
-// set at all is an override.
+// Tri-state overrides carry their own "inherit" value, so any set value is an override.
 function hasClaudeTriStateOverride(claude: UIEnvironmentConfig['claude']): boolean {
   return (
     claude.useMantle !== undefined ||
@@ -25,13 +24,8 @@ function hasClaudeTypedOverride(claude: UIEnvironmentConfig['claude']): boolean 
   return (claude.models?.length ?? 0) > 0;
 }
 
-// effectiveClaudeModelDefaults resolves which model set the AI tab offers,
-// mirroring erun-common EffectiveGateway and resolveClaudeLaunchModel: a
-// configured catalog applies unless the environment opted out, and then the
-// catalog's models (with its default) are what a launch can select; otherwise
-// the environment's own models are, with the first available as the default.
-// It reads the draft, so flipping "Use the gateway" changes the choices before
-// the save rather than after it.
+// effectiveClaudeModelDefaults mirrors erun-common EffectiveGateway and resolveClaudeLaunchModel.
+// It reads the draft, so toggling the gateway changes the choices before save.
 export function effectiveClaudeModelDefaults(
   claude: UIEnvironmentConfig['claude'],
   defaults: UIEnvironmentConfig['claudeDefaults'],
@@ -76,7 +70,7 @@ export function parseIdleTrafficBytes(value: string): number {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
 }
 
-// Keys are the workspaceSyncStatus values set by App.setWorkspaceSyncStatus (erun-ui/workspace_sync.go).
+// Keys are the workspaceSyncStatus values set in erun-ui/workspace_sync.go.
 const workspaceSyncStatusTones: Record<string, StatusBadgeTone> = {
   error: 'destructive',
   stopped: 'muted',

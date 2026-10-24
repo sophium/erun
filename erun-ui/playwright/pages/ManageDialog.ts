@@ -2,7 +2,6 @@ import type { Locator, Page } from '@playwright/test';
 
 export type ManageTab = 'General' | 'Runtime' | 'AI' | 'Ports' | 'Access' | 'History';
 
-// ManageDialog POM. The dialog title is "<tenant>-<environment>".
 export class ManageDialog {
   constructor(
     public readonly page: Page,
@@ -13,11 +12,7 @@ export class ManageDialog {
     if (this.expectedTitle) {
       return this.page.getByRole('dialog', { name: this.expectedTitle });
     }
-    // Disambiguate from other open dialogs (e.g. the activity drawer) by the
-    // description text unique to the manage surface. The General tab used to
-    // serve this purpose, but it — along with every other tab — is replaced
-    // by the delete-confirmation view while dialog.tab === 'delete', which
-    // made every locator scoped under this one resolve to nothing mid-delete.
+    // Matched by the manage description, which survives the delete-confirmation view.
     return this.page
       .getByRole('dialog')
       .filter({ hasText: 'Edit environment configuration' })
@@ -33,8 +28,7 @@ export class ManageDialog {
   }
 
   tab(name: ManageTab): Locator {
-    // The tab's accessible name gains ", has unsaved changes" when dirty, so
-    // match by prefix; scope to this dialog to avoid the terminal tab strip.
+    // Prefix match: the name gains ", has unsaved changes" when dirty.
     return this.locator().getByRole('tab', { name: new RegExp(`^${name}(,|$)`) });
   }
 
@@ -43,60 +37,35 @@ export class ManageDialog {
     return label?.includes('has unsaved changes') ?? false;
   }
 
-  // The "Pending redeploy" alert appears after a save that changed a
-  // pod-shaping field.
   redeployBanner(): Locator {
     return this.locator().getByRole('alert').filter({ hasText: 'Pending redeploy' });
   }
 
-  // The banner's own deploy action. It reads the same checklist selection as the
-  // Runtime tab's Deploy, so an emptied checklist refuses it too.
+  // Shares the Runtime checklist, so an emptied checklist refuses it too.
   redeployNowButton(): Locator {
     return this.redeployBanner().getByRole('button', { name: 'Redeploy now' });
   }
 
-  // Converge on the banner actually having rendered before asserting on it.
-  // The save click and the banner's appearance are two separate steps (a save
-  // round-trip, then a re-render), so a bare `expect(...).toBeVisible()`
-  // right after save() races that render against expect's fixed timeout
-  // instead of the enclosing test's own budget — waitFor with no explicit
-  // timeout defers to the test's budget instead, the same shape
-  // ManageDialog.waitForOpen/waitForClosed already use.
+  // Waits under the test's own budget, not expect's fixed timeout.
   async waitForRedeployBanner(): Promise<void> {
     await this.redeployBanner().waitFor({ state: 'visible' });
   }
 
-  // The "Include in Upgrade all" opt-in is selection metadata for a future
-  // `erun upgrade`, never a pod input.
   autoUpgradeCheckbox(): Locator {
     return this.locator().locator('#environment-config-autoupgrade');
   }
 
-  // The "Ignore project build.sh" toggle is a build-time CLI setting, never a
-  // pod input.
   disableBuildScriptCheckbox(): Locator {
     return this.locator().locator('#environment-config-disablebuildscript');
   }
 
-  // The "Platform account" toggle binds the env's runtime SA to cluster-admin,
-  // so it renders for every pod-backed type. A host env has no runtime SA to
-  // bind, and its Runtime tab offers only the build-script opt-out below.
+  // Renders for every pod-backed type; a host env has no runtime SA.
   platformAccountCheckbox(): Locator {
     return this.locator().locator('#environment-config-platformaccount');
   }
 
-  // The Hosted environment panel on the General tab: which platform row this
-  // local environment corresponds to, whether this machine's own settings have
-  // moved since they were last sent, and the drift comparison behind its
-  // "Check for updates" button. It renders only for an environment that
-  // carries a hosted marker, so an unhosted env has no panel here at all.
-  // Scoped to the panel itself (a named region), not the dialog: the dialog
-  // carries other role=status elements -- the cloud-context "Not linked"
-  // empty state, for one -- so an unscoped status query is ambiguous.
-  //
-  // The panel's two status lines carry their own accessible names for the same
-  // reason: they are both live regions about this environment, and only their
-  // names tell them apart.
+  // Hosted environment panel, scoped to its named region: the dialog has other role=status
+  // elements. Its two status lines are told apart by accessible name.
   hostedPanel(): Locator {
     return this.locator().getByRole('region', { name: 'Hosted environment' });
   }
@@ -105,8 +74,6 @@ export class ManageDialog {
     return this.hostedPanel().getByRole('button', { name: /Check whether the platform's copy/ });
   }
 
-  // This machine's own settings: the standing divergence, and the sentence an
-  // upload that just answered it reports.
   hostedLocalChangeLine(): Locator {
     return this.hostedPanel().getByRole('status', { name: "This machine's settings" });
   }
@@ -121,14 +88,12 @@ export class ManageDialog {
     return this.hostedPanel().getByRole('status', { name: "The platform's definition" });
   }
 
-  // Either line's failure state. Both are attempted failures, so both are
-  // alerts rather than statuses, per the shared design-language record.
+  // Failures are alerts, not statuses.
   hostedDriftError(): Locator {
     return this.hostedPanel().getByRole('alert');
   }
 
-  // The runtime-only "Mount source code" toggle and the git remote it reveals.
-  // The URL field is rendered only while the toggle is on.
+  // The URL field renders only while the toggle is on.
   mountSourceCheckbox(): Locator {
     return this.locator().locator('#environment-config-mountsource');
   }
@@ -137,21 +102,16 @@ export class ManageDialog {
     return this.locator().locator('input#environment-config-repourl');
   }
 
-  // The Idle-stop "Timeout" is a pod-shaping value.
   idleTimeoutInput(): Locator {
     return this.locator().locator('#environment-config-idle-timeout');
   }
 
-  // "Version to deploy": the version the Deploy button installs by reference
-  // (empty = the env's current version). Deploy never builds — producing a new
-  // version is the separate "Create & deploy new version" action.
+  // Deploy installs by reference; it never builds.
   runtimeVersionInput(): Locator {
     return this.locator().locator('#manage-version');
   }
 
-  // The version + components live in one popover: the chevron beside the version
-  // field opens the version list and, below it, that version's component
-  // checklist. Idempotent — a no-op when the panel is already open.
+  // Opens the version list and component checklist; a no-op if already open.
   async openVersionPicker(): Promise<void> {
     if (
       await this.deployComponentsHeading()
@@ -164,31 +124,22 @@ export class ManageDialog {
     await this.deployComponentsHeading().waitFor({ state: 'visible' });
   }
 
-  // Picks a version from the picker's suggestion list, which keeps the panel
-  // open so the version-scoped component checklist is reachable in one flow.
+  // Keeps the panel open so the checklist is reachable.
   async pickVersion(version: string): Promise<void> {
     await this.openVersionPicker();
     const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     await this.page.getByRole('option', { name: new RegExp(escaped) }).click();
   }
 
-  // Deploy installs the selected version by reference (never builds), so it is
-  // disabled until a version is chosen.
   deployButton(): Locator {
     return this.locator().locator('#environment-config-deploy');
   }
 
-  // "Stop environment" scales the runtime to zero so its CPU and memory go back
-  // to the node. It sits beside Deploy because that is where the operator finds
-  // the resource sliders capped. There is no matching Start: opening the
-  // environment wakes it.
+  // There is no matching Start: opening the environment wakes it.
   stopButton(): Locator {
     return this.locator().locator('#environment-config-stop');
   }
 
-  // What the runtime Deployment currently reports, above the Stop button and
-  // part of that button's accessible description. It is what makes the control's
-  // outcome predictable before it is pressed rather than after.
   runtimeRunStateLine(): Locator {
     return this.locator().locator('#environment-config-run-state');
   }
@@ -197,9 +148,6 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-stop-help');
   }
 
-  // "This environment's usage" reports the environment's own CPU, memory and
-  // disk reading against its cgroup limits, directly below the sliders that
-  // set those limits.
   runtimeUsagePanel(): Locator {
     return this.locator()
       .locator('div')
@@ -211,9 +159,6 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-usage-refresh');
   }
 
-  // "Sizing recommendation" turns the environment's own standing
-  // recommendation into a one-click "Resize to this" action, directly under
-  // the usage reading it is derived from.
   runtimeSizingPanel(): Locator {
     return this.locator()
       .locator('div')
@@ -229,15 +174,11 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-sizing-apply');
   }
 
-  // Shown only after a resize is refused because the environment is held by
-  // another worker; the override is a deliberate second click, never implicit.
+  // The override is a deliberate second click.
   runtimeSizingOverrideButton(): Locator {
     return this.locator().locator('#environment-config-sizing-override');
   }
 
-  // "Running in this environment" reports what the pod is actually running —
-  // observed sessions and the processes holding memory — beneath the sliders,
-  // because that is the next question once the figures read as capped.
   runtimeActivityPanel(): Locator {
     return this.locator()
       .locator('div')
@@ -249,21 +190,18 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-activity-refresh');
   }
 
-  // A reclaim button exists only for a group with a safe reclaim action; an
-  // agent process is the operator's work and deliberately has none.
+  // Agent processes deliberately have no reclaim action.
   runtimeReclaimButton(group: string): Locator {
     return this.locator().locator(`#environment-config-reclaim-${group}`);
   }
 
-  // The capacity reading's explanation line: why the maximum is what it is.
   runtimeCapacityNotice(): Locator {
     return this.locator()
       .getByRole('status')
       .filter({ hasText: /node is fully committed|declare no limits/ });
   }
 
-  // "Create & deploy new version" (build → push → deploy) — shown only for a
-  // local-agent env, which owns source to build.
+  // Only for local-agent envs, which own source to build.
   createVersionButton(): Locator {
     return this.locator().locator('#environment-config-create-version');
   }
@@ -274,86 +212,61 @@ export class ManageDialog {
     await button.click();
   }
 
-  // The checklist lives in the version-picker popover, which Radix portals to
-  // the document root — so these query at page level, not inside the dialog.
-  // `name` is the component's canonical name: a chart dir name, or the runtime
-  // release name <tenant>-devops for the runtime item.
+  // The checklist is portaled to the document root. `name` is a chart dir or <tenant>-devops.
   deployComponentCheckbox(name: string): Locator {
     return this.page.locator(`#environment-config-deploy-component-${name}`);
   }
 
-  // Version-scoped ("Components in <version> to deploy") only for sourceless
-  // envs; a local env's charts aren't version-filtered, so it stays plain.
+  // Version-scoped only for sourceless envs.
   deployComponentsHeading(): Locator {
     return this.page.locator('#environment-config-deploy-components-heading');
   }
 
-  // Source-failure notices below the version list (a private or unreachable
-  // runtime image). Portaled with the popover, so query at page level.
+  // Portaled with the popover.
   versionSourceNotices(): Locator {
     return this.page.getByRole('list', { name: 'Version source notices' });
   }
 
-  // The version-picker popover itself (portaled to the document root), used to
-  // assert it stays within the viewport rather than overflowing off-screen.
   versionPickerPopover(): Locator {
     return this.page.locator('[data-slot="popover-content"]');
   }
 
-  // The panel's own search box: a control inside the panel, so a spec can put
-  // focus there without a pointer and then observe what moving it out does.
   versionPickerSearchInput(): Locator {
     return this.page.getByPlaceholder('Search versions...');
   }
 
-  // Shown in place of the checklist until a version is picked — the charts are
-  // that version's, so there's nothing to choose before one is selected.
   deployComponentsHint(): Locator {
     return this.page.locator('#environment-config-deploy-components-hint');
   }
 
-  // Enabled only when the selection differs from the saved default. Matched by
-  // id, not name, so it never collides with the dialog footer's Save.
+  // Matched by id so it never collides with the footer's Save.
   saveDeployComponentsButton(): Locator {
     return this.page.locator('#environment-config-save-deploy-components');
   }
 
-  // The notice under the version row stating that every chart in the checklist is
-  // unchecked, so a disabled Deploy names its reason rather than stopping
-  // silently.
   deployComponentsEmptyNotice(): Locator {
     return this.page.locator('#environment-config-deploy-components-empty-notice');
   }
 
-  // The same statement rendered inside the open version panel, which covers the
-  // row above it while the operator is unchecking the last chart.
   deployComponentsEmptyPanelNotice(): Locator {
     return this.page.locator('#environment-config-deploy-components-empty-notice-panel');
   }
 
-  // The "Runtime chart" field states the chart coordinate -- which chart the
-  // runtime is installed from -- separately from the version, which names the
-  // image. Empty means "the chart published with the deployed version".
+  // Empty means the chart published with the deployed version.
   runtimeChartInput(): Locator {
     return this.locator().locator('#environment-config-runtimechart');
   }
 
-  // The notice under the version row: what a deploy of the picked version would
-  // install for the runtime, or why it cannot be deployed as it stands.
-  // Page-scoped, not dialog-scoped: while the version panel is open it is a modal
-  // popover and the dialog behind it is aria-hidden, so a role-scoped query would
-  // find nothing exactly when this notice matters most.
+  // Page-scoped: while the version panel is open the dialog is aria-hidden.
   runtimeChartNotice(): Locator {
     return this.page.locator('#environment-config-runtimechart-notice');
   }
 
-  // The same statement rendered inside the open version panel.
   runtimeChartPanelNotice(): Locator {
     return this.page.locator('#environment-config-runtimechart-notice-panel');
   }
 
-  // One-click recovery offered by the blocking notice: adopt an ERun chart. Each
-  // notice owns its own button id, so the row and the panel never collide.
+  // Each notice owns its button id, so row and panel never collide.
   adoptRuntimeChartButton(): Locator {
     return this.page.locator('#environment-config-runtimechart-notice-adopt');
   }
@@ -362,13 +275,7 @@ export class ManageDialog {
     return this.page.locator('#environment-config-runtimechart-notice-panel-adopt');
   }
 
-  // Converges on the popover actually being open before returning, the same
-  // way openVersionPicker does for its own popover: the click and the
-  // popover's render are two separate steps, so a caller that asserts on an
-  // option right after the click races that render against its own fixed
-  // budget instead of this wait's (which defers to the enclosing test's).
-  // The paired-default option always renders first regardless of what other
-  // charts a spec stubs in, so it is a stable "the picker is open" signal.
+  // Waits for the popover to open; the paired-default option always renders first.
   async openRuntimeChartPicker(): Promise<void> {
     await this.locator().getByRole('button', { name: 'Show runtime chart choices' }).click();
     await this.page
@@ -376,8 +283,7 @@ export class ManageDialog {
       .waitFor({ state: 'visible' });
   }
 
-  // Picks an offered chart. The options carry both the label and the reference,
-  // so either matches.
+  // Options carry both label and reference, so either matches.
   async pickRuntimeChart(text: string): Promise<void> {
     const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     await this.page.getByRole('option', { name: new RegExp(escaped) }).click();
@@ -431,9 +337,7 @@ export class ManageDialog {
     return this.locator().getByTestId('manage-jobs-empty');
   }
 
-  // The reading placeholder, which is not the empty state: it is what the tab
-  // renders until its read has been answered, and it carries its own id so a
-  // wait for the empty state cannot settle on it.
+  // The reading placeholder has its own id so an empty-state wait cannot settle on it.
   jobsLoadingState(): Locator {
     return this.locator().getByTestId('manage-jobs-loading');
   }
@@ -446,11 +350,7 @@ export class ManageDialog {
     return this.locator().getByTestId('manage-jobs-unreachable-reconnect');
   }
 
-  // The read was refused -- a pod timeout, an auth or parse failure -- rather
-  // than the runtime being unreachable. Its own surface, with its own retry;
-  // scoped by its message so it is never confused with the unreachable card's
-  // role="status" above (the two can never render together, but the assertion
-  // should still say which one it is looking at).
+  // A refused read (timeout, auth, parse), distinct from the unreachable card.
   jobsReadFailure(): Locator {
     return this.locator()
       .getByRole('alert')
@@ -540,17 +440,8 @@ export class ManageDialog {
     return (await field.textContent())?.trim() ?? '';
   }
 
-  // Mirrors the Go-side EnvConfig.RemoteWorktree() predicate: true for any env
-  // type other than the local-agent variant.
-  //
-  // Reads an answer or fails; it never answers from a field that is not there.
-  // The Environment type control lives in the dialog's loaded body, and
-  // `ManageDialogContent` replaces that whole body with a "Loading config..."
-  // placeholder for as long as `configLoading` is set -- so the control is
-  // genuinely absent during the load. Folding "absent" into "not remote" made
-  // the negative assertions about it green without the field ever having been
-  // read, and left a caller unable to tell "this env is a local agent" from
-  // "nothing has rendered yet".
+  // Mirrors EnvConfig.RemoteWorktree(). Throws while the body is still loading rather than
+  // reading an absent field as "not remote".
   async hasRemoteWorktree(): Promise<boolean> {
     const label = await this.envTypeFieldValue();
     if (label === '') {
@@ -561,8 +452,7 @@ export class ManageDialog {
     return !/local agent/i.test(label);
   }
 
-  // Only renders for remote envs (autoStart is meaningless for local shells),
-  // so check visibility before driving it.
+  // Remote envs only.
   autoStartSelect(): Locator {
     return this.locator().locator('#environment-config-autostart');
   }
@@ -581,13 +471,11 @@ export class ManageDialog {
     mode: 'Ask each time' | 'Always auto-start' | 'Never auto-start',
   ): Promise<void> {
     await this.autoStartSelect().click();
-    // SelectField renders a Radix Select; the listbox is portal'd to body
-    // so it is queried at the document root rather than inside the dialog.
+    // The listbox is portaled to body.
     await this.page.getByRole('option', { name: mode }).click();
   }
 
-  // Only renders when the tenant has at least one cloud alias configured (else
-  // an EmptyState), so check visibility first.
+  // Renders only when the tenant has a cloud alias.
   cloudAliasSelect(): Locator {
     return this.locator().locator('#environment-config-cloudprovideralias');
   }
@@ -606,8 +494,7 @@ export class ManageDialog {
     await this.cloudAliasSelect().click();
   }
 
-  // The Radix listbox is portal'd to the document body, so it is queried at the
-  // page root rather than inside the dialog.
+  // The listbox is portaled to body.
   cloudAliasNoneOption(): Locator {
     return this.page.getByRole('option', { name: '— None —' });
   }
@@ -647,36 +534,29 @@ export class ManageDialog {
     await this.cloudAliasSlotSelect(providerType).click();
   }
 
-  // The standalone "Use host AWS credentials" toggle was removed (an attached
-  // AWS alias now delivers credentials); this locator asserts it never renders.
+  // Removed control; asserts it never renders.
   hostAwsCredentialsCheckbox(): Locator {
     return this.locator().getByLabel('Use host AWS credentials inside this env');
   }
 
   // --- Per-environment gateway overrides ---
-  //
-  // Rendered only when the erun-level catalog names a gateway: without one
-  // there is nothing for an environment to override, so the controls are absent
-  // rather than offering a switch that changes nothing.
+  // Rendered only when the erun-level catalog names a gateway.
 
   claudeGatewayField(): Locator {
     return this.locator().locator('#environment-config-claude-gateway');
   }
 
-  // The Radix listbox is portal'd to the document body, so the option is
-  // queried at the page root rather than inside the dialog.
+  // The listbox is portaled to body.
   async chooseClaudeGateway(label: string): Promise<void> {
     await this.claudeGatewayField().click();
     await this.page.getByRole('option', { name: label, exact: true }).click();
   }
 
-  // The gateway credential is one erun-level value, so this control no longer
-  // exists and every use of it asserts that absence rather than filling it in.
+  // Removed control; asserts its absence.
   claudeGatewaySecretInput(): Locator {
     return this.locator().locator('#environment-config-claude-gateway-secret');
   }
 
-  // Always renders; with no per-env override it shows "Default (ultracode)".
   claudeEffortSelect(): Locator {
     return this.locator().locator('#environment-config-claude-effort');
   }
@@ -685,15 +565,12 @@ export class ManageDialog {
     return (await this.claudeEffortSelect().textContent())?.trim() ?? '';
   }
 
-  // The Radix listbox is portal'd to the document body, so the option is
-  // queried at the page root rather than inside the dialog.
+  // The listbox is portaled to body.
   async chooseClaudeEffort(label: string): Promise<void> {
     await this.claudeEffortSelect().click();
     await this.page.getByRole('option', { name: label, exact: true }).click();
   }
 
-  // An editable selector, not a read-only label, so a mis-set env type can be
-  // corrected in place.
   environmentTypeSelect(): Locator {
     return this.locator().locator('#environment-config-type');
   }
@@ -702,18 +579,14 @@ export class ManageDialog {
     return (await this.environmentTypeSelect().textContent())?.trim() ?? '';
   }
 
-  // The Radix listbox is portal'd to the document body, so the option is
-  // queried at the page root rather than inside the dialog.
+  // The listbox is portaled to body.
   async chooseEnvironmentType(label: string): Promise<void> {
     await this.environmentTypeSelect().click();
     await this.page.getByRole('option', { name: label, exact: true }).click();
   }
 
-  // The "Repository path" field is an editable Input for a local-agent env but
-  // a read-only label for remote-agent/runtime envs.
   repositoryPathInput(): Locator {
-    // Tag-qualified because the read-only variant reuses this id on a <div>;
-    // only the editable local-agent field is an <input>.
+    // Tag-qualified: the read-only variant reuses this id on a <div>.
     return this.locator().locator('input#environment-config-repopath');
   }
 
@@ -733,8 +606,6 @@ export class ManageDialog {
     return this.locator().locator(`#environment-config-claude-models-${model}`);
   }
 
-  // Always renders; with no per-env override it shows "Default (<first
-  // available model>)", e.g. "Default (opus)".
   claudeDefaultModelSelect(): Locator {
     return this.locator().locator('#environment-config-claude-default-model');
   }
@@ -743,8 +614,7 @@ export class ManageDialog {
     return (await this.claudeDefaultModelSelect().textContent())?.trim() ?? '';
   }
 
-  // The Radix listbox is portal'd to the document body, so the option is
-  // queried at the page root.
+  // The listbox is portaled to body.
   async chooseClaudeDefaultModel(label: string): Promise<void> {
     await this.claudeDefaultModelSelect().click();
     await this.page.getByRole('option', { name: label, exact: true }).click();

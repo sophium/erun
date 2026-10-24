@@ -85,8 +85,7 @@ type DiffCommit struct {
 type DiffOptions struct {
 	Scope          string `json:"scope,omitempty"`
 	SelectedCommit string `json:"selectedCommit,omitempty"`
-	// Target selects which repo to diff: "env" (default) the environment's
-	// runtime working directory, "erun" the contribute-mode erun clone.
+	// Target is "env" (default, the runtime working directory) or "erun" (the contribute-mode clone).
 	Target string `json:"target,omitempty"`
 }
 
@@ -95,8 +94,7 @@ const (
 	DiffTargetERun = "erun"
 )
 
-// NormalizeDiffTarget canonicalizes the diff target; empty resolves to the
-// historical "env" default.
+// NormalizeDiffTarget canonicalizes the diff target, defaulting to "env".
 func NormalizeDiffTarget(target string) string {
 	switch strings.TrimSpace(target) {
 	case DiffTargetERun:
@@ -106,8 +104,7 @@ func NormalizeDiffTarget(target string) string {
 	}
 }
 
-// ResolveDiffTargetRoot returns the working directory the diff tool should
-// operate on for the given target.
+// ResolveDiffTargetRoot returns the working directory to diff for target.
 func ResolveDiffTargetRoot(target, envRoot, homeDir string) (string, error) {
 	switch NormalizeDiffTarget(target) {
 	case DiffTargetERun:
@@ -199,11 +196,7 @@ func normalizeDiffScope(scope string) string {
 	}
 }
 
-// rejectOptionShapedSelectedCommit refuses a selectedCommit that git would
-// parse as an option rather than a revision, before any git command runs with
-// it. exec_diff is a read-scoped MCP tool, so a caller-supplied revision must
-// never be able to steer git's own flags. Only the "commit" scope ever passes
-// selectedCommit into argv, so other scopes have nothing to validate.
+// exec_diff is read-scoped, so a caller-supplied revision must never parse as a git option.
 func rejectOptionShapedSelectedCommit(scope, selectedCommit string) error {
 	if scope != "commit" || selectedCommit == "" {
 		return nil
@@ -214,10 +207,7 @@ func rejectOptionShapedSelectedCommit(scope, selectedCommit string) error {
 	return nil
 }
 
-// resolveDiffSelectedCommit resolves a "commit" scope's selectedCommit to a
-// commit sha via git itself, so only a value git already agreed is a commit
-// reaches the diff argv. Other scopes pass selectedCommit through unresolved
-// since it never reaches argv for them.
+// Resolving through git ensures only a real commit sha reaches the diff argv.
 func resolveDiffSelectedCommit(projectRoot, scope, selectedCommit string, runGit gitx.GitCommandRunnerFunc) (string, error) {
 	if scope != "commit" || selectedCommit == "" {
 		return selectedCommit, nil
@@ -244,27 +234,14 @@ func gitDiffReviewArgs(baseCommit string, baseFound bool, scope, selectedCommit 
 		}
 		return args
 	default:
-		// "current" is the panel's "Current local changes" layer: staged and
-		// unstaged edits not yet committed, distinct from the "all"/"commit"
-		// layers that reach further back into history. A bare `git diff` only
-		// compares the worktree against the index, so a staged-but-uncommitted
-		// change was invisible here even though it is exactly the kind of
-		// local change this scope exists to show.
+		// Include staged changes: a bare `git diff` hides them.
 		return currentScopeGitDiffArgs(headFound)
 	}
 }
 
-// gitEmptyTreeHash is git's well-known SHA-1 hash for the empty tree object --
-// identical in every repository, since it depends only on being empty, not on
-// any repo-specific content or history.
 const gitEmptyTreeHash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-// currentScopeGitDiffArgs is the "current"/plain-default git invocation:
-// worktree plus index against HEAD, so staged changes show up alongside
-// unstaged ones. A repo with no commits yet has no HEAD to diff against, so
-// this diffs against the empty tree instead -- otherwise a freshly staged
-// file would compare equal to itself (worktree == index) and vanish exactly
-// like the bug this scope exists to fix.
+// Without a HEAD, diff against the empty tree so freshly staged files still show.
 func currentScopeGitDiffArgs(headFound bool) []string {
 	args := []string{"diff", "--no-color", "--no-ext-diff"}
 	if headFound {
@@ -273,8 +250,6 @@ func currentScopeGitDiffArgs(headFound bool) []string {
 	return append(args, gitEmptyTreeHash)
 }
 
-// gitDiffHeadFound reports whether HEAD resolves to a commit, so callers can
-// fall back to the index-only diff form for a repo with no commits yet.
 func gitDiffHeadFound(projectRoot string, runGit gitx.GitCommandRunnerFunc) bool {
 	_, err := gitOutput(projectRoot, runGit, "rev-parse", "--verify", "--quiet", "HEAD")
 	return err == nil

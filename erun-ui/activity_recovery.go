@@ -9,19 +9,15 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// activityRecoveryResult carries a recovery action's outcome to the
-// frontend, which renders Output verbatim even on failure so the operator
-// always sees what the recovery did.
+// activityRecoveryResult's Output is shown verbatim, even on failure.
 type activityRecoveryResult struct {
 	OK     bool   `json:"ok"`
 	Output string `json:"output"`
 	Error  string `json:"error,omitempty"`
 }
 
-// RecoverPendingHelmRelease clears the pending-operation lock a killed
-// deploy leaves behind, which otherwise blocks every later deploy on that
-// release. The entry is force-dismissed so the drawer re-syncs with the
-// actual cluster state.
+// RecoverPendingHelmRelease clears the pending-operation lock a killed deploy
+// leaves, which blocks every later deploy on that release.
 func (a *App) RecoverPendingHelmRelease(id string) activityRecoveryResult {
 	entry, errResult := a.resolveRecoverableHelmEntry(id)
 	if errResult != nil {

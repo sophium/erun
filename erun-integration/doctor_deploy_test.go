@@ -35,8 +35,6 @@ func doctorDeployDiagnosisScenarios(t *testing.T) {
 }
 
 func testDoctorDryRunReportsLibraryExecutionMode(t *testing.T) {
-	// An operator who flipped execution.modes.aws-sts to "library" in
-	// config.yaml must see it reflected here, not just take it on faith.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedExecutionMode(t, setup, "aws-sts", "library")
@@ -48,10 +46,7 @@ func testDoctorDryRunReportsLibraryExecutionMode(t *testing.T) {
 }
 
 func testDoctorDryRunReportsDeployDiagnosis(t *testing.T) {
-	// --dry-run withholds mutations,
-	// not reads, so the helm/kubectl diagnosis reads must still run and
-	// their sections must still print -- the same content a real run
-	// would show -- instead of the diagnosis being silently suppressed.
+	// --dry-run withholds mutations, not reads, so the diagnosis still prints.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -66,14 +61,7 @@ func testDoctorDryRunReportsDeployDiagnosis(t *testing.T) {
 }
 
 func testDoctorDryRunUnaffectedByKubectlDeploymentWaitLibraryExecutionMode(t *testing.T) {
-	// Locks the dry-run/audit contract for kubectl-deployment-wait: the
-	// kubectl trace lines must stay byte-identical to the
-	// subprocess-mode golden (dry_run_prune_images_traces_dind_exec,
-	// modulo the "Execution modes" line itself reporting the flipped
-	// mode) even with execution.modes.kubectl-deployment-wait=library,
-	// since traceAndWaitForRuntime only ever renders the trace line
-	// (kubectlDeploymentWaitArgs) and never calls
-	// libraryWaitForDeploymentAvailable on a dry run.
+	// Library-mode wait renders the same kubectl trace on a dry run as subprocess mode.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedExecutionMode(t, setup, "kubectl-deployment-wait", "library")
@@ -85,15 +73,8 @@ func testDoctorDryRunUnaffectedByKubectlDeploymentWaitLibraryExecutionMode(t *te
 }
 
 func testDoctorRealRunKubectlDeploymentWaitLibraryExecutionModeReachesTheApiServerDirectly(t *testing.T) {
-	// Proves the library path produces the same observable result as the
-	// subprocess path (the runtime deployment reports Available, so the
-	// doctor action proceeds) via a real client-go call against a fake API
-	// server instead of shelling out to kubectl. The kubectl stub fails
-	// loudly and distinctively only for the "wait" argv shape (every
-	// other kubectl subcommand this doctor run needs -- pod listing,
-	// dind exec -- still succeeds), so a fallback to the subprocess path
-	// for the wait surfaces as a recognizable failure instead of
-	// silently passing.
+	// The kubectl stub fails only for "wait", so a fallback to the subprocess path
+	// fails visibly.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedExecutionMode(t, setup, "kubectl-deployment-wait", "library")
@@ -151,10 +132,6 @@ func testDoctorRealRunKubectlDeploymentWaitLibraryExecutionModeReachesTheApiServ
 }
 
 func testDoctorDryRunRollbackTracesHelmRollback(t *testing.T) {
-	// Exercises the deploy-recovery action: --rollback --dry-run must
-	// trace the `helm rollback <release> --namespace --kube-context
-	// --wait --timeout` command for the runtime release, without
-	// mutating the cluster.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run", "--rollback"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -165,9 +142,7 @@ func testDoctorDryRunRollbackTracesHelmRollback(t *testing.T) {
 }
 
 func testDoctorRealRunRollbackFailureReportsHelmStderr(t *testing.T) {
-	// RunDeployRecovery's rollback branch captures helm's combined output,
-	// and runDeployRecoveryActions (the CLI caller) must carry it on failure
-	// rather than a content-free "exit status 1".
+	// A failed rollback carries helm's output, not "exit status 1".
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -188,12 +163,7 @@ func testDoctorRealRunRollbackFailureReportsHelmStderr(t *testing.T) {
 }
 
 func testDoctorRealRunReportsMemoryPressureAndTheSizingVerdict(t *testing.T) {
-	// The signal `erun usage` computes: an environment pinned at 100% of its
-	// memory limit with real OOM kills and sustained CPU throttling must not
-	// read as a disk question. The
-	// verdict is reported and never applied -- resizing rolls the runtime pod
-	// -- so the run must name the explicit `erun resize` values and must not
-	// run a resize.
+	// The resize verdict is reported, never applied: resizing rolls the runtime pod.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -209,9 +179,7 @@ func testDoctorRealRunReportsMemoryPressureAndTheSizingVerdict(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// The warning, the verdict and the next action are asserted by their own
-	// wording as well as by the snapshot: a golden refresh that dropped the
-	// section would still have to be reviewed against these.
+	// Asserted by wording too, so a golden refresh dropping the section is caught.
 	for _, want := range []string{
 		"== Resources ==",
 		"memory is at 100% of its 6144Mi limit (warns at 85%)",
@@ -232,10 +200,6 @@ func testDoctorRealRunReportsMemoryPressureAndTheSizingVerdict(t *testing.T) {
 }
 
 func testDoctorDryRunClearPendingHelmTracesKubectlDelete(t *testing.T) {
-	// Exercises the deploy-recovery action: --clear-pending-helm
-	// --dry-run must trace the `kubectl delete secrets,configmaps -l
-	// owner=helm,...,status in (pending-install,...)` command that
-	// clears the stuck helm pending-operation lock.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run", "--clear-pending-helm"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -246,10 +210,7 @@ func testDoctorDryRunClearPendingHelmTracesKubectlDelete(t *testing.T) {
 }
 
 func testDoctorConflictingRecoveryFlagsError(t *testing.T) {
-	// Clearing a pending lock and rolling back are alternative
-	// recoveries; passing both must fail fast with a clear error
-	// rather than running both (which would step the release back a
-	// revision too far).
+	// Applying both would roll the release back one revision too far.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run", "--clear-pending-helm", "--rollback"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -260,16 +221,8 @@ func testDoctorConflictingRecoveryFlagsError(t *testing.T) {
 }
 
 func testDoctorRealRunClusterUnreachableSkipsPodDependentSectionsOnceEstablished(t *testing.T) {
-	// Once the helm release status read confirms the Kubernetes API
-	// server itself is unreachable, doctor must not rediscover that fact
-	// in the Pods, Host AWS credentials, Git push
-	// access, or Docker storage sections -- before the fix each paid its
-	// own multi-minute kubectl timeout to relearn what the helm read
-	// already established (~8 minutes and 17 klog frames across the four
-	// sections in the reported run). kubectl is deliberately left
-	// unstubbed (absent from fixture.StubEnv below): if any of the four
-	// sections still probes for real, erun.Run's own
-	// "executable file not found" detection fails this test outright.
+	// Once helm reports the API server unreachable, later sections must not re-probe.
+	// kubectl is unstubbed, so any real probe fails the test.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithAWSAlias(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -283,15 +236,8 @@ func testDoctorRealRunClusterUnreachableSkipsPodDependentSectionsOnceEstablished
 }
 
 func testDoctorRealRunStorageUnhealthyDiagnosticError(t *testing.T) {
-	// kubectl wait fails with a disk i/o error: doctor must fold the
-	// stderr into the storage-unhealthy diagnostic
-	// (normalizeDoctorKubectlError → doctorKubectlDiagnostic's
-	// unhealthy-storage arm) and degrade the docker-storage check instead
-	// of aborting the whole command — the helm/pod diagnosis
-	// above already reported the cluster is reachable, so this failure is
-	// specific to the docker inspection alone, and the requested prune is
-	// skipped for the same reason rather than attempted and failing too.
-	// Only reachable in a real run — dry-run never executes the wait.
+	// A disk i/o error on wait degrades only the docker-storage check and skips the
+	// prune. Real-run only: dry-run never executes the wait.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -306,11 +252,7 @@ func testDoctorRealRunStorageUnhealthyDiagnosticError(t *testing.T) {
 }
 
 func testDoctorRealRunUnrecognizedWaitFailureStillReportsKubectlStderr(t *testing.T) {
-	// kubectl wait fails with a cause doctorKubectlDiagnostic does not
-	// recognize (neither the disk-i/o-error nor the namespace-lookup-failed
-	// shape above matches). normalizeDoctorKubectlError's unrecognized-cause
-	// branch must still carry kubectl's own message, not a bare
-	// "could not read: exit status 1".
+	// An unrecognized wait failure still carries kubectl's message.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -325,10 +267,6 @@ func testDoctorRealRunUnrecognizedWaitFailureStillReportsKubectlStderr(t *testin
 }
 
 func testDoctorRealRunUnrecognizedWaitFailureWithNoStderrReportsExitStatusPlainly(t *testing.T) {
-	// The empty-stderr case: when kubectl wait fails with
-	// nothing captured on stderr, normalizeDoctorKubectlError has
-	// nothing to add, so the degraded report must still name the exit
-	// status plainly rather than emitting a blank fragment.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -343,15 +281,8 @@ func testDoctorRealRunUnrecognizedWaitFailureWithNoStderrReportsExitStatusPlainl
 }
 
 func testDoctorRealRunNamespaceListedButApiFailingError(t *testing.T) {
-	// kubectl wait reports the runtime namespace as not found while
-	// `kubectl get namespaces` lists it — the split-brain failure
-	// mode where the namespace exists but direct API access is
-	// broken. Covers doctorNamespaceLookupFailed +
-	// doctorNamespaceIsListed and the second diagnostic arm of
-	// doctorKubectlDiagnostic; the probe-then-diagnose sequence only
-	// runs on a real wait failure. Degrades the docker-storage check
-	// rather than aborting the command, same as the storage
-	// scenario above.
+	// wait says the namespace is missing while get namespaces lists it: API access
+	// is broken. Real-run only.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -365,17 +296,9 @@ func testDoctorRealRunNamespaceListedButApiFailingError(t *testing.T) {
 	golden.Equal(t, "doctor/real_run_namespace_listed_but_api_failing_error", normalize.Apply(result.Combined))
 }
 
-// stubDoctorKubectlWithUsage answers doctor's read-only surfaces and both of
-// the resources section's cgroup reads with the figures four erun fleet
-// environments actually reported: memory pinned at 100% of a 6144Mi limit with
-// three recorded OOM kills, and 9.8% of scheduling periods throttled at a
-// 6-core quota.
-//
-// The exec arms are ordered because doctor dispatches more than one exec: the
-// dind one first (the sidecar's own reading and doctor's docker-storage probe
-// both use -c erun-dind), then the runtime container's. The usage reads are
-// told apart from the docker-storage probe by the reading script in the exec
-// argv -- memory_oom_kill for the one, df -h /var/lib/docker for the other.
+// stubDoctorKubectlWithUsage reports memory pinned at its limit with OOM kills and
+// CPU throttling. The dind exec comes first; usage reads are told from the storage
+// probe by their script.
 func stubDoctorKubectlWithUsage(t *testing.T, stubsDir string) {
 	t.Helper()
 	runtimeLines := []string{
@@ -394,8 +317,7 @@ func stubDoctorKubectlWithUsage(t *testing.T, stubsDir string) {
 		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
 		"disk_own_used_kb=44040192",
 	}
-	// The sidecar reads healthy: it is a separate cgroup, and the section must
-	// report its own pressure rather than mirroring the runtime container's.
+	// The sidecar is a separate cgroup and reports its own pressure.
 	dindLines := []string{
 		"cgroup_type=cgroup2fs",
 		"memory_current=1073741824",
@@ -435,10 +357,7 @@ func stubDoctorKubectlWithUsage(t *testing.T, stubsDir string) {
 	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", strings.Join(script, "\n"))
 }
 
-// stubDoctorHelmStatusUnreachable stubs `helm status` to fail with the
-// unreachable-API-server error a real cluster reports, matching the reported
-// run's exact wording. No other helm command is expected to run once this
-// fails.
+// stubDoctorHelmStatusUnreachable fails `helm status` with an unreachable-API-server error.
 func stubDoctorHelmStatusUnreachable(t *testing.T, stubsDir string) {
 	t.Helper()
 	script := strings.Join([]string{

@@ -30,13 +30,8 @@ async function stubLoadTenantDashboard(
   });
 }
 
-// The Users tab shows the signed-in operator's own erun username
-// (whoami's own `username`, the same one the console's identity-header and
-// audit trail use) and, now, the OIDC subject too -- the one value that
-// reliably joins this row against the same person's entry in the console's
-// separate IdP-identity Users list, which has no reachable erun username of
-// its own to compare against. Neither surface previously showed the subject
-// at all.
+// The Users tab shows the OIDC subject, the one value that joins this row to
+// the console's IdP-identity Users list.
 test.describe('tenant dashboard — users tab (#2050)', () => {
   test('renders the signed-in operator with roles and their OIDC subject', async ({
     app,
@@ -50,9 +45,7 @@ test.describe('tenant dashboard — users tab (#2050)', () => {
         tenant: SEED_TENANT,
         environment,
         apiUrl: 'http://127.0.0.1:1/unreachable',
-        // The Users tab renders the roster (GET /v1/users), not the caller's
-        // own identity: seeding only `user` leaves `data.users` empty and the
-        // tab renders no table at all.
+        // The tab renders the roster (`users`), not the caller's own `user`.
         users: [
           {
             tenantId: 't1',

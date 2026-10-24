@@ -10,22 +10,16 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
-// errMCPUnreachable signals the frontend to render an unreachable state with a
-// Reconnect action. Side-effecting recovery — which can redeploy the runtime —
-// is gated on that explicit user action; MCP readers never recover implicitly.
+// errMCPUnreachable makes the frontend offer Reconnect; recovery can redeploy,
+// so it only runs on that explicit user action.
 var errMCPUnreachable = errors.New("mcp unreachable")
 
-// mcpUnreachableMarker is prefixed onto every surfaced error message so the
-// frontend can detect the unreachable state without depending on locale or
-// underlying error text. The marker is opaque; it is never shown to users.
+// mcpUnreachableMarker prefixes surfaced errors so the frontend detects the
+// state independent of locale or message text. Never shown to users.
 const mcpUnreachableMarker = "ERUN_MCP_UNREACHABLE: "
 
-// mcpUnreachableKindMarkers give the review panel the reachability kind
-// DescribeLocalMCPUnreachable already computed, rather than asking it to
-// pattern-match the sentence: a never-opened/stopped environment reads
-// as informational, a stale forward reads as a fault, and the frontend cannot
-// tell those apart from prose alone. Both are still recognised as "MCP
-// unreachable" the same way the plain marker is.
+// mcpUnreachableKindMarkers carry the reachability kind: stopped is
+// informational, a stale forward is a fault.
 var mcpUnreachableKindMarkers = map[mcp.LocalMCPUnreachableKind]string{
 	mcp.LocalMCPNotOpen:      "ERUN_MCP_UNREACHABLE_NOT_OPEN: ",
 	mcp.LocalMCPStaleForward: "ERUN_MCP_UNREACHABLE_STALE: ",
@@ -38,10 +32,7 @@ func wrapMCPUnreachableError(err error) error {
 	return fmt.Errorf("%s%w: %w", mcpUnreachableMarker, errMCPUnreachable, err)
 }
 
-// wrapMCPUnreachableErrorWithKind is wrapMCPUnreachableError plus the
-// reachability kind the caller already classified, so the review panel can
-// tell a stopped environment (informational, "Open") from a stale forward (a
-// fault, "Reconnect…") without re-deriving it from the message text.
+// wrapMCPUnreachableErrorWithKind also tags the already-classified reachability kind.
 func wrapMCPUnreachableErrorWithKind(kind mcp.LocalMCPUnreachableKind, err error) error {
 	if err == nil {
 		return nil

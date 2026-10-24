@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-// gitOutputForTest returns git's trimmed stdout, so a scenario asserts the
-// state it actually reached rather than assuming it.
 func gitOutputForTest(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -21,9 +19,7 @@ func gitOutputForTest(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// newCheckoutBehindItsRemote builds a real checkout of a real bare origin that
-// carries `behind` commits the checkout does not, which is the state a machine
-// that has not pulled since the last release is in.
+// newCheckoutBehindItsRemote returns a checkout whose bare origin carries `behind` extra commits.
 func newCheckoutBehindItsRemote(t *testing.T, behind int) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -37,8 +33,6 @@ func newCheckoutBehindItsRemote(t *testing.T, behind int) string {
 		writeAndCommit(t, dir, fmt.Sprintf("advance-%d.txt", index), "advance\n", "advance the remote")
 	}
 	runGitForTest(t, dir, "push", "-q", "origin", "main")
-	// The checkout rewinds to where it stood before that advance, which is the
-	// state a machine that has not pulled since is in.
 	runGitForTest(t, dir, "reset", "-q", "--hard", base)
 	return dir
 }
@@ -50,9 +44,7 @@ func annotatePinPlanForTest(t *testing.T, projectRoot string) PinPlan {
 	return plan
 }
 
-// TestPinPlanKeepsAQuietBaseQuiet is the other half of the contract: a checkout
-// level with its remote must not carry the warning, or the warning becomes
-// noise every reader learns to skip past.
+// A checkout level with its remote must carry no warning.
 func TestPinPlanKeepsAQuietBaseQuiet(t *testing.T) {
 	plan := annotatePinPlanForTest(t, newCheckoutBehindItsRemote(t, 0))
 
@@ -67,14 +59,10 @@ func TestPinPlanKeepsAQuietBaseQuiet(t *testing.T) {
 	}
 }
 
-// TestPinPlanRefreshesTheRemoteBeforeCounting pins why the count is taken after
-// a fetch rather than from whatever this checkout last observed: a clone whose
-// remote-tracking ref is itself stale would otherwise count zero and be
-// reported current, which is the same silent staleness one level up.
+// A stale remote-tracking ref would otherwise count zero.
 func TestPinPlanRefreshesTheRemoteBeforeCounting(t *testing.T) {
 	dir := newCheckoutBehindItsRemote(t, 2)
-	// Rewind the local view of the remote so it agrees with the checkout while
-	// the real remote is ahead of both.
+	// Make the local view of origin agree with the checkout while the real remote is ahead.
 	runGitForTest(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
 	if behind := gitOutputForTest(t, dir, "rev-list", "--count", "HEAD..origin/main"); behind != "0" {
 		t.Fatalf("expected the local view of the remote to read 0 behind, got %s", behind)
@@ -87,9 +75,6 @@ func TestPinPlanRefreshesTheRemoteBeforeCounting(t *testing.T) {
 	}
 }
 
-// TestPinPlanSaysWhenTheBaseWasOnlyLastSeen covers the weaker answer: with the
-// remote unreachable the count is still the best evidence available, but it is
-// presented as this checkout's own last look rather than as agreement.
 func TestPinPlanSaysWhenTheBaseWasOnlyLastSeen(t *testing.T) {
 	dir := newCheckoutBehindItsRemote(t, 1)
 	runGitForTest(t, dir, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone.git"))
@@ -107,9 +92,7 @@ func TestPinPlanSaysWhenTheBaseWasOnlyLastSeen(t *testing.T) {
 	}
 }
 
-// TestPinPlanNamesADetachedCheckoutsDivergence covers the checkout an operator
-// lands on by inspecting an old commit directly, which has no branch of its own
-// to name and so is compared against the remote's default branch.
+// A detached checkout is compared against the remote's default branch.
 func TestPinPlanNamesADetachedCheckoutsDivergence(t *testing.T) {
 	dir := newCheckoutBehindItsRemote(t, 1)
 	runGitForTest(t, dir, "remote", "set-head", "origin", "-a")
@@ -125,9 +108,7 @@ func TestPinPlanNamesADetachedCheckoutsDivergence(t *testing.T) {
 	}
 }
 
-// TestPinPlanLeavesAnUntrackedCheckoutUnannotated pins that a tree with no
-// remote to compare against is not invented into a warning: the absence is a
-// real answer, and a pin of a local-only checkout is legitimate.
+// A local-only checkout is legitimate and gets no warning.
 func TestPinPlanLeavesAnUntrackedCheckoutUnannotated(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepoAt(t, dir)

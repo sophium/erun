@@ -26,12 +26,7 @@ func (platformAliasEmptyBootstrapStore) LoadEnvConfig(string, string) (config.En
 }
 func (platformAliasEmptyBootstrapStore) SaveEnvConfig(string, config.EnvConfig) error { return nil }
 
-// Init resolved the platform alias for a remote environment against the
-// default config store rather than the store it was given, so a caller with
-// its own store -- the MCP server, every test that injects one -- had the
-// alias decided by whatever config happened to be on the host. Here the host
-// holds two erun aliases, which the default store reads as an ambiguity, while
-// the injected store holds none, which is no alias to provision.
+// The host holds two aliases (ambiguous) while the injected store holds none.
 func TestRemoteInitResolvesThePlatformAliasAgainstItsOwnStore(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	if err := (config.ConfigStore{}).SaveERunConfig(config.ERunConfig{CloudProviders: []config.CloudProviderConfig{

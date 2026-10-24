@@ -13,17 +13,13 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// The embedded Chart.yaml exists only to migrate legacy scaffolded tenant
-// charts; new environments deploy the published erun-devops chart directly.
+// The embedded Chart.yaml exists only to migrate legacy scaffolded tenant charts.
 //
 //go:embed assets/default-devops-chart/Chart.yaml
 var defaultDevopsChartFiles embed.FS
 
-// MigrateDefaultDevopsChartAppVersion rewrites a legacy scaffolded tenant
-// Chart.yaml still pinned to the placeholder appVersion, so tenants that keep
-// their own local chart pick up the current version. It only ever rewrites the
-// legacy shape, never hand-customised charts, and emits only trace lines so it
-// stays safe on the dry-run open path.
+// MigrateDefaultDevopsChartAppVersion rewrites only a legacy placeholder-pinned tenant Chart.yaml.
+// It emits only trace lines, so it is safe on the dry-run open path.
 func MigrateDefaultDevopsChartAppVersion(ctx core.Context, projectRoot, tenant, appVersion string) error {
 	projectRoot = strings.TrimSpace(projectRoot)
 	tenant = strings.TrimSpace(tenant)
@@ -66,11 +62,7 @@ func renderDefaultDevopsChartTemplate(moduleName, appVersion string, data []byte
 }
 
 func resolveOpenRuntimeDeploySpec(ctx core.Context, store DeployStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now shared.NowFunc, target config.OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
-	// This is the baseline resolution before any --runtime-image `erun open`
-	// flag is applied (applyRuntimeDeployImageOverride re-resolves through the
-	// always-explicit ResolvePublishedDevopsDeploySpec when one is passed), so
-	// any RuntimeImage read here is a persisted memo, never this invocation's
-	// own explicit choice.
+	// Before any --runtime-image override, a RuntimeImage here is a persisted memo, not this invocation's choice.
 	if target.RemoteRepo() {
 		return ResolvePublishedDevopsDeploySpecWithOverrides(ctx, target, "", "", false)
 	}
@@ -89,10 +81,7 @@ func resolveOpenRuntimeDeploySpec(ctx core.Context, store DeployStore, findProje
 	return ResolvePublishedDevopsDeploySpecWithOverrides(ctx, target, "", "", false)
 }
 
-// runtimeComponentNames lists an environment's candidate runtime chart names
-// most-specific first (tenant-prefixed, then canonical erun-devops), so open
-// and deploy resolve the same chart — or fall back to the published one —
-// uniformly.
+// runtimeComponentNames lists candidate runtime chart names, most specific first.
 func runtimeComponentNames(tenant string) []string {
 	names := []string{config.DevopsComponentName}
 	tenant = strings.TrimSpace(tenant)
@@ -157,9 +146,7 @@ func shouldWriteExistingDefaultDevopsFile(path string, content []byte) (bool, er
 	return shouldReplaceDefaultDevopsFile(existing, content), nil
 }
 
-// shouldReplaceDefaultDevopsFile only ever replaces a legacy scaffolded
-// Chart.yaml still pinned to the "1.0.0" placeholder; any other
-// existing content is treated as hand-customised and left alone.
+// shouldReplaceDefaultDevopsFile replaces only a Chart.yaml still pinned to the "1.0.0" placeholder.
 func shouldReplaceDefaultDevopsFile(existing, content []byte) bool {
 	current := strings.TrimSpace(string(existing))
 	for _, candidate := range legacyDevopsChartYAMLCandidates(content) {
@@ -170,9 +157,7 @@ func shouldReplaceDefaultDevopsFile(existing, content []byte) bool {
 	return false
 }
 
-// legacyDevopsChartYAMLCandidates returns the legacy Chart.yaml shapes that get
-// auto-rewritten on the next open. The `description: ERun DevOps` guard scopes
-// this to the devops chart, not the backend-* charts that share the base name.
+// The `description: ERun DevOps` guard excludes backend-* charts sharing the base name.
 func legacyDevopsChartYAMLCandidates(content []byte) []string {
 	if !bytes.Contains(content, []byte("description: ERun DevOps")) {
 		return nil

@@ -50,8 +50,6 @@ func testIdleInvalidWorkingHoursFormatErrors(t *testing.T) {
 }
 
 func testIdleEqualWorkingHoursBoundsErrors(t *testing.T) {
-	// A zero-width working window (start==end) is a configuration error,
-	// not "always outside".
 	setup := env.New(t)
 	seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 08:00-08:00\n")
 	result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -72,10 +70,7 @@ func testIdleInvalidTimezoneErrors(t *testing.T) {
 }
 
 func testIdleOvernightWorkingHoursWithTimezone(t *testing.T) {
-	// The window 23:59-23:58 is "within" for every wall-clock minute
-	// except 23:58, so the marker reliably reads active; the remaining
-	// seconds are wall-clock dependent, so this asserts the marker's shape
-	// rather than a golden the normalizer would have to erase.
+	// 23:59-23:58 reads active for all but one minute; the remaining seconds vary, so assert the shape.
 	setup := env.New(t)
 	seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 23:59-23:58\n  timezone: UTC\n")
 	result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -98,8 +93,6 @@ func testIdleHelp(t *testing.T) {
 }
 
 func testIdleStatusForSeededEnv(t *testing.T) {
-	// The working-hours marker is wall-clock-dependent, so the stable
-	// lines are asserted exactly and the variable line structurally.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -148,11 +141,7 @@ func testIdleMissingEnvErrors(t *testing.T) {
 }
 
 func testIdleJSONOverlaysPendingGraceWindow(t *testing.T) {
-	// A far-future "since" clamps elapsed to 0, so secondsUntilForcedStop
-	// deterministically equals the full grace (600) for decades without
-	// sleeping. The working-hours marker varies by wall clock, so the
-	// overlay fields are asserted directly on the JSON stream rather than
-	// via a whole-stream golden.
+	// A far-future "since" clamps elapsed to 0, so secondsUntilForcedStop equals the full grace.
 	setup := env.New(t)
 	seedManagedCloudTenantEnv(t, setup, "team", "dev")
 	seedStopPending(t, setup.Home, "team", "dev", `{"since": "2099-01-01T00:00:00Z", "graceSeconds": 600}
@@ -175,10 +164,6 @@ func testIdleJSONOverlaysPendingGraceWindow(t *testing.T) {
 }
 
 func testIdleReportsStopErrorTailFromEnvLog(t *testing.T) {
-	// Only the last 4000 bytes of the stop log are kept, so a
-	// repeatedly-failing stop loop cannot flood the status output. The
-	// working-hours line varies by wall clock, so the truncation contract
-	// is asserted via head/tail markers rather than a whole-stream golden.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	logDir := filepath.Join(setup.Home, ".erun", "team", "dev")
@@ -205,8 +190,6 @@ func testIdleReportsStopErrorTailFromEnvLog(t *testing.T) {
 }
 
 func testIdleReportsStopErrorFromLegacyLogLocation(t *testing.T) {
-	// Older runtime images wrote a single shared idle-stop.log, so an
-	// absent per-env log falls back to that legacy location.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	legacyDir := filepath.Join(setup.Home, ".erun")
@@ -225,19 +208,10 @@ func testIdleReportsStopErrorFromLegacyLogLocation(t *testing.T) {
 	}
 }
 
-// TestIdleJSONOmitsNeverSetTimestamps is a top-level scenario rather than a
-// TestIdle subtest because the branch's regression declaration names it.
+// TestIdleJSONOmitsNeverSetTimestamps is top-level because the branch's regression declaration names it.
 func TestIdleJSONOmitsNeverSetTimestamps(t *testing.T) {
 	t.Parallel()
-	// A marker that has never seen activity has no timestamp to report.
-	// Encoding Go's zero time instead fabricates an instant a consumer cannot
-	// tell from a real one, and normalize.Apply's <TS> rule rewrites every
-	// RFC3339 value — including 0001-01-01T00:00:00Z — so no golden could catch
-	// it. This asserts the raw stream for that reason.
-	//
-	// The states the report crossed are crossed here too: ssh carries a recorded
-	// activity time while api, cli and codex have never recorded one, so the
-	// same field on sibling markers must render both ways.
+	// normalize.Apply rewrites every RFC3339 value, including the zero time, so assert the raw stream.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedIdleActivitySnapshot(t, setup, "ssh", `{"lastActivity":"2026-01-02T03:04:05Z","lastSeen":"2026-01-02T03:04:05Z"}`)
@@ -248,8 +222,6 @@ func TestIdleJSONOmitsNeverSetTimestamps(t *testing.T) {
 	if strings.Contains(result.Stdout, "0001-01-01T00:00:00Z") {
 		t.Errorf("never-set timestamp rendered as the Go zero instant, want the field absent:\n%s", result.Stdout)
 	}
-	// The real time still renders, and the never-set markers still report
-	// themselves: the fix drops the fabricated instant, not the marker.
 	for _, want := range []string{
 		`"name": "ssh"`,
 		`"lastActivity": "2026-01-02T03:04:05Z"`,
@@ -262,9 +234,6 @@ func TestIdleJSONOmitsNeverSetTimestamps(t *testing.T) {
 	}
 }
 
-// seedIdleActivitySnapshot writes one activity kind's on-disk snapshot, which
-// is what separates a marker with a real last-activity time from one that has
-// never recorded anything.
 func seedIdleActivitySnapshot(t *testing.T, setup env.Setup, kind, body string) {
 	t.Helper()
 	dir := filepath.Join(setup.CacheHome, "erun", "activity", "team", "dev")

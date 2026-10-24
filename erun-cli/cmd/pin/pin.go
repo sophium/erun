@@ -15,14 +15,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// `erun pin` re-pins every place an environment records its erun version, in one
-// motion. Those places only work when they agree, and nothing kept them in step:
-// a repo was found with Terraform on one version, its charts on a second and the
-// running binary on a third.
-//
-// It edits the source of truth and stops there. Realizing the new version —
-// terraform apply, deploy — stays a separate explicit step, so changing a pin is
-// never a rollout by accident.
+// NewPinCmd re-pins every recorded erun version for an environment. It only edits
+// sources; terraform apply and deploy stay separate steps.
 func NewPinCmd(prepareContext func(core.Context) core.Context, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
 	var version string
 	var latest, revert, list bool
@@ -47,10 +41,7 @@ func NewPinCmd(prepareContext func(core.Context) core.Context, resolveOpen func(
 			if prepareContext != nil {
 				ctx = prepareContext(ctx)
 			}
-			// --list only reads the registry — it needs no tenant or environment,
-			// so it must not require one to be resolvable. `erun pin --list` is the
-			// literal example in this command's own --help; a default tenant being
-			// unconfigured must not break it.
+			// --list reads only the registry, so it must work without a resolvable tenant.
 			if list {
 				return runPinListCommand(cmd.Context(), ctx)
 			}
@@ -85,10 +76,7 @@ type pinRequest struct {
 	Revert  bool
 }
 
-// runPinListCommand answers "what can I pin to" from the registry, so choosing a
-// version is recognition rather than recall. It reads erun's own published
-// registry, which is the same for every tenant and environment, so it needs
-// neither resolved — unlike a real re-pin, it never touches a project root.
+// runPinListCommand lists published versions; it needs no tenant, environment, or project root.
 func runPinListCommand(ctx context.Context, cmdCtx core.Context) error {
 	versions, err := resolvePinRegistryVersions(ctx)
 	if err != nil {
@@ -142,13 +130,9 @@ func runPinCommand(ctx context.Context, cmdCtx core.Context, result config.OpenR
 	return applyPinCommand(cmdCtx, projectRoot, result, plan, saveEnvConfig)
 }
 
-// applyPinCommand writes a resolved, drifted plan: records the previous
-// version, rewrites every file site, persists the env's own runtimeversion
-// when the plan carries that site, and refreshes any chart lock a rewritten
-// dependency left stale.
+// applyPinCommand writes a resolved, drifted plan.
 func applyPinCommand(cmdCtx core.Context, projectRoot string, result config.OpenResult, plan lifecycle.PinPlan, saveEnvConfig func(string, config.EnvConfig) error) error {
-	// Recorded before anything moves, so a revert has somewhere to go even if the
-	// rewrite fails partway.
+	// Recorded first so a revert has a target even if the rewrite fails partway.
 	if err := lifecycle.RecordPinPrevious(projectRoot, result.Tenant, result.Environment, plan.Previous); err != nil {
 		return err
 	}
@@ -158,8 +142,7 @@ func applyPinCommand(cmdCtx core.Context, projectRoot string, result config.Open
 	if err := savePinnedEnvConfig(result, plan, saveEnvConfig); err != nil {
 		return err
 	}
-	// The rewritten Chart.yaml and the lock beside it have to agree, or the next
-	// deploy fails on a tree this command just called aligned.
+	// Rewritten Chart.yaml files and their locks must agree or the next deploy fails.
 	if err := lifecycle.RefreshPinnedChartLocks(cmdCtx, plan, nil); err != nil {
 		return err
 	}
@@ -170,9 +153,7 @@ func applyPinCommand(cmdCtx core.Context, projectRoot string, result config.Open
 	return cmdCtx.WriteResult(plan)
 }
 
-// resolvePinTarget answers which version to pin to, and refuses a version that
-// is not actually published. Pinning to something unpublished produces a tree
-// that only fails later, at terraform init or a chart pull, far from the cause.
+// resolvePinTarget refuses an unpublished version, which would only fail later at terraform init or chart pull.
 func resolvePinTarget(ctx context.Context, cmdCtx core.Context, result config.OpenResult, request pinRequest, projectRoot string) (string, error) {
 	if request.Revert {
 		previous, ok := lifecycle.PinPrevious(projectRoot, result.Tenant, result.Environment)
@@ -188,8 +169,7 @@ func resolvePinTarget(ctx context.Context, cmdCtx core.Context, result config.Op
 	}
 	versions, err := resolvePinRegistryVersions(ctx)
 	if err != nil {
-		// Choosing the latest needs the registry; verifying an explicit target
-		// does not have to fail closed on an unreadable one.
+		// An explicit target does not fail closed on an unreadable registry.
 		if explicit == "" {
 			return "", fmt.Errorf("could not read the published erun versions to resolve the latest: %w", err)
 		}
@@ -209,9 +189,7 @@ func resolvePinTarget(ctx context.Context, cmdCtx core.Context, result config.Op
 	return explicit, nil
 }
 
-// verifyPinTargetPublished refuses a target the registry does not carry. An
-// empty tag listing is not proof of absence, so it is treated as "cannot check"
-// rather than "not there".
+// verifyPinTargetPublished refuses a target the registry lacks. An empty listing means "cannot check".
 func verifyPinTargetPublished(target string, versions registry.RuntimeRegistryVersions) error {
 	wanted := strings.TrimPrefix(strings.TrimSpace(target), "v")
 	if len(versions.Tags) == 0 {
@@ -225,24 +203,12 @@ func verifyPinTargetPublished(target string, versions registry.RuntimeRegistryVe
 	return fmt.Errorf("erun version %s is not published in %s — pin to a released version (see `erun pin --list`)", target, versions.Image)
 }
 
-// resolvePinRegistryVersions reads what erun has actually published. A pin is
-// only meaningful against a released version, so the registry — not a local
-// guess — is what decides which targets exist.
 func resolvePinRegistryVersions(ctx context.Context) (registry.RuntimeRegistryVersions, error) {
 	return registry.ResolveDefaultRuntimeRegistryVersions(ctx)
 }
 
-// resolvePinProjectRoot finds the tree whose pins are being rewritten. The
-// environment's own repo path is authoritative when it has one on this
-// machine. A sourceless remote env (a runtime env with no MountSource, or any
-// remote-worktree env run from the host rather than the pod) has none of its
-// own, so the next-best answer is a sibling environment of the same tenant
-// that does — every environment of a tenant shares the same repo. Only as a
-// last resort, and only when the caller can be told so, does this fall back
-// to the caller's own working directory, which may not be the tenant's repo
-// at all. viaCwdFallback reports which of those two ways the root was found,
-// so the caller can annotate the plan instead of presenting an unverified
-// tree as if it were known-good.
+// resolvePinProjectRoot prefers the env's own repo, then a sibling env of the same tenant,
+// then the cwd; viaCwdFallback reports the last case so the plan can say it is unverified.
 func resolvePinProjectRoot(result config.OpenResult, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot sharedpkg.ProjectFinderFunc) (string, bool, error) {
 	if path := strings.TrimSpace(result.RepoPath); path != "" && !result.RemoteRepo() {
 		return path, false, nil
@@ -263,13 +229,8 @@ func resolvePinProjectRoot(result config.OpenResult, listEnvConfigs func(string)
 		result.Tenant, result.Environment, result.Tenant)
 }
 
-// savePinnedEnvConfig persists every env-config field a resolved plan
-// actually included a site for — runtimeversion, a stated-stock runtimeimage,
-// and runtimechart — in the one write ApplyPinnedEnvConfig computes. A
-// tenant-imaged env's runtimeversion, or a tenant's own runtimechart, rides
-// that line's own release, not erun's, and ResolvePinPlan already decided to
-// leave those alone (plan.Skipped names why); writing them here regardless
-// would silently undo that decision.
+// savePinnedEnvConfig persists only fields the plan has sites for; skipped
+// tenant-owned values must stay untouched.
 func savePinnedEnvConfig(result config.OpenResult, plan lifecycle.PinPlan, saveEnvConfig func(string, config.EnvConfig) error) error {
 	if saveEnvConfig == nil {
 		return nil
@@ -281,9 +242,7 @@ func savePinnedEnvConfig(result config.OpenResult, plan lifecycle.PinPlan, saveE
 	return saveEnvConfig(result.Tenant, updated)
 }
 
-// tracePinPlan renders every site and its old→new value. Emitted for a real run
-// too, not only a dry run: a re-pin edits files across a repo, and the operator
-// should see which without diffing afterwards.
+// tracePinPlan renders every site's old→new value, on real runs too.
 func tracePinPlan(cmdCtx core.Context, plan lifecycle.PinPlan) {
 	cmdCtx.Trace(fmt.Sprintf("pin %s/%s -> %s (project root %s)", plan.Tenant, plan.Environment, plan.Target, plan.ProjectRoot))
 	if plan.ProjectRootNote != "" {

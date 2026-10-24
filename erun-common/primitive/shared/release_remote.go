@@ -13,49 +13,18 @@ import (
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
-// A release establishes that it can fast-forward exactly once, in sync-remote,
-// and then spends the whole build before it pushes anything. Nothing
-// re-establishes it in between, so a base branch that moved while the release was
-// working is discovered at the final push — after the images, the charts and the
-// tag are already public. That leaves the registry holding a version the
-// repository has no commits for, and VERSION still on the version just published,
-// which is the one state the stage ordering exists to prevent.
-//
-// This file holds both halves of the answer: the branch is re-read immediately
-// before the build spends anything, and the final push absorbs a move that
-// happened after that read rather than failing on it.
-//
-// Everything here that describes what the registry holds is written for the
-// run that publishes, because `erun build --release` is the run that reaches
-// the final push with its images and charts verified. `erun release` reaches
-// the same push having published nothing (see ReleaseSpec.ArtifactsPublished),
-// so each of those reports is conditioned on that field rather than assuming
-// the publishing shape.
+// A base branch that moves while a release builds would reject the final push after the
+// artifacts and tag are public. The branch is re-read before the build spends, and the
+// final push absorbs a later move. Registry claims are conditioned on ArtifactsPublished.
 
-// releasePushStageName is the stage that makes the release's generated commits
-// public. Named once because both the stage constructors and the push's
-// rebase-and-retry have to agree on it.
 const releasePushStageName = "push"
 
-// releasePushRebaseAttempts bounds the rebase-and-retry. The commits this push
-// carries are generated, `[skip ci]`, and conflict-free by construction, so one
-// retry absorbs the ordinary race and a second covers a branch that moved again
-// while the first was running. Past that, something other than a merge is going
-// on and the operator should see the push's own error instead of a loop.
+// releasePushRebaseAttempts: the pushed commits are generated and conflict-free, so two
+// retries cover ordinary races; beyond that the push's own error surfaces.
 const releasePushRebaseAttempts = 2
 
-// ensureReleaseBaseBranchUnmoved refuses a release whose base branch has moved
-// since sync-remote rebased onto it, while the refusal still costs nothing.
-//
-// It runs immediately before the publish because that is where the spend starts:
-// two seconds of git instead of a multi-architecture build, every chart, a public
-// tag, and only then a push that cannot land. Same class of upfront refusal as an
-// unusable registry credential or a release whose images nothing publishes.
-//
-// A remote it cannot read is not an answer: an inconclusive check lets the
-// release proceed exactly as it does today. The point is to turn a *known*
-// failure into an immediate one, not to invent a new way for a release to refuse
-// to start.
+// ensureReleaseBaseBranchUnmoved refuses a release whose base branch moved since sync-remote,
+// before the build spends. An unreadable remote lets the release proceed.
 func ensureReleaseBaseBranchUnmoved(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRunnerFunc) error {
 	branch := strings.TrimSpace(spec.Branch)
 	if branch == "" {
@@ -81,11 +50,8 @@ func ensureReleaseBaseBranchUnmoved(ctx core.Context, spec ReleaseSpec, runGit g
 	return nil
 }
 
-// releaseBaseBranchAhead counts the commits origin/<branch> carries that this
-// release is not built on. It reads the remote itself rather than a
-// remote-tracking ref, which is only what sync-remote already believed; the
-// fetch's own chatter is discarded because the release's trace lines already say
-// what was asked and what came back.
+// releaseBaseBranchAhead counts commits origin/<branch> has that the release lacks, reading
+// the remote itself rather than a tracking ref.
 func releaseBaseBranchAhead(projectRoot, branch string, runGit gitx.GitCommandRunnerFunc) (int, bool) {
 	if err := runGit(projectRoot, io.Discard, io.Discard, "fetch", "origin", branch); err != nil {
 		return 0, false
@@ -111,36 +77,20 @@ func movedReleaseBaseBranchError(spec ReleaseSpec, branch string, ahead int) err
 		branch, ahead, spec.Version, spec.ProjectRoot, branch, spec.Version)
 }
 
-// isReleaseBranchPush identifies the release's own final push — the one that
-// makes the generated commits public. A tag push is deliberately not it: a moved
-// branch cannot reject a tag, so rebasing would not explain whatever did.
+// isReleaseBranchPush excludes tag pushes: a moved branch cannot reject a tag.
 func isReleaseBranchPush(stage ReleaseStage, command ReleaseCommandSpec) bool {
 	return stage.Name == releasePushStageName &&
 		command.Name == "git" &&
 		isGitPushArgs(command.Args)
 }
 
-// isGitPushArgs reports whether a release stage's git command is a push. A
-// push's stderr is the only stream GitHub's bypass notice appears on and the
-// only one the push's own error is built from, so both are read from one
-// capture; every other stage command stays on the plain runner.
+// isGitPushArgs reports whether a stage command is a push, which needs its stderr captured.
 func isGitPushArgs(args []string) bool {
 	return len(args) > 0 && args[0] == "push"
 }
 
-// RunReleaseBranchPush pushes the release's generated commits, absorbing a base
-// branch that moved while the release was building.
-//
-// By the time this runs the version's tag is public, and so are its images and
-// charts when the run published any. Failing here leaves the repository without
-// the commits that record the release — VERSION still on the version just
-// published, so a plain `erun build` would re-mint it — which is exactly the
-// inconsistency the publish-before-tag ordering exists to prevent. A
-// source-control-only release reaches this with nothing published, so for it
-// the tag is the whole of what is public. The commits are generated, `[skip ci]`, and
-// conflict-free by construction, so rebasing onto the branch as it stands now and
-// retrying is strictly better than stopping. It stays bounded: a rebase that
-// cannot apply, or a push that keeps failing, still surfaces the push's own error.
+// RunReleaseBranchPush pushes the generated commits, rebasing onto a moved base branch and
+// retrying (bounded), since the tag is already public by now.
 func RunReleaseBranchPush(ctx core.Context, spec ReleaseSpec, command ReleaseCommandSpec, runGit gitx.GitCommandRunnerFunc) error {
 	branch := strings.TrimSpace(spec.Branch)
 	var pushOutput strings.Builder
@@ -165,10 +115,7 @@ func RunReleaseBranchPush(ctx core.Context, spec ReleaseSpec, command ReleaseCom
 	return err
 }
 
-// releasePushStderrWriter streams git's push output to the operator while
-// keeping a copy for the rejection parse. A caller with no stderr sink (tests,
-// embedding callers) would make io.MultiWriter panic on a nil writer, so the
-// capture stands alone there.
+// releasePushStderrWriter: io.MultiWriter panics on a nil writer, so a nil sink uses the capture alone.
 func releasePushStderrWriter(ctx core.Context, capture *strings.Builder) io.Writer {
 	if ctx.Stderr == nil {
 		return capture
@@ -176,34 +123,20 @@ func releasePushStderrWriter(ctx core.Context, capture *strings.Builder) io.Writ
 	return io.MultiWriter(ctx.Stderr, capture)
 }
 
-// runReleasePush runs one of the release's own pushes. git's output still
-// streams to the operator, and the copy kept for the rejection parse is read
-// for GitHub's bypass notice as well. These are the pushes that write a branch
-// or a tag a ruleset can protect — the tag that publishes the version, the
-// `--follow-tags` push that makes the generated commits public, and the force
-// re-point of a tag the release's own rebase moved — so none of them may be the
-// one path where a bypass goes unreported.
-//
-// The caller owns output so that a push which is retried reports the notice
-// from the attempt that carried it, and so the rejection parse reads the same
-// bytes.
+// runReleasePush runs a push that a ruleset can protect, reporting GitHub's bypass notice.
+// The caller owns output so a retry reports the attempt that carried the notice.
 func runReleasePush(ctx core.Context, dir string, runGit gitx.GitCommandRunnerFunc, output *strings.Builder, args ...string) error {
 	err := runGit(dir, ctx.Stdout, releasePushStderrWriter(ctx, output), args...)
 	gitx.ReportRulesetBypassFromPushArgs(ctx, args, output.String())
 	return err
 }
 
-// ReleasePushRejection is one ref git refused to update, as git reported it on
-// the `! [rejected]  <from> -> <to> (reason)` line. The local side is the ref
-// the push named, which is the only thing a remediation may be scoped to; the
-// reason is carried through so an operator reads git's own words.
+// ReleasePushRejection is one `! [rejected]` ref; remediation is scoped to its local side.
 type ReleasePushRejection struct {
 	Ref    string
 	Reason string
 }
 
-// releasePushRejectionLine matches git's rejected-ref line. The reason is
-// optional because not every rejection carries one.
 var releasePushRejectionLine = regexp.MustCompile(`(?m)^\s*!\s*\[rejected\]\s+(\S+)\s*->\s*\S+\s*(?:\(([^)]*)\))?\s*$`)
 
 func ParseReleasePushRejections(output string) []ReleasePushRejection {
@@ -218,17 +151,8 @@ func ParseReleasePushRejections(output string) []ReleasePushRejection {
 	return rejections
 }
 
-// ReleasePushRejectedTheMovedBaseBranch reports whether this rejection is the
-// one case the rebase-and-retry explains: the base branch itself was rejected,
-// and because it moved.
-//
-// A push carries several refs, and only the base branch can be repaired by
-// rebasing the base branch. A develop rejected as a non-fast-forward is a
-// different failure — the branch diverged, and rebasing main onto an origin/main
-// that never moved is a no-op that spends every retry without ever fetching or
-// merging origin/develop. Anything unrecognised, including a
-// rejection whose reason is a hook rather than a moved branch, is left to the
-// operator with git's own reason attached.
+// ReleasePushRejectedTheMovedBaseBranch reports whether the base branch itself was rejected
+// because it moved, the only case a rebase repairs.
 func ReleasePushRejectedTheMovedBaseBranch(rejections []ReleasePushRejection, branch string) bool {
 	if branch == "" || len(rejections) == 0 {
 		return false
@@ -248,28 +172,10 @@ func releasePushReasonIsMovedBranch(reason string) bool {
 		strings.Contains(reason, "stale info")
 }
 
-// ReleasePushRejectedError names the ref git actually rejected, what the
-// registry holds for this version, and what is now missing, instead of letting
-// a bare failure stand in for it.
-//
-// By the time this push runs the version's tag is on the remote, and its images
-// and charts are there too when the run published any; the GitHub Release
-// object is created after this push, so a push failure also leaves it absent.
-// The unqualified failure that used to be reported here reads as the
-// pre-publication shape "Recovering an interrupted release" covers, and acting
-// on that shape would delete a public tag and reset a branch that already
-// landed. So the error says which ref did not land, why git refused
-// it, and that the tag must not be deleted.
-//
-// The registry half is the run's own to state, and spec.ArtifactsPublished is
-// what it is stated from: `erun release` marks source control only, so claiming
-// its images and charts verified on a registry sends its operator past the
-// publish this version still needs and onto a version no environment can
-// deploy.
+// ReleasePushRejectedError names the rejected ref, what the registry holds, and that the
+// public tag must not be deleted. The registry claim follows spec.ArtifactsPublished.
 func ReleasePushRejectedError(spec ReleaseSpec, rejections []ReleasePushRejection, cause error) error {
-	// described carries git's own reason for the reader; names is the bare ref
-	// for the recovery command, where a parenthesised reason would not be a
-	// ref that can be reconciled.
+	// described carries git's reason; names is the bare ref for the recovery command.
 	described := make([]string, 0, len(rejections))
 	names := make([]string, 0, len(rejections))
 	for _, rejection := range rejections {
@@ -292,10 +198,7 @@ func ReleasePushRejectedError(spec ReleaseSpec, rejections []ReleasePushRejectio
 	published := fmt.Sprintf("Everything else this release publishes is already public: its images and charts verified on the registry and tag v%s is on the remote. What did not land is %s.", version, refs)
 	recovery := fmt.Sprintf("  reconcile %s with its remote, push it, then create the GitHub Release for the existing tag v%s", unlanded, version)
 	if !spec.ArtifactsPublished {
-		// Nothing in this run built or published an artifact, so the registry
-		// holds nothing for this version and the recovery has a publish of its
-		// own to name: the tag is public, and a tag with no artifacts behind it
-		// is a version no environment can deploy (erun deploy never builds).
+		// A public tag with no artifacts is undeployable, so the recovery names a publish.
 		published = fmt.Sprintf("This release marks source control only: it built and published no images or charts, so version %s is on no registry. What landed is source control; what did not land is %s.", version, refs)
 		recovery = fmt.Sprintf("  reconcile %s with its remote and push it\n"+
 			"  publish the version's images and charts, which this release never did: erun push --version %s\n"+
@@ -310,11 +213,7 @@ func ReleasePushRejectedError(spec ReleaseSpec, rejections []ReleasePushRejectio
 		cause, refs, spec.Branch, version, version, spec.Branch, spec.ProjectRoot)
 }
 
-// ReleaseRebaseFailedRecovery says what is left to do when the retry's rebase
-// onto the moved branch could not apply. It restates what the registry holds
-// for the same reason releasePushRejectedError does: the release that did not
-// publish must not send its operator away believing there is nothing left to
-// publish.
+// ReleaseRebaseFailedRecovery says what remains when the retry's rebase could not apply.
 func ReleaseRebaseFailedRecovery(spec ReleaseSpec, branch string) string {
 	version := strings.TrimSpace(spec.Version)
 	if spec.ArtifactsPublished {
@@ -323,10 +222,7 @@ func ReleaseRebaseFailedRecovery(spec ReleaseSpec, branch string) string {
 	return fmt.Sprintf("version %s is on no registry — this release marks source control only — so rebase the release's own commits onto origin/%s by hand, push them, then publish the version's images and charts with `erun push --version %s`", version, branch, version)
 }
 
-// ReleaseRepointFailedRecovery is the same statement for the retry that
-// absorbed the move and then could not bring the already-public release tag
-// back onto the rebased commit. The tag is public either way; the artifacts
-// are not, unless this run published them.
+// ReleaseRepointFailedRecovery says what remains when the public tag could not be re-pointed.
 func ReleaseRepointFailedRecovery(spec ReleaseSpec) string {
 	version := strings.TrimSpace(spec.Version)
 	if spec.ArtifactsPublished {
@@ -335,14 +231,8 @@ func ReleaseRepointFailedRecovery(spec ReleaseSpec) string {
 	return fmt.Sprintf("version %s is on no registry — this release marks source control only — so move tag v%s onto the rebased release commit by hand, force-push it, then publish the version's images and charts with `erun push --version %s`", version, version, version)
 }
 
-// repointReleaseTagIfRebased brings the release's own annotated tag back onto
-// the branch's history after a rebase rewrote the commit it named. A rebase
-// replays every commit from the release's own fork point forward, including
-// the one push-release-tag already published the tag under, so an already-public
-// tag can end up naming a commit reachable from nothing once that commit is
-// replayed under a new sha. The remote already holds the tag at the old
-// commit, and an annotated tag update is never a fast-forward, so bringing it
-// back onto the branch always needs a force.
+// repointReleaseTagIfRebased force-moves the release tag onto its replayed commit after a
+// rebase; an annotated tag update is never a fast-forward.
 func repointReleaseTagIfRebased(ctx core.Context, spec ReleaseSpec, projectRoot string, runGit gitx.GitCommandRunnerFunc) error {
 	version := strings.TrimSpace(spec.Version)
 	if version == "" {
@@ -366,13 +256,8 @@ func repointReleaseTagIfRebased(ctx core.Context, spec ReleaseSpec, projectRoot 
 	return moveReleaseTagOnto(ctx, projectRoot, runGit, tag, newCommit)
 }
 
-// findReplayedReleaseTagCommit locates the commit a rebase gave the release's
-// own tagged commit under its new sha, by the message the two must share (see
-// findCommitsBySubjectInRange). The search is bounded to FETCH_HEAD..HEAD —
-// the commits the rebase moments earlier in rebaseReleaseOntoRemoteBranch
-// actually replayed onto the upstream it just fetched — rather than all of
-// history, so an unrelated older commit that happens to share the subject can
-// never be mistaken for the replayed one.
+// findReplayedReleaseTagCommit searches only FETCH_HEAD..HEAD, so an older commit with the
+// same subject cannot match.
 func findReplayedReleaseTagCommit(projectRoot, branch, tag, tagCommit string) (string, error) {
 	subject, err := GitCommitSubject(projectRoot, tagCommit)
 	if err != nil {
@@ -394,10 +279,7 @@ func findReplayedReleaseTagCommit(projectRoot, branch, tag, tagCommit string) (s
 	}
 }
 
-// moveReleaseTagOnto re-creates tag at newCommit, preserving its original
-// annotation message, and force-publishes it: the remote already has this
-// tag at the pre-rebase commit, and an annotated tag update is never a
-// fast-forward.
+// moveReleaseTagOnto re-creates tag at newCommit with its original annotation and force-pushes it.
 func moveReleaseTagOnto(ctx core.Context, projectRoot string, runGit gitx.GitCommandRunnerFunc, tag, newCommit string) error {
 	message, err := GitTagAnnotationSubject(projectRoot, tag)
 	if err != nil {
@@ -413,10 +295,7 @@ func moveReleaseTagOnto(ctx core.Context, projectRoot string, runGit gitx.GitCom
 	return runReleasePush(ctx, projectRoot, runGit, &pushOutput, "push", "--force", "origin", "refs/tags/"+tag)
 }
 
-// gitIsAncestorOfHead reports whether commit is already part of HEAD's own
-// history — true for a tag a rebase left untouched (it named a commit at or
-// before the merge-base, which every rebase leaves alone), false once the
-// commit it used to name was replayed under a new sha.
+// gitIsAncestorOfHead is false once a rebase replayed the commit under a new sha.
 func gitIsAncestorOfHead(projectRoot, commit string) (bool, error) {
 	err := core.Command("git", "-C", projectRoot, "merge-base", "--is-ancestor", commit, "HEAD").Run()
 	if err == nil {
@@ -440,12 +319,8 @@ func GitCommitSubject(projectRoot, commit string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// FindCommitsBySubjectInRange returns every commit in revRange whose subject
-// is an exact match, newest first. A rebase replays commits in order without
-// changing their message, and the release's generated commit subjects always
-// carry the version being released, so the subject is normally unique within
-// the commits a rebase just replayed — but the caller decides what to do with
-// more than one match rather than this function silently picking one.
+// FindCommitsBySubjectInRange returns exact subject matches in revRange, newest first;
+// the caller handles more than one.
 func FindCommitsBySubjectInRange(projectRoot, revRange, subject string) ([]string, error) {
 	output, err := core.Command("git", "-C", projectRoot, "log", "--format=%H%x01%s", revRange).Output()
 	if err != nil {
@@ -475,10 +350,7 @@ func GitTagAnnotationSubject(projectRoot, tag string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// releaseBranchPushArgs is the retried push. repointReleaseTagIfRebased has
-// already re-pointed and force-pushed the release tag by the time this runs
-// if the rebase moved it, so appending the tag by name here only matters when
-// the tag never needed to move — a no-op against what origin already has.
+// releaseBranchPushArgs is the retried push; the tag is already re-pointed if it had to move.
 func releaseBranchPushArgs(spec ReleaseSpec, command ReleaseCommandSpec) []string {
 	version := strings.TrimSpace(spec.Version)
 	if version == "" {
@@ -487,11 +359,7 @@ func releaseBranchPushArgs(spec ReleaseSpec, command ReleaseCommandSpec) []strin
 	return append(append([]string{}, command.Args...), "v"+version)
 }
 
-// rebaseReleaseOntoRemoteBranch replays the release's generated commits on top of
-// the base branch as it stands now. A rebase that cannot apply is aborted rather
-// than left half-done, so a failed absorb hands back the checkout the release was
-// working in, and its output rides on the error instead of the release's streams
-// (git's rebase chatter is version-dependent and says nothing on success).
+// rebaseReleaseOntoRemoteBranch aborts a rebase that cannot apply and returns its output on the error.
 func rebaseReleaseOntoRemoteBranch(ctx core.Context, projectRoot, branch string, runGit gitx.GitCommandRunnerFunc) error {
 	ctx.TraceCommand(projectRoot, "git", "fetch", "origin", branch)
 	if err := runGit(projectRoot, io.Discard, io.Discard, "fetch", "origin", branch); err != nil {
@@ -511,8 +379,6 @@ func rebaseReleaseOntoRemoteBranch(ctx core.Context, projectRoot, branch string,
 	return nil
 }
 
-// resolvedReleaseTagCommit reports the commit tag names locally; a tag that
-// cannot be resolved has nothing to re-point.
 func resolvedReleaseTagCommit(ctx core.Context, projectRoot, tag string) (string, bool) {
 	commit, ok, err := GitResolvedRef(ctx, projectRoot, tag+"^{commit}")
 	return commit, err == nil && ok

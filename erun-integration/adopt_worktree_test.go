@@ -12,9 +12,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// stageAdoptVolumes lays out the two staging mounts the runtime chart's
-// adopt-worktree init container sees: the home volume holding a legacy
-// checkout, and the empty worktree claim beside it.
+// stageAdoptVolumes lays out the adopt-worktree init container's mounts.
 func stageAdoptVolumes(t *testing.T, root string) (legacy, claim string) {
 	t.Helper()
 	legacy = filepath.Join(root, "mnt", "erun-home", "git", "petios")
@@ -27,10 +25,7 @@ func stageAdoptVolumes(t *testing.T, root string) (legacy, claim string) {
 	return legacy, claim
 }
 
-// normalizeAdoptOutput names the staged volumes relative to the scenario's own
-// root before the default temp-dir rule collapses each path to one token, so
-// the golden still shows which path is the legacy tree, the claim, the
-// staging dir and the preserved copy.
+// normalizeAdoptOutput names the staged volumes before temp-dir collapsing.
 func normalizeAdoptOutput(root, output string) string {
 	output = strings.ReplaceAll(filepath.ToSlash(output), filepath.ToSlash(root), "<STAGE>")
 	return normalize.Apply(output)
@@ -55,9 +50,6 @@ func testAdoptWorktreeHelp(t *testing.T) {
 }
 
 func testAdoptWorktreeDryRunNamesTheCopyAndSetAsideWithoutTouchingEitherVolume(t *testing.T) {
-	// The init container's decision, previewed: an empty claim and a real
-	// legacy repository adopt, and the dry run says what it would copy,
-	// move and set aside while leaving both volumes as they were.
 	setup := env.New(t)
 	root := t.TempDir()
 	legacy, claim := stageAdoptVolumes(t, root)
@@ -75,9 +67,6 @@ func testAdoptWorktreeDryRunNamesTheCopyAndSetAsideWithoutTouchingEitherVolume(t
 }
 
 func testAdoptWorktreeRealRunAdoptsThenASecondBootIsANoOp(t *testing.T) {
-	// The first boot after the claim appears adopts the checkout and
-	// keeps the original beside it; every later boot finds the claim
-	// populated and leaves it alone.
 	setup := env.New(t)
 	root := t.TempDir()
 	legacy, claim := stageAdoptVolumes(t, root)

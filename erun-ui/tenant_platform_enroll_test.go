@@ -8,10 +8,7 @@ import (
 	"testing"
 )
 
-// enrollUserAPI serves POST /v1/users with a canned status and body, the
-// shape EnrollERunPlatformUser's failure classification (tenant_platform.go's
-// call into enrollERunPlatformUserError, tenant_platform_error.go) has to
-// tell apart.
+// enrollUserAPI serves POST /v1/users with a canned status and body.
 func enrollUserAPI(t *testing.T, status int, body string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -33,12 +30,8 @@ func enrollAuthEnvelope(code string) string {
 	return string(encoded)
 }
 
-// TestEnrollERunPlatformUserRendersTheAdministratorHandoff: a not-yet-enrolled
-// caller's self-enroll attempt is refused by the platform's own auth
-// middleware -- documented on EnrollERunPlatformUser as the expected outcome.
-// It must not surface as the raw wire error (a JSON envelope inside
-// "http 401: ...") but read as the hand-off the not-enrolled card already offers
-// (request an invitation, or hand the printed command to an administrator).
+// A 401 on self-enroll is expected and must read as the administrator
+// hand-off, not the raw wire error.
 func TestEnrollERunPlatformUserRendersTheAdministratorHandoff(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -75,12 +68,8 @@ func TestEnrollERunPlatformUserRendersTheAdministratorHandoff(t *testing.T) {
 	}
 }
 
-// TestEnrollERunPlatformUserKeepsTheRawErrorForUnexpectedFailures is the
-// inversion the fix must not introduce: TENANT_UNRESOLVED and
-// RESOLUTION_FAILED are not enrollment answers (tenantDashboardIdentityFailure
-// draws the same line on the read path), and a genuinely unclassifiable
-// failure must not be folded into the friendly hand-off either -- that would
-// hide real breakage behind a reassuring message.
+// Non-enrollment failures keep their raw error rather than hiding behind the
+// hand-off.
 func TestEnrollERunPlatformUserKeepsTheRawErrorForUnexpectedFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

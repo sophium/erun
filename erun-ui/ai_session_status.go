@@ -11,54 +11,25 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// ai_session_status.go is the desktop's read of the structured AI-session
-// status model (base/model/ai_session_status.go) for an environment's AI tab.
-//
-// PTY output volume cannot represent this state: a session blocked on the
-// human prints nothing, exactly like a finished one, and a live `claude`
-// process keeps the pod heartbeat up after its turn has ended. So the badge
-// asks the tool. The environment's own `erun activity ai-session
-// status` resolves busy / awaiting-input / exited / oom-killed from the last
-// turn-boundary event the tool's own hooks reported, with no elapsed-time input
-// — which is what makes "waiting on you" representable at all. Output volume
-// remains the answer only where the model has nothing to say: an environment
-// whose AI tool has never reported a turn boundary keeps the volume latch it
-// has always had, and so does one too old to have the verb.
-//
-// The read goes over the runtime pod exec the heartbeat already uses rather
-// than the MCP edge, for the reason the heartbeat does: kubectl exec works
-// while the edge is down, and a dead edge is exactly when a session is most
-// likely to look stale.
+// The AI badge asks the pod's `erun activity ai-session status` (output volume cannot
+// tell awaiting-input from working); reads use pod exec so they work with the edge down.
 
-// aiSessionStatusTTL bounds how long a reading stays applicable. Matched to the
-// session heartbeat's own bound: the same tick refreshes both, so a reading and
-// the pod observation it is weighed against are never far apart in time, and a
-// reading the desktop can no longer refresh stops having a say rather than
-// pinning a row forever.
+// aiSessionStatusTTL matches the heartbeat bound so an unrefreshable reading stops pinning a row.
 const aiSessionStatusTTL = 3 * sessionHeartbeatInterval
 
-// aiSessionStatusTimeout bounds one read. It is a pod exec plus a CLI start, the
-// same shape and cost as the heartbeat probe, and it runs on the same tick.
 const aiSessionStatusTimeout = 5 * time.Second
 
-// aiSessionStatusMarker brackets the CLI's JSON in the combined output the pod
-// exec returns. kubectlText merges stderr into stdout, so the JSON has to be
-// delimited rather than parsed out of the whole stream.
+// aiSessionStatusMarker delimits the JSON because kubectlText merges stderr into stdout.
 const aiSessionStatusMarker = "erun-ai-sessions"
 
-// aiSessionReading is one environment's last resolved reading, with when it was
-// taken. sessions is every session the tool has reported for the environment,
-// including ones that have exited: which of them can speak for the desktop's
-// own tab is decided per tab, at use (aiSessionReadingForTab).
+// aiSessionReading includes exited sessions; attribution to a tab happens in aiSessionReadingForTab.
 type aiSessionReading struct {
 	observedAt time.Time
 	sessions   []model.AISessionStatus
 }
 
-// aiSessionStatusScript asks the pod's own erun for the environment's resolved
-// AI-session status. erun's stderr is discarded so a warning cannot land inside
-// the JSON, and a pod too old to have the verb prints nothing between the
-// markers, which reads as no reading rather than as an empty one.
+// aiSessionStatusScript discards erun's stderr; a pod without the verb prints
+// nothing between the markers, which reads as no reading.
 func aiSessionStatusScript(selection uiSelection) string {
 	return fmt.Sprintf(
 		"printf '%s\\tbegin\\n'; erun activity ai-session status --tenant %s --environment %s --output json 2>/dev/null; printf '%s\\tend\\n'",
@@ -69,17 +40,14 @@ func aiSessionStatusScript(selection uiSelection) string {
 	)
 }
 
-// parseAISessionStatuses reads the marked block out of a pod exec's combined
-// output. A block that is missing, or that does not hold a JSON array, reports
-// ok=false: a failed read is evidence of nothing, and must not be mistaken for
-// a reading that says no session is working.
+// parseAISessionStatuses reports ok=false for a missing or malformed block: a
+// failed read is no evidence, not "nothing working".
 func parseAISessionStatuses(probe string) ([]model.AISessionStatus, bool) {
 	block, ok := markedBlock(probe, aiSessionStatusMarker)
 	if !ok {
 		return nil, false
 	}
-	// Trace output around the array is dropped rather than failing the read;
-	// only what is between the first '[' and the last ']' is the payload.
+	// Trace output around the array is dropped.
 	start := strings.Index(block, "[")
 	end := strings.LastIndex(block, "]")
 	if start < 0 || end < start {
@@ -92,7 +60,6 @@ func parseAISessionStatuses(probe string) ([]model.AISessionStatus, bool) {
 	return statuses, true
 }
 
-// markedBlock extracts what a script wrote between its begin and end markers.
 func markedBlock(output, marker string) (string, bool) {
 	_, rest, ok := strings.Cut(output, marker+"\tbegin")
 	if !ok {
@@ -101,23 +68,12 @@ func markedBlock(output, marker string) (string, bool) {
 	if end := strings.Index(rest, marker+"\tend"); end >= 0 {
 		return rest[:end], true
 	}
-	// An unterminated block is still a block: the command ran and printed, and
-	// only its closing marker is missing.
+	// An unterminated block is still a block.
 	return rest, true
 }
 
-// reconcileAISessionStatusesOnce refreshes every environment's reading and
-// applies it to that environment's AI tabs. It is called from the heartbeat
-// ticker, after the pod observations are fresh, so a decision made here is
-// weighed against this tick's view of what the pod is running.
-//
-// Only environments with an open AI tab are read. The badge exists for that
-// tab, an environment without one has no row to spin, and each read costs a pod
-// exec.
-//
-// The deadlock this cannot have: it holds no lock while reading. The read is
-// network-bound, and taking a.mu across it would stall every other session
-// operation behind a cluster round trip.
+// reconcileAISessionStatusesOnce runs after the heartbeat tick and reads only envs
+// with an open AI tab. It holds no lock across the network read.
 func (a *App) reconcileAISessionStatusesOnce() {
 	tabs := a.openAITabs()
 	read := make(map[string]struct{}, len(tabs))
@@ -131,8 +87,7 @@ func (a *App) reconcileAISessionStatusesOnce() {
 	}
 }
 
-// openAITabs snapshots the AI tabs the badge can be drawn for, in serial order
-// so a pass is reproducible.
+// openAITabs returns AI tabs in serial order so a pass is reproducible.
 func (a *App) openAITabs() []*managedTerminal {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -147,9 +102,8 @@ func (a *App) openAITabs() []*managedTerminal {
 	return tabs
 }
 
-// readAISessionStatusOnce stores one environment's reading. A failed read
-// leaves the previous reading in place to age out of its TTL rather than
-// dropping it: an unreachable pod is not evidence that a running turn ended.
+// readAISessionStatusOnce keeps the previous reading on failure: an unreachable
+// pod is not evidence a turn ended.
 func (a *App) readAISessionStatusOnce(selection uiSelection) {
 	ctx, cancel := context.WithTimeout(a.backgroundContext(), aiSessionStatusTimeout)
 	defer cancel()
@@ -164,7 +118,6 @@ func (a *App) readAISessionStatusOnce(selection uiSelection) {
 	a.recordAISessionReading(selection, sessions)
 }
 
-// recordAISessionReading stores one environment's resolved reading.
 func (a *App) recordAISessionReading(selection uiSelection, sessions []model.AISessionStatus) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -177,9 +130,7 @@ func (a *App) recordAISessionReading(selection uiSelection, sessions []model.AIS
 	}
 }
 
-// aiSessionReadingForLocked returns the environment's reading while it is
-// fresh. A reading the desktop can no longer refresh is treated as absent, so
-// an unreachable pod can never pin a row forever. Caller holds a.mu.
+// aiSessionReadingForLocked treats an expired reading as absent. Caller holds a.mu.
 func (a *App) aiSessionReadingForLocked(selection uiSelection) (aiSessionReading, bool) {
 	reading, ok := a.aiSessionReadings[selectionKey(selection)]
 	if !ok || time.Since(reading.observedAt) > aiSessionStatusTTL {
@@ -188,17 +139,14 @@ func (a *App) aiSessionReadingForLocked(selection uiSelection) (aiSessionReading
 	return reading, true
 }
 
-// aiSessionEvidenceForTab answers what the tool says about one tab: busy is
-// whether it reports work in flight, reported whether it has said anything
-// about this tab at all. reported=false means the volume latch keeps its say.
+// aiSessionEvidenceForTab: reported=false leaves the decision to the volume latch.
 func (a *App) aiSessionEvidenceForTab(managed *managedTerminal) (busy bool, reported bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.aiSessionEvidenceForTabLocked(managed)
 }
 
-// aiSessionEvidenceForTabLocked is aiSessionEvidenceForTab for a caller already
-// holding a.mu. Caller holds a.mu.
+// Caller holds a.mu.
 func (a *App) aiSessionEvidenceForTabLocked(managed *managedTerminal) (busy bool, reported bool) {
 	if managed == nil {
 		return false, false
@@ -210,16 +158,8 @@ func (a *App) aiSessionEvidenceForTabLocked(managed *managedTerminal) (busy bool
 	return aiSessionReadingForTab(reading, managed.startedAt)
 }
 
-// aiSessionReadingForTab attributes a reading to one tab. Only records the tool
-// wrote since this tab's session started can be about it, and that comparison
-// is what is left of staleness here — the model itself resolves state with no
-// elapsed-time input by design, so it can say "still awaiting input" an hour
-// later, correctly. What it cannot say is *whose* turn it was: a record an
-// earlier session left behind would otherwise pin this row for good, and "the
-// tool reported a turn boundary before this tab existed" is not evidence about
-// the agent the operator is watching now. Such a record is evidence neither
-// way, so the volume latch decides — which is exactly the pre-existing
-// behaviour rather than a new silence.
+// aiSessionReadingForTab ignores records older than the tab's session, since a
+// previous session's turn would otherwise pin the row; those fall back to volume.
 func aiSessionReadingForTab(reading aiSessionReading, startedAt time.Time) (busy bool, reported bool) {
 	for _, status := range reading.sessions {
 		if status.LastActivity.IsZero() || !status.LastActivity.After(startedAt) {
@@ -233,8 +173,7 @@ func aiSessionReadingForTab(reading aiSessionReading, startedAt time.Time) (busy
 	return busy, reported
 }
 
-// applyAISessionReading turns one tab's reading into the sidebar signal. A
-// reading that says nothing about this tab is left alone entirely.
+// applyAISessionReading leaves the tab alone when the reading says nothing about it.
 func (a *App) applyAISessionReading(managed *managedTerminal) {
 	busy, reported := a.aiSessionEvidenceForTab(managed)
 	if !reported {
@@ -244,10 +183,7 @@ func (a *App) applyAISessionReading(managed *managedTerminal) {
 		a.latchAIActivity(managed)
 		return
 	}
-	// The tool reported a turn boundary — its turn ended, or it is blocked on
-	// the human. Either way the work is not in flight, and this is the one
-	// signal that can say so while the process is still alive and the stream is
-	// still silent. The heartbeat's "the program is running" is not a
-	// counter-argument: a process waiting for input is running.
+	// A reported turn boundary means no work in flight, even while the process
+	// is alive and waiting for input.
 	a.releaseAIActivity(managed)
 }

@@ -8,12 +8,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestParseRuntimeUsageReadings covers the fixture shapes measured live: cgroup
-// v2 present, an unlimited memory.max, cgroup v1 (or no cgroup fs at all), and
-// a script that could not read a file. None of these are reachable from the
-// dry-run integration subprocess (dry-run never runs the script), and the
-// real-run path needs a live cgroup v2 container the harness does not have, so
-// the fixture matrix belongs here rather than in erun-integration.
 func TestParseRuntimeUsageReadings(t *testing.T) {
 	req := config.ShellLaunchParams{Tenant: "frs", Environment: "local"}
 	interval := time.Second
@@ -70,7 +64,7 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				"disk_workspace=/dev/sda1        198234112  99117056   89006592  53% /home/erun",
 				"disk_own_used_kb=54000000",
 			}, "\n"),
-			// 100000 usec of CPU burned over 1 elapsed second, against a 1-core quota.
+			// 100000 usec over 1 second against a 1-core quota.
 			wantCPU: config.RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 10, IntervalSeconds: 1},
 			wantMemory: config.RuntimeMemoryUsage{
 				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
@@ -116,11 +110,7 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 			wantDisk:   config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 		{
-			// A long filesystem identifier pushes df's data row onto its own
-			// line with the Filesystem column dropped, leaving only the 5
-			// remaining columns -- the shape parseRuntimeDFUsage's
-			// neighbor-based lookup exists to survive; the script's
-			// `tail -n1` already selects this line.
+			// A long filesystem name wraps df's data row, dropping the Filesystem column.
 			name:       "wrapped filesystem name still parses by column, not fixed index",
 			output:     "disk_workspace=1000 500 500 50% /home/erun\ndisk_own_used_kb=300",
 			wantCPU:    config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "no cgroup_type key should report unavailable"},
@@ -134,18 +124,9 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 	}
 }
 
-// runtimeUsageDiskOwnUsageReadingCases is split out from
-// runtimeUsageBaseReadingCases the same way runtimeUsageMemoryObservationReadingCases
-// is: a dedicated table for a reading facet that must stay independent of the
-// rest of the disk reading, kept in its own function purely to bound the
-// parent table's length.
 func runtimeUsageDiskOwnUsageReadingCases() []runtimeUsageReadingCase {
 	return []runtimeUsageReadingCase{
 		{
-			// du and df read independent sources (a filesystem walk vs a
-			// statfs), so one being unreadable must not suppress the other --
-			// an operator can still learn their own footprint even when the
-			// node-wide figure is unavailable, and vice versa.
 			name: "own usage is observed independently of df availability",
 			output: strings.Join([]string{
 				"cgroup_type=cgroup2fs",
@@ -176,17 +157,9 @@ func runtimeUsageDiskOwnUsageReadingCases() []runtimeUsageReadingCase {
 	}
 }
 
-// runtimeUsageMemoryObservationReadingCases covers memory.peak and
-// memory.events' oom_kill going missing independently of the rest of the
-// memory reading -- each must stay unobserved rather than reporting a
-// fabricated zero, without the struct-level Unavailable firing, since the
-// rest of the reading is genuinely available.
 func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 	return []runtimeUsageReadingCase{
 		{
-			// memory.events' oom_kill counter can be as unreadable as
-			// memory.peak; OOMKillsObserved must stay false rather than
-			// reporting a confident "no kills".
 			name: "memory.events oom_kill missing reports unobserved, not a fabricated zero",
 			output: strings.Join([]string{
 				"cgroup_type=cgroup2fs",
@@ -203,9 +176,6 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 			wantDisk: config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 		{
-			// memory.events' "max" counter (cgroup ceiling hits) is exactly
-			// as unreadable as oom_kill from the same file; CeilingHitsObserved
-			// must stay false rather than reporting a confident "never hit it".
 			name: "memory.events max (ceiling hits) missing reports unobserved, not a fabricated zero",
 			output: strings.Join([]string{
 				"cgroup_type=cgroup2fs",
@@ -226,10 +196,7 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 	}
 }
 
-// assertRuntimeCPU compares an availability marker (want.Unavailable's
-// presence, not its exact text -- the fixture table above uses the field to
-// document *why* a case is unavailable) and, only when available, the
-// numeric fields.
+// Only want.Unavailable's presence is compared, not its text.
 func assertRuntimeCPU(t *testing.T, got, want config.RuntimeCPUUsage) {
 	t.Helper()
 	if (got.Unavailable == "") != (want.Unavailable == "") {
@@ -268,9 +235,6 @@ func assertRuntimeMemory(t *testing.T, got, want config.RuntimeMemoryUsage) {
 	}
 }
 
-// assertRuntimeMemoryPeakAndOOM checks CurrentBytes/PeakBytes/OOMKills
-// alongside their own Observed bit: a value alone is never enough to say
-// whether it means anything.
 func assertRuntimeMemoryPeakAndOOM(t *testing.T, got, want config.RuntimeMemoryUsage) {
 	t.Helper()
 	if got.CurrentBytes != want.CurrentBytes {
@@ -301,9 +265,7 @@ func assertRuntimeDisk(t *testing.T, got, want config.RuntimeDiskUsage) {
 	if got.NodeShared != want.NodeShared {
 		t.Errorf("Disk.NodeShared = %t, want %t", got.NodeShared, want.NodeShared)
 	}
-	// Own usage comes from an independent read (du, not df/statfs), so it is
-	// checked before the Unavailable early-return below -- one being
-	// unreadable must not hide the other.
+	// Own usage is checked before the Unavailable early return: du is independent of df.
 	assertRuntimeDiskOwnUsage(t, got, want)
 	if (got.Unavailable == "") != (want.Unavailable == "") {
 		t.Errorf("Disk.Unavailable = %q, want unavailable=%t", got.Unavailable, want.Unavailable != "")

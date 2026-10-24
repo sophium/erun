@@ -111,14 +111,8 @@ func WriteListResult(ctx core.Context, result lifecycle.ListResult) error {
 	return writeOrchestrators(ctx, result.Orchestrators)
 }
 
-// writeOrphanedSSHAliases reports Host blocks in the host's own ssh config that
-// name an erun environment alias nothing claims. The section is absent when
-// there is nothing to report: an operator with no stale blocks should not have
-// to read a heading telling them so on every listing.
-//
-// The remedy is deliberately manual. erun wrote these blocks, but it cannot
-// tell one it wrote from one an operator hand-maintained under the same naming
-// convention, and a prune that guessed would delete an alias someone relies on.
+// writeOrphanedSSHAliases reports unclaimed erun-named ssh Host blocks. Removal stays
+// manual: erun cannot tell its own blocks from hand-maintained ones.
 func writeOrphanedSSHAliases(ctx core.Context, orphans []lifecycle.SSHOrphanedAlias) error {
 	if len(orphans) == 0 {
 		return nil
@@ -135,9 +129,6 @@ func writeOrphanedSSHAliases(ctx core.Context, orphans []lifecycle.SSHOrphanedAl
 	return err
 }
 
-// sshConfigLocationLabel names the file these blocks live in the same way the
-// missing-alias annotation above does. The alias it matters to is an ssh
-// client's own, and `~/.ssh/config` is what an operator types.
 func sshConfigLocationLabel() string {
 	return "~/.ssh/config"
 }

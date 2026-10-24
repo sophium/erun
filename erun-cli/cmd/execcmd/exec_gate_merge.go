@@ -113,8 +113,7 @@ func runExecGateMergeCommand(ctx core.Context, findProjectRoot sharedpkg.Project
 	return reportGateMergeResult(ctx, result)
 }
 
-// readGateMergeSources reads one NUL-separated commit message per source
-// branch from stdin, in the same order as the --source flags.
+// readGateMergeSources reads NUL-separated commit messages from stdin in --source order.
 func readGateMergeSources(ctx core.Context, sourceBranches []string) ([]mergequeue.GateMergeSource, error) {
 	stdin, err := io.ReadAll(ctx.Stdin)
 	if err != nil {
@@ -131,10 +130,7 @@ func readGateMergeSources(ctx core.Context, sourceBranches []string) ([]mergeque
 	return sources, nil
 }
 
-// gateMergeCarriedTrailerSummary names what one landed source's squash
-// carried. The empty case is spelled out rather than left blank: a carriage
-// that found nothing is the state a caller cannot otherwise see, since the
-// landed commit and a successful exit look the same either way.
+// An empty carriage is spelled out; it is otherwise invisible to the caller.
 func gateMergeCarriedTrailerSummary(trailers []string) string {
 	if len(trailers) == 0 {
 		return "no trailers of its own"
@@ -142,9 +138,7 @@ func gateMergeCarriedTrailerSummary(trailers []string) string {
 	return "its own trailers: " + strings.Join(trailers, "; ")
 }
 
-// reportGateMergeResult prints each landed and skipped source, then refuses
-// if the batch landed nothing at all — there is nothing to build against an
-// unchanged target.
+// reportGateMergeResult refuses when the batch landed nothing.
 func reportGateMergeResult(ctx core.Context, result mergequeue.GateMergeWorkingTreeResult) error {
 	for _, landed := range result.Landed {
 		ctx.Info(fmt.Sprintf("Squash-merged %s/%s onto %s (%s), carrying %s.",

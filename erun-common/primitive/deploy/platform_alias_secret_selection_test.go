@@ -12,9 +12,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// secondPlatformAliasProvider is a second erun-type alias on the same host:
-// what makes resolution ambiguous, and therefore what the operator's own
-// selection has to disambiguate.
 func secondPlatformAliasProvider() configpkg.CloudProviderConfig {
 	return configpkg.CloudProviderConfig{
 		Alias:         "erun+api.acme.services.erunpaas.com@acme",
@@ -30,10 +27,7 @@ func secondPlatformAliasProvider() configpkg.CloudProviderConfig {
 	}
 }
 
-// ambiguousHostStore is a host configured with two erun-type aliases and
-// signed in to both: the state the sole-alias default cannot answer, and the
-// state the explicit selection exists for. Both sessions are stored so the only
-// reason to decline is the ambiguity itself, never a missing token.
+// ambiguousHostStore is signed in to two erun aliases, so only ambiguity can cause a decline.
 func ambiguousHostStore(t *testing.T) staticCloudStore {
 	t.Helper()
 	redirectConfigHomeForTest(t)
@@ -53,13 +47,6 @@ func ambiguousHostStore(t *testing.T) staticCloudStore {
 	return staticCloudStore{config: configpkg.ERunConfig{CloudProviders: providers}}
 }
 
-// TestResolveHostPlatformAliasSelectsTheNamedAliasFromSeveral pins the selection
-// itself, away from the deploy path. With two erun aliases configured an
-// explicit name decides which one is resolved; with none the host still
-// declines rather than guessing, which is the behaviour every caller had before
-// the selection existed and the one a flag must not quietly replace. The
-// decline comes back as the ambiguity rather than as nothing, because it is the
-// one decline the operator named nothing for that they can still lift.
 func TestResolveHostPlatformAliasSelectsTheNamedAliasFromSeveral(t *testing.T) {
 	store := ambiguousHostStore(t)
 	deps := cloud.DefaultCloudDependencies()
@@ -88,12 +75,7 @@ func TestResolveHostPlatformAliasSelectsTheNamedAliasFromSeveral(t *testing.T) {
 	}
 }
 
-// TestPlatformAliasAmbiguityIsNotTheAbsentAliasCause pins the one distinction
-// the retrofit's decline turns on: several erun aliases with none selected,
-// versus no erun alias at all. The resolver has always reported both as the
-// same silence, and only the first is the operator's to lift, so they have to
-// be tellable apart without matching on wording -- which each transport spells
-// its own way, naming its own selection.
+// Each transport words the cause differently, so it must be distinguishable without matching text.
 func TestPlatformAliasAmbiguityIsNotTheAbsentAliasCause(t *testing.T) {
 	several := staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{
 		testPlatformAliasProvider(), secondPlatformAliasProvider(),
@@ -116,12 +98,6 @@ func TestPlatformAliasAmbiguityIsNotTheAbsentAliasCause(t *testing.T) {
 	}
 }
 
-// TestResolveHostPlatformAliasReportsAnExplicitSelectionItCannotHonour pins the
-// other half of the explicit path: a name the operator gave is never a silent
-// no-op, whatever stopped it being usable. Each failure has to say what could
-// not happen and what to do next, because "the retrofit declined" is
-// indistinguishable from "the retrofit never ran" once the deploy has reported
-// success.
 func TestResolveHostPlatformAliasReportsAnExplicitSelectionItCannotHonour(t *testing.T) {
 	store := ambiguousHostStore(t)
 	deps := cloud.DefaultCloudDependencies()
@@ -139,9 +115,6 @@ func TestResolveHostPlatformAliasReportsAnExplicitSelectionItCannotHonour(t *tes
 	})
 
 	t.Run("names a configured alias with no session", func(t *testing.T) {
-		// A secret store holding nothing, so the only thing missing is the
-		// session -- the state a fresh machine is in for an alias it has been
-		// told about but never signed in to.
 		empty := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
 		assertSelectionRejected(t, store, empty, testPlatformAliasProvider().Alias, "erun cloud login")
 	})
@@ -151,11 +124,6 @@ func TestResolveHostPlatformAliasReportsAnExplicitSelectionItCannotHonour(t *tes
 	})
 }
 
-// assertSelectionRejected drives one unnamed-or-unusable selection and asserts
-// it fails the way the flag's contract requires: an error naming the selection
-// and the alias, never a usable alias alongside it. wantCause, when set, is the
-// phrase the failure owes the operator -- the reason, or the command that fixes
-// it.
 func assertSelectionRejected(t *testing.T, store staticCloudStore, deps cloud.CloudDependencies, alias, wantCause string) {
 	t.Helper()
 	_, _, ok, err := ResolveHostPlatformAlias(store, deps, alias)
@@ -173,14 +141,6 @@ func assertSelectionRejected(t *testing.T, store staticCloudStore, deps cloud.Cl
 	}
 }
 
-// TestReconcilePlatformAliasSecretHonoursTheOperatorsExplicitAlias is the
-// direction the opt-in exists for. A host signed in to more than one erun-type
-// alias has no unambiguous answer to "whose identity", so the retrofit declined
-// on it and the environment stayed unable to call the platform with nothing
-// saying why -- while the desktop resolves that same choice from the tenant's
-// own primary alias. This drives an explicit selection end to end and asserts
-// the Secret the pod mounts carries the alias the operator named, not the first
-// one configured.
 func TestReconcilePlatformAliasSecretHonoursTheOperatorsExplicitAlias(t *testing.T) {
 	captured := installCapturingKubectl(t)
 	ambiguousHostStore(t)
@@ -223,20 +183,7 @@ func TestReconcilePlatformAliasSecretHonoursTheOperatorsExplicitAlias(t *testing
 	}
 }
 
-// TestReconcilePlatformAliasSecretReportsAnAmbiguousHostWithoutTheFlag is the
-// reproduction of the reported failure. An ambiguous host has no answer the
-// retrofit could pick without guessing whose identity an environment acts as,
-// so declining is right -- but it declined as the same silence a host with
-// nothing to give gets, and that is the host this retrofit exists for. Every
-// deploy from it provisioned nothing, recorded nothing, and left nothing in the
-// trace, so the only symptom was a refusal inside the pod naming a cause that
-// was not this one. The decline still provisions nothing and threads nothing;
-// it must also say what happened and name the flag that lifts it.
-//
-// Both sessions here are signed in, so ambiguity is the only reason to decline;
-// had the selection leaked into the default path, this is where it would show,
-// and the recorded environment is asserted because a decline is not a licence
-// to write one.
+// Both sessions are signed in, so ambiguity is the only reason to decline.
 func TestReconcilePlatformAliasSecretReportsAnAmbiguousHostWithoutTheFlag(t *testing.T) {
 	ambiguousHostStore(t)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
@@ -277,13 +224,6 @@ func TestReconcilePlatformAliasSecretReportsAnAmbiguousHostWithoutTheFlag(t *tes
 	}
 }
 
-// TestReconcilePlatformAliasSecretLeavesARecordedEnvironmentAloneOnAnAmbiguousHost
-// keeps the ambiguity out of the one path that must stay silent whatever the
-// host looks like. The identity a recorded Secret carries is the operator's,
-// and an environment that already names one is never re-provisioned -- a
-// decision this deploy does not revisit, so it owes the trace nothing, and the
-// line the ambiguity earns on an unprovisioned environment would here be a
-// report of a decision that was not made on this host's behalf at all.
 func TestReconcilePlatformAliasSecretLeavesARecordedEnvironmentAloneOnAnAmbiguousHost(t *testing.T) {
 	ambiguousHostStore(t)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
@@ -318,12 +258,6 @@ func TestReconcilePlatformAliasSecretLeavesARecordedEnvironmentAloneOnAnAmbiguou
 	}
 }
 
-// TestReconcilePlatformAliasSecretSaysWhenAnExplicitAliasWasNotUsed closes the
-// flag's last silent path. An environment that already records a Secret keeps
-// it -- re-provisioning is a change of identity, not a refresh -- so a deploy
-// naming an alias has nothing to apply. Saying that in the trace is what keeps
-// a flag the operator passed from reading as a flag that took effect; the
-// recorded Secret must still be the one left in place.
 func TestReconcilePlatformAliasSecretSaysWhenAnExplicitAliasWasNotUsed(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
@@ -355,10 +289,6 @@ func TestReconcilePlatformAliasSecretSaysWhenAnExplicitAliasWasNotUsed(t *testin
 	}
 }
 
-// TestReconcilePlatformAliasSecretReportsAnExplicitAliasOnADeploy is the same
-// failure reaching the caller of the deploy path: the retrofit has to return it,
-// not swallow it, and must leave the environment untouched so the next run can
-// be told what went wrong instead of reading a half-applied state.
 func TestReconcilePlatformAliasSecretReportsAnExplicitAliasOnADeploy(t *testing.T) {
 	ambiguousHostStore(t)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
@@ -394,9 +324,6 @@ func TestReconcilePlatformAliasSecretReportsAnExplicitAliasOnADeploy(t *testing.
 	}
 }
 
-// TestReconcilePlatformAliasSecretScopesItselfToTheRuntimeRelease keeps the
-// retrofit off component releases, which never carry the platform-alias volume
-// -- a component chart naming one would be a value nothing consumes.
 func TestReconcilePlatformAliasSecretScopesItselfToTheRuntimeRelease(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))

@@ -14,12 +14,7 @@ import (
 	"testing"
 )
 
-// TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias is the "green"
-// half of the erun-vs-AWS seam: the dashboard's bearer and username
-// hint come from the resolved erun-type platform alias, never from whichever
-// alias happens to be the tenant's primary one. See
-// TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform for the "red"
-// half — proving an AWS-only configuration cannot reach this path at all.
+// The bearer and username hint come from the erun-type alias, never the primary alias.
 func TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias(t *testing.T) {
 	var requests []string
 	server := httptest.NewServer(erunPlatformDashboardHandler(t, &requests, "frs"))
@@ -33,15 +28,8 @@ func TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias(t *testing.T)
 	assertERunPlatformDashboard(t, dashboard, requests)
 }
 
-// TestLoadTenantDashboardNamesThePlatformTenantItsRowsBelongTo: a local tenant
-// is bound to a platform tenant only by whichever alias its credential reaches,
-// so the rows every panel renders can belong to a tenant that is not the one
-// the dashboard was opened from — an `frs` dashboard listing `erun`'s reviews
-// and queue. The surface must name the platform tenant whoami reports.
-//
-// The fixture's local tenant is "frs" (testERunPlatformAliasApp) and the
-// platform answers "erun", which is the disagreement, not the agreement:
-// assertERunPlatformDashboard covers the case where the two names match.
+// A local tenant reaches a platform tenant only through its alias, so the two
+// names can differ; the fixture's "frs" vs "erun" is the disagreement.
 func TestLoadTenantDashboardNamesThePlatformTenantItsRowsBelongTo(t *testing.T) {
 	var requests []string
 	server := httptest.NewServer(erunPlatformDashboardHandler(t, &requests, "erun"))
@@ -60,25 +48,8 @@ func TestLoadTenantDashboardNamesThePlatformTenantItsRowsBelongTo(t *testing.T) 
 	}
 }
 
-// TestLoadTenantDashboardRefusesAPlatformTenantThatIsNotTheLocalOne: a local
-// tenant must not present another platform tenant's rows as its own. Attaching an erun-type alias to a local tenant's
-// cloudprovideraliases gives that tenant's dashboard a route to the platform,
-// resolved through the alias — so a tenant named `frs` renders `erun`'s
-// reviews, queue, users and audit under its own name, behind the write
-// controls (create a review, advance a merge queue, approve an invitation)
-// that act on them. Nothing in either config links the two namespaces; the
-// platform's own name for the tenant behind the bearer is the only thing that
-// can say whether the rows are this local tenant's.
-//
-// The fixture's local tenant is "frs" (testERunPlatformAliasApp) and the
-// platform answers "erun", so the two do not correspond. This drives the real
-// path — the alias resolution, the real refresh-token bearer mint, and a real
-// HTTP platform — and pins that the dashboard stops at the identity read:
-// whoami is the last request the platform sees, so no panel ever renders the
-// other tenant's rows.
-// TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias is the
-// agreeing control: the same path with the platform answering "frs" loads
-// every panel exactly as it did before.
+// Nothing in config links the local and platform tenant namespaces, so whoami
+// must be the last request the platform sees when the names differ.
 func TestLoadTenantDashboardRefusesAPlatformTenantThatIsNotTheLocalOne(t *testing.T) {
 	var requests []string
 	server := httptest.NewServer(erunPlatformDashboardHandler(t, &requests, "erun"))
@@ -92,8 +63,6 @@ func TestLoadTenantDashboardRefusesAPlatformTenantThatIsNotTheLocalOne(t *testin
 	if dashboard.PlatformState != tenantPlatformStateTenantMismatch {
 		t.Fatalf("expected the dashboard to refuse a platform tenant that is not the local one, got platformState %q", dashboard.PlatformState)
 	}
-	// The platform's own name is still carried, so the header can say whose
-	// rows these are rather than only that they are not this tenant's.
 	user := dashboard.User
 	if user == nil {
 		t.Fatal("expected the dashboard to carry the caller's own identity")
@@ -107,10 +76,6 @@ func TestLoadTenantDashboardRefusesAPlatformTenantThatIsNotTheLocalOne(t *testin
 	assertTenantDashboardRowsAreEmpty(t, &dashboard)
 }
 
-// assertTenantDashboardRowsAreEmpty holds the mismatched-platform dashboard to
-// "none of the other tenant's rows", panel by panel: each is a different read
-// against the same wrong tenant, so one of them left populated is the whole
-// defect back again.
 func assertTenantDashboardRowsAreEmpty(t *testing.T, dashboard *uiTenantDashboard) {
 	t.Helper()
 	for _, rows := range []struct {
@@ -129,11 +94,7 @@ func assertTenantDashboardRowsAreEmpty(t *testing.T, dashboard *uiTenantDashboar
 	}
 }
 
-// TestTenantDashboardTenantMismatchOnlyNamesATenantThatDoesNotCorrespond pins
-// the two halves of the correspondence check that are not "the names differ":
-// a platform that reports no name leaves nothing to compare, so its dashboard
-// is read without the check, and an unnamed local
-// tenant is never refused on a comparison that was never made.
+// With no name on either side there is nothing to compare, so nothing is refused.
 func TestTenantDashboardTenantMismatchOnlyNamesATenantThatDoesNotCorrespond(t *testing.T) {
 	for _, tc := range []struct {
 		name               string
@@ -156,14 +117,7 @@ func TestTenantDashboardTenantMismatchOnlyNamesATenantThatDoesNotCorrespond(t *t
 	}
 }
 
-// erunPlatformDashboardFixtures is erunPlatformDashboardHandler's fixture
-// body for every path, keyed by path rather than a switch — a switch here
-// once tripped golangci-lint's cyclomatic-complexity cap.
-// platformTenantName is the name the fixture's whoami reports for the tenant
-// behind the bearer. It is the caller's choice rather than a constant because
-// the local tenant a dashboard is opened from and the platform tenant its
-// credential reaches are separate namespaces; a caller stages the state it
-// means to exercise by naming whether they agree.
+// erunPlatformDashboardFixtures is keyed by path; a switch tripped the cyclomatic-complexity lint.
 func erunPlatformDashboardFixtures(platformTenantName string) map[string]string {
 	return map[string]string{
 		"/v1/whoami":                  `{"tenantId":"tenant-1","tenantName":"` + platformTenantName + `","userId":"user-1","username":"Rihards.Freimanis","roles":["ReadAll","WriteAll"],"issuer":"` + testERunIssuer + `","subject":"` + testERunSubject + `"}`,
@@ -171,9 +125,7 @@ func erunPlatformDashboardFixtures(platformTenantName string) map[string]string 
 		"/v1/reviews/merge-queue":     `[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`,
 		"/v1/reviews/review-1/builds": `[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`,
 		"/v1/builds":                  `{"builds":[]}`,
-		// The pipeline fixture carries both halves of the union in one view:
-		// a planned job with no branch and no review behind it, and a review
-		// whose only issue link was parsed out of its branch name.
+		// One group: a planned job with no branch, and a review linked via its branch name.
 		"/v1/pipeline": `[{"issueKey":"sophium/erun#2683","items":[` +
 			`{"issueKey":"sophium/erun#2683","issueRef":"sophium/erun#2683","issueRefSource":"DECLARED","rung":"PLANNED",` +
 			`"job":{"jobId":"job-1","jobType":"triage","issueRef":"sophium/erun#2683","summary":"plan the pipeline view","status":"PLANNED","actorKind":"orchestrator","actorId":"erun/ideas","startedAt":"2026-01-01T00:00:00Z"}},` +
@@ -226,11 +178,7 @@ func assertERunPlatformDashboard(t *testing.T, dashboard uiTenantDashboard, requ
 	}
 }
 
-// assertERunPlatformDashboardUser pins the caller's own identity row, which is
-// the one row whoami answers for. Its platform tenant name is asserted even
-// where it agrees with the local tenant's: the header line is rendered
-// whenever the platform reported one, so its absence is never the signal that
-// the two names matched.
+// The platform tenant name is asserted even when it matches; the header always renders it.
 func assertERunPlatformDashboardUser(t *testing.T, dashboard uiTenantDashboard) {
 	t.Helper()
 	if dashboard.User == nil || dashboard.User.Username != "Rihards.Freimanis" || len(dashboard.User.Roles) != 2 {
@@ -241,10 +189,6 @@ func assertERunPlatformDashboardUser(t *testing.T, dashboard uiTenantDashboard) 
 	}
 }
 
-// assertERunPlatformDashboardPipeline pins what the Pipeline tab is for: the
-// planned job and the review arrive in one group keyed on the same issue, the
-// job is a job (a record with no branch) and the review is a review, and the
-// provenance of every link survives the read.
 func assertERunPlatformDashboardPipeline(t *testing.T, issues []uiPipelineIssue) {
 	t.Helper()
 	if len(issues) != 1 || issues[0].IssueKey != "sophium/erun#2683" || len(issues[0].Items) != 2 {
@@ -262,8 +206,6 @@ func assertERunPlatformDashboardPlannedJob(t *testing.T, planned uiPipelineItem)
 	if planned.Rung != "PLANNED" || planned.Job.JobType != "triage" || planned.IssueRefSource != "DECLARED" {
 		t.Fatalf("unexpected planned item: %+v", planned)
 	}
-	// A planned job is a backlog entry: it carries no endedAt, and a reader
-	// must not see one invented for it.
 	if planned.Job.EndedAt != "" {
 		t.Fatalf("a planned job must carry no endedAt, got %q", planned.Job.EndedAt)
 	}
@@ -324,10 +266,7 @@ func TestLoadTenantDashboardReturnsAPILogWhenIdentityIsNotEnrolled(t *testing.T)
 	}
 }
 
-// The API log is one tab of nine, so a failed read must name the read it could
-// not make before the raw error — the same shape the Runtime panels and
-// Manage's jobs panel use. The underlying error stays verbatim: operators need
-// the original transport text, not a paraphrase of it.
+// The underlying error stays verbatim; operators need the original transport text.
 func TestLoadTenantDashboardAPILogErrorNamesTheReadThatFailed(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		notEnrolledDashboardAPIResponse(t, w, req.URL.Path)
@@ -358,18 +297,13 @@ func TestLoadTenantDashboardAPILogErrorNamesTheReadThatFailed(t *testing.T) {
 	}
 }
 
-// notEnrolledDashboardAPIResponse serves TestLoadTenantDashboardReturnsAPILogWhenIdentityIsNotEnrolled's
-// fixture: whoami always 401s, and the identity-scoped invite-request/config
-// reads it still makes with the same bearer both answer normally.
+// notEnrolledDashboardAPIResponse 401s whoami while invite-request/config reads answer normally.
 func notEnrolledDashboardAPIResponse(t *testing.T, w http.ResponseWriter, path string) {
 	t.Helper()
 	switch path {
 	case "/v1/whoami":
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	case "/v1/invite-requests/mine":
-		// Not-enrolled is exactly the identity "request an invitation"
-		// serves — the dashboard still checks this caller's own request
-		// status using the same bearer, even though whoami itself 401s.
 		http.Error(w, "no invite request found", http.StatusNotFound)
 	case "/v1/config":
 		w.Header().Set("Content-Type", "application/json")
@@ -379,12 +313,7 @@ func notEnrolledDashboardAPIResponse(t *testing.T, w http.ResponseWriter, path s
 	}
 }
 
-// TestLoadTenantDashboardDoesNotMisreportTenantUnresolvedOrResolutionFailedAsNotEnrolled
-// a 401 whoami response can mean three different things per its
-// {code, message} envelope (erun-backend-api's auth.go), and "not enrolled"
-// is false advice for two of them. TENANT_UNRESOLVED and RESOLUTION_FAILED must
-// fall through to the generic whole-dashboard error instead of asserting an
-// enrollment answer that is not true.
+// TENANT_UNRESOLVED and RESOLUTION_FAILED 401s must not be reported as not enrolled.
 func TestLoadTenantDashboardDoesNotMisreportTenantUnresolvedOrResolutionFailedAsNotEnrolled(t *testing.T) {
 	for _, code := range []string{"TENANT_UNRESOLVED", "RESOLUTION_FAILED"} {
 		t.Run(code, func(t *testing.T) {
@@ -423,10 +352,7 @@ func TestLoadTenantDashboardDoesNotMisreportTenantUnresolvedOrResolutionFailedAs
 	}
 }
 
-// TestLoadTenantDashboardReportsMyInviteRequestErrorRatherThanNilOnFault
-// guards against the failure a round trip other than "not found" must not
-// silently collapse into "never submitted one": a caller with an already
-// pending or approved request would be shown "Request an invitation" again.
+// A failed invite-request read must not look like "never submitted one".
 func TestLoadTenantDashboardReportsMyInviteRequestErrorRatherThanNilOnFault(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.URL.Path {
@@ -456,17 +382,8 @@ func TestLoadTenantDashboardReportsMyInviteRequestErrorRatherThanNilOnFault(t *t
 	}
 }
 
-// TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform is the "red" half
-// of the erun-vs-AWS seam: on a machine configured exactly like the
-// operator's own (only an AWS cloud alias, no erun platform alias at all),
-// the dashboard must report not-connected rather than signing the platform
-// read with the AWS identity. Before this fix, LoadTenantDashboard took its
-// apiUrl/cloudProviderAlias straight from the frontend, which happily handed
-// it the tenant's AWS-typed primary alias and an environment's own loopback
-// port-forward — this test fails against that shape because there is no
-// APIURL/CloudProviderAlias field left to even construct it with, and it
-// would otherwise reach an AWS-signed 401 rather than this local, no-network
-// classification.
+// With only an AWS alias, the dashboard must report not-connected rather than sign
+// the platform read with the AWS identity.
 func TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform(t *testing.T) {
 	app := testAWSAliasApp(t)
 	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
@@ -484,9 +401,7 @@ func TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform(t *testing.T) {
 func TestLoadAPILogPrefersKubernetesLogs(t *testing.T) {
 	t.Setenv("PATH", fakeKubectl(t, func(args []string) (string, int) {
 		got := strings.Join(args, "\n")
-		// The erun-backend-api chart's Deployment/Service is <tenant>-api
-		// (open.APIDeploymentName), not the runtime's <tenant>-devops
-		// Deployment: the erun-backend-api container never exists there.
+		// The API runs in <tenant>-api (open.APIDeploymentName), not <tenant>-devops.
 		want := "--context\ncluster-dev\n--namespace\nfrs-prod\nlogs\n-l\napp=frs-api\n--prefix\n-c\nerun-backend-api\n--tail\n400"
 		if got != want {
 			t.Fatalf("unexpected kubectl args:\n%s", got)
@@ -527,18 +442,14 @@ func fakeKubectl(t *testing.T, handler func([]string) (string, int)) string {
 		if err != nil {
 			t.Fatalf("read fake kubectl args failed: %v", err)
 		}
-		// The Windows stub records CRLF-terminated lines; normalize so the
-		// recorded args match what production passed.
 		normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
 		handler(strings.Split(strings.TrimSpace(normalized), "\n"))
 	})
 	return dir
 }
 
-// writeFakeKubectlStub drops a `kubectl` on PATH that records its args, replays a
-// captured stdout, and exits with a captured code. On Windows it must be a real
-// .cmd (exec.LookPath only honors PATHEXT extensions, and a #!/bin/sh script is
-// not runnable), with CRLF line endings or cmd.exe mis-parses the label loop.
+// writeFakeKubectlStub installs a recording kubectl on PATH. On Windows it must be a
+// .cmd with CRLF endings (PATHEXT lookup; cmd.exe mis-parses LF labels).
 func writeFakeKubectlStub(t *testing.T, dir, argsPath, outputPath, exitPath string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {

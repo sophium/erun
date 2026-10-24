@@ -19,13 +19,8 @@ import type { PlatformTenant } from '../app/api/tenantsApi';
 import type { DeployState, RegisterState } from './controller';
 import { useDeployController, useRegisterEnvironmentController } from './controller';
 
-// "Register and deploy environments" panel: register a new environment, and deploy an
-// already-registered runtime one at a chosen or default version. A thin render
-// layer over the two controllers — no business logic lives here.
-
 const ENV_TYPES = ['runtime', 'remote-agent', 'local-agent'];
-// Radix Select items cannot carry an empty-string value, so "no cloud context"
-// needs a sentinel distinct from every real contextId.
+// Radix Select items cannot carry an empty-string value.
 const NO_CONTEXT = '__none__';
 
 function RegisterFeedback({ state }: { state: RegisterState }): React.ReactElement | null {
@@ -152,8 +147,7 @@ function RegisterForm({
   );
 }
 
-// versionSummary renders the deployed version alongside the declared pin when
-// they differ, so a stale deploy is visible rather than looking up to date.
+// Shows the deployed version beside the pin when they differ, so a stale deploy is visible.
 function versionSummary(environment: Environment): string {
   const deployed = environment.deployedVersion;
   if (deployed === undefined) {
@@ -187,9 +181,7 @@ function deployStatusLine(state: DeployState | undefined, environment: Environme
   }
 }
 
-// deployFeedbackRole treats the conflict/unavailable states as their own kind
-// of expected-but-blocked state (status), distinct from a genuine failure
-// (alert) — a 409 is not an error the operator caused, unlike a 501 misconfig.
+// 409/501 are expected blocked states (status), not failures (alert).
 function deployFeedbackRole(state: DeployState): 'status' | 'alert' {
   return state.status === 'failed' || state.status === 'error' || state.status === 'unavailable'
     ? 'alert'
@@ -207,8 +199,7 @@ function DeployStatus({
   if (line === '' || state === undefined) {
     return null;
   }
-  // The full provisionError string is shown, not truncated — it names the
-  // version, the registries probed, and the ways out.
+  // Not truncated: it names the version, registries probed, and the ways out.
   const reason = state.status === 'failed' ? state.environment.provisionError : undefined;
   return (
     <div
@@ -222,9 +213,6 @@ function DeployStatus({
   );
 }
 
-// tenantLabel looks up a row's owning tenant name. Undefined whenever there
-// is nothing to disambiguate (a caller with no cross-tenant scope, or a
-// tenant id the caller's own tenant list doesn't (yet) carry).
 function tenantLabel(tenants: PlatformTenant[], tenantId: string | undefined): string | undefined {
   if (tenantId === undefined) {
     return undefined;
@@ -232,9 +220,7 @@ function tenantLabel(tenants: PlatformTenant[], tenantId: string | undefined): s
   return tenants.find((tenant) => tenant.tenantId === tenantId)?.name;
 }
 
-// RowHeading names the environment and, once the caller administers more than
-// its own tenant (shell/ScopeSelector.tsx), the tenant it belongs to --
-// otherwise a row from a scope-widened list reads as the caller's own.
+// Names the tenant once the list can span tenants, so rows never read as the caller's own.
 function RowHeading({
   environment,
   tenants,
@@ -251,12 +237,8 @@ function RowHeading({
   );
 }
 
-// TeardownRow replaces the whole deploy control for an environment whose delete
-// is outstanding. The API refuses a deploy on these with 409, so offering the
-// button would only lead to a raw Kubernetes admission error. Showing the
-// recorded blocker instead is the
-// thing an operator can actually act on: it names the finalizer holding the
-// namespace.
+// TeardownRow replaces the deploy control while a delete is outstanding (the API would
+// refuse it) and shows the blocking finalizer.
 function TeardownRow({
   environment,
   tenants,
@@ -370,14 +352,9 @@ export function EnvironmentsPanel({
   token: string;
   contexts: CloudContext[];
   environments: Environment[];
-  // The full tenant list, for naming a row's owning tenant -- populated only
-  // for an OPERATIONS caller (shell/AppShell.tsx). Absent, this console has
-  // nothing to disambiguate rows with, so no tenant badge renders.
+  // Populated only for an OPERATIONS caller.
   tenants?: PlatformTenant[];
-  // Set once shell/ScopeSelector.tsx points this caller at another tenant;
-  // undefined means "my own tenant", the default -- in which case `environments`
-  // above (already resolved by the parent from GET /v1/config) is shown
-  // unchanged, with no extra request.
+  // Undefined means the caller's own tenant.
   scopeTenantId?: string;
   onChanged: () => void;
 }): React.ReactElement {

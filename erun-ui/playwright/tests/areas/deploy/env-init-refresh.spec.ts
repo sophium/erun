@@ -9,43 +9,20 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// The error case below waits out the init handler's own retry loop -- 8
-// attempts, a state reload plus a 400ms delay each -- which is the only step
-// of any size in this spec. On a quiet box that loop alone runs ~19s, two
-// thirds of the config's 30s test timeout, so a test that declares no budget
-// spends most of its clock inside one nested bound and reds on any slower
-// machine while that bound still has room. Both halves are one defect seen
-// from opposite ends, so the scenario clock is the sum of the bounds nested
-// inside it plus a margin for the work between them -- the derivation
-// terminal-scroll-on-resize and terminal-switch-timing use for their own.
+// The init handler's retry loop alone runs ~19s, so the scenario budget covers it with margin.
 const ENV_INIT_ERROR_BUDGET_MS = 45_000;
 const SCENARIO_MARGIN_MS = 30_000;
 const SCENARIO_BUDGET_MS = ENV_INIT_ERROR_BUDGET_MS + SCENARIO_MARGIN_MS;
 
-// How long each state reload is held in the case below, and how many reloads
-// the handler makes before it gives up -- the latter must match
-// ENVIRONMENT_INIT_RELOAD_ATTEMPTS (frontend/src/app/wailsEventThunks.ts), or
-// the derivation below stops covering the case it exists for.
-//
-// The hold's clock is the 30s test budget this spec used to inherit: eight
-// attempts held this long put the loop past 30s with room to spare, so the
-// case reds for the right reason when that budget comes back, and a shorter
-// hold stops reliably disagreeing with the clock it exists to disagree with.
+// RELOAD_ATTEMPTS must match ENVIRONMENT_INIT_RELOAD_ATTEMPTS in wailsEventThunks.ts.
+// Eight holds of this length push the loop past the default 30s budget.
 const LOAD_STATE_HOLD_MS = 2_000;
 const RELOAD_ATTEMPTS = 8;
 
-// The slow-reload case converges on the same error one hold later per attempt,
-// so its own bound is the error budget above plus the holds it adds, and its
-// scenario clock is that plus the same margin. Deriving it that way is what
-// keeps it exactly as contention-tolerant as the case above it: reusing the
-// fixed 45s would have it red at half the load the other one survives, which
-// is the class this file is being converged out of rather than into.
 const SLOW_RELOAD_BUDGET_MS = ENV_INIT_ERROR_BUDGET_MS + RELOAD_ATTEMPTS * LOAD_STATE_HOLD_MS;
 const SLOW_SCENARIO_BUDGET_MS = SLOW_RELOAD_BUDGET_MS + SCENARIO_MARGIN_MS;
 
-// Fires the event directly because the real `erun init` flow cannot complete
-// in this harness: the kubectl stub fails namespace-ensure, so a live
-// local-agent init never reaches the point of emitting the init-complete signal.
+// The kubectl stub fails namespace-ensure, so a real init never emits this event.
 async function emitWailsEvent(page: Page, name: string, payload?: unknown): Promise<void> {
   await page.evaluate(
     ({ name, payload }) => {
@@ -66,26 +43,16 @@ test.describe('environment init refresh', () => {
   test('environment-initialized surfaces a brand-new tenant row and confirms with a toast', async ({
     app,
   }) => {
-    // Reproduces the reported scenario: `erun init` creates a brand-new
-    // tenant + env and the init-complete signal must surface it in the
-    // sidebar. The success toast (a message centre icon, not a
-    // pill) is the handler-only signal — the fsnotify watcher's reload
-    // surfaces the row but shows no toast — so asserting the icon proves the
-    // init handler ran, not that the row appeared by some other path.
+    // Only the init handler shows the success toast (the fsnotify reload doesn't).
     const tenant = uniqueEnvironmentName('init-tenant');
     const environment = 'local';
     seedTenant(tenant, environment);
     seedEnvironment(tenant, environment);
     try {
-      // Freeze the clock so the transient success icon can't auto-dismiss
-      // before the assertion below observes it.
+      // Freeze the clock so the transient success icon survives until asserted.
       await app.page.clock.install();
       await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
 
-      // Both are the state transition the init handler's reload loop produces
-      // -- the toast and the row it confirms -- so each waits on this test's
-      // own budget rather than a 10s cap nested inside it that the test never
-      // declared. See the held-reload case at the end of this file.
       await expect(app.titlebar.messageCenterIcon('success')).toBeVisible(withTestBudget());
       await expect(app.sidebar.envRowButton(tenant, environment)).toBeVisible(withTestBudget());
     } finally {
@@ -97,20 +64,11 @@ test.describe('environment init refresh', () => {
     app,
   }) => {
     test.setTimeout(SCENARIO_BUDGET_MS);
-    // Regression guard for the silent-stale-sidebar bug: a swallowed reload
-    // miss used to leave the sidebar stale with no feedback. The handler now
-    // retries and, when the env still never surfaces, raises a recoverable
-    // error instead of nothing (Nielsen #1 + #9). Firing the event for an env
-    // that was never written drives that path deterministically — nothing is
-    // on disk, so the watcher never surfaces the row either.
+    // An env never written to disk drives the handler's retry-then-error path.
     const tenant = uniqueEnvironmentName('ghost-tenant');
     const environment = 'local';
     await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
 
-    // The env never exists, so the handler exhausts its full retry budget
-    // (8 attempts, a state reload plus a 400ms delay each) before raising the
-    // error, and the wait here must clear that loop's own worst case with real
-    // margin rather than the fast-path duration a lightly-loaded machine sees.
     await expect(app.titlebar.messageCenterIcon('error')).toBeVisible({
       timeout: ENV_INIT_ERROR_BUDGET_MS,
     });
@@ -124,19 +82,13 @@ test.describe('environment init refresh', () => {
     page,
   }) => {
     test.setTimeout(SLOW_SCENARIO_BUDGET_MS);
-    // The case above only reds on a machine slow enough to lose the race to a
-    // 30s budget; this one forces the same shape on demand by holding the
-    // state reloads the handler's loop awaits, so the loop outlasts the 30s
-    // this spec used to inherit and still lands inside the scenario clock that
-    // replaced it. Nothing is written for the tenant, so the loop runs its
-    // whole budget exactly as the case above it does.
+    // Holding each reload forces the loop past 30s deterministically.
     const tenant = uniqueEnvironmentName('slow-ghost-tenant');
     const environment = 'local';
 
     await page.route('**/__erun_invoke', async (route) => {
       if (parseInvoke(route.request())?.method === 'LoadState') {
-        // Deliberate stimulus, not a wait for the app: this hold *is* the
-        // contention the case exists to reproduce.
+        // Deliberate stimulus, not a wait for the app.
         await new Promise<void>((resolve) => setTimeout(resolve, LOAD_STATE_HOLD_MS));
       }
       await route.continue();
@@ -150,21 +102,8 @@ test.describe('environment init refresh', () => {
     await expect(app.titlebar.messageCenterRow('did not appear in the sidebar')).toBeVisible();
   });
 
-  // The success half of the same handler: its confirmation is a state
-  // transition too (the reload landing, then the toast), and the step used to
-  // cap it at 10s inside a test that declares 30s. A reload that is merely
-  // slow therefore red the test with two thirds of its own clock unspent --
-  // the same defect the error cases above were converged out of, on the path
-  // that does NOT depend on a machine being loaded enough to lose the race.
-  //
-  // The hold is deliberately just past that 10s cap: the smallest delay that
-  // discriminates, injected at LoadState -- the read the handler waits on --
-  // rather than by loading the machine, so the reproduction is deterministic
-  // on a quiet host.
-  //
-  // Pre-fix this case reds at exactly 10_000ms with 50s of its own budget
-  // unused; pointed at the budget the test declares, it passes when the
-  // reload actually lands.
+  // LoadState is held just past expect's 10s default; the confirmation must still be
+  // waited out on the test's own budget.
   test('a confirmation that lands past the step cap is waited out, not cut off', async ({
     app,
     page,
@@ -185,8 +124,7 @@ test.describe('environment init refresh', () => {
         await route.continue();
       });
 
-      // Freeze the clock so the transient success icon can't auto-dismiss
-      // before the assertion below observes it.
+      // Freeze the clock so the transient success icon survives until asserted.
       await app.page.clock.install();
       await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
 

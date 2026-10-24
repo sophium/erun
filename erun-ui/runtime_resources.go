@@ -20,10 +20,7 @@ func (a *App) LoadRuntimeResourceStatus(input uiRuntimeResourceInput) (uiRuntime
 	return a.deps.loadResourceStatus(ctx, normalizeRuntimeResourceInput(input))
 }
 
-// LoadClusterRegistry reports whether the given Kubernetes context has an
-// in-cluster erun-registry Service, so the new-environment dialog can default to
-// a resolvable cluster: registry entry (addresses derived from the context) for
-// that env instead of a hardcoded host.
+// LoadClusterRegistry reports whether the context has an in-cluster erun-registry Service.
 func (a *App) LoadClusterRegistry(input uiRuntimeResourceInput) (uiClusterRegistryStatus, error) {
 	ctx := a.ctx
 	if ctx == nil {
@@ -32,11 +29,7 @@ func (a *App) LoadClusterRegistry(input uiRuntimeResourceInput) (uiClusterRegist
 	return a.deps.loadClusterRegistry(ctx, normalizeRuntimeResourceInput(input))
 }
 
-// LoadHostedRegistry reports whether erun's hosted container registry is
-// reachable right now, so the new-environment dialog can gate the "Use
-// erun's hosted registry" option on a real check instead of offering it
-// unconditionally — the asymmetry the in-cluster registry option does not
-// have, since it is already gated on clusterRegistry.deployed.
+// LoadHostedRegistry reports whether erun's hosted container registry is reachable.
 func (a *App) LoadHostedRegistry() (uiHostedRegistryStatus, error) {
 	ctx := a.ctx
 	if ctx == nil {
@@ -62,9 +55,7 @@ func loadClusterRegistry(ctx context.Context, input uiRuntimeResourceInput) (uiC
 	}
 	service := config.DefaultClusterRegistryService
 	namespace := config.DefaultClusterRegistryNamespace
-	// A ClusterIP means the registry Service exists in this context. A missing
-	// Service makes kubectl exit non-zero — treated as "not deployed", not an
-	// error, so the dialog simply falls back to its normal registry default.
+	// A missing Service makes kubectl exit non-zero; that means "not deployed", not an error.
 	if !clusterRegistryServiceDeployed(ctx, input.KubernetesContext, service, namespace) {
 		return uiClusterRegistryStatus{KubernetesContext: input.KubernetesContext, Deployed: false}, nil
 	}
@@ -75,7 +66,7 @@ func loadClusterRegistry(ctx context.Context, input uiRuntimeResourceInput) (uiC
 		Service:           service,
 		Namespace:         namespace,
 		Port:              port,
-		// The erun-registry is plain HTTP, so mark it insecure for the in-pod dind.
+		// The erun-registry is plain HTTP.
 		Insecure: true,
 		Message:  fmt.Sprintf("In-cluster registry %s.%s:%d", service, namespace, port),
 	}, nil
@@ -101,8 +92,7 @@ func loadRuntimeResourceStatus(ctx context.Context, input uiRuntimeResourceInput
 	if err != nil {
 		return unavailableRuntimeResourceStatus(input.KubernetesContext, fmt.Sprintf("Current pod allocation is unavailable: %v", err)), nil
 	}
-	// Measured usage is a best-effort refinement, not a requirement: clusters
-	// without metrics-server still get the limits-based reading, and say so.
+	// Measured usage is best-effort: without metrics-server the limits-based reading stands.
 	return runtimeResourceStatusFromKubernetes(input, nodes, pods, loadKubernetesContainerUsage(ctx, input.KubernetesContext)), nil
 }
 
@@ -136,27 +126,14 @@ func runtimeResourceStatusFromKubernetes(input uiRuntimeResourceInput, nodes kub
 		targetHeld := accounting.targetUsage[name]
 		item := uiRuntimeResourceNode{
 			Name: name,
-			// What the scheduler will do: allocatable minus what the pods on the
-			// node request. This is the reading a deploy's outcome follows, and
-			// what the configuration dialog's bounds come from.
-			//
-			// It carries the same floor the worst-case reading does, for the
-			// same reason and only where an environment is already on the node:
-			// a pod that exists is already admitted, and resizing it re-creates
-			// it against a request the scheduler has already placed -- so a node
-			// whose requests are exhausted must not render that environment's
-			// own size uneditable. For an environment not yet on the node there
-			// is nothing held, the floor is zero, and a node with no request
-			// headroom correctly reports that it cannot admit one.
+			// Allocatable minus requests: what a deploy's outcome follows. Floored at what an
+			// environment already on the node holds, since its pod is already admitted.
 			Schedulable: uiRuntimeResourceReading{
 				CPU:    cpuMetricWithMinimumFree(cpuTotal, requests.CPUMilli, targetHeld.CPUMilli),
 				Memory: memoryMetricWithMinimumFree(memoryTotal, requests.MemoryMi, targetHeld.MemoryMi),
 			},
 			SchedulableComplete: accounting.unreadable[name] == 0,
-			// Worst case: what would be left if every container on the node ran
-			// to its declared limit at once. Floored at what this environment
-			// already holds so its current setting stays representable, and
-			// labelled as headroom rather than scheduling.
+			// Every container at its limit at once, floored at what this environment holds.
 			WorstCase: uiRuntimeResourceReading{
 				CPU:    cpuMetricWithMinimumFree(cpuTotal, bursting.CPUMilli, targetHeld.CPUMilli),
 				Memory: memoryMetricWithMinimumFree(memoryTotal, bursting.MemoryMi, targetHeld.MemoryMi),
@@ -193,14 +170,7 @@ func runtimeResourceNodeLabel(status uiRuntimeResourceStatus) string {
 	return "the selected node"
 }
 
-// runtimeSchedulableMessage states which question the schedulable reading
-// answers. It is the reading a deploy's outcome follows: the scheduler admits a
-// pod on what it *requests*, and the CPU/memory the configuration dialog sets
-// are *limits*, which reserve nothing. Reporting one figure without saying
-// which question it answers is the reported defect -- the panel read 0 free
-// from the limits sum, an operator read that as "a deploy will not schedule",
-// and the remedy it offered was to shrink the very limit the node's capacity
-// planning assumes will be burst into.
+// The scheduler admits on requests; the dialog's CPU/memory are limits, which reserve nothing.
 func runtimeSchedulableMessage(status uiRuntimeResourceStatus, targeted bool) string {
 	node := runtimeResourceNodeLabel(status)
 	if !status.SchedulableComplete {
@@ -218,19 +188,12 @@ func runtimeSchedulableMessage(status uiRuntimeResourceStatus, targeted bool) st
 		node, status.Schedulable.CPU.Formatted, status.Schedulable.Memory.Formatted)
 }
 
-// runtimeWorstCaseMessage labels the limits reading as the capacity-planning
-// question it is. It answers "how much of this node is committed if everything
-// bursts at once", which is a legitimate question and not the one a deploy
-// outcome follows.
 func runtimeWorstCaseMessage(status uiRuntimeResourceStatus) string {
 	return fmt.Sprintf("Worst case, with every container on %s at its declared limit at once: %s CPU and %s memory left. "+
 		"That is oversubscription headroom, not scheduling capacity.",
 		runtimeResourceNodeLabel(status), status.WorstCase.CPU.Formatted, status.WorstCase.Memory.Formatted)
 }
 
-// runtimeSchedulableNotice carries the one thing this reading's figures cannot:
-// what to do when the node has nothing left to admit a pod with. The remedy is
-// capacity on the node, because that is what the scheduler is short of.
 func runtimeSchedulableNotice(status uiRuntimeResourceStatus) string {
 	if !status.SchedulableComplete && status.UnreadableRequests > 0 {
 		return fmt.Sprintf("%s on this node declares a request this reading could not read, so the free figure above is an upper bound.",
@@ -243,20 +206,14 @@ func runtimeSchedulableNotice(status uiRuntimeResourceStatus) string {
 	}
 	notice := "The scheduler has nothing left on this node to admit another pod with."
 	if floored {
-		// A floored figure equals what this environment is already running at,
-		// which reads as a product ceiling unless the reading says otherwise.
+		// A floored figure would otherwise read as a product ceiling.
 		notice += " What is shown is the size this environment already holds, not spare capacity."
 	}
 	return notice + " Stopping an environment nobody is using on it returns its reservation."
 }
 
-// runtimeWorstCaseNotice carries what the worst-case figure alone cannot say:
-// that it is the node being committed rather than a ceiling on this
-// environment, what part of the node's real consumption is invisible to it, and
-// -- the reported defect -- which levers actually move it. It never offers a
-// smaller limit: the runtime limit is sized for the cold full build an
-// agent runs in that container, and lowering it re-creates the out-of-memory
-// kills that destroy an in-pod agent run and its unpushed work.
+// Never suggests a smaller limit: the limit is sized for the agent's cold full
+// build, and lowering it brings back OOM kills.
 func runtimeWorstCaseNotice(status uiRuntimeResourceStatus) string {
 	var notices []string
 	if status.Floored {
@@ -287,44 +244,21 @@ func pluralizeContainers(count int) string {
 	return fmt.Sprintf("%d containers", count)
 }
 
-// runtimeResourceAccounting is the per-node picture the status is built from,
-// in both resource domains: what every pod holds at its declared limit, what
-// every pod requests of the scheduler, what this environment's own container
-// holds, and how much of either the reading could not account for at all.
 type runtimeResourceAccounting struct {
-	// usage is the node's commitment if every container bursts to its limit.
 	usage map[string]runtimeResourceTotals
-	// requests is what the scheduler has admitted the node's pods on. A limit
-	// reserves nothing and a request is not in any cgroup, so this comes from
-	// the pod specs rather than from the same reading as usage.
+	// requests come from pod specs: a limit reserves nothing and no cgroup carries a request.
 	requests map[string]runtimeResourceTotals
-	// targetUsage is what this environment's own runtime container holds at its
-	// limit, which is the floor the worst-case reading must not fall below.
+	// targetUsage floors the worst-case reading.
 	targetUsage map[string]runtimeResourceTotals
-	// unaccounted counts containers that declare no limit and had no measured
-	// usage either; unreadable counts pods whose declared requests could not be
-	// read. Neither is ever counted as zero.
+	// Unaccounted and unreadable entries are never counted as zero.
 	unaccounted map[string]int
 	unreadable  map[string]int
 	targetNode  string
 }
 
-// accumulateRuntimePodUsage sums what the node is committed to, in both
-// domains. A container's limit is the best answer when it declares one; when it
-// does not, its measured usage is used instead, and when there is no
-// measurement either the container is counted as unaccounted rather than as
-// zero.
-//
-// Treating a limitless container as zero is what made the figure wrong in
-// practice: every erun-dind sidecar declares no limits, so a node's real
-// consumption — Testcontainers, the buildkit cache — was entirely invisible to
-// a reading that summed limits alone.
-//
-// The request leg applies erun-common's EffectiveKubernetesPodRequests, which
-// is the same admission rule the per-environment usage reading reports: a
-// second spelling of "max over the init containers, sum over the containers"
-// would understate what a node has already committed and report scheduling
-// capacity that is not there.
+// A limitless container counts at measured usage, else as unaccounted, never as
+// zero: every erun-dind sidecar declares no limits. Requests use erun-common's
+// EffectiveKubernetesPodRequests so the admission rule has one spelling.
 func accumulateRuntimePodUsage(pods kubernetesPodList, target runtimeResourceTargetSpec, measured kubernetesContainerUsage) runtimeResourceAccounting {
 	accounting := runtimeResourceAccounting{
 		usage:       make(map[string]runtimeResourceTotals),
@@ -356,18 +290,12 @@ func accumulateRuntimePodUsage(pods kubernetesPodList, target runtimeResourceTar
 		}
 		accounting.usage[nodeName] = totals
 
-		// The scheduler counts the whole pod -- the runtime container, the
-		// erun-dind sidecar, and the init phase's own peak -- including this
-		// environment's own pod, which is on the node and is holding its
-		// reservation right now.
 		podRequests, err := podruntime.EffectiveKubernetesPodRequests(
 			kubernetesContainerResources(pod.Spec.Containers),
 			kubernetesContainerResources(pod.Spec.InitContainers),
 		)
 		if err != nil {
-			// Unreadable is not zero: this pod reserves an amount the reading
-			// cannot size, so the free figure is an upper bound rather than an
-			// answer, and the status says so.
+			// An unreadable pod makes the free figure an upper bound.
 			accounting.unreadable[nodeName]++
 			continue
 		}
@@ -379,8 +307,6 @@ func accumulateRuntimePodUsage(pods kubernetesPodList, target runtimeResourceTar
 	return accounting
 }
 
-// kubernetesContainerResources projects a decoded pod spec onto erun-common's
-// request-rule input, so the desktop never re-derives the rule itself.
 func kubernetesContainerResources(containers []kubernetesContainer) []podruntime.KubernetesContainerResources {
 	out := make([]podruntime.KubernetesContainerResources, 0, len(containers))
 	for _, container := range containers {
@@ -392,9 +318,6 @@ func kubernetesContainerResources(containers []kubernetesContainer) []podruntime
 	return out
 }
 
-// containerConsumption resolves one container's contribution and reports
-// whether the answer is complete — a container with neither a limit nor a
-// measurement is consuming something the reading cannot see.
 func containerConsumption(pod kubernetesPod, container kubernetesContainer, measured kubernetesContainerUsage) (runtimeResourceTotals, bool) {
 	var totals runtimeResourceTotals
 	usage, hasUsage := measured[containerUsageKey(pod, container)]
@@ -424,10 +347,7 @@ func addTotals(totals, add runtimeResourceTotals) runtimeResourceTotals {
 	return totals
 }
 
-// shouldUseRuntimeResourceNode picks the node the reading is anchored to. "The
-// emptiest node" is the node a deploy would land on, and the scheduler decides
-// that by requests, so the schedulable reading -- not the worst-case one -- is
-// what selects it.
+// The scheduler places by requests, so the schedulable reading picks the node.
 func shouldUseRuntimeResourceNode(name, targetNode string, item uiRuntimeResourceNode, result uiRuntimeResourceStatus) bool {
 	if targetNode != "" {
 		return name == targetNode
@@ -450,10 +370,8 @@ func runtimeResourceTarget(input uiRuntimeResourceInput) runtimeResourceTargetSp
 	}
 	return runtimeResourceTargetSpec{
 		namespace: config.KubernetesNamespaceName(input.Tenant, input.Environment),
-		// The runtime container is named for the component, identical across
-		// tenants; only the Deployment/release is <tenant>-devops. Match on the
-		// container name, not the release name, or the capacity check misses the
-		// env's own pod for every non-erun tenant.
+		// The runtime container is named for the component in every tenant; the release is
+		// <tenant>-devops, so match on the container name.
 		container: config.DevopsComponentName,
 	}
 }
@@ -479,10 +397,7 @@ type runtimeResourceTotals struct {
 	MemoryMi int64
 }
 
-// cpuMetricWithMinimumFree floors free capacity at what this environment
-// already holds — it can always keep what it has. Floored records when that
-// floor is what produced the number, because "your maximum equals your current
-// value" is otherwise indistinguishable from a product limit.
+// Floored records when the floor produced the number, so it isn't read as a product limit.
 func cpuMetricWithMinimumFree(totalMilli, usedMilli, minimumFreeMilli int64) uiRuntimeResourceMetric {
 	freeMilli := totalMilli - usedMilli
 	if freeMilli < 0 {

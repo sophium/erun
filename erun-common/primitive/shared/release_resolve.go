@@ -226,9 +226,7 @@ func nestedReleaseRootCandidate(projectRoot, path string, d os.DirEntry, err err
 	return dir, true, nil
 }
 
-// Excludes .git (VCS store, not source) and anything the repo's .gitignore
-// covers: third-party trees like node_modules/ or vendor/ ship their own
-// VERSION/Chart.yaml files that must not count as release-root candidates.
+// Skips .git and gitignored trees, whose vendored VERSION/Chart.yaml are not release roots.
 func releaseDiscoverySkipDir(projectRoot, path string, d os.DirEntry, ignored *IgnoreSet) bool {
 	if d.Name() == ".git" {
 		return true
@@ -243,9 +241,7 @@ func releaseDiscoverySkipDir(projectRoot, path string, d os.DirEntry, ignored *I
 	return ignored.Matches(filepath.ToSlash(rel), true)
 }
 
-// Matches on .gitignore alone: .dockerignore is the build-context contract,
-// not the source-tree contract, so only .gitignore marks a tree as "not part
-// of this repo's source" for release-root discovery.
+// Only .gitignore applies; .dockerignore is the build-context contract.
 func loadReleaseDiscoveryIgnoreSet(projectRoot string) (*IgnoreSet, error) {
 	combined := &IgnoreSet{}
 	root, err := LoadIgnoreFile(filepath.Join(projectRoot, ".gitignore"), "")

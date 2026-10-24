@@ -117,9 +117,7 @@ func jobAwaitLine(result jobspkg.AwaitEnvironmentJobResult) string {
 	return jobStatusLine(result.Job)
 }
 
-// jobAwaitExit maps the wait onto the process exit code. Every outcome an
-// orchestrator must distinguish gets its own code, so a shell caller can branch
-// without reading anything back out of a payload.
+// jobAwaitExit gives each outcome its own exit code so shell callers can branch.
 func jobAwaitExit(result jobspkg.AwaitEnvironmentJobResult) error {
 	switch {
 	case result.TimedOut:
@@ -141,12 +139,7 @@ func jobAwaitExit(result jobspkg.AwaitEnvironmentJobResult) error {
 	}
 }
 
-// jobFailedExitError is the message a plain failed exit carries. Every other
-// arm of jobAwaitExit names why it failed; this is the one an orchestrator is
-// most likely to be reading, and the recorded reason is the only place a job
-// whose work never started says so at all. Signal first, for the same reason
-// jobExitedLine prefers it: it already is the reason, and the recorded text
-// would only restate it.
+// jobFailedExitError carries the signal, else the recorded reason.
 func jobFailedExitError(job sharedpkg.EnvironmentJob) error {
 	switch {
 	case strings.TrimSpace(job.Signal) != "":

@@ -10,19 +10,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// reportHostCredentials tells the operator whether the environment's copy of
-// their AWS identity is still usable. Injected host credentials are temporary,
-// so without this the first sign of expiry is an unrelated failure deep in
-// whatever tool reached for AWS first — a registry pull, usually. Runs only for
-// an environment configured to act as the operator's identity; every other
-// environment sees no change.
-//
-// The read execs into the runtime pod, which is exactly the state doctor most
-// needs to diagnose when it is down — reading it must degrade to a clear
-// "could not read" report rather than aborting the rest of doctor's checks.
-// When an earlier section already confirmed the cluster is unreachable
-// (diagnosis.ClusterUnreachable), this reports the same skip instead of
-// paying its own kubectl exec timeout to rediscover it.
+// reportHostCredentials reports whether the env's injected, temporary AWS credentials
+// are still usable. Degrades on an unreachable pod.
 func reportHostCredentials(ctx core.Context, store config.ConfigStore, result config.OpenResult, diagnosis deploy.DeployDiagnosisResult) error {
 	if !result.EnvConfig.HasAWSCloudAlias() {
 		return nil
@@ -47,9 +36,6 @@ func reportHostCredentials(ctx core.Context, store config.ConfigStore, result co
 	return nil
 }
 
-// hostCredentialsRegionLine names the missing-region failure mode from #904 in
-// the same place: an alias with no resolvable region leaves the pod's AWS calls
-// with no default region at all.
 func hostCredentialsRegionLine(status cloud.HostCredentialsStatus) string {
 	if status.Region == "" {
 		return "none resolved — AWS calls in this environment have no default region until the alias carries an SSO region or the environment names an ECR registry"

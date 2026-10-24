@@ -11,9 +11,7 @@ import (
 )
 
 func testListWithOrchestratorEnvironmentRoles(t *testing.T) {
-	// erun list shows each orchestrator's
-	// linked environments with their role, and an undeclared role
-	// renders distinctly ("undeclared") rather than guessing a default.
+	// An undeclared role renders as "undeclared" rather than a guessed default.
 	setup := env.New(t)
 	seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{
 		{
@@ -40,12 +38,8 @@ func testListWithOrchestratorEnvironmentRoles(t *testing.T) {
 }
 
 func testListWithOrchestratorRuntimeRoleOnARuntimeTypeEnvironment(t *testing.T) {
-	// Type and role share the
-	// spelling "runtime" for two different things. The tenant's own
-	// environment carries `type: runtime` (its worktree/pod shape); the
-	// orchestrator link to that same environment carries `role=runtime`
-	// (what the orchestrator uses it for). Both must render, each in its
-	// own labeled section, so a reader can tell which is which.
+	// Environment `type: runtime` and link `role=runtime` are different things and
+	// must render in separate labeled sections.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "frs", "prod")
 	seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{
@@ -65,16 +59,8 @@ func testListWithOrchestratorRuntimeRoleOnARuntimeTypeEnvironment(t *testing.T) 
 }
 
 func testListWithOrchestratorPairingInvalidBeforeTheRoleGateExisted(t *testing.T) {
-	// `erun orchestrator set-role` now refuses a role
-	// `config.OrchestratorEnvRoleAllowed` would not have let the
-	// desktop link this environment with in the first place, but a
-	// config written before that gate existed can still carry the
-	// invalid pairing on disk (role=code against a runtime-type
-	// environment, which the desktop's link gate would refuse to create
-	// today). `erun list` reads the persisted role directly and never
-	// re-resolves the environment's type to render it, so this must
-	// still load and display the mismatch rather than erroring out --
-	// only a write through set-role is gated, never a read.
+	// A config written before set-role's gate can still carry an invalid pairing;
+	// reads must display it, only writes are gated.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "frs", "prod")
 	seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{
@@ -94,10 +80,7 @@ func testListWithOrchestratorPairingInvalidBeforeTheRoleGateExisted(t *testing.T
 }
 
 func testListWithOrchestratorDirectories(t *testing.T) {
-	// An orchestrator may be pointed at directories of its own and link no
-	// environment at all -- that is a complete definition, not an empty one.
-	// `erun list` has to report them, or an orchestrator working only in
-	// directories reads as having no scope.
+	// An orchestrator with only directories still has a scope that must be reported.
 	setup := env.New(t)
 	seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{
 		{

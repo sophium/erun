@@ -22,8 +22,7 @@ func TestResolveLocalTargetRefusesAForeignEnvironment(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected %s/%s to be refused by a server serving tenant-a/dev", tc.tenant, tc.environment)
 			}
-			// The message must name both scopes, or the caller cannot work out which
-			// edge to call instead.
+			// Both scopes must be named so the caller knows which edge to call.
 			if !strings.Contains(err.Error(), "tenant-a/dev") {
 				t.Errorf("error should name the server's own scope, got: %v", err)
 			}
@@ -59,10 +58,6 @@ func TestResolveLocalTargetAcceptsItsOwnScope(t *testing.T) {
 	}
 }
 
-// A server with no scope of its own still needs both values from the caller.
-// The error itself must not be the bare "tenant and environment are
-// required" dead end that made exec_agent's failure unrecoverable: it must
-// name what is missing and what the caller can do about it.
 func TestResolveLocalTargetRequiresBothWhenTheServerHasNoScope(t *testing.T) {
 	runtime := RuntimeConfig{}
 	_, _, err := ResolveLocalTarget(runtime, "", "")
@@ -78,11 +73,7 @@ func TestResolveLocalTargetRequiresBothWhenTheServerHasNoScope(t *testing.T) {
 	assertNamesMissingAndRecovery(t, err, "environment")
 }
 
-// assertNamesMissingAndRecovery insists a target-resolution error names the
-// missing subject and a concrete recovery ("pass ... explicitly"), not just
-// that an error occurred -- a bare "tenant and environment are required"
-// would pass a plain err != nil check but is exactly the dead end this
-// guards against.
+// assertNamesMissingAndRecovery requires the error to name the missing subject and a recovery.
 func assertNamesMissingAndRecovery(t *testing.T, err error, wantSubject string) {
 	t.Helper()
 	if err.Error() == "tenant and environment are required" || err.Error() == "tenant is required" || err.Error() == "environment is required" {

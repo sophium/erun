@@ -108,13 +108,9 @@ describe('UsersPanel', () => {
     expect(await screen.findByText(/Enrolled bob/)).toBeInTheDocument();
     expect(screen.getByText(/An invite email is on its way/)).toBeInTheDocument();
     expect(listedAfterEnroll).toBe(true);
-    // The invite-email path never mints a credential to show.
     expect(screen.queryByText(/Temporary password/)).not.toBeInTheDocument();
   });
 
-  // Leaving the target tenant untouched must send no orgId and must never
-  // resolve an org at all — a network call the caller never asked for
-  // is itself a defect, not just an unused result.
   it('omits orgId and never resolves an org when the target tenant is unchanged', async () => {
     let enrollBody: unknown;
     let tenantIssuersCalled = false;
@@ -197,8 +193,6 @@ describe('UsersPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
     expect(screen.queryByText('Temporary password for dana')).not.toBeInTheDocument();
-    // The enrolled-user status message stays; only the one-time credential
-    // itself is gone from the controller's state.
     expect(screen.getByText(/Enrolled dana/)).toBeInTheDocument();
   });
 
@@ -518,7 +512,6 @@ describe('UsersPanel', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       /revoking this role would leave the tenant with no user able to grant roles/,
     );
-    // The refused revoke must leave the role in place, not optimistically clear it.
     expect(screen.getByText('WriteAll')).toBeInTheDocument();
   });
 
@@ -550,12 +543,6 @@ describe('UsersPanel', () => {
   });
 });
 
-// The header names the signed-in identity by its erun username (whoami's
-// `username`), so the table must make the caller's own row recognizable: the
-// row matching the caller's own erun user id is marked "You",
-// the erun username renders as the primary label with the IdP username
-// alongside it when the two diverge, and the OIDC subject -- the one value
-// that actually joins the erun and IdP directories -- is always reachable.
 describe('UsersPanel — caller identity (erun#2050)', () => {
   it("marks the caller's own row and shows both usernames when they diverge", async () => {
     mockFetch((req) => {
@@ -643,14 +630,6 @@ describe('UsersPanel — caller identity (erun#2050)', () => {
   });
 });
 
-// The scope selector was rendered on every section but read by only three
-// panels, and Users was not one of them -- an operator pointing
-// "Administering" at another tenant saw their own tenant's identities
-// unchanged, with no signal the control did not apply. These lock the fix:
-// a scoped read swaps in the target tenant's own org and membership join
-// (mirroring shell/AppShell.test.tsx's existing Environments scope test),
-// and a target tenant with no org mapping renders that fact plainly instead
-// of a false "no users enrolled" empty state.
 describe('UsersPanel scope selector', () => {
   const TENANTS = [
     { tenantId: 'own-tenant', name: 'Acme', type: 'OPERATIONS', createdAt: '', updatedAt: '' },
@@ -684,7 +663,6 @@ describe('UsersPanel scope selector', () => {
           },
         ]);
       }
-      // The caller's own, unscoped read -- must never be hit while scoped.
       if (req.url === '/v1/identity/users') {
         return jsonResponse([{ id: 'idp-own-1', username: 'alice', state: 'USER_STATE_ACTIVE' }]);
       }
@@ -703,7 +681,6 @@ describe('UsersPanel scope selector', () => {
     expect(screen.getByText('Tenant member')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Manage roles' })).toBeInTheDocument();
     expect(screen.queryByText('alice')).not.toBeInTheDocument();
-    // The scoped badge in the card header names the tenant being viewed.
     expect(screen.getAllByText('Beta').length).toBeGreaterThan(0);
   });
 

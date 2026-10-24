@@ -11,9 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// A build that plans no work at all must not report success: it builds no
-// image and runs no gate, so its exit code would be indistinguishable from a
-// real pass for the caller that reads it as a verdict.
+// A build that plans no work must not exit zero: callers read the exit code as a verdict.
 func TestRunBuildExecutionRefusesAPlanThatDoesNothing(t *testing.T) {
 	err := RunBuildExecution(core.Context{DryRun: true}, shared.BuildExecutionSpec{}, nil, nil, nil, nil, cloud.CloudDependencies{})
 	if err == nil {
@@ -24,8 +22,6 @@ func TestRunBuildExecutionRefusesAPlanThatDoesNothing(t *testing.T) {
 	}
 }
 
-// An empty plan is refused in dry-run too: the preview must show the failure
-// rather than print an empty plan and exit zero.
 func TestBuildExecutionPlansWorkDistinguishesScriptsFromNothing(t *testing.T) {
 	if buildrun.BuildExecutionPlansWork(shared.BuildExecutionSpec{}) {
 		t.Error("an execution with no release, script, image, or chart plans no work")

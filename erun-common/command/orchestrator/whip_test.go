@@ -48,10 +48,6 @@ func TestDecideWhipFreshDoesNothingWhenNotExplicit(t *testing.T) {
 	}
 }
 
-// TestDecideWhipExplicitIgnoresFreshnessButNotCap is the manual-trigger
-// contract: clicking whip on a session that moved a second ago
-// still pushes it, but a capped session stays capped and an already-exhausted
-// one crosses to the cap notice rather than a 7th nudge.
 func TestDecideWhipExplicitIgnoresFreshnessButNotCap(t *testing.T) {
 	now := time.Now()
 	cfg := ResolveWhipConfig(nil)

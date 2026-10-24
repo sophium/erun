@@ -12,10 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// reconcileBypassStub serves the GitHub compare/tags reads and the platform's
-// GET /v1/builds from one server. successfulBuilds maps a commit to the
-// successful build of exactly it; honourFilters false models a platform that
-// ignores ?commit= and answers with its newest build regardless.
+// honourFilters false models a platform that ignores ?commit= and returns its
+// newest build.
 type reconcileBypassStub struct {
 	successfulBuilds map[string]string
 	honourFilters    bool
@@ -75,8 +73,6 @@ func runAccountForBypassedPushes(t *testing.T, stub *reconcileBypassStub, pushes
 	return accountForBypassedPushes(context.Background(), srv.Client(), "gho_token", inputs, pushes, newSuccessfulBuildIndex(context.Background(), client))
 }
 
-// The tip of one push often appears again among another push's commits, and
-// the platform is asked about each commit once.
 func TestReconcileBypassAsksThePlatformOncePerCommit(t *testing.T) {
 	stub := &reconcileBypassStub{honourFilters: true}
 	pushes := []BypassedPush{
@@ -91,8 +87,6 @@ func TestReconcileBypassAsksThePlatformOncePerCommit(t *testing.T) {
 	}
 }
 
-// A platform that does not filter by commit answers with some other build; it
-// must not reconcile a push whose own commits were never built.
 func TestReconcileBypassIgnoresABuildOfAnotherCommit(t *testing.T) {
 	stub := &reconcileBypassStub{honourFilters: false}
 	pushes := reconcileBypassTestPushes()[2:]
@@ -105,8 +99,6 @@ func TestReconcileBypassIgnoresABuildOfAnotherCommit(t *testing.T) {
 	}
 }
 
-// An unreadable build history is not a fact about any push, so it fails the
-// run instead of blaming every push with UNRECONCILED.
 func TestReconcileBypassFailsWhenTheBuildHistoryIsUnreadable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)

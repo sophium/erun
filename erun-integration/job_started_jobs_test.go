@@ -16,34 +16,15 @@ import (
 )
 
 func testJobAJobThatEndsWhileAJobItStartedIsStillRunningReadsAsGateIncomplete(t *testing.T) {
-	// The reproduction this closes: an agent job runs a gate through its own
-	// `job start` (detach and await, from inside an agent's Bash tool) and
-	// then ends -- by backgrounding itself,
-	// running out of turns, or an outer `timeout` killing the foreground
-	// wait -- while the gate has not reached a verdict. The gate is a
-	// separate, detached job on purpose, so it is never a member of the
-	// outer job's process group and the abandoned scenario above cannot see
-	// it; only the StartedByJobID record relationship can. The nested
-	// `job start` here runs through the real compiled binary rather than a
-	// seeded record, so this locks the whole wiring end to end: the outer
-	// job's supervisor has to actually propagate ERUN_JOB_ID to the "work"
-	// stub's process, and the stub's own nested erun call has to actually
-	// read it back onto the gate job it starts.
+	// A job that exits 0 while a gate it started through the real binary is still
+	// running reads as gate-incomplete; only the StartedByJobID link (via
+	// ERUN_JOB_ID) can see the detached gate.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	bin := erun.BinaryPath(t)
-	// The nested job start's own stdout (a "job started: ..." line naming its
-	// log path) is discarded rather than left to land in outer's captured
-	// output: the log path's length varies with the test's own tempdir name,
-	// which would make outer's recorded outputBytes -- and so the golden --
-	// flaky across runs.
+	// Discard the nested start's output: its log path length varies per run.
 	script := fmt.Sprintf("%q job start --tenant team --environment dev --name gate --id gate -- sleep 30 >/dev/null 2>&1\nexit 0\n", bin)
-	// The outer job's own finish check now waits for the gate to reach a
-	// verdict (see resolveEnvironmentJobOutcome) before it decides
-	// gate-incomplete -- the gate here sleeps far longer than this scenario
-	// could afford to wait for real, so the cap/poll are shrunk to
-	// milliseconds. The point under test is the eventual gate-incomplete
-	// outcome once the wait is exhausted, not genuinely waiting one out.
+	// Shrink the gate wait so the scenario reaches gate-incomplete quickly.
 	envVars := append(jobStubEnv(t, setup, script),
 		"ERUN_JOB_GATE_INCOMPLETE_WAIT_CAP=100ms", "ERUN_JOB_GATE_INCOMPLETE_POLL=20ms")
 
@@ -60,11 +41,7 @@ func testJobAJobThatEndsWhileAJobItStartedIsStillRunningReadsAsGateIncomplete(t 
 	if await.ExitCode != 1 {
 		t.Fatalf("expected a gate-incomplete job to report a failure outcome, got %d:\n%s", await.ExitCode, await.Combined)
 	}
-	// : this is the exact shape the issue reported -- exitCode 0
-	// sitting beside state gate-incomplete, with only state telling the
-	// truth. succeeded must say so explicitly, so exec_agent (and any other
-	// caller reading the job record over MCP or --output json) cannot read
-	// this as success from exitCode alone.
+	// exitCode 0 beside gate-incomplete must still report succeeded=false.
 	statusJSON := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "outer", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	var payload struct {
 		State     string `json:"state"`
@@ -81,12 +58,7 @@ func testJobAJobThatEndsWhileAJobItStartedIsStillRunningReadsAsGateIncomplete(t 
 }
 
 func testJobAJobThatWaitsForAJobItStartedReportsTheRealOutcomeOnceItFinishes(t *testing.T) {
-	// The fix this locks: the scenario above ends because the wait cap is
-	// exhausted, but the common case is the started job actually finishing.
-	// Here the gate finishes (successfully) well within any reasonable wait,
-	// so outer's own finish check waits it out and reports the *real* combined
-	// outcome instead of ever surfacing an intermediate gate-incomplete a
-	// caller would otherwise have to separately chase down.
+	// A started job that finishes within the wait yields the real combined outcome.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	bin := erun.BinaryPath(t)
@@ -115,20 +87,13 @@ func testJobAJobThatWaitsForAJobItStartedReportsTheRealOutcomeOnceItFinishes(t *
 }
 
 func testJobAJobThatWaitsForAFailedJobItStartedSurfacesStartedJobFailed(t *testing.T) {
-	// The other half of the fix above: when the started job finishes but
-	// fails, that failure must not vanish behind outer's own clean exit code
-	// just because outer's process happened to exit 0.
+	// A started job's failure surfaces even though the parent exited 0.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	bin := erun.BinaryPath(t)
 	stubs := filepath.Join(setup.Cwd, "stubs")
-	// The scrubbed PATH (see AGENTS.md "The PATH is scrubbed") has no `sh`
-	// forwarder, so a nested job whose own command was `sh -c '...'` failed
-	// to start rather than genuinely running its command -- the loose
-	// assertion below (matching "gate" in startedJobFailed regardless of
-	// why it failed) never caught it. A declared stub is the real gate
-	// command instead, so this locks the actual "started job finished with
-	// a failing exit code" path, not an accidental "sh is unresolvable" one.
+	// The scrubbed PATH has no sh, so the gate is a declared stub that really
+	// fails rather than one that fails to start.
 	fixture.StubBinaryWithScript(t, stubs, "gatefail", "sleep 0.2\nexit 1\n")
 	script := fmt.Sprintf("%q job start --tenant team --environment dev --name gate --id gate -- gatefail >/dev/null 2>&1\nexit 0\n", bin)
 	envVars := append(jobStubEnv(t, setup, script), fixture.StubEnv(stubs, "gatefail")...)
@@ -159,14 +124,8 @@ func testJobAJobThatWaitsForAFailedJobItStartedSurfacesStartedJobFailed(t *testi
 }
 
 func testJobStartedJobFailedIgnoresASupersededEarlierAttemptUnderTheSameName(t *testing.T) {
-	// A caller that folds the tree and command into the nested job's --id
-	// means an agent that fixes what a gate found and reruns it gets a fresh
-	// id under the same --name -- the earlier failing attempt's record is
-	// never replaced (only reusing an id outright does that). Without
-	// accounting for that, a parent would keep naming the stale failure
-	// even after the same-named gate went green: exited/succeeded sitting
-	// next to a startedJobFailed naming a job that was not the one that
-	// actually ran last.
+	// A rerun under the same --name with a fresh --id supersedes the earlier
+	// failed attempt, so the parent does not name the stale failure.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	bin := erun.BinaryPath(t)
@@ -210,20 +169,9 @@ func testJobStartedJobFailedIgnoresASupersededEarlierAttemptUnderTheSameName(t *
 }
 
 func testJobAJobThatEndsWhileABackgroundTaskJobItStartedIsStillRunningReadsAsGateIncomplete(t *testing.T) {
-	// Task jobs -- what build/deploy/doctor and the rest of the job-envelope
-	// tools become when an MCP caller sets wait:false -- run in the MCP
-	// server's own long-lived process, never as a subprocess of this binary,
-	// so nothing in this suite can start one directly. Seeding the record it
-	// would have produced (kind "task", a real alive pid so reconciliation
-	// reads it as genuinely running rather than demoting it to unknown,
-	// startedByJobId naming the parent) is what proves the parent's own
-	// finish check -- previously blind to task jobs because none of them
-	// ever wrote startedByJobId at all -- now finds one exactly like it
-	// finds a nested command job (see the gate-incomplete scenario above).
-	// The seeded pid is this test binary's own: it is a real, alive process
-	// for the run's whole duration, so the child genuinely reads as running
-	// rather than as an abandoned/unknown record the way a fabricated dead
-	// pid would.
+	// A running task job (seeded, since tasks run inside the MCP server) whose
+	// startedByJobId names the parent makes the parent gate-incomplete. The pid is
+	// this test's own, so it reads as alive.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	dir, logPath := seedTaskJobLog(t, setup, "task-child", "building...\n")
@@ -244,11 +192,7 @@ func testJobAJobThatEndsWhileABackgroundTaskJobItStartedIsStillRunningReadsAsGat
 		t.Fatalf("seed job record: %v", err)
 	}
 
-	// The seeded task job never finishes on its own, so the wait/poll are
-	// shrunk to milliseconds the same way the nested-job gate-incomplete
-	// scenario above does -- the point under test is the eventual
-	// gate-incomplete outcome once the wait is exhausted, not genuinely
-	// waiting one out.
+	// The task never finishes, so shrink the wait.
 	envVars := append(jobStubEnv(t, setup, "exit 0"),
 		"ERUN_JOB_GATE_INCOMPLETE_WAIT_CAP=100ms", "ERUN_JOB_GATE_INCOMPLETE_POLL=20ms")
 	start := startJob(t, setup, envVars, "outer", "--", "work")
@@ -281,8 +225,7 @@ func testJobAJobThatEndsWhileABackgroundTaskJobItStartedIsStillRunningReadsAsGat
 	assertTaskChildStartedByOuter(t, setup, envVars)
 }
 
-// seedTaskJobLog writes the log a task job id was handed and returns the job
-// directory beside it.
+// seedTaskJobLog writes a task job's log and returns its job directory.
 func seedTaskJobLog(t *testing.T, setup env.Setup, id, contents string) (dir, logPath string) {
 	t.Helper()
 	dir = filepath.Dir(jobRecordPath(setup, "team", "dev", id))
@@ -312,13 +255,8 @@ func assertTaskChildStartedByOuter(t *testing.T, setup env.Setup, envVars []stri
 }
 
 func testJobAJobThatWaitsForAFailedBackgroundTaskJobItStartedSurfacesStartedJobFailedAndLeavesItsLogReadable(t *testing.T) {
-	// The other half of the fix: a task job that already failed before the
-	// parent's own process even exits is picked up by the same
-	// environmentJobFailedChildren scan a nested command job's failure is.
-	// A task job is a Go call with no subprocess stdio to capture, so what a
-	// poll can read back is only whatever the work itself wrote to the log
-	// it was handed -- before this PR a failed task left nothing at all to
-	// read, just a bare exit code and a bare error string.
+	// A task job that already failed surfaces as startedJobFailed, and its log is
+	// readable via `job output`.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	dir, logPath := seedTaskJobLog(t, setup, "task-fail", "pushing image...\nauth failed\n")
@@ -365,10 +303,6 @@ func testJobAJobThatWaitsForAFailedBackgroundTaskJobItStartedSurfacesStartedJobF
 		t.Fatalf("expected startedJobFailed to name the failed task job, got %+v", payload)
 	}
 
-	// The failed task job's own status line renders the recorded reason
-	// (jobExitedLine) exactly as a failed command job's does, and its log --
-	// the one thing a task job has no subprocess stdio to fall back on -- is
-	// readable through the same `job output` path as any other kind.
 	childStatus := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "task-fail"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if !strings.Contains(childStatus.Combined, "authentication required") {
 		t.Fatalf("expected the task job's own status line to name its recorded reason, got: %s", childStatus.Combined)
@@ -380,17 +314,8 @@ func testJobAJobThatWaitsForAFailedBackgroundTaskJobItStartedSurfacesStartedJobF
 }
 
 func testJobATaskJobStartedWithNoParentStaysParentless(t *testing.T) {
-	// An orchestrator driving this environment from outside any job at all
-	// -- never itself started as a job, so it has nothing to thread as
-	// startedByJobId -- is exactly the caller TaskEnvironmentJobParams'
-	// own doc describes: empty when nothing started it, never a guess at
-	// whichever job happens to be running here. Seeded with no
-	// startedByJobId key at all (the shape StartTaskEnvironmentJob itself
-	// produces for that caller, since the field is omitempty), this proves
-	// two things: the task job's own record reports no parent, and a real,
-	// unrelated job running in the same environment at the same time is
-	// not wrongly credited with having started it merely because it
-	// happens to be the job running here.
+	// A task job with no startedByJobId reports no parent and does not block an
+	// unrelated job running alongside it.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	dir := filepath.Dir(jobRecordPath(setup, "team", "dev", "task-orphan"))
@@ -435,11 +360,7 @@ func testJobATaskJobStartedWithNoParentStaysParentless(t *testing.T) {
 }
 
 func testJobHandoffExcludesAJobFromItsParentsFinishCheck(t *testing.T) {
-	// The other side of the contract: a job started with --handoff is meant
-	// to outlive its caller on purpose, so it must never be what a parent's
-	// own finish check waits for -- unlike the gate above, outer must report
-	// its own real success immediately even though the handed-off job is
-	// still running (a long sleep standing in for a release or a render).
+	// A --handoff job is excluded from the parent's finish check.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	bin := erun.BinaryPath(t)

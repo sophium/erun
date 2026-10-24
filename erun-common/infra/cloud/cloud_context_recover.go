@@ -11,8 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// RecoverCloudContextParams carries the inputs the recovery flow cannot
-// derive from the orphan record on its own.
+// RecoverCloudContextParams carries inputs the orphan record cannot supply.
 type RecoverCloudContextParams struct {
 	KubernetesContext  string
 	CloudProviderAlias string
@@ -20,8 +19,7 @@ type RecoverCloudContextParams struct {
 	AdminToken         string
 }
 
-// RecoverCloudContextResult records what the recovery flow saved so the
-// caller can surface the values back to the user.
+// RecoverCloudContextResult records what the recovery saved.
 type RecoverCloudContextResult struct {
 	Saved     configpkg.CloudContextConfig
 	Source    string // "aws-describe-instances"
@@ -60,12 +58,8 @@ type awsDescribeVolumeJSON struct {
 	} `json:"Volumes"`
 }
 
-// RecoverCloudContextFromAWS rebuilds a CloudContextConfig whose local
-// record was lost, from the EC2 instance that still exists in the account.
-//
-// It deliberately leaves InstanceProfileName / RoleName blank: those matter
-// only when re-init re-attaches a profile, and the recovered instance already
-// has one, so populating them would only widen the recovery's scope.
+// RecoverCloudContextFromAWS rebuilds a lost context record from its surviving EC2 instance.
+// InstanceProfileName and RoleName stay blank: the instance already has a profile.
 func RecoverCloudContextFromAWS(ctx core.Context, store CloudContextStore, params RecoverCloudContextParams, deps CloudContextDependencies) (RecoverCloudContextResult, error) {
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)
 	params.CloudProviderAlias = strings.TrimSpace(params.CloudProviderAlias)
@@ -91,7 +85,7 @@ func RecoverCloudContextFromAWS(ctx core.Context, store CloudContextStore, param
 	disk, err := describeCloudContextVolume(ctx, deps, provider, params.Region, instance.volumeID)
 	if err != nil {
 		ctx.Trace("cloud-context recover: volume describe failed: " + err.Error())
-		// Volume detail is best-effort; a context with empty disk fields is still usable, so the failure is non-fatal.
+		// Volume detail is best-effort.
 	}
 	token, tokenFrom := resolveRecoverAdminToken(params)
 

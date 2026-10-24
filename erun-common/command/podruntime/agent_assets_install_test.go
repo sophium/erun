@@ -28,10 +28,6 @@ func assertAssetFile(t *testing.T, path, want string) {
 	}
 }
 
-// TestInstallOrRefreshSkillsTracksTheSourceAndKeepsOperatorEdits walks one skill
-// through every state an environment's home volume can hold it in: absent,
-// erun's unmodified copy of an older source, an operator's in-place edit, and a
-// copy installed before markers existed.
 func TestInstallOrRefreshSkillsTracksTheSourceAndKeepsOperatorEdits(t *testing.T) {
 	src := t.TempDir()
 	dest := t.TempDir()
@@ -87,8 +83,6 @@ func installSkillsForTest(t *testing.T, src, dest string) AgentAssetsInstallResu
 	return result
 }
 
-// The image bakes skills 0755 so the unprivileged user can enter them; what is
-// installed is always ordinary 0644 files in 0755 directories.
 func TestInstallOrRefreshSkillsNormalisesModes(t *testing.T) {
 	src := t.TempDir()
 	dest := t.TempDir()

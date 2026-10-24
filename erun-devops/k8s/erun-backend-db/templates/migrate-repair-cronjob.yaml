@@ -10,13 +10,8 @@
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $backendDBImage := default (printf "%s/erun-backend-db:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
-# The migrate Job above only runs on a Helm install/upgrade. A database that
-# loses its schema by some means outside a Helm operation (a bug, a manual
-# reset, a restore onto an empty volume) would otherwise stay schema-less
-# indefinitely — nothing re-applies migrations until someone happens to
-# deploy. This CronJob runs the identical migrate.sh on a short interval so
-# the same repair happens on its own; atlas migrate apply is a fast no-op
-# once the schema is already at head, so this is safe to run continuously.
+# Re-applies migrations between deploys so a database that loses its schema
+# outside Helm repairs itself; a no-op once the schema is at head.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -30,14 +25,8 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      # Bounds failure *age*, which failedJobsHistoryLimit above does not: that
-      # limit only bounds how many failures are kept, so the three most recent
-      # stay forever. Three failures from one bad afternoon therefore sat in
-      # `kubectl get pods` as Error for weeks and made a healthy database read
-      # as permanently broken. An hour spans twelve scheduling intervals: a
-      # database that is genuinely broken keeps failing every five minutes and
-      # always has a fresh failure to read, while a transient one stops being
-      # reported as current state within the hour.
+      # failedJobsHistoryLimit bounds count, not age; the TTL keeps stale
+      # failures from reading as current state while a real outage keeps failing.
       backoffLimit: 0
       ttlSecondsAfterFinished: 3600
       template:

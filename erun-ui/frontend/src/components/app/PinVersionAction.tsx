@@ -5,9 +5,7 @@ import { useAppDispatch } from '@/app/hooks';
 import { openPinVersion } from '@/app/pinVersionThunks';
 import type { UISelection } from '@/types';
 
-// Deploying a version and pinning one are different motions: deploy rolls the
-// running runtime, pin realigns every place the repo records the version. They
-// sit together because an operator reaching for one often means the other.
+// Deploy rolls the runtime; pin realigns every place the repo records the version.
 export function PinVersionAction({
   selection,
   disabled,

@@ -25,34 +25,17 @@ type CloudContextStore interface {
 	CloudStore
 }
 
-// CloudContextRefreshFailure is one batched status refresh that failed,
-// recorded once for the (alias, region) group its AWS call covered rather than
-// once per context in that group. Message carries the cause, the command
-// attempted, and the upstream remedy. The contexts the batch covered do not
-// repeat it: the failure is one fact about the batch, and copying it onto every
-// row both buries the per-context detail that actually differs and quotes each
-// sibling context's instance ID back at every other one.
+// CloudContextRefreshFailure is one failed batched status refresh, recorded
+// once per (alias, region) group rather than copied onto each context.
 type CloudContextRefreshFailure struct {
 	Alias   string `json:"alias" yaml:"alias"`
 	Region  string `json:"region" yaml:"region"`
 	Message string `json:"message" yaml:"message"`
 }
 
-// CloudContextListResult is the structured result of listing managed cloud
-// contexts. It is shared so the CLI's --output json and the context_list MCP
-// tool emit one shape rather than two that drift apart.
-//
-// CloudContexts is always present, and always an array: it carries no
-// omitempty because that tag drops a slice of length zero as well, so an empty
-// set of contexts serialised as a bare {} -- a caller could not tell "none are
-// managed" from "this result does not report contexts". ListCloudContextStatuses
-// returns a non-nil slice for the same reason.
-//
-// RefreshFailures keeps its omitempty, which here is load-bearing rather than
-// the same bug: it is an annotation on the rows above, not the collection the
-// result exists to report. When there are no contexts the refresh is never
-// attempted, and writing an empty array there would assert that it ran and
-// nothing failed.
+// CloudContextListResult is the shared result shape of the CLI's --output json and the context_list MCP tool.
+// CloudContexts has no omitempty so an empty list serialises as []; RefreshFailures
+// keeps it because the refresh is never attempted when there are no contexts.
 type CloudContextListResult struct {
 	CloudContexts   []configpkg.CloudContextStatus `json:"cloudContexts"`
 	RefreshFailures []CloudContextRefreshFailure   `json:"refreshFailures,omitempty"`
@@ -75,9 +58,7 @@ type CloudContextParams struct {
 	Force bool
 }
 
-// CloudContextEnvLookup is an optional interface used by StartCloudContext to
-// enforce per-environment working hours when starting a cloud context. Stores
-// that do not implement it skip the working-hours gate.
+// CloudContextEnvLookup lets StartCloudContext enforce working hours; stores without it skip the gate.
 type CloudContextEnvLookup interface {
 	ListTenantConfigs() ([]configpkg.TenantConfig, error)
 	ListEnvConfigs(string) ([]configpkg.EnvConfig, error)
@@ -115,10 +96,8 @@ func ListCloudContextStatuses(store configpkg.CloudReadStore) ([]configpkg.Cloud
 	return statuses, nil
 }
 
-// RefreshCloudContextList returns the configured cloud contexts with Status set
-// from live AWS state, plus one entry per batched refresh that failed. A group
-// whose AWS call fails is marked Unknown rather than reported with a stale
-// value, and its failure is attributed to the batch that produced it.
+// RefreshCloudContextList returns contexts with live AWS status; a group whose
+// AWS call fails is marked Unknown rather than left stale.
 func RefreshCloudContextList(ctx core.Context, store configpkg.CloudReadStore, deps CloudContextDependencies) (CloudContextListResult, error) {
 	statuses, err := ListCloudContextStatuses(store)
 	if err != nil {
@@ -132,8 +111,7 @@ func RefreshCloudContextList(ctx core.Context, store configpkg.CloudReadStore, d
 	return CloudContextListResult{CloudContexts: statuses, RefreshFailures: failures}, nil
 }
 
-// RefreshCloudContextStatuses returns just the per-context statuses of
-// RefreshCloudContextList, for callers that render no batch-level report.
+// RefreshCloudContextStatuses returns just the statuses of RefreshCloudContextList.
 func RefreshCloudContextStatuses(ctx core.Context, store configpkg.CloudReadStore, deps CloudContextDependencies) ([]configpkg.CloudContextStatus, error) {
 	result, err := RefreshCloudContextList(ctx, store, deps)
 	if err != nil {
@@ -155,8 +133,7 @@ func refreshCloudContextStatusesFromAWS(ctx core.Context, store configpkg.CloudR
 			failures = append(failures, failure)
 		}
 	}
-	// Groups come from a map, so sort for output a caller can compare between
-	// runs rather than one that reshuffles with Go's map iteration order.
+	// Groups come from a map; sort for stable output.
 	sort.Slice(failures, func(i, j int) bool {
 		if failures[i].Alias != failures[j].Alias {
 			return failures[i].Alias < failures[j].Alias
@@ -219,10 +196,8 @@ func applyCloudContextRefreshState(status *configpkg.CloudContextStatus, states 
 	}
 }
 
-// markCloudContextsRefreshUnknown downgrades every context the failed batch
-// covered. When AWS cannot be reached, downgrade to Unknown so the UI never
-// surfaces a stale "running" as authoritative. The cause is deliberately left
-// off the rows and reported once on the group's CloudContextRefreshFailure.
+// markCloudContextsRefreshUnknown keeps a stale "running" from looking authoritative;
+// the cause is reported once on the group's CloudContextRefreshFailure.
 func markCloudContextsRefreshUnknown(statuses []configpkg.CloudContextStatus, indices []int) {
 	for _, i := range indices {
 		statuses[i].Status = CloudContextStatusUnknown

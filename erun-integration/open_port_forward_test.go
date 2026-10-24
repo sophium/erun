@@ -17,11 +17,7 @@ import (
 
 func testOpenPersistedLocalPortRangeIsHonoured(t *testing.T) {
 	t.Parallel()
-	// EnvConfig.LocalPortRangeStart is the durable per-env port
-	// contract. When it is already set on disk, open must derive every
-	// service port from it (MCP 17500, API 17533, SSH 17522) and must
-	// not emit the "config: would assign" trace. Locks the early-return
-	// in EnsureLocalPortRangePersisted (open.go::common helper).
+	// A persisted localportrangestart drives every service port, with no assign trace.
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 17500)
 	envVars := stubKubectlNotFound(t, setup)
@@ -31,13 +27,7 @@ func testOpenPersistedLocalPortRangeIsHonoured(t *testing.T) {
 
 func testOpenWalkerSkipsIndexClaimedByOtherTenant(t *testing.T) {
 	t.Parallel()
-	// When a second env on the host has already persisted
-	// localportrangestart=17000, the alphabetical walker must skip
-	// that index when allocating an unpersisted env. team/dev sorts
-	// before other/staging but the persisted claim wins, so team/dev
-	// resolves to 17100 and the dry-run trace records the would-be
-	// assignment. Locks the cross-tenant claim-respect branch in
-	// ResolveAllEnvironmentLocalPorts.
+	// Another env's persisted range is skipped when allocating an unpersisted one.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedSecondaryTenantEnv(t, setup, "other", "staging", 17000)
@@ -48,11 +38,7 @@ func testOpenWalkerSkipsIndexClaimedByOtherTenant(t *testing.T) {
 
 func testOpenOverlappingPersistedRangesFailWithPointer(t *testing.T) {
 	t.Parallel()
-	// Two envs that persist the same localportrangestart must surface
-	// an ErrLocalPortRangeOverlap pointing at both. The CLI should
-	// fail with a non-zero exit and a message naming both envs and the
-	// range, instead of silently re-allocating one of them. Locks the
-	// overlap path in ResolveAllEnvironmentLocalPorts.
+	// Duplicate persisted ranges fail naming both envs, never silently reallocate.
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 17000)
 	fixture.SeedSecondaryTenantEnv(t, setup, "other", "staging", 17000)
@@ -63,12 +49,7 @@ func testOpenOverlappingPersistedRangesFailWithPointer(t *testing.T) {
 
 func testOpenMisalignedPersistedRangeFailsWithPointer(t *testing.T) {
 	t.Parallel()
-	// localportrangestart must align to EnvironmentPortRangeSize=100
-	// boundaries from LowerServicePort=17000. A value like 17050
-	// would make MCP/API/SSH offsets bleed into another env's range,
-	// so the resolver refuses with a clear alignment error instead of
-	// accepting it. Locks environmentPortIndexForRangeStart's
-	// validation branch.
+	// Unaligned range starts would bleed into another env's range, so they are refused.
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 17050)
 	envVars := stubKubectlNotFound(t, setup)
@@ -77,24 +58,12 @@ func testOpenMisalignedPersistedRangeFailsWithPointer(t *testing.T) {
 }
 
 func testOpenAdoptsExistingKubectlPortForward(t *testing.T) {
-	// Regression for the orphan-kubectl-can't-adopt failure: when the
-	// per-env state file is missing but a long-lived `kubectl
-	// port-forward` is already serving the env's MCP port, erun must
-	// recognise the holder as its own and reuse it instead of erroring
-	// with "already in use". The probe runs in dry-run too, so we lock
-	// the decision in the golden via the "would adopt" trace.
-	//
-	// The holder is a real listener that answers, not just an lsof claim:
-	// adoption now requires the tunnel to carry traffic, so a stubbed
-	// holder alone would leave the decision to whatever else happens to
-	// hold that port on the host. That pins the scenario to the 26100
-	// range, like every other one that binds a port.
+	// An orphan kubectl forward that actually carries traffic is adopted. The
+	// holder is a real listener because adoption requires a live tunnel.
 	skipIfPortsBusy(t, 26100, 26133)
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
-	// Pin DetectHost to darwin so the --no-shell preamble stays POSIX (see
-	// openHostOSOverride); the adopt holder probe is stubbed, so the pinned OS
-	// only keeps the golden deterministic across hosts.
+	// Pin darwin so the --no-shell preamble stays POSIX and the golden deterministic.
 	envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
 	holderPID := fixture.StartServingPortHolder(t, 26100)
 	stubAdoptHolderProbes(t, setup, adoptHolder{
@@ -106,14 +75,8 @@ func testOpenAdoptsExistingKubectlPortForward(t *testing.T) {
 }
 
 func testOpenPreviewsReplacingABoundButDeadPortForward(t *testing.T) {
-	// The sibling decision, and the reason the one above needs a live
-	// holder at all: a holder with erun's exact port-forward argv whose
-	// far end is gone still binds the port and answers nothing through
-	// it. Adopting it would hand the caller a tunnel to a pod that no
-	// longer exists — the failure that left an environment unreachable
-	// for hours behind a listener that looked healthy. The plan must say
-	// it would replace the forward, and dry-run must stop at saying so:
-	// the holder is still bound when the run ends.
+	// A holder with erun's argv whose far end is gone must be replaced, not
+	// adopted; dry-run only plans the replacement.
 	skipIfPortsBusy(t, 26100, 26133)
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
@@ -125,24 +88,14 @@ func testOpenPreviewsReplacingABoundButDeadPortForward(t *testing.T) {
 	})
 	result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	golden.Equal(t, "open/previews_replacing_a_bound_but_dead_port_forward", normalize.Apply(result.Combined))
-	// Side effect outside the captured streams: dry-run plans the
-	// replacement, it does not perform it.
 	if fixture.StalePortHolderStopped(26100, 500*time.Millisecond) {
 		t.Error("dry-run must leave the stale holder running; it only plans the replacement")
 	}
 }
 
 func testOpenRealRunReestablishesABoundButDeadPortForward(t *testing.T) {
-	// The reported failure, verbatim: erun's own recorded forward is
-	// still bound — its state file matches this env and its process is
-	// alive — while every request through it dies, because the pod it
-	// targeted was replaced. Reusing it on the strength of the recorded
-	// state is what let that survive for five hours, so open must stop
-	// the dead forward and start a fresh one that answers.
-	//
-	// The holder is a real process and the ps/lsof stubs name its real
-	// PID: production kills what the probe names, so a fabricated PID
-	// would aim the kill at whatever else owns that number.
+	// erun's own recorded forward to a replaced pod must be stopped and restarted.
+	// The stubs name the holder's real PID because production kills what the probe names.
 	skipIfPortsBusy(t, 26100, 26133)
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
@@ -157,9 +110,7 @@ func testOpenRealRunReestablishesABoundButDeadPortForward(t *testing.T) {
 		ExecExitCodes:  []int{0},
 	})...)
 	envVars = append(envVars, openHostOSOverride)
-	// ERUN_FORCE_TTY=1: this scenario locks the interactive shell path (the
-	// form an operator at a real terminal runs); without it, stdin's
-	// non-TTY default in this harness would take the no-shell branch instead.
+	// ERUN_FORCE_TTY=1 takes the interactive shell path.
 	envVars = append(envVars, "ERUN_FORCE_TTY=1")
 	holderPID := fixture.StartStalePortHolder(t, 26100)
 	stubAdoptHolderProbes(t, setup, adoptHolder{
@@ -169,18 +120,14 @@ func testOpenRealRunReestablishesABoundButDeadPortForward(t *testing.T) {
 	envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
 	writePortForwardState(t, setup, "mcp", "team", "dev", 26100, holderPID)
 
-	// The shell form, not --no-shell: real-run --no-shell silences stderr
-	// so an `eval "$(erun open ...)"` alias stays quiet, and the decision
-	// this scenario exists to lock is a trace line. The exec stub exits 0
-	// so runShellLoop ends after one pass.
+	// Not --no-shell, which silences the stderr trace this asserts. The exec stub
+	// exits 0 so runShellLoop ends after one pass.
 	result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "open/real_run_reestablishes_a_bound_but_dead_port_forward", normalize.Apply(result.Combined))
-	// Side effects outside the captured streams: the dead forward is
-	// gone, and the recorded forward is a different process — the same
-	// PID would mean erun re-adopted the corpse.
+	// A same PID would mean erun re-adopted the dead forward.
 	stateBody, err := os.ReadFile(portForwardStateFile(setup, "mcp", "team", "dev"))
 	if err != nil {
 		t.Fatalf("read rewritten mcp state: %v", err)
@@ -191,22 +138,9 @@ func testOpenRealRunReestablishesABoundButDeadPortForward(t *testing.T) {
 }
 
 func testOpenNoShellRealRunRefusesSuccessWhenAStaleForwardCannotBeStopped(t *testing.T) {
-	// Regression for the defect: erun's own error already names this exact
-	// shape ("127.0.0.1:PORT is held but the edge never answers -- a
-	// stale port-forward") and tells the operator to run `erun open`,
-	// but running it silently warned and exited 0 while the edge stayed
-	// unreachable -- the reported failure, verbatim. The detect-and-
-	// replace machinery (adoptForeignMCPPortForward /
-	// replaceStalePortForwardHolder) is tried regardless, and when the
-	// stale holder genuinely cannot be stopped, `open --no-shell` has no
-	// shell to fall back on, so it must fail loudly instead of reporting
-	// success on a port nothing is serving.
-	//
-	// The lsof/ps probes present a PID that names no real process, so
-	// production's kill of it fails with ESRCH -- simulating a holder
-	// erun cannot actually stop -- while a real listener (a different
-	// PID, from StartStalePortHolder) keeps the port bound and silent so
-	// the initial reachability probe genuinely observes "held but dead".
+	// A stale holder that cannot be stopped must fail `open --no-shell` loudly.
+	// The probes name a nonexistent PID so the kill fails with ESRCH while a real
+	// listener keeps the port bound and silent.
 	skipIfPortsBusy(t, 26100, 26133)
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
@@ -232,21 +166,13 @@ func testOpenNoShellRealRunRefusesSuccessWhenAStaleForwardCannotBeStopped(t *tes
 }
 
 func testOpenPreviewsReapingARecordedForwardThatNeverBoundItsPort(t *testing.T) {
-	// A `kubectl port-forward` that is still retrying against a pod that
-	// never answers holds no port at all — unlike the bound-but-dead shape
-	// above, nothing binds, but the process itself is alive. Bound state
-	// alone can't tell that corpse apart from one that already exited, so
-	// the plan must still name it. Dry-run only plans: the process must
-	// still be alive when the run ends.
+	// A forward still retrying binds nothing but is alive; the plan must still name it.
 	skipIfPortsBusy(t, 26100, 26133)
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
 	envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
 	deadPID := fixture.StartUnboundPortForwardProcess(t)
-	// port: 0 keeps the fabricated holder out of the lsof answer for
-	// 26100 (nothing is really bound), while the ps stub still answers
-	// for this exact PID — the shape production's isPortForwardProcess
-	// check needs to recognise the recorded PID as its own.
+	// port: 0 keeps the holder out of lsof while ps still recognises the PID.
 	stubAdoptHolderProbes(t, setup, adoptHolder{
 		port: 0, pid: deadPID,
 		argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1",
@@ -254,24 +180,14 @@ func testOpenPreviewsReapingARecordedForwardThatNeverBoundItsPort(t *testing.T) 
 	writePortForwardState(t, setup, "mcp", "team", "dev", 26100, deadPID)
 	result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	golden.Equal(t, "open/previews_reaping_a_recorded_forward_that_never_bound_its_port", normalize.Apply(result.Combined))
-	// Side effect outside the captured streams: dry-run plans the reap,
-	// it does not perform it.
 	if fixture.ProcessStopped(deadPID, 500*time.Millisecond) {
 		t.Error("dry-run must leave the never-bound forward running; it only plans clearing it")
 	}
 }
 
 func testOpenRealRunReapsARecordedForwardThatNeverBoundItsPort(t *testing.T) {
-	// The real-run sibling, and the reported failure itself: a forward
-	// that never bound its port is never reaped, so every repeat attempt
-	// starts a fresh kubectl beside the last one — 101 of them for one
-	// environment in the reported case. open must kill the recorded PID
-	// before starting a replacement, not leave it running as one more
-	// corpse nothing will ever clear.
-	//
-	// The holder is a real process and the ps/lsof stubs name its real
-	// PID: production kills what the probe names, so a fabricated PID
-	// would aim the kill at whatever else owns that number.
+	// A recorded forward that never bound must be killed before starting a
+	// replacement. The stubs name the real PID because production kills it.
 	skipIfPortsBusy(t, 26100, 26133)
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
@@ -313,14 +229,8 @@ func testOpenRealRunReapsARecordedForwardThatNeverBoundItsPort(t *testing.T) {
 }
 
 func testOpenRealRunSweepsAnOrphanedForwardWithNoMatchingState(t *testing.T) {
-	// The race the recorded-PID reap alone cannot close: two overlapping
-	// opens for the same environment can each read the old state file
-	// before either overwrites it, so the invocation that loses that
-	// race leaves a kubectl process with no state entry left pointing at
-	// it. This scenario reproduces the same end state without needing
-	// real concurrency — no state file names this env's forward at
-	// all — so only the argv-identity sweep (not the state-based reap)
-	// can find and clear the orphan.
+	// Overlapping opens can orphan a kubectl with no state entry; only the
+	// argv-identity sweep can clear it.
 	skipIfPortsBusy(t, 26100, 26133)
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
@@ -352,8 +262,6 @@ done
 exit 1
 `, orphanPID, shellQuote(orphanArgv), orphanPID, shellQuote(orphanArgv)))
 	envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
-	// No writePortForwardState call: the sweep must find this PID by
-	// argv identity alone, with no state file naming it at all.
 
 	result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode != 0 {
@@ -367,16 +275,10 @@ exit 1
 
 func testOpenRefusesToBindWhenForeignProcessHoldsPort(t *testing.T) {
 	t.Parallel()
-	// When the port is held by a process whose argv does not look like
-	// the kubectl port-forward erun would start, adoption is unsafe.
-	// erun must trace what is holding the port (PID + argv) so the
-	// user sees what to kill, instead of the bare "already in use"
-	// message that gave nothing actionable in the prior UI loop.
+	// A non-kubectl holder is not adopted; its PID and argv are traced.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
-	// Pin DetectHost to darwin so the --no-shell preamble stays POSIX (see
-	// openHostOSOverride); the adopt holder probe is stubbed, so the pinned OS
-	// only keeps the golden deterministic across hosts.
+	// Pin darwin so the --no-shell preamble stays POSIX and the golden deterministic.
 	envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
 	stubAdoptHolderProbes(t, setup, adoptHolder{
 		port: 17000, pid: 88888,
@@ -388,19 +290,8 @@ func testOpenRefusesToBindWhenForeignProcessHoldsPort(t *testing.T) {
 
 func testOpenApiForwardTargetsTheEnvironmentsOwnServicePort(t *testing.T) {
 	t.Parallel()
-	// Regression for the API forward on any environment whose api port is
-	// not the canonical 17033. `erun deploy` publishes the erun-backend-api
-	// Service on the environment's own api port (the chart's apiPort comes
-	// from the same per-env allocation), so a forward whose far side is the
-	// APIServicePort constant asks kubectl for a service port the Service
-	// does not have: kubectl answers "Service team-api does not have a
-	// service port 17033", and erun open times out with no local channel.
-	//
-	// The env is seeded in the 26100 range so its api port is 26133, and the
-	// foreign-holder refusal is what makes dry-run print the API forward's
-	// own argv — the value the deployed Service port has to match. The
-	// holder is stubbed (lsof/ps), so nothing is bound and the ports need
-	// not be free.
+	// The API forward must target the env's own api port (26133 here), which is
+	// the port deploy publishes on the Service, not the APIServicePort constant.
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
 	envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
@@ -414,16 +305,8 @@ func testOpenApiForwardTargetsTheEnvironmentsOwnServicePort(t *testing.T) {
 
 func testOpenDeploymentMatchIgnoresMissingApiPort(t *testing.T) {
 	t.Parallel()
-	// Regression for the --intellij short-circuit on tenant-owned
-	// devops charts. The runtime-pod identity matcher must accept a
-	// deployment whose containers expose ERUN_REPO_PATH,
-	// ERUN_SSHD_ENABLED, ERUN_MCP_PORT, and ERUN_SSHD_PORT but not
-	// ERUN_API_PORT — the erun-api service is a separate deployment
-	// with its own port-forward path, so the runtime pod legitimately
-	// omits that env var. Without the fix, every open against a
-	// tenant chart predating ERUN_API_PORT would be flagged as "not
-	// deployed" and either redeploy unnecessarily (shell flow) or
-	// hard-error (--intellij / --vscode flow).
+	// The runtime pod legitimately omits ERUN_API_PORT, so its absence must not
+	// read as "not deployed".
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	stubsDir := filepath.Join(setup.Cwd, "stubs")
@@ -434,14 +317,9 @@ func testOpenDeploymentMatchIgnoresMissingApiPort(t *testing.T) {
 		MCPPort:        17000,
 		SSHPort:        17022,
 	})...)
-	// Keep the adopt-or-conflict probe silent: this scenario is about
-	// the deployment-match path, not orphan adoption, and we don't
-	// want the developer's host state to leak a "would refuse" line
-	// into the golden when port 17000 is in use locally.
+	// Keep host port state out of the golden.
 	stubLsofNoHolder(t, stubsDir)
 	envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
-	// Pin DetectHost so the --no-shell preamble dialect stays POSIX; see
-	// openHostOSOverride.
 	envVars = append(envVars, openHostOSOverride)
 	result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	golden.Equal(t, "open/deployment_match_ignores_missing_api_port", normalize.Apply(result.Combined))

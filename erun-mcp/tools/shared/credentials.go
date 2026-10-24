@@ -10,9 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// hostInjectedAWSProfileName must match the profile the deployment template
-// wires into the pod's AWS_PROFILE, so host credentials injected here are the
-// ones the pod's AWS SDK picks up.
+// hostInjectedAWSProfileName must match the AWS_PROFILE the deployment template sets in the pod.
 const hostInjectedAWSProfileName = "erun-host"
 
 type InjectAWSCredentialsInput struct {

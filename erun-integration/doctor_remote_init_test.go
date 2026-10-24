@@ -20,20 +20,8 @@ func doctorRemoteInitScenarios(t *testing.T) {
 }
 
 func testDoctorFinishRemoteInitRealRunPromptsUrlAndRetriesClone(t *testing.T) {
-	// Real-run --finish-remote-init for a plain SSH host: covers the
-	// non-dry-run arms of RunRemoteInitFinish that the dry-run trace
-	// cannot reach because their decisions depend on side effects —
-	// finishRemoteInitProjectRoot/SSHKey actually creating files,
-	// ensureRemoteInitSSHKeyPermissions re-chmodding the generated
-	// keypair, finishRemoteInitGitAccess printing the public key and
-	// polling ls-remote (WaitForGitAccess retry + confirmation), the
-	// clone, and SaveRemoteInitMarker. The marker has no
-	// repository_url so the single interactive prompt of this
-	// subprocess supplies it (one prompt max — readline read-ahead
-	// eats remaining stdin once the first prompt closes). ssh-keygen
-	// is stubbed to write a deterministic keypair; git is stubbed to
-	// fail the first ls-remote (driving one retry cycle) and succeed
-	// afterwards.
+	// Real-run only: these arms depend on side effects. One prompt per subprocess,
+	// since readline read-ahead eats the rest of stdin.
 	setup := env.New(t)
 	projectRoot := filepath.Join(setup.Home, "git", "team")
 	seedRemoteInitMarker(t, setup, "team", "dev",
@@ -60,9 +48,6 @@ func testDoctorFinishRemoteInitRealRunPromptsUrlAndRetriesClone(t *testing.T) {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "doctor/finish_remote_init_real_run_prompts_url_and_retries_clone", normalize.Apply(result.Combined))
-	// Side effects outside the captured streams: the marker must be
-	// rewritten with the prompted URL and bootstrap_complete=true,
-	// and the generated keypair must carry the ssh-required modes.
 	marker := readFileForTest(t, filepath.Join(setup.Home, ".erun", "team", "dev", "bootstrap.yaml"))
 	for _, want := range []string{
 		"repository_url: git@example.com:team/repo.git",
@@ -77,18 +62,8 @@ func testDoctorFinishRemoteInitRealRunPromptsUrlAndRetriesClone(t *testing.T) {
 }
 
 func testDoctorFinishRemoteInitCodecommitRealRunPromptsKeyId(t *testing.T) {
-	// Real-run CodeCommit recovery: the marker recorded no CodeCommit
-	// metadata, so the host is detected from --remote-repository-url
-	// and RunRemoteInitFinish dynamically appends the missing RSA
-	// keypair item. Covers finishRemoteInitCodeCommitSSHKey,
-	// resolveCodeCommitSSHKeyID's prompt branch (the public key +
-	// IAM setup block printed before asking for the key ID — the
-	// single prompt of this subprocess; init's equivalent prompt is
-	// unreachable through a pipe because it is always the second
-	// prompt there), finishRemoteInitCodeCommitSSHConfig writing
-	// ~/.ssh/config, and the CodeCommit arm of
-	// finishRemoteInitGitAccess. None of these run in dry-run mode:
-	// they read the generated key files and mutate ~/.ssh.
+	// The CodeCommit key-ID prompt is reachable only here: in init it is always the
+	// second prompt.
 	setup := env.New(t)
 	projectRoot := filepath.Join(setup.Home, "git", "petios")
 	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
@@ -131,9 +106,6 @@ func testDoctorFinishRemoteInitCodecommitRealRunPromptsKeyId(t *testing.T) {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "doctor/finish_remote_init_codecommit_real_run_prompts_key_id", normalize.Apply(result.Combined))
-	// The marker must capture the CodeCommit coordinates so the next
-	// doctor run inspects the RSA keypair, and ~/.ssh/config must
-	// carry the IAM host stanza git's ssh relies on.
 	marker := readFileForTest(t, filepath.Join(setup.Home, ".erun", "petios", "dev", "bootstrap.yaml"))
 	for _, want := range []string{
 		"repository_url: ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repos/petios",
@@ -158,11 +130,8 @@ func testDoctorFinishRemoteInitCodecommitRealRunPromptsKeyId(t *testing.T) {
 	assertFileMode(t, filepath.Join(sshDir, "id_rsa_codecommit"), 0o600)
 }
 
-// stubGitForRemoteInit stubs git for the remote-init recovery: clone
-// always succeeds; ls-remote either succeeds immediately or — when
-// failFirstLsRemote is set — fails exactly once so WaitForGitAccess
-// runs one retry cycle (the "not active yet / access confirmed" lines).
-// The first-call state lives in a marker file beside the stub.
+// stubGitForRemoteInit always clones; with failFirstLsRemote the first ls-remote
+// fails once, tracked in a marker file.
 func stubGitForRemoteInit(t *testing.T, stubsDir string, failFirstLsRemote bool) {
 	t.Helper()
 	lines := []string{`case "$*" in`, `  *"ls-remote"*)`}
@@ -186,12 +155,8 @@ func stubGitForRemoteInit(t *testing.T, stubsDir string, failFirstLsRemote bool)
 	fixture.StubBinaryWithScript(t, stubsDir, "git", strings.Join(lines, "\n"))
 }
 
-// stubSSHKeygenWritingKeypair stubs ssh-keygen to actually create the
-// requested keypair files (private key plus .pub) at the -f path, the
-// side effect the real-run remote-init recovery depends on: production
-// chmods the private key and reads the .pub to print it for import.
-// The key type in argv picks the public-key flavor so ed25519 and the
-// CodeCommit RSA key produce distinguishable golden output.
+// stubSSHKeygenWritingKeypair writes the keypair at -f, with the key type
+// selecting the public-key text.
 func stubSSHKeygenWritingKeypair(t *testing.T, stubsDir string) {
 	t.Helper()
 	script := strings.Join([]string{
@@ -209,8 +174,7 @@ func stubSSHKeygenWritingKeypair(t *testing.T, stubsDir string) {
 
 func assertFileMode(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
-	// Windows has no Unix permission bits — os.Chmod only toggles the read-only
-	// attribute, so Stat reports 0666/0777. The mode contract is Unix-only.
+	// Windows has no Unix permission bits.
 	if runtime.GOOS == "windows" {
 		return
 	}

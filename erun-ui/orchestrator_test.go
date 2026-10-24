@@ -13,11 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
-// newOrchestratorStubStore backs the store with a persistent in-memory root
-// config plus one env of each agent type — remote-agent frs/dev, reviewed in a
-// mirror, and local-agent frs/laptop, reviewed in the worktree at laptopRepoPath
-// — plus a runtime env, which has no worktree to review and no agent to delegate
-// to and so is not orchestratable.
+// newOrchestratorStubStore has a remote-agent, a local-agent and a non-orchestratable runtime env.
 func newOrchestratorStubStore(laptopRepoPath string) stubUIStore {
 	return stubUIStore{
 		config: &configpkg.ERunConfig{},
@@ -32,17 +28,13 @@ func newOrchestratorStubStore(laptopRepoPath string) stubUIStore {
 	}
 }
 
-// orchestratorTestApp confines $HOME to a temp dir so ensureOrchestratorWorkspace
-// and the default mirror directories never touch the real home.
+// orchestratorTestApp confines $HOME to a temp dir.
 func orchestratorTestApp(t *testing.T) *App {
 	t.Helper()
 	app, _ := orchestratorTestAppWithLocalRepo(t)
 	return app
 }
 
-// investigateHelmTimeoutReport is the shape the desktop's failure card produces:
-// the command that failed, the target, the error, and the captured output. The
-// bounds in investigation_bounds.go admit it because it carries all three.
 const investigateHelmTimeoutReport = `erun deploy failed
 Target: frs/dev
 Version: 1.0.179
@@ -57,29 +49,19 @@ Output:
 helm upgrade --install frs-devops ./chart
 Error: UPGRADE FAILED: timed out waiting for the condition`
 
-// orchestratorTestAppWithLocalRepo also returns the local-agent env's worktree
-// path, for the assertions that care where that env is reviewed.
 func orchestratorTestAppWithLocalRepo(t *testing.T) (*App, string) {
 	t.Helper()
 	return orchestratorTestAppWithReachability(t, orchestratorTestAlwaysReachable)
 }
 
-// orchestratorTestAppWithReachability is orchestratorTestAppWithLocalRepo with
-// an injectable MCP-edge reachability probe, so a test about the unreachable-
-// edge notice can simulate a down edge without a real port-forward,
-// while every other orchestrator test gets a deterministic "always reachable"
-// default instead of depending on a real network dial.
+// orchestratorTestAppWithReachability injects the MCP-edge reachability probe.
 func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool) (*App, string) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
-	// Resolve the shipped skills to an empty directory by default, so a test
-	// about something else never trips over the report a desktop posts when no
-	// skills source resolves at all. Tests that are about the skills stage their
-	// own source AFTER calling this.
+	// Empty skills/agents sources so no "no skills source" report is posted.
 	t.Setenv("ERUN_SKILLS_DIR", t.TempDir())
-	// Same default for the reusable agents, for the same reason.
 	t.Setenv("ERUN_AGENTS_DIR", t.TempDir())
 	laptopRepo := t.TempDir()
 	app := NewApp(erunUIDeps{
@@ -92,25 +74,16 @@ func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool)
 		},
 		canReachMCPEndpoint:         reachable,
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
-		// Never the real secret store: a test that launches through the gateway
-		// stages its own credential.
 		resolveGatewayCredential: func(*configpkg.OpenRouterConfig) (string, error) {
 			return "", errors.New("no gateway credential staged by this test")
 		},
 	})
-	// Stage failure reports inside the test's own directory. Left at the default
-	// they land in the shared host temp dir, which is how a suite that spawns
-	// nothing still left two reports per run behind — and made a handful of real
-	// failures read as dozens of spawned agents.
+	// Keep failure reports out of the shared host temp dir.
 	app.investigations.reportDir = t.TempDir()
 	return app, laptopRepo
 }
 
-// TestCreateOrchestratorLinksARuntimeEnvWithTheRuntimeRole is the link-time
-// half of scope item 2: a runtime env may be linked when its role is
-// runtime, and the persisted link carries no review directory — the
-// operate-role link resolves no review directory, per scope item 3, asserted
-// on the resolved value rather than the absence of an error.
+// A runtime env links with the runtime role and no review directory.
 func TestCreateOrchestratorLinksARuntimeEnvWithTheRuntimeRole(t *testing.T) {
 	app, _ := orchestratorTestAppWithLocalRepo(t)
 	defer app.shutdown(context.Background())
@@ -133,10 +106,6 @@ func TestCreateOrchestratorLinksARuntimeEnvWithTheRuntimeRole(t *testing.T) {
 	}
 }
 
-// TestCreateOrchestratorRejectsARuntimeEnvWithoutTheRuntimeRole locks scope
-// item 6: linking a runtime env as code or build (or leaving the role
-// undeclared) must still be refused, narrowing the gate rather than opening
-// it, with the same reason orchestratorIneligibilityReason gives.
 func TestCreateOrchestratorRejectsARuntimeEnvWithoutTheRuntimeRole(t *testing.T) {
 	app, _ := orchestratorTestAppWithLocalRepo(t)
 	defer app.shutdown(context.Background())
@@ -154,10 +123,7 @@ func TestCreateOrchestratorRejectsARuntimeEnvWithoutTheRuntimeRole(t *testing.T)
 	}
 }
 
-// TestCreateOrchestratorLinksLocalAgentWithoutSync locks the other half: a
-// local-agent env's worktree is already on this machine, so linking it must not
-// switch SSHD or workspace sync on behind the operator's back, and the review
-// directory is derived from the env rather than taken from the caller.
+// Linking a local-agent env must not enable sync; its directory comes from the env.
 func TestCreateOrchestratorLinksLocalAgentWithoutSync(t *testing.T) {
 	app, laptopRepo := orchestratorTestAppWithLocalRepo(t)
 	defer app.shutdown(context.Background())
@@ -180,9 +146,6 @@ func TestCreateOrchestratorLinksLocalAgentWithoutSync(t *testing.T) {
 	}
 }
 
-// TestCreateOrchestratorRejectsLocalAgentWithoutWorktree keeps the failure loud:
-// with no worktree to read, the orchestrator would otherwise be handed an empty
-// review window that looks like an env with no changes.
 func TestCreateOrchestratorRejectsLocalAgentWithoutWorktree(t *testing.T) {
 	app, _ := orchestratorTestAppWithLocalRepo(t)
 	defer app.shutdown(context.Background())
@@ -200,9 +163,6 @@ func TestCreateOrchestratorRejectsLocalAgentWithoutWorktree(t *testing.T) {
 	}
 }
 
-// TestRefreshLinkedEnvDirectoriesFollowsAMovedWorktree covers the derived path
-// staying correct: a local-agent link follows its env's repository path, while a
-// mirror path the operator chose is left alone.
 func TestRefreshLinkedEnvDirectoriesFollowsAMovedWorktree(t *testing.T) {
 	app, _ := orchestratorTestAppWithLocalRepo(t)
 	defer app.shutdown(context.Background())
@@ -224,8 +184,6 @@ func TestRefreshLinkedEnvDirectoriesFollowsAMovedWorktree(t *testing.T) {
 	}
 }
 
-// assertSingleOrchestratorStatus fails unless the app lists exactly one
-// orchestrator in wantStatus.
 func assertSingleOrchestratorStatus(t *testing.T, app *App, wantStatus string) {
 	t.Helper()
 	got := app.ListOrchestrators()
@@ -234,7 +192,6 @@ func assertSingleOrchestratorStatus(t *testing.T, app *App, wantStatus string) {
 	}
 }
 
-// assertLoneTenant fails unless tenants is exactly [want].
 func assertLoneTenant(t *testing.T, tenants []string, want string) {
 	t.Helper()
 	if len(tenants) != 1 || tenants[0] != want {
@@ -242,8 +199,6 @@ func assertLoneTenant(t *testing.T, tenants []string, want string) {
 	}
 }
 
-// assertSingleOrchestratorID fails unless the app lists exactly one
-// orchestrator with wantID.
 func assertSingleOrchestratorID(t *testing.T, app *App, wantID string) {
 	t.Helper()
 	listed := app.ListOrchestrators()
@@ -252,8 +207,6 @@ func assertSingleOrchestratorID(t *testing.T, app *App, wantID string) {
 	}
 }
 
-// assertSingleTransientOrchestrator fails unless the app lists exactly one
-// transient orchestrator.
 func assertSingleTransientOrchestrator(t *testing.T, app *App) {
 	t.Helper()
 	listed := app.ListOrchestrators()
@@ -262,8 +215,6 @@ func assertSingleTransientOrchestrator(t *testing.T, app *App) {
 	}
 }
 
-// assertCreatedFRSOrchestrator checks the shape of a freshly created
-// single-env "frs" orchestrator.
 func assertCreatedFRSOrchestrator(t *testing.T, info orchestratorInfo) {
 	t.Helper()
 	if info.Status != "stopped" || len(info.Environments) != 1 || info.Environments[0].Directory == "" {
@@ -289,7 +240,6 @@ func TestCreateOrchestratorWiresSyncAndPersists(t *testing.T) {
 	}
 	assertCreatedFRSOrchestrator(t, info)
 
-	// The env's one-way workspace sync was wired to the mirror directory.
 	env, _, err := app.deps.store.LoadEnvConfig("frs", "dev")
 	if err != nil {
 		t.Fatalf("load env: %v", err)
@@ -298,11 +248,9 @@ func TestCreateOrchestratorWiresSyncAndPersists(t *testing.T) {
 		env.SSHD.WorkspaceSync.LocalPath != info.Environments[0].Directory {
 		t.Fatalf("expected workspace sync wired to the mirror dir, got %+v", env.SSHD)
 	}
-	// The mirror directory was created.
 	if fi, statErr := os.Stat(info.Environments[0].Directory); statErr != nil || !fi.IsDir() {
 		t.Fatalf("expected the mirror directory to be created: %v", statErr)
 	}
-	// Persisted.
 	assertSingleOrchestratorID(t, app, info.ID)
 }
 
@@ -329,13 +277,11 @@ func TestRestartOrchestratorRespawnsWithFreshSession(t *testing.T) {
 	if restarted.Status != "running" || restarted.ID != created.ID {
 		t.Fatalf("expected the same orchestrator running after restart, got %+v", restarted)
 	}
-	// A restart tears the old session down and spawns a new one, so the serial must
-	// advance — reusing the old serial would attach the UI to a dead PTY.
+	// A stale serial would attach the UI to a dead PTY.
 	if restarted.SessionID == started.SessionID {
 		t.Fatalf("expected a fresh session serial after restart, both were %d", started.SessionID)
 	}
 
-	// Transient / unknown ids have no persisted definition, so they are not restartable.
 	if _, err := app.RestartOrchestrator("does-not-exist", 80, 24); err == nil {
 		t.Fatal("expected restart of an unknown orchestrator to error")
 	}
@@ -367,8 +313,6 @@ func TestSpawnOrchestratorSessionExposesOrchestratorID(t *testing.T) {
 		t.Fatalf("StartOrchestrator failed: %v", err)
 	}
 
-	// The agent reads its own id from $ERUN_ORCHESTRATOR_ID to record the return
-	// target for a rebuild+restart.
 	want := "ERUN_ORCHESTRATOR_ID=" + created.ID
 	found := false
 	for _, entry := range capturedEnv {
@@ -408,7 +352,6 @@ func TestUpdateOrchestratorRelinksEnvironments(t *testing.T) {
 		t.Fatalf("expected the edit to apply, got %+v", updated)
 	}
 
-	// Start keeps the definition; delete removes it.
 	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
 		t.Fatalf("StartOrchestrator failed: %v", err)
 	}
@@ -425,9 +368,6 @@ func TestUpdateOrchestratorRelinksEnvironments(t *testing.T) {
 	}
 }
 
-// mcpConfigServerKeys reads back the wired MCP server map for id and returns
-// its keys, so a test can assert exactly which environments a live session's
-// toolset covers rather than trusting the in-memory scope alone.
 func mcpConfigServerKeys(t *testing.T, id string) []string {
 	t.Helper()
 	data, err := os.ReadFile(orchestratorMCPConfigPath(id))
@@ -445,9 +385,6 @@ func mcpConfigServerKeys(t *testing.T, id string) []string {
 	return keys
 }
 
-// requireOnlyOrchestratorMCPKey fails unless id's on-disk MCP config wires
-// exactly wantKey, so a test can assert what a live session can actually
-// reach rather than trusting the in-memory scope alone.
 func requireOnlyOrchestratorMCPKey(t *testing.T, id, wantKey, label string) {
 	t.Helper()
 	if keys := mcpConfigServerKeys(t, id); len(keys) != 1 || keys[0] != wantKey {
@@ -455,8 +392,6 @@ func requireOnlyOrchestratorMCPKey(t *testing.T, id, wantKey, label string) {
 	}
 }
 
-// requireLoneOrchestratorRestartRequired fails unless ListOrchestrators
-// reports exactly one orchestrator whose RestartRequired flag matches want.
 func requireLoneOrchestratorRestartRequired(t *testing.T, app *App, want bool, label string) {
 	t.Helper()
 	listed := app.ListOrchestrators()
@@ -465,17 +400,9 @@ func requireLoneOrchestratorRestartRequired(t *testing.T, app *App, want bool, l
 	}
 }
 
-// TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale: re-scoping a
-// running orchestrator cannot rewire its --mcp-config in place, so the on-disk
-// wiring keeps the old scope, UpdateOrchestrator flags RestartRequired, and
-// ListOrchestrators keeps reporting it until a restart re-wires the session.
+// A live re-scope cannot rewire --mcp-config, so RestartRequired stays set until restart.
 func TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale(t *testing.T) {
-	// Pin the executable seam, for the same reason
-	// TestWriteOrchestratorMCPConfigCarriesSkipsEvenWhenNothingWired does:
-	// StartOrchestrator resolves the erun executable before it writes the
-	// per-orchestrator MCP config, so on a host without one it writes no config
-	// at all and the on-disk assertions below read a file that was never
-	// created. The build's own test stage has no erun on PATH.
+	// StartOrchestrator writes the MCP config only once it resolves an erun binary.
 	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
 
 	app, laptopRepo := orchestratorTestAppWithLocalRepo(t)
@@ -490,7 +417,6 @@ func TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale(t *testing.T) {
 	}
 	requireOnlyOrchestratorMCPKey(t, created.ID, "frs-dev", "before re-scope")
 
-	// Re-scope to a different environment while the session is still running.
 	updated, err := app.UpdateOrchestrator(created.ID, "agent", []orchestratorEnvInput{
 		{Tenant: "frs", Environment: "laptop", Directory: laptopRepo},
 	}, nil, "", orchestratorLaunchInput{})
@@ -502,15 +428,9 @@ func TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale(t *testing.T) {
 		t.Fatalf("expected UpdateOrchestrator to flag a restart as required for a live scope change, got %+v", updated)
 	}
 
-	// Before restart the on-disk MCP config has not moved: frs/dev (unlinked)
-	// is still wired and frs/laptop (newly linked) has no tools at all.
 	requireOnlyOrchestratorMCPKey(t, created.ID, "frs-dev", "RED: after re-scope, before restart")
-	// The same mismatch must keep showing up on every subsequent poll, not
-	// just in UpdateOrchestrator's own return value.
 	requireLoneOrchestratorRestartRequired(t, app, true, "RED: polled after re-scope")
 
-	// Restarting is the only thing that re-wires the session, and it resolves
-	// the flag along with the actual toolset.
 	restarted, err := app.RestartOrchestrator(created.ID, 80, 24)
 	mustNoErr(t, err, "RestartOrchestrator")
 	if restarted.RestartRequired {
@@ -548,8 +468,6 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 		t.Fatalf("expected a transient investigator, got %+v", info)
 	}
 	assertLoneTenant(t, info.Tenants, "frs")
-	// A transient investigator has no persisted settings: it launches on the
-	// fixed defaults whatever any orchestrator is configured with.
 	requireDefaultOrchestratorLaunch(t, seededLaunch)
 	if !strings.Contains(seededPrompt, "report-") || !strings.Contains(seededPrompt, "erun-file-issue") {
 		t.Fatalf("unexpected seed prompt: %q", seededPrompt)
@@ -580,7 +498,6 @@ func TestOrchestratorWorkspaceIsSharedRootWithOneClaudeMd(t *testing.T) {
 	if dir != orchestratorsRoot() {
 		t.Fatalf("expected the shared orchestrators root %q, got %q", orchestratorsRoot(), dir)
 	}
-	// Launching again refreshes stale instructions in the same shared workspace.
 	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("stale instructions\n"), 0o644); err != nil {
 		t.Fatalf("seed stale instructions: %v", err)
 	}
@@ -599,7 +516,6 @@ func TestOrchestratorWorkspaceIsSharedRootWithOneClaudeMd(t *testing.T) {
 	if string(data) != orchestratorClaudeMd {
 		t.Fatal("provisioned orchestrator instructions differ from the canonical template")
 	}
-	// The shared CLAUDE.md is generic — no per-orchestrator "Linked environments" list.
 	if strings.Contains(string(data), "## Linked environments") {
 		t.Fatalf("expected no per-orchestrator env list in the shared CLAUDE.md:\n%s", data)
 	}

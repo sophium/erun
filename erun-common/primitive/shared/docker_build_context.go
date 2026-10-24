@@ -77,12 +77,8 @@ func DockerBuildContextsUnderDir(dir string) ([]DockerBuildContext, error) {
 	return buildContexts, nil
 }
 
-// CheckNotE2ESuiteDockerfile refuses a Dockerfile under <tenant>-devops/e2e/.
-// An e2e suite runs against a deployed environment and must re-run every
-// time, so it is never a component: building it would fingerprint, promote
-// and push the suite like an image. Discovery never reaches it -- it only
-// walks docker/ directories -- so this guards the cwd and explicit-context
-// paths that hand a Dockerfile in directly.
+// CheckNotE2ESuiteDockerfile refuses an e2e suite, which must re-run every time
+// and so is never a fingerprinted component.
 func CheckNotE2ESuiteDockerfile(dockerfilePath string) error {
 	suiteDir := filepath.Dir(filepath.Clean(strings.TrimSpace(dockerfilePath)))
 	e2eDir := filepath.Dir(suiteDir)

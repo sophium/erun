@@ -6,9 +6,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// ObserveGetArgs builds a read-only `kubectl get <resource> [name] -o json`
-// invocation. name is optional: omitted, it lists every object of that kind in
-// the namespace.
+// ObserveGetArgs builds `kubectl get <resource> [name] -o json`; without name it lists the kind.
 func ObserveGetArgs(req config.ShellLaunchParams, resource string, name ...string) []string {
 	args := config.KubectlTargetArgs(req)
 	args = append(args, "get", resource)
@@ -16,9 +14,7 @@ func ObserveGetArgs(req config.ShellLaunchParams, resource string, name ...strin
 	return append(args, "-o", "json")
 }
 
-// isKubectlUnknownResource reports whether stderr is kubectl's "this API
-// isn't installed" shape, so a cluster with no cert-manager CRDs reports zero
-// certificates instead of failing the whole observation.
+// isKubectlUnknownResource lets a cluster without cert-manager CRDs report zero certificates.
 func isKubectlUnknownResource(stderr string) bool {
 	lower := strings.ToLower(stderr)
 	return strings.Contains(lower, "the server doesn't have a resource type") ||

@@ -24,13 +24,7 @@ function storeWith(entries: Record<string, { diff: unknown; error?: string }>) {
   return store;
 }
 
-// renderPair mounts a component that calls the real hook -- always exactly
-// twice, unconditionally, so the loop-free call shape satisfies
-// react-hooks/rules-of-hooks -- and captures both return values, via
-// react-dom/server (no jsdom needed since the hook never touches the DOM).
-// This exercises useEnvDiffSlot itself (not a re-implemented copy of its
-// selector expression), so a change to the hook's fallback logic is caught
-// here. Every case below fits two slots: a lone lookup just repeats its key.
+// The component calls the hook exactly twice, unconditionally, for rules-of-hooks.
 function renderPair(
   store: ReturnType<typeof storeWith>,
   envKeyA: string,
@@ -55,8 +49,6 @@ test('a fetched environment returns its own slot', () => {
   assert.deepEqual(alpha, { ...emptyEnvDiffState, diff: { marker: 'alpha' } });
 });
 
-// diffByEnv is sparse, so a key that was never fetched must fall back
-// to the shared empty slot rather than throwing or reading undefined fields.
 test('a never-fetched environment falls back to the empty slot without throwing', () => {
   const store = storeWith({});
 
@@ -65,10 +57,6 @@ test('a never-fetched environment falls back to the empty slot without throwing'
   assert.deepEqual(missing, emptyEnvDiffState);
 });
 
-// The failure mode this hook exists to prevent: a missing key must never
-// resolve to a DIFFERENT environment's data. Probing two keys in the same
-// render -- one present, one absent -- pins that the absent one cannot
-// silently alias the present one.
 test("a missing environment never aliases a different environment's slot", () => {
   const store = storeWith({ 'a/alpha': { diff: { marker: 'alpha-only' } } });
 

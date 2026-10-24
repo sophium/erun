@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// TestOpenPortForwardLogBoundsAnOvergrownLog covers the growth direction: a
-// port-forward log past the cap is rolled to its ".1" generation before the
-// next forward appends, so the live file restarts and the pair stays bounded.
 func TestOpenPortForwardLogBoundsAnOvergrownLog(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "local.log")
 	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
@@ -41,9 +38,6 @@ func TestOpenPortForwardLogBoundsAnOvergrownLog(t *testing.T) {
 	}
 }
 
-// TestOpenPortForwardLogKeepsAnUnderCapLog covers the other direction: the
-// ordinary small log an operator opens the file for is appended to, not
-// discarded.
 func TestOpenPortForwardLogKeepsAnUnderCapLog(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "local.log")
 	existing := "error: unable to forward port because pod is not running. Current status=Pending\n"

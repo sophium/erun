@@ -9,14 +9,12 @@ import (
 
 const contributeStateFileName = "contribute-state.json"
 
-// contributeState persists the per-env contribute toggle as a desktop-UI
-// preference, kept out of env config.yaml because it is not env semantics.
+// contributeState is a desktop-UI preference, kept out of env config.yaml.
 type contributeState struct {
 	Flags map[string]bool `json:"flags,omitempty"`
 }
 
-// contributeStore serializes mutations so a toggle click never races with the
-// initial disk load.
+// contributeStore serializes mutations so a toggle cannot race the initial load.
 type contributeStore struct {
 	path string
 	mu   sync.Mutex

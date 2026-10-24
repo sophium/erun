@@ -34,21 +34,15 @@ type uiPortStatus struct {
 }
 
 // uiContainerRegistryEntry mirrors config.ContainerRegistryEntry for the
-// desktop registry-list editor. Roles carry the value set build/from/to/deploy
-// but ride as plain strings because RegistryRole is a string alias at the Wails
-// boundary.
+// registry-list editor.
 type uiContainerRegistryEntry struct {
 	Registry string `json:"registry"`
-	// Cluster is set for a context-resolved in-cluster registry (a `cluster:`
-	// entry) instead of a static Registry host. It carries a legible Label so the
-	// editor renders it as a readable line rather than a blank text box, and its
-	// concrete fields so the entry round-trips losslessly on save.
+	// Cluster replaces Registry for a `cluster:` entry; its fields round-trip on save.
 	Cluster *uiContainerRegistryCluster `json:"cluster,omitempty"`
 	Roles   []string                    `json:"roles"`
 }
 
-// uiContainerRegistryCluster mirrors config.ClusterRegistry for the desktop
-// registry-list editor, plus a Label the frontend shows verbatim.
+// uiContainerRegistryCluster mirrors config.ClusterRegistry plus a display Label.
 type uiContainerRegistryCluster struct {
 	Service   string `json:"service"`
 	Namespace string `json:"namespace"`
@@ -57,9 +51,7 @@ type uiContainerRegistryCluster struct {
 	Label     string `json:"label"`
 }
 
-// uiDeployComponents is the Runtime tab's read model for a deploy at a chosen
-// version: the charts it would roll out, and which chart the runtime itself would
-// be installed from -- the second coordinate the version does not name.
+// uiDeployComponents is what a deploy at a chosen version would roll out.
 type uiDeployComponents struct {
 	Components   []deploy.DeployableComponent `json:"components"`
 	RuntimeChart uiRuntimeChartPlan           `json:"runtimeChart"`
@@ -72,29 +64,17 @@ type uiEnvironmentConfig struct {
 	RepoPath            string                     `json:"repoPath"`
 	KubernetesContext   string                     `json:"kubernetesContext"`
 	ContainerRegistries []uiContainerRegistryEntry `json:"containerRegistries"`
-	// ContainerRegistriesInherited is true when the shown list is resolved from
-	// the project's .erun/config.yaml (a local-agent env with no env-level
-	// override) rather than carried on the env config. The editor marks it so the
-	// operator sees these are inherited-from-project, not an env override.
+	// ContainerRegistriesInherited: the list comes from the project's .erun/config.yaml.
 	ContainerRegistriesInherited bool                      `json:"containerRegistriesInherited"`
 	CloudProviderAlias           string                    `json:"cloudProviderAlias"`
 	CloudProviderAliases         []string                  `json:"cloudProviderAliases,omitempty"`
 	CloudAliasSlots              []uiEnvironmentCloudAlias `json:"cloudAliasSlots,omitempty"`
 	CloudContext                 *uiCloudContextStatus     `json:"cloudContext,omitempty"`
 	RuntimeVersion               string                    `json:"runtimeVersion"`
-	// RuntimeChart is the chart this env's runtime is installed from, stated as an
-	// OCI reference that may carry its own version. Empty means "the chart
-	// published with the deployed version", which is right whenever the chart and
-	// the runtime image ride one release line. See EnvConfig.RuntimeChart.
+	// RuntimeChart: empty means the chart published with the deployed version.
 	RuntimeChart string `json:"runtimeChart,omitempty"`
-	// RuntimeRegistry is where the env resolves erun's OWN artifacts from -- the
-	// runtime chart and platform images -- as distinct from the registry this
-	// project's images are pushed to. Set it when the deploy registry holds only
-	// the project's images, so erun's chart is not there to pull.
-	RuntimeRegistry string `json:"runtimeRegistry,omitempty"`
-	// ImagePullSecrets names the Kubernetes dockerconfigjson secrets the runtime
-	// pod pulls its image with. Without one a private runtime image leaves the
-	// pod in ImagePullBackOff.
+	// RuntimeRegistry holds erun's own artifacts, distinct from the project's deploy registry.
+	RuntimeRegistry  string             `json:"runtimeRegistry,omitempty"`
 	ImagePullSecrets []string           `json:"imagePullSecrets,omitempty"`
 	RuntimePod       uiRuntimePodConfig `json:"runtimePod"`
 	SSHD             uiSSHDConfig       `json:"sshd"`
@@ -102,12 +82,7 @@ type uiEnvironmentConfig struct {
 	Claude           uiClaudeConfig     `json:"claude"`
 	ClaudeDefaults   uiClaudeDefaults   `json:"claudeDefaults"`
 	AITool           string             `json:"aiTool,omitempty"`
-	// AILaunchSignature is the command the environment's AI tab launches with
-	// for the persisted config, computed by the same open.AISessionLaunchCommand the
-	// launch uses (gateway, model, effort, Remote Control). A save whose value
-	// changed reopens the open AI tabs; deciding that here rather than from a
-	// copy of the rules in the frontend keeps the two from disagreeing. Read
-	// only: a save ignores it and returns a fresh one.
+	// AILaunchSignature is read-only; a change after save reopens the AI tabs.
 	AILaunchSignature     string                  `json:"aiLaunchSignature"`
 	LocalPorts            uiEnvironmentLocalPorts `json:"localPorts"`
 	AutoStart             *bool                   `json:"autoStart,omitempty"`
@@ -115,79 +90,45 @@ type uiEnvironmentConfig struct {
 	AutoUpgrade           bool                    `json:"autoUpgrade"`
 	UpgradeChannel        string                  `json:"upgradeChannel,omitempty"`
 	DisableBuildScript    bool                    `json:"disableBuildScript"`
-	// PlatformAccount binds the env's runtime ServiceAccount to cluster-admin so
-	// in-pod platform Terraform (the cluster edge) and component installs can
-	// manage cluster-scoped resources. See EnvConfig.PlatformAccount.
+	// PlatformAccount binds the runtime ServiceAccount to cluster-admin.
 	PlatformAccount bool `json:"platformAccount"`
-	// MountSource opts a runtime env into a mutable source worktree the pod clones
-	// at the deployed release ref; RepoURL is the git remote it clones. Runtime
-	// envs only, and a no-op without RepoURL. See EnvConfig.MountsRuntimeSource.
+	// MountSource is a no-op without RepoURL.
 	MountSource bool   `json:"mountSource"`
 	RepoURL     string `json:"repoURL"`
-	// DeployComponents is the per-machine saved deploy selection: the charts
-	// `erun deploy` rolls out for this env by default. Empty means no saved
-	// selection — deploy falls back to the repo plan, then the runtime chart
-	// alone. Editing it raises the pending-redeploy banner, since it changes what
-	// a redeploy rolls out.
-	DeployComponents []string `json:"deployComponents,omitempty"`
-	// Hosted is the platform row this environment corresponds to, when it has
-	// one. Nil means the environment is not marked as hosted. See
-	// config.HostedEnvironment.
-	Hosted *uiHostedEnvironment `json:"hosted,omitempty"`
+	// DeployComponents: empty falls back to the repo plan, then the runtime chart alone.
+	DeployComponents []string             `json:"deployComponents,omitempty"`
+	Hosted           *uiHostedEnvironment `json:"hosted,omitempty"`
 }
 
-// uiHostedEnvironment is the desktop's view of config.HostedEnvironment:
-// which platform row this local environment corresponds to, and how far the
-// local copy has fallen behind the definition that row holds.
+// uiHostedEnvironment is the desktop's view of config.HostedEnvironment.
 type uiHostedEnvironment struct {
-	// Describe renders the row for the operator: host, tenant, environment.
-	Describe string `json:"describe"`
-	APIHost  string `json:"apiHost"`
-	TenantID string `json:"tenantId"`
-	// EnvironmentID is the platform row's environment_id, shown so the
-	// operator can match the local environment against `erun platform env
-	// list` without guessing.
+	Describe      string `json:"describe"`
+	APIHost       string `json:"apiHost"`
+	TenantID      string `json:"tenantId"`
 	EnvironmentID string `json:"environmentId"`
-	// DefinitionRevision is the revision this local copy was last synced
-	// from; zero means it has never been synced.
+	// DefinitionRevision zero means never synced.
 	DefinitionRevision int `json:"definitionRevision"`
-	// LocalChange is whether this machine's settings have moved since that
-	// revision was recorded. Unlike Drift it needs no platform read, so it is
-	// always resolved — including for an operator who has never connected.
+	// LocalChange needs no platform read, so it is always resolved.
 	LocalChange uiHostedDefinitionLocalChange `json:"localChange"`
-	// Drift is the read-only "the platform has moved" hint, resolved on the
-	// desktop's own poll. Nil when no comparison has been made yet, which
-	// reads as "nothing to say" rather than as "up to date".
+	// Drift is nil until compared, which does not mean "up to date".
 	Drift *uiHostedDefinitionDrift `json:"drift,omitempty"`
 }
 
-// uiHostedDefinitionLocalChange mirrors config.HostedDefinitionLocalChange:
-// whether this machine's portable settings have moved since the marker last
-// recorded a transfer. It is the offline half of the marker panel — no
-// platform read, no button — which is what makes a change made while the
-// desktop was closed visible at all.
+// uiHostedDefinitionLocalChange mirrors config.HostedDefinitionLocalChange.
 type uiHostedDefinitionLocalChange struct {
-	// Available is false when the marker records no digest, so nothing can be
-	// said either way. It is deliberately not rendered as "in step".
+	// Available false (no recorded digest) must not render as "in step".
 	Available bool   `json:"available"`
 	Changed   bool   `json:"changed"`
 	Describe  string `json:"describe"`
 }
 
-// uiHostedDefinitionDrift is the half of the marker panel that only the
-// platform can answer: what it holds against what this machine last pulled.
+// uiHostedDefinitionDrift compares the platform revision with the last pulled one.
 type uiHostedDefinitionDrift struct {
-	LocalRevision    int  `json:"localRevision"`
-	PlatformRevision int  `json:"platformRevision"`
-	Behind           bool `json:"behind"`
-	// Describe is the operator-facing sentence, worded once in
-	// config.HostedDefinitionDrift.Describe so the CLI and the desktop
-	// cannot phrase the same state two ways.
-	Describe string `json:"describe"`
-	// Error is set when the comparison could not be made; it states what could
-	// not be read before the cause, per the Diagnostic Decision Record in
-	// erun-common/AGENTS.md.
-	Error string `json:"error,omitempty"`
+	LocalRevision    int    `json:"localRevision"`
+	PlatformRevision int    `json:"platformRevision"`
+	Behind           bool   `json:"behind"`
+	Describe         string `json:"describe"`
+	Error            string `json:"error,omitempty"`
 }
 
 type uiClaudeConfig struct {
@@ -202,24 +143,17 @@ type uiClaudeConfig struct {
 }
 
 type uiClaudeDefaults struct {
-	UseMantle       bool     `json:"useMantle"`
-	UseBedrock      bool     `json:"useBedrock"`
-	Models          []string `json:"models"`
-	MaxOutputTokens int      `json:"maxOutputTokens"`
-	KnownModels     []string `json:"knownModels"`
-	MinTokens       int      `json:"minTokens"`
-	MaxTokens       int      `json:"maxTokens"`
-	Effort          string   `json:"effort"`
-	EffortLevels    []string `json:"effortLevels"`
-	// GatewayConfigured reports whether the erun-level catalog names a gateway.
-	// Without one the per-environment controls have nothing to override, so the
-	// AI tab hides them rather than offering a switch that changes nothing.
-	GatewayConfigured bool `json:"gatewayConfigured"`
-	// GatewayModels and GatewayDefaultModel are the catalog's selectable models
-	// and the model a gateway launch falls back to. They stand beside Models and
-	// KnownModels rather than replacing them, because which set applies is the
-	// environment's own choice: the AI tab picks from the draft's useGateway, so
-	// an environment that leaves the gateway is offered its own models at once.
+	UseMantle         bool     `json:"useMantle"`
+	UseBedrock        bool     `json:"useBedrock"`
+	Models            []string `json:"models"`
+	MaxOutputTokens   int      `json:"maxOutputTokens"`
+	KnownModels       []string `json:"knownModels"`
+	MinTokens         int      `json:"minTokens"`
+	MaxTokens         int      `json:"maxTokens"`
+	Effort            string   `json:"effort"`
+	EffortLevels      []string `json:"effortLevels"`
+	GatewayConfigured bool     `json:"gatewayConfigured"`
+	// Gateway models sit beside Models; the draft's useGateway picks which set applies.
 	GatewayModels       []string `json:"gatewayModels"`
 	GatewayDefaultModel string   `json:"gatewayDefaultModel"`
 }

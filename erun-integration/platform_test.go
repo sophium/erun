@@ -84,9 +84,7 @@ func testPlatformWhoamiRealRun(t *testing.T) {
 	if !strings.Contains(result.Combined, "test-user") || !strings.Contains(result.Combined, "tenant-1") {
 		t.Fatalf("expected whoami output to name the resolved identity, got:\n%s", result.Combined)
 	}
-	// whoami must print the tenant's real name ("acme", matching
-	// GET /v1/tenants' name for the same tenant-1 id above), not just the
-	// username ("test-user") -- the two must never be the only name shown.
+	// whoami must show the tenant name, not only the username.
 	if !strings.Contains(result.Combined, "acme") {
 		t.Fatalf("expected whoami output to name the tenant (matching tenant list), got:\n%s", result.Combined)
 	}
@@ -103,11 +101,7 @@ func testPlatformVersionDryRunTracesResolvedCall(t *testing.T) {
 }
 
 func testPlatformVersionRealRunWithoutAWorkingToken(t *testing.T) {
-	// GET /v1/platform is unauthenticated (see platformAPIStubServer's own
-	// comment), so this must succeed even though the alias's cached access
-	// token is garbage -- the whole point of exposing this route is that it
-	// answers when a caller's credentials cannot be trusted to resolve
-	// anything else.
+	// The route answers even with garbage credentials; that is its purpose.
 	setup := env.New(t)
 	server := platformAPIStubServer(t)
 	alias := "erun+test@erun"
@@ -151,8 +145,6 @@ func testPlatformTenantCreateAndListRealRun(t *testing.T) {
 	if !strings.Contains(listResult.Combined, "acme") {
 		t.Fatalf("expected tenant list to include acme, got:\n%s", listResult.Combined)
 	}
-	// A tenant no token can resolve to must be flagged where it is
-	// listed, and a healthy one must not be.
 	unreachableLine := ""
 	acmeLine := ""
 	for _, line := range strings.Split(listResult.Combined, "\n") {
@@ -182,11 +174,7 @@ func testPlatformIdentityOrgCreateDryRun(t *testing.T) {
 	golden.Equal(t, "platform/identity_org_create_dry_run", normalize.Apply(result.Combined))
 }
 
-// Without a way to obtain an org id, an org-scoped tenant could only be
-// created with an empty, permanently unresolvable org value (see
-// tenant_create_and_list_real_run's "probeco" fixture above). This proves
-// the reachable path: create the org, feed its id into tenant create, and
-// the same org-scoped issuer that refuses an empty value accepts this one.
+// Creating the org first gives the org-scoped issuer a real org value to accept.
 func testPlatformIdentityOrgCreateAndTenantCreateReachablePathRealRun(t *testing.T) {
 	setup := env.New(t)
 	server := platformAPIStubServer(t)
@@ -206,10 +194,7 @@ func testPlatformIdentityOrgCreateAndTenantCreateReachablePathRealRun(t *testing
 	const issuer = "https://auth.reachable-path.example"
 	const orgFieldKey = "urn:zitadel:iam:user:resourceowner:id"
 
-	// Without the org id this reachable path just produced, the same
-	// issuer refuses -- proving the empty-org refusal is still live
-	// and that what follows is a genuine positive case, not a stub that
-	// always says yes.
+	// The same issuer refuses without the org id, so the stub is not always-yes.
 	refused := erun.Run(t, []string{
 		"platform", "tenant", "create", "--name", "acme-reachable-dead",
 		"--issuer", issuer, "--org-field-key", orgFieldKey,
@@ -248,10 +233,7 @@ func testPlatformTenantRepairOrgMappingDryRun(t *testing.T) {
 	golden.Equal(t, "platform/tenant_repair_org_mapping_dry_run", normalize.Apply(result.Combined))
 }
 
-// The repair path for a tenant already stuck in probeco's state (created
-// before the empty-org refusal, or left behind when its issuer was
-// converted to org-scoped afterward): an operations caller repairs a
-// tenant other than its own by naming --tenant-id explicitly.
+// An operations caller repairs another tenant's mapping via explicit --tenant-id.
 func testPlatformTenantRepairOrgMappingRealRun(t *testing.T) {
 	setup := env.New(t)
 	server := platformAPIStubServer(t)
@@ -269,9 +251,7 @@ func testPlatformTenantRepairOrgMappingRealRun(t *testing.T) {
 	}
 }
 
-// The post-enrollment grant: the one an operator reaches for after a user
-// already exists, since re-enrolling an enrolled identity is a no-op that
-// leaves its roles untouched. Both ids have to reach the request.
+// Re-enrolling an enrolled identity leaves its roles untouched, so grants go through this.
 func testPlatformUserGrantRoleDryRun(t *testing.T) {
 	setup := env.New(t)
 	seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
@@ -297,10 +277,7 @@ func testPlatformUserEnrollDryRun(t *testing.T) {
 	golden.Equal(t, "platform/user_enroll_dry_run", normalize.Apply(result.Combined))
 }
 
-// The cross-tenant recovery shape: an operations caller enrolls another
-// tenant's administrator directly. Both flags have to reach the request,
-// since an enrollment that lands as an ordinary member can only be elevated
-// from inside a tenant that may have nobody able to do it.
+// An enrollment landing as a plain member may be unrecoverable inside the tenant.
 func testPlatformUserEnrollWithRolesDryRun(t *testing.T) {
 	setup := env.New(t)
 	seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")

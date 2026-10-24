@@ -10,18 +10,10 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// orchestrator_launch_settings.go holds the CLI's writers for an orchestrator's
-// launch settings -- OrchestratorConfig.UseGateway, .Model and .Effort -- the
-// counterparts of the desktop's Edit orchestrator dialog. `erun list` reads
-// them back.
-
-// OrchestratorLaunchSettingDefault is the CLI-facing token that clears a model
-// or effort back to its default. The fields' own zero value ("") is that
-// default, and cannot double as a flag value that also means "no flag given".
+// OrchestratorLaunchSettingDefault is the CLI token that clears a model or effort, since ""
+// means "no flag given".
 const OrchestratorLaunchSettingDefault = "default"
 
-// ParseOrchestratorGatewayFlag resolves `on` or `off` into
-// OrchestratorConfig.UseGateway.
 func ParseOrchestratorGatewayFlag(value string) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "on":
@@ -32,16 +24,11 @@ func ParseOrchestratorGatewayFlag(value string) (bool, error) {
 	return false, fmt.Errorf("invalid gateway %q: must be \"on\" or \"off\"", value)
 }
 
-// ParseOrchestratorModelFlag resolves a CLI-facing model token into the value
-// OrchestratorConfig.Model stores. It checks only that one was given; whether
-// the model can be launched is decided against the catalog by
-// SetOrchestratorModel, so a dry run reports the same answer a real run would.
+// ParseOrchestratorModelFlag checks only that a model was given; SetOrchestratorModel validates it.
 func ParseOrchestratorModelFlag(value string) (string, error) {
 	return parseOrchestratorLaunchSettingFlag("model", "a model id", value)
 }
 
-// ParseOrchestratorEffortFlag resolves a CLI-facing effort token into the value
-// OrchestratorConfig.Effort stores, validated by SetOrchestratorEffort.
 func ParseOrchestratorEffortFlag(value string) (string, error) {
 	return parseOrchestratorLaunchSettingFlag("effort", "one of "+strings.Join(open.ClaudeEffortLevels, ", "), value)
 }
@@ -58,30 +45,24 @@ func parseOrchestratorLaunchSettingFlag(setting, expected, value string) (string
 	return trimmed, nil
 }
 
-// SetOrchestratorGatewayParams identifies the orchestrator to write and whether
-// it routes through the gateway catalog.
 type SetOrchestratorGatewayParams struct {
 	OrchestratorID string
 	UseGateway     bool
 }
 
-// SetOrchestratorModelParams identifies the orchestrator to write and the model
-// to record on it. Model is already parsed: "" clears it to the default.
+// SetOrchestratorModelParams carries an already-parsed Model; "" clears it.
 type SetOrchestratorModelParams struct {
 	OrchestratorID string
 	Model          string
 }
 
-// SetOrchestratorEffortParams identifies the orchestrator to write and the
-// effort to record on it. Effort is already parsed: "" clears it to the default.
+// SetOrchestratorEffortParams carries an already-parsed Effort; "" clears it.
 type SetOrchestratorEffortParams struct {
 	OrchestratorID string
 	Effort         string
 }
 
-// SetOrchestratorGateway turns an orchestrator's use of the gateway catalog on
-// or off. Turning it on with no catalog configured is refused: the orchestrator
-// would launch on the host's own sign-in while reading as routed.
+// SetOrchestratorGateway toggles gateway use; enabling it with no catalog is refused.
 func SetOrchestratorGateway(ctx core.Context, store OrchestratorAliasStore, params SetOrchestratorGatewayParams) (configpkg.OrchestratorConfig, error) {
 	return setOrchestratorLaunchSetting(ctx, store, params.OrchestratorID, orchestratorLaunchSettingWrite{
 		setting: "gateway",
@@ -90,8 +71,7 @@ func SetOrchestratorGateway(ctx core.Context, store OrchestratorAliasStore, para
 	})
 }
 
-// SetOrchestratorModel sets the model an orchestrator launches on. A model the
-// gateway cannot drive is refused when the orchestrator uses the gateway.
+// SetOrchestratorModel sets the launch model, refusing one the gateway cannot drive.
 func SetOrchestratorModel(ctx core.Context, store OrchestratorAliasStore, params SetOrchestratorModelParams) (configpkg.OrchestratorConfig, error) {
 	model := strings.TrimSpace(params.Model)
 	return setOrchestratorLaunchSetting(ctx, store, params.OrchestratorID, orchestratorLaunchSettingWrite{
@@ -117,8 +97,7 @@ type orchestratorLaunchSettingWrite struct {
 	apply   func(*configpkg.OrchestratorConfig)
 }
 
-// orchestratorLaunchSettingRemedy names the command that clears the check that
-// failed, which need not be the setting being written.
+// orchestratorLaunchSettingRemedy names the command for the failed check, not the setting written.
 func orchestratorLaunchSettingRemedy(err error, orchestratorID string) string {
 	var settingErr orchestratorLaunchSettingError
 	if !errors.As(err, &settingErr) {
@@ -137,10 +116,8 @@ func orchestratorLaunchSettingRemedy(err error, orchestratorID string) string {
 	return ""
 }
 
-// setOrchestratorLaunchSetting validates the orchestrator as it would be after
-// the write, not only the one field written: turning the gateway on can make an
-// already recorded model undriveable, and that combination must be refused by
-// whichever writer would create it.
+// setOrchestratorLaunchSetting validates the whole resulting orchestrator, since one
+// setting can invalidate another.
 func setOrchestratorLaunchSetting(ctx core.Context, store OrchestratorAliasStore, rawID string, write orchestratorLaunchSettingWrite) (configpkg.OrchestratorConfig, error) {
 	if store == nil {
 		return configpkg.OrchestratorConfig{}, fmt.Errorf("store is required")
@@ -162,8 +139,7 @@ func setOrchestratorLaunchSetting(ctx core.Context, store OrchestratorAliasStore
 
 	orchestrator := config.Orchestrators[orchestratorIndex]
 	write.apply(&orchestrator)
-	// Validated in dry-run too: a local config read, and a dry run that
-	// accepted a value a real run refuses would report a plan it cannot carry out.
+	// Validated in dry-run too, so a dry run refuses what a real run refuses.
 	if err := ValidateOrchestratorLaunchSettings(orchestrator, config.OpenRouter); err != nil {
 		if remedy := orchestratorLaunchSettingRemedy(err, orchestratorID); remedy != "" {
 			return configpkg.OrchestratorConfig{}, fmt.Errorf("orchestrator %s: %w -- %s", orchestratorID, err, remedy)

@@ -12,10 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// wireTimeOmitzeroRoots are the JSON roots a machine consumer actually reads:
-// `--output json`, the MCP edge, and the desktop's own read models. Every
-// timestamp reachable from one of them must render an unset value by
-// disappearing, never as the Go zero instant.
+// wireTimeOmitzeroRoots are the JSON roots machine consumers read.
 var wireTimeOmitzeroRoots = []any{
 	activity.EnvironmentIdleStatus{},
 	activity.EnvironmentActivitySnapshot{},
@@ -30,13 +27,8 @@ var wireTimeOmitzeroRoots = []any{
 	cloud.HostCredentialsStatus{},
 }
 
-// TestWireTimeFieldsOmitZeroNotOmitEmpty guards the whole class rather than the
-// fields one report named: encoding/json has no notion of an "empty" struct, so
-// omitempty on a value time.Time never fires and a never-set timestamp is
-// published as 0001-01-01T00:00:00Z — a real-looking instant a consumer cannot
-// distinguish from one that was actually recorded. omitzero is the tag that
-// works, and it is already how the stop-history record renders its own
-// optional ArmedAt.
+// omitempty never fires on a value time.Time, so an unset one would publish
+// as 0001-01-01T00:00:00Z.
 func TestWireTimeFieldsOmitZeroNotOmitEmpty(t *testing.T) {
 	for _, root := range wireTimeOmitzeroRoots {
 		found := findOmitemptyTimeFields(reflect.TypeOf(root), map[reflect.Type]bool{})
@@ -50,10 +42,7 @@ func TestWireTimeFieldsOmitZeroNotOmitEmpty(t *testing.T) {
 	}
 }
 
-// TestWireTimeFieldGuardDetectsViolation is the positive control: a walker that
-// silently stopped walking would let the next field through, so it is required
-// to find a violation that is really there — and to leave a correctly tagged
-// pointer field alone, since omitempty does omit a nil pointer.
+// Positive control for the walker; omitempty on a pointer is fine.
 func TestWireTimeFieldGuardDetectsViolation(t *testing.T) {
 	type planted struct {
 		Never time.Time `json:"never,omitempty"`
@@ -78,8 +67,6 @@ func TestWireTimeFieldGuardDetectsViolation(t *testing.T) {
 	}
 }
 
-// wireStructElement follows the pointer, slice, array and map wrappers a JSON
-// value can arrive behind, so the walk sees the struct they carry.
 func wireStructElement(typ reflect.Type) reflect.Type {
 	for typ.Kind() == reflect.Pointer || typ.Kind() == reflect.Slice ||
 		typ.Kind() == reflect.Array || typ.Kind() == reflect.Map {
@@ -88,8 +75,6 @@ func wireStructElement(typ reflect.Type) reflect.Type {
 	return typ
 }
 
-// findOmitemptyTimeFields describes every value time.Time reachable from typ
-// that carries omitempty, which encoding/json never honours.
 func findOmitemptyTimeFields(typ reflect.Type, seen map[reflect.Type]bool) []string {
 	typ = wireStructElement(typ)
 	if typ.Kind() != reflect.Struct || seen[typ] {

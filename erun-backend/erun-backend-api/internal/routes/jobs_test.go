@@ -46,8 +46,7 @@ type stubJobService struct {
 	claimed model.Job
 	updated model.Job
 	err     error
-	// updatedTenantID records the tenant the route named, so a test can hold
-	// the handler to passing the caller's own rather than merely passing one.
+	// updatedTenantID proves the handler passes the caller's own tenant.
 	updatedTenantID string
 }
 
@@ -75,10 +74,6 @@ func (stubJobEnvironments) Get(_ context.Context, environmentID string) (model.E
 	return model.Environment{EnvironmentID: environmentID}, nil
 }
 
-// TestListJobsReturnsAnEmptyArrayNotNull pins the client contract an empty
-// queue has to hold: a tenant with no jobs ranges over an empty list, and a
-// null body would force every caller to null-check a collection the platform
-// always has.
 func TestListJobsReturnsAnEmptyArrayNotNull(t *testing.T) {
 	routes := JobRoutes{jobs: &stubJobRepository{jobs: []model.Job{}}}
 	rec := httptest.NewRecorder()
@@ -93,9 +88,7 @@ func TestListJobsReturnsAnEmptyArrayNotNull(t *testing.T) {
 	}
 }
 
-// TestListJobsPassesEveryDocumentedFilter: the issue names five composable
-// filters, and a filter the route silently drops is worse than one it
-// rejects -- the caller gets an unfiltered queue and believes it is filtered.
+// A silently dropped filter returns an unfiltered queue the caller believes is filtered.
 func TestListJobsPassesEveryDocumentedFilter(t *testing.T) {
 	repo := &stubJobRepository{jobs: []model.Job{}}
 	routes := JobRoutes{jobs: repo}
@@ -119,11 +112,6 @@ func TestListJobsPassesEveryDocumentedFilter(t *testing.T) {
 	}
 }
 
-// TestClaimJobNamesTheHolderOnAConflict is the coordination primitive's whole
-// payload: a second actor asking for a held scope must be told *who* holds it,
-// what they are doing in prose, and since when. A bare 409 teaches a caller
-// nothing it can act on -- the defect the local activity lease has, where a
-// refusal is anonymous.
 func TestClaimJobNamesTheHolderOnAConflict(t *testing.T) {
 	started := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
 	svc := &stubJobService{err: &service.JobScopeHeldError{
@@ -168,10 +156,6 @@ func TestClaimJobNamesTheHolderOnAConflict(t *testing.T) {
 	}
 }
 
-// TestClaimJobRejectsAnUnknownJobType: job_type is a closed vocabulary so the
-// queue can group without a free-text bucket. A value outside it is refused at
-// the API rather than stored and discovered later by a dashboard that cannot
-// render it.
 func TestClaimJobRejectsAnUnknownJobType(t *testing.T) {
 	svc := &stubJobService{err: &service.InvalidJobInputError{Field: "jobType", Reason: "must be one of fix, review, gate, release, deploy, investigate, plan, triage, maintenance"}}
 	routes := JobRoutes{service: svc}
@@ -196,9 +180,6 @@ func TestClaimJobRejectsAnUnknownJobType(t *testing.T) {
 	}
 }
 
-// TestClaimJobNormalizesCallerCase: the CLI and MCP transports document
-// lowercase values ("fix", "agent"), and the route must accept what it teaches
-// rather than passing the caller's case straight into the closed vocabularies.
 func TestClaimJobNormalizesCallerCase(t *testing.T) {
 	svc := &stubJobService{}
 	routes := JobRoutes{service: svc}
@@ -222,10 +203,6 @@ func TestClaimJobNormalizesCallerCase(t *testing.T) {
 	}
 }
 
-// TestClaimJobNeverAcceptsAServerStampedTime: started_at is what a refused
-// claimant is told, so a caller's own clock must not be able to age a job.
-// The request body has no such field to send; this pins that a caller cannot
-// smuggle one in through an unknown key either.
 func TestClaimJobNeverAcceptsAServerStampedTime(t *testing.T) {
 	svc := &stubJobService{}
 	routes := JobRoutes{service: svc}
@@ -243,17 +220,12 @@ func TestClaimJobNeverAcceptsAServerStampedTime(t *testing.T) {
 	}
 }
 
-// TestUpdateJobRejectsAnUpdateToAFinishedJob: an outcome is immutable once
-// reached, the same discipline that keeps a review's recorded builds
-// append-only.
 func TestUpdateJobRejectsAnUpdateToAFinishedJob(t *testing.T) {
 	svc := &stubJobService{err: &service.JobAlreadyFinishedError{JobID: "job-1", Status: model.JobStatusSucceeded}}
 	routes := JobRoutes{service: svc}
 	req := httptest.NewRequest(http.MethodPatch, "/v1/jobs/job-1",
 		bytes.NewBufferString(`{"status":"FAILED"}`))
 	req.SetPathValue("job_id", "job-1")
-	// The write names the caller's tenant, so the handler needs the scoped
-	// security context the auth middleware would have installed.
 	req = req.WithContext(security.WithContext(req.Context(), security.Context{TenantID: "tenant-1", TenantType: string(model.TenantTypeCompany)}))
 	rec := httptest.NewRecorder()
 
@@ -276,10 +248,7 @@ func TestUpdateJobRejectsAnUpdateToAFinishedJob(t *testing.T) {
 	}
 }
 
-// TestListEnvironmentJobsConfirmsTheEnvironmentFirst: another tenant's
-// environment id must read as not-found rather than as an empty queue, the
-// same discipline the ai-sessions sub-route follows. An empty queue is a
-// confident "nothing is running there"; a foreign id is not.
+// A foreign environment id must read as not-found, not an empty queue.
 func TestListEnvironmentJobsScopesToTheEnvironment(t *testing.T) {
 	repo := &stubJobRepository{jobs: []model.Job{}}
 	routes := JobRoutes{jobs: repo, environments: stubJobEnvironments{}}

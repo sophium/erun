@@ -10,11 +10,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// TestRecommendedDeployRecovery locks the diagnosis → single-recovery mapping.
-// `erun doctor --dry-run` never reaches this classifier -- the recovery
-// prompt itself is skipped outright under --dry-run, since recommending and
-// running a recovery are both mutating concerns -- so it is unreachable from
-// the dry-run integration subprocess and is covered here.
+// The recovery prompt is skipped under --dry-run, so the integration goldens
+// cannot reach this classifier.
 func TestRecommendedDeployRecovery(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -46,9 +43,7 @@ func TestRecommendedDeployRecovery(t *testing.T) {
 			wantOK:     true,
 		},
 		{
-			// A status string that would otherwise fall into the "failed"
-			// default arm must not recommend a rollback when the read itself is
-			// the thing that failed, not the release.
+			// A failed read must not recommend a rollback.
 			name:          "unreadable release offers nothing even though the status text looks like a failure",
 			helmStatus:    "Error from server (Forbidden): secrets is forbidden: User \"jane\" cannot list resource \"secrets\"",
 			helmReadError: `observe: not authorized to read helm release "team-devops" in namespace "team-dev"`,
@@ -68,10 +63,7 @@ func TestRecommendedDeployRecovery(t *testing.T) {
 	}
 }
 
-// writeDoctorHelmStub points ERUN_HELM_BIN at a script that prints stdout and
-// stderr and exits with the given code, so a test can drive RunDeployDiagnosis
-// against the real, distinct shapes a live `helm status` invocation returns
-// (plain text, not the `-o json` shape observe reads) without a live cluster.
+// writeDoctorHelmStub points ERUN_HELM_BIN at a script with the given output and exit code.
 func writeDoctorHelmStub(t *testing.T, stdout, stderr string, exitCode int) {
 	t.Helper()
 	dir := t.TempDir()
@@ -90,11 +82,7 @@ func writeDoctorHelmStub(t *testing.T, stdout, stderr string, exitCode int) {
 	t.Setenv("ERUN_HELM_BIN", path)
 }
 
-// TestRunDeployDiagnosisRecordsHelmReadError: a failed helm read (here, an RBAC
-// denial reading the release Secrets) must populate HelmReadError, and that
-// alone must be enough for RecommendedDeployRecovery to refuse a destructive
-// recovery -- without this repo adding another strings.Contains arm for the
-// RBAC wording.
+// A failed helm read (RBAC denial) alone must block a destructive recovery.
 func TestRunDeployDiagnosisRecordsHelmReadError(t *testing.T) {
 	writeDoctorHelmStub(t, "", `Error from server (Forbidden): secrets is forbidden: User "jane" cannot list resource "secrets"`, 1)
 	writeKubectlStub(t, "", 0)
@@ -112,10 +100,7 @@ func TestRunDeployDiagnosisRecordsHelmReadError(t *testing.T) {
 	}
 }
 
-// TestRunDeployDiagnosisMissingReleaseHasNoReadError locks the unchanged
-// side: `helm status` also exits non-zero for a genuinely missing release,
-// but that is a confirmed answer, not a failed read, so HelmReadError must
-// stay empty.
+// A missing release is a confirmed answer, not a failed read.
 func TestRunDeployDiagnosisMissingReleaseHasNoReadError(t *testing.T) {
 	writeDoctorHelmStub(t, "", "Error: release: not found", 1)
 	writeKubectlStub(t, "", 0)
@@ -130,10 +115,7 @@ func TestRunDeployDiagnosisMissingReleaseHasNoReadError(t *testing.T) {
 	}
 }
 
-// TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback keeps the
-// unreadable-release guard from turning into "never recommend anything":
-// `helm status` exits 0 for a release that exists but genuinely failed, so
-// HelmReadError must stay empty and the rollback recommendation must survive.
+// A failed release still reads successfully and must still recommend rollback.
 func TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback(t *testing.T) {
 	writeDoctorHelmStub(t, "NAME: team-devops\nSTATUS: failed\nREVISION: 5", "", 0)
 	writeKubectlStub(t, "", 0)
@@ -149,10 +131,7 @@ func TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback(t *testing.T) {
 	}
 }
 
-// TestRunDeployDiagnosisRunsPodsProbeWhenHelmReadFailsForOtherReasons is the
-// control: an RBAC read failure is not evidence the whole cluster is
-// unreachable, so the pods probe must still run and ClusterUnreachable must
-// stay false.
+// An RBAC failure does not mean the cluster is unreachable.
 func TestRunDeployDiagnosisRunsPodsProbeWhenHelmReadFailsForOtherReasons(t *testing.T) {
 	writeDoctorHelmStub(t, "", `Error from server (Forbidden): secrets is forbidden: User "jane" cannot list resource "secrets"`, 1)
 	writeKubectlStub(t, "", 0)
@@ -164,10 +143,6 @@ func TestRunDeployDiagnosisRunsPodsProbeWhenHelmReadFailsForOtherReasons(t *test
 	}
 }
 
-// TestRunDeployDiagnosisDetectsUnreachableFromPodsProbe covers the other
-// direction: when the helm read itself succeeds but the pods probe is the
-// one that hits the unreachable API server, ClusterUnreachable must still be
-// set from that probe so later doctor sections skip their own reads too.
 func TestRunDeployDiagnosisDetectsUnreachableFromPodsProbe(t *testing.T) {
 	writeDoctorHelmStub(t, "NAME: team-devops\nSTATUS: deployed", "", 0)
 	writeKubectlStub(t, "Unable to connect to the server: dial tcp 10.0.0.1:6443: i/o timeout", 1)

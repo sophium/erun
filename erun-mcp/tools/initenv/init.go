@@ -60,10 +60,8 @@ func InitTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolR
 	}
 }
 
-// initToolExecute resolves the target once (its errors are refusals, not part
-// of the work to job-ify) and returns the closure that does the actual work,
-// so an async init still resolves tenant/environment before the call returns
-// rather than only discovering a bad input once the background job finishes.
+// initToolExecute resolves the target synchronously so a bad input is refused
+// before an async job starts.
 func initToolExecute(runtime shared.RuntimeConfig, input InitInput) (func(bool, io.Writer) (shared.CommandOutput, error), error) {
 	workDir, err := shared.RuntimeRepoPath(runtime.Context)
 	if err != nil {
@@ -114,11 +112,7 @@ func initToolExecute(runtime shared.RuntimeConfig, input InitInput) (func(bool, 
 
 		if envType := config.EnvironmentType(strings.TrimSpace(input.Type)); envType.IsValid() {
 			params.Type = envType
-			// The deprecated Remote bool models "not local-agent" for exactly the
-			// two legacy types it predates; deriving it from RemoteWorktree
-			// (rather than repeating "!= local-agent" here) keeps host correctly
-			// reporting false instead of inheriting the old exclusion's wrong
-			// answer for it.
+			// Derived from RemoteWorktree so host reports false.
 			params.Remote = (open.BootstrapInitParams{Type: envType}).RemoteWorktree()
 		} else {
 			params.Remote = input.Remote

@@ -149,8 +149,7 @@ func writeJobList(ctx core.Context, jobs []sharedpkg.EnvironmentJob) error {
 	return nil
 }
 
-// jobStatusLine renders the outcome without ever implying one that was not
-// recorded: an unknown job says so and says why.
+// jobStatusLine never implies an unrecorded outcome.
 func jobStatusLine(job sharedpkg.EnvironmentJob) string {
 	switch job.State {
 	case jobspkg.EnvironmentJobStateRunning:
@@ -176,10 +175,7 @@ func jobRunningLine(job sharedpkg.EnvironmentJob) string {
 	return line + jobExclusiveSuffix(job) + jobAliveSuffix(job) + jobAgentSuffix(job) + jobReinvocationSuffix(job) + jobOutputSuffix(job)
 }
 
-// jobExclusiveSuffix names the one thing that explains why an unrelated job
-// start here is being refused right now. Without it an operator reading `job
-// status` sees a running job and a refusal that mentions a lease id, with
-// nothing on screen connecting the two.
+// jobExclusiveSuffix links a running job to the lease refusing other starts.
 func jobExclusiveSuffix(job sharedpkg.EnvironmentJob) string {
 	if !job.Exclusive {
 		return ""
@@ -187,12 +183,7 @@ func jobExclusiveSuffix(job sharedpkg.EnvironmentJob) string {
 	return ", holding this environment exclusively"
 }
 
-// jobExitedLine renders the reason a clean exit cannot carry on its own. Every
-// other terminal line already did; this one did not, so a failed job's recorded
-// reason -- the only thing on the record that says what went wrong, and for a
-// task job the only place the work's own error text lands at all -- was
-// readable in JSON and invisible to anyone reading the human line. The signal
-// takes its place when there is one: that already is the reason.
+// jobExitedLine includes the signal, else the recorded failure reason.
 func jobExitedLine(job sharedpkg.EnvironmentJob) string {
 	line := fmt.Sprintf("exited %d: %s", jobExitCodeOrUnset(job), job.Name)
 	switch {
@@ -204,9 +195,7 @@ func jobExitedLine(job sharedpkg.EnvironmentJob) string {
 	return line + jobAgentSuffix(job) + jobReinvocationSuffix(job) + jobStartedJobFailedSuffix(job) + jobWorktreeSuffix(job) + jobCloneSuffix(job) + jobOutputSuffix(job)
 }
 
-// jobStartedJobFailedSuffix surfaces a job this job started and waited for
-// (see EnvironmentJobStateGateIncomplete) that finished without succeeding --
-// the one thing this job's own exit code cannot say once that wait is over.
+// jobStartedJobFailedSuffix surfaces a waited-for child job that did not succeed.
 func jobStartedJobFailedSuffix(job sharedpkg.EnvironmentJob) string {
 	if strings.TrimSpace(job.StartedJobFailed) == "" {
 		return ""
@@ -214,12 +203,7 @@ func jobStartedJobFailedSuffix(job sharedpkg.EnvironmentJob) string {
 	return ", " + job.StartedJobFailed
 }
 
-// jobCloneSuffix surfaces what happened to an agent job's own working
-// directory now that it has finished: reclaimed once nothing would be lost by
-// deleting it, or kept with the exact reason an operator would otherwise have
-// to work out by hand from git state. Silent either way, a vanished directory
-// and an accumulating one both read as the product doing nothing. See
-// work_clone_reclaim.go in erun-common.
+// jobCloneSuffix reports whether an agent job's clone was reclaimed or kept, and why.
 func jobCloneSuffix(job sharedpkg.EnvironmentJob) string {
 	if job.CloneReclaimed {
 		return ", clone reclaimed"
@@ -230,11 +214,7 @@ func jobCloneSuffix(job sharedpkg.EnvironmentJob) string {
 	return ""
 }
 
-// jobWorktreeSuffix surfaces a dirty working tree on any terminal line, so a
-// job that otherwise looks like a clean success still shows the one thing its
-// exit status cannot: uncommitted work in its own working directory, and
-// whether the supervisor managed to check-point it. See job_worktree.go in
-// erun-common for what this reports and why.
+// jobWorktreeSuffix surfaces uncommitted work and whether it was check-pointed.
 func jobWorktreeSuffix(job sharedpkg.EnvironmentJob) string {
 	if !job.WorktreeDirty {
 		return ""
@@ -242,9 +222,7 @@ func jobWorktreeSuffix(job sharedpkg.EnvironmentJob) string {
 	return ", " + jobWorktreeSummary(job)
 }
 
-// jobWorktreeSummary is the human-readable half of jobWorktreeSuffix, reused
-// by jobAwaitExit's error text so the two surfaces never describe the same
-// outcome differently.
+// jobWorktreeSummary is shared with jobAwaitExit so both describe it identically.
 func jobWorktreeSummary(job sharedpkg.EnvironmentJob) string {
 	switch {
 	case job.WorktreePushed:
@@ -256,9 +234,7 @@ func jobWorktreeSummary(job sharedpkg.EnvironmentJob) string {
 	}
 }
 
-// jobAbandonedLine is rendered distinctly from both exited and unknown: the
-// exit status was captured (unlike unknown), but it is never a success (unlike
-// exited) -- the reason names the background work nothing will ever report on.
+// jobAbandonedLine: the exit was captured but background work was left running.
 func jobAbandonedLine(job sharedpkg.EnvironmentJob) string {
 	line := fmt.Sprintf("abandoned %d: %s", jobExitCodeOrUnset(job), job.Name)
 	if strings.TrimSpace(job.Signal) != "" {
@@ -270,9 +246,7 @@ func jobAbandonedLine(job sharedpkg.EnvironmentJob) string {
 	return line + jobAgentSuffix(job) + jobReinvocationSuffix(job) + jobStartedJobFailedSuffix(job) + jobWorktreeSuffix(job) + jobOutputSuffix(job)
 }
 
-// jobGateIncompleteLine is rendered distinctly from abandoned: the still-running
-// work is a sibling job record this job started, not a process left behind in
-// its own process group.
+// jobGateIncompleteLine: the still-running work is a child job, not a leftover process.
 func jobGateIncompleteLine(job sharedpkg.EnvironmentJob) string {
 	line := fmt.Sprintf("gate-incomplete %d: %s", jobExitCodeOrUnset(job), job.Name)
 	if strings.TrimSpace(job.Signal) != "" {
@@ -292,10 +266,7 @@ func jobUnknownLine(job sharedpkg.EnvironmentJob) string {
 	return line + jobAgentSuffix(job) + jobOutputSuffix(job)
 }
 
-// jobAliveSuffix surfaces the supervisor's alive beat for a running job, so an
-// operator watching `job status` sees the same signal the 5s caller rule acts
-// on rather than only the frozen activity string a stalled beat would
-// otherwise leave on screen.
+// jobAliveSuffix shows the supervisor's alive beat.
 func jobAliveSuffix(job sharedpkg.EnvironmentJob) string {
 	if job.AliveAgeMs == nil {
 		return ""
@@ -303,9 +274,7 @@ func jobAliveSuffix(job sharedpkg.EnvironmentJob) string {
 	return fmt.Sprintf(", last beat %dms ago", *job.AliveAgeMs)
 }
 
-// jobAgentSuffix reports what an agent run is doing right now. An agent job that
-// has emitted nothing yet says so rather than reading as an idle one — the
-// difference is exactly what a caller polling for progress needs.
+// jobAgentSuffix distinguishes an agent that has emitted nothing from an idle one.
 func jobAgentSuffix(job sharedpkg.EnvironmentJob) string {
 	if job.Kind != jobspkg.EnvironmentJobKindAgent {
 		return ""
@@ -320,10 +289,6 @@ func jobAgentSuffix(job sharedpkg.EnvironmentJob) string {
 	return suffix + ", no events yet"
 }
 
-// jobReinvocationSuffix surfaces a job's automatic bounded resumptions, the
-// one thing that turns "this job started work that failed" into a real second
-// chance for the agent to act rather than a silent record nobody reads. Empty
-// for a job that never needed one.
 func jobReinvocationSuffix(job sharedpkg.EnvironmentJob) string {
 	if job.ReinvocationCount <= 0 {
 		return ""

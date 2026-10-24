@@ -11,49 +11,31 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// An agent run is a job kind rather than an opaque command because the AI tools
-// say nothing until they exit: a multi-hour run sits at zero captured bytes
-// while it is actively editing files, so "read the log" cannot answer what it is
-// doing. Naming the kind lets erun invoke the tool in the streaming mode it
-// already has and fold the events into one progress view, which is what keeps
-// the answer the same shape across tools and across a vendor reshaping its
-// stream. Everything vendor-specific stops at the parsers in this file.
+// Agent runs are their own job kind because AI tools print nothing until exit;
+// streaming mode lets erun fold events into progress. Vendor specifics stay in
+// this file's parsers.
 
 const (
-	// EnvironmentJobKindCommand is a plain argv job; its log is whatever the
-	// work printed.
 	EnvironmentJobKindCommand = "command"
-	// EnvironmentJobKindAgent is an AI tool run in streaming mode; its log is the
-	// tool's event stream and its progress is normalized from it.
+	// EnvironmentJobKindAgent is an AI tool run in streaming mode; progress is
+	// normalized from its event stream.
 	EnvironmentJobKindAgent = "agent"
-	// EnvironmentJobKindTask is Go work run asynchronously in this process
-	// rather than a subprocess a supervisor waits on. Its typed return value is
-	// captured directly onto Result once it finishes, and liveness is decided
-	// by this process's own pid rather than a supervisor's. Its log is whatever
-	// the work wrote to the writer it was handed — there is no subprocess whose
-	// stdio could be captured instead, and a failed task with no log at all was
-	// undiagnosable after the fact.
+	// EnvironmentJobKindTask is Go work run in this process: its result is
+	// captured directly and liveness is this process's pid.
 	EnvironmentJobKindTask = "task"
 
 	agentToolClaude = "claude"
 	agentToolCodex  = "codex"
 
-	// agentTextLimit bounds every free-text field folded into progress, so the
-	// job record stays small no matter how much the agent says.
 	agentTextLimit = 240
-	// agentPendingLimit bounds the partial trailing line the reader carries
-	// between polls, so a stream that never emits a newline cannot grow it.
+	// agentPendingLimit bounds the carried partial line for streams without newlines.
 	agentPendingLimit = 1 << 20
 )
 
-// AgentJobTools are the AI tools a job can run as an agent, in the order the
-// error message lists them.
+// AgentJobTools are the AI tools a job can run as an agent.
 var AgentJobTools = []string{agentToolClaude, agentToolCodex}
 
-// AgentJobCommand builds the argv for an agent run. Each tool is invoked in its
-// streaming mode — the only mode that emits before the run ends — so the job's
-// existing incremental output read works for an agent job with no change to its
-// contract.
+// AgentJobCommand builds the argv for an agent run in the tool's streaming mode.
 func AgentJobCommand(tool, prompt string) ([]string, error) {
 	name := strings.ToLower(strings.TrimSpace(tool))
 	text := strings.TrimSpace(prompt)
@@ -62,16 +44,8 @@ func AgentJobCommand(tool, prompt string) ([]string, error) {
 	}
 	switch name {
 	case agentToolClaude:
-		// --verbose is what makes stream-json emit per event instead of one
-		// closing envelope, which is the whole point of running it this way.
-		//
-		// --disallowedTools ScheduleWakeup: this run is a one-shot supervised
-		// process with no later invocation to wake into, unlike the orchestrator's
-		// own persistent session (command/ai), which keeps the tool. Offered here,
-		// the agent could schedule a wakeup that never fires and end its turn
-		// while the supervisor records a clean exit. Denying the tool removes it
-		// from what the model is even offered, rather than rejecting the call
-		// after the model has committed to it.
+		// --verbose makes stream-json emit per event. ScheduleWakeup is denied:
+		// a one-shot run has nothing to wake into and would end its turn early.
 		return []string{agentToolClaude, "-p", text, "--output-format", "stream-json", "--verbose", "--disallowedTools", "ScheduleWakeup"}, nil
 	case agentToolCodex:
 		return []string{agentToolCodex, "exec", "--json", text}, nil
@@ -80,21 +54,9 @@ func AgentJobCommand(tool, prompt string) ([]string, error) {
 	}
 }
 
-// AgentJobCommandPrompt recovers the prompt AgentJobCommand was built from,
-// reading the argv that run's own job record kept (EnvironmentJob.Command).
-// It is the constructor's exact inverse and refuses anything that is not its
-// own output, so a caller never gets a fragment of some other argv read back
-// as if it were the task: the record outlives the erun that wrote it, and an
-// argv a later or older version shaped differently is not this function's to
-// guess at. Empty means "not recoverable", and every caller must treat it
-// that way rather than substituting something plausible.
-//
-// It exists for the bounded reinvocation (job_supervisor.go), which resumes an
-// agent's own session to act on work it left behind. A resumed turn that is
-// told only about the failure answers only the failure — and a one-shot run's
-// final message is the only channel its actual finding has, so a resumption
-// that displaces it destroys the run's whole result. Restating the task the
-// turn was originally given is what keeps the resumed message answering both.
+// AgentJobCommandPrompt is AgentJobCommand's exact inverse and returns "" for
+// any other argv shape; the resumed turn restates the task so its final
+// message still answers it.
 func AgentJobCommandPrompt(tool string, command []string) string {
 	name := strings.ToLower(strings.TrimSpace(tool))
 	switch name {
@@ -110,12 +72,8 @@ func AgentJobCommandPrompt(tool string, command []string) string {
 	return ""
 }
 
-// AgentJobResumeCommand builds the argv for a bounded follow-up turn of a run
-// AgentJobCommand already started, resumed via the session/thread id that
-// turn's own stream reported (AgentJobProgress.SessionID) rather than restated
-// from scratch, so `claude -p --resume <id>` is genuine conversational
-// continuation. codex's non-interactive twin (`codex exec resume <id>
-// <prompt>`) is built the same way, but its context survival is unverified.
+// AgentJobResumeCommand builds a follow-up turn resuming the reported session;
+// codex's context survival across resume is unverified.
 func AgentJobResumeCommand(tool, sessionID, prompt string) ([]string, error) {
 	name := strings.ToLower(strings.TrimSpace(tool))
 	id := strings.TrimSpace(sessionID)
@@ -136,8 +94,7 @@ func AgentJobResumeCommand(tool, sessionID, prompt string) ([]string, error) {
 	}
 }
 
-// NormalizeAgentJobTool resolves the tool name a job records, so a caller's
-// casing never reaches the record or the argv.
+// NormalizeAgentJobTool resolves the tool name so caller casing never reaches the record.
 func NormalizeAgentJobTool(tool string) (string, error) {
 	name := strings.ToLower(strings.TrimSpace(tool))
 	for _, candidate := range AgentJobTools {
@@ -148,13 +105,9 @@ func NormalizeAgentJobTool(tool string) (string, error) {
 	return "", fmt.Errorf("unsupported agent tool %q: expected one of %s", tool, strings.Join(AgentJobTools, ", "))
 }
 
-// agentProgressReader folds an agent's event stream into progress as bytes
-// arrive. It is fed directly from the child process's stdout/stderr writes
-// (agentProgressReader.feed), independent of whatever the job's output log
-// retains — the byte cap that bounds the log on disk must not also silence
-// progress, since the progress fields it folds into are themselves small and
-// bounded. Two of the process's own pipe-copying goroutines can write
-// concurrently, so every method locks.
+// agentProgressReader folds the event stream as bytes arrive, fed from the
+// process writes so the log's byte cap cannot silence progress. Two pipe
+// goroutines write concurrently, so every method locks.
 type agentProgressReader struct {
 	tool string
 
@@ -167,25 +120,19 @@ func newAgentProgressReader(tool string) *agentProgressReader {
 	return &agentProgressReader{tool: tool, progress: shared.AgentJobProgress{Tool: tool}}
 }
 
-// snapshot returns progress as it currently stands.
 func (r *agentProgressReader) snapshot() shared.AgentJobProgress {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.progress
 }
 
-// feed folds newly-arrived bytes into progress. It is called from the same
-// writer that captures the job's output, but it sees every byte the process
-// wrote, not only the bytes the output cap kept.
 func (r *agentProgressReader) feed(chunk []byte) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.consume(chunk)
 }
 
-// consume splits the arrived bytes on newlines, folding complete lines and
-// carrying the partial trailing one — a feed can land mid-line, and re-reading
-// it from the start would double-count everything before it. Caller holds mu.
+// consume carries a partial trailing line between feeds. Caller holds mu.
 func (r *agentProgressReader) consume(chunk []byte) {
 	buffer := make([]byte, 0, len(r.pending)+len(chunk))
 	buffer = append(buffer, r.pending...)
@@ -206,8 +153,7 @@ func (r *agentProgressReader) consume(chunk []byte) {
 
 func (r *agentProgressReader) apply(line []byte) {
 	trimmed := strings.TrimSpace(string(line))
-	// The tools interleave plain diagnostic lines with their JSON events; a line
-	// that is not an event is not a parse failure worth reporting.
+	// Plain diagnostic lines interleave with events and are not parse failures.
 	if !strings.HasPrefix(trimmed, "{") {
 		return
 	}
@@ -228,16 +174,13 @@ type claudeStreamEvent struct {
 	NumTurns int                  `json:"num_turns"`
 	IsError  bool                 `json:"is_error"`
 	Message  *claudeStreamMessage `json:"message"`
-	// SessionID rides on every event claude's stream-json mode emits, from the
-	// very first ("system"/"init") one -- unlike Result, which arrives only on
-	// the closing event.
+	// SessionID is on every event, unlike Result which only the last carries.
 	SessionID string `json:"session_id"`
 }
 
 type claudeStreamMessage struct {
 	ID string `json:"id"`
-	// Content is raw because the same key carries an array of blocks on an
-	// assistant event and a plain string on some others.
+	// Content is an array of blocks on assistant events and a string on others.
 	Content json.RawMessage `json:"content"`
 }
 
@@ -248,7 +191,6 @@ type claudeContentBlock struct {
 	Input json.RawMessage `json:"input"`
 }
 
-// applyClaudeAgentEvent folds one `claude -p --output-format stream-json` event.
 func applyClaudeAgentEvent(progress *shared.AgentJobProgress, raw []byte) bool {
 	var event claudeStreamEvent
 	if err := json.Unmarshal(raw, &event); err != nil {
@@ -282,8 +224,7 @@ func applyClaudeAssistantEvent(progress *shared.AgentJobProgress, event claudeSt
 	if event.Message == nil {
 		return
 	}
-	// One assistant message arrives as several events; the id is what separates
-	// a new turn from another block of the same one.
+	// One message spans several events; the id separates turns.
 	if id := strings.TrimSpace(event.Message.ID); id != "" && id != progress.LastMessageID {
 		progress.LastMessageID = id
 		progress.Turns++
@@ -307,9 +248,7 @@ func applyClaudeAssistantEvent(progress *shared.AgentJobProgress, event claudeSt
 	}
 }
 
-// agentToolInput is the union of the input keys the tools name a target with.
-// The first non-empty one in the order read below is what a reader recognises
-// the call by, so an unknown tool still reports something usable.
+// agentToolInput is the union of the input keys tools name a target with.
 type agentToolInput struct {
 	FilePath     string `json:"file_path"`
 	Path         string `json:"path"`
@@ -350,9 +289,7 @@ type codexStreamEvent struct {
 	Error   *struct {
 		Message string `json:"message"`
 	} `json:"error"`
-	// ThreadID names the conversation on codex's own "thread.started" event,
-	// the first event a `codex exec --json` run emits -- codex's twin of
-	// claude's per-event session_id above.
+	// ThreadID arrives on codex's first event, its twin of claude's session_id.
 	ThreadID string `json:"thread_id"`
 }
 
@@ -369,9 +306,6 @@ type codexStreamItem struct {
 	} `json:"changes"`
 }
 
-// applyCodexAgentEvent folds one `codex exec --json` thread event. Codex reports
-// work as items rather than tool calls, so the item type is what the activity is
-// named from.
 func applyCodexAgentEvent(progress *shared.AgentJobProgress, raw []byte) bool {
 	var event codexStreamEvent
 	if err := json.Unmarshal(raw, &event); err != nil {
@@ -399,9 +333,6 @@ func applyCodexAgentEvent(progress *shared.AgentJobProgress, raw []byte) bool {
 	return true
 }
 
-// applyCodexThreadStartedEvent captures the thread id off codex's first event,
-// split out of applyCodexAgentEvent's switch so a plain call keeps that
-// switch's own cyclomatic complexity from growing.
 func applyCodexThreadStartedEvent(progress *shared.AgentJobProgress, event codexStreamEvent) {
 	if id := strings.TrimSpace(event.ThreadID); id != "" {
 		progress.SessionID = id
@@ -423,8 +354,7 @@ func applyCodexItem(progress *shared.AgentJobProgress, item *codexStreamItem, co
 	if tool == "" {
 		return
 	}
-	// Only a completed item counts as work run; started and updated are the same
-	// item still in flight, and counting each would inflate the total.
+	// Only completed items count; started/updated are the same item in flight.
 	if completed {
 		progress.ToolsRun++
 	}
@@ -433,8 +363,6 @@ func applyCodexItem(progress *shared.AgentJobProgress, item *codexStreamItem, co
 	progress.Activity = agentActivityLabel(tool, target)
 }
 
-// codexItemTarget maps a codex thread item onto erun's own tool vocabulary, so a
-// codex file_change and a claude Edit read the same way to a caller.
 func codexItemTarget(item *codexStreamItem) (string, string) {
 	switch item.Type {
 	case "command_execution":
@@ -475,8 +403,6 @@ func codexMcpToolName(item *codexStreamItem) string {
 	}
 }
 
-// agentActivityLabel turns a tool call into the line the desktop and the status
-// view show, so an agent job reports "editing <file>" rather than "running".
 func agentActivityLabel(tool, target string) string {
 	verb := agentToolVerb(tool)
 	if strings.TrimSpace(target) == "" {
@@ -485,9 +411,7 @@ func agentActivityLabel(tool, target string) string {
 	return verb + " " + target
 }
 
-// agentToolVerbs is the fixed vocabulary an activity line is normalized into. It
-// is a closed set on purpose: a caller renders the same phrases whichever AI
-// tool produced the event, and an unrecognised tool still reads sensibly.
+// agentToolVerbs is closed on purpose so every AI tool renders the same phrases.
 var agentToolVerbs = map[string]string{
 	"Edit":         "editing",
 	"MultiEdit":    "editing",
@@ -520,8 +444,6 @@ func collapseAgentWhitespace(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
-// truncateAgentText bounds a folded value on a rune boundary, so a record can
-// never carry an agent's whole essay and never carries a broken rune either.
 func truncateAgentText(value string) string {
 	value = strings.TrimSpace(value)
 	if utf8.RuneCountInString(value) <= agentTextLimit {

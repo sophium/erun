@@ -9,16 +9,10 @@ import (
 	"testing"
 )
 
-// The heartbeat exists so a client can tell a working session from a leftover
-// socket. This runs the generated script against real sockets in a temp dir:
-// no dtach master is alive there, so every socket must report PID 0 — the
-// "process is gone, stop claiming to run" direction. The live direction has no
-// dtach to attach in a unit test and is locked at the consumer instead
-// (erun-ui TestSessionRunningFollowsHeartbeatNotStreamSilence).
+// No dtach master is alive here, so every socket reports PID 0. The live direction is
+// covered in erun-ui (TestSessionRunningFollowsHeartbeatNotStreamSilence).
 func TestRemoteAppSessionHeartbeatScriptReportsSocketsWithNoLiveMaster(t *testing.T) {
-	// Not t.TempDir(): it embeds the test name, and a unix socket path is capped
-	// near 104 bytes, so binding under it fails with "invalid argument" on a host
-	// whose temp root is already long (macOS /var/folders/...).
+	// Not t.TempDir(): unix socket paths are capped near 104 bytes.
 	dir, err := os.MkdirTemp("", "erun-sock")
 	if err != nil {
 		t.Fatalf("temp dir: %v", err)
@@ -31,8 +25,6 @@ func TestRemoteAppSessionHeartbeatScriptReportsSocketsWithNoLiveMaster(t *testin
 		}
 		t.Cleanup(func() { _ = listener.Close() })
 	}
-	// A plain file with the session suffix is not a socket and must be ignored,
-	// so a stray file can never inflate the running count.
 	if err := os.WriteFile(filepath.Join(dir, "team-dev-stray.dtach"), []byte("x"), 0o600); err != nil {
 		t.Fatalf("write stray file: %v", err)
 	}
@@ -59,8 +51,7 @@ func TestRemoteAppSessionHeartbeatScriptReportsSocketsWithNoLiveMaster(t *testin
 	}
 }
 
-// An empty session dir must produce no heartbeats at all: the glob is
-// unmatched, so the loop body must not run once with a literal `*.dtach`.
+// An unmatched glob must not run the loop once with a literal `*.dtach`.
 func TestRemoteAppSessionHeartbeatScriptIsSilentWithoutSockets(t *testing.T) {
 	script := remoteAppSessionHeartbeatScriptIn(t.TempDir(), "team", "dev")
 	output, err := exec.Command("/bin/sh", "-c", script).CombinedOutput()

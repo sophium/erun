@@ -7,9 +7,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// newFakeClock reuses the fakeClock defined in deploy_pod_watch_test.go —
-// timing is awkward to test deterministically, so both suites control
-// elapsed time exactly instead of sleeping.
 func newFakeClock() *fakeClock {
 	return &fakeClock{t: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
 }

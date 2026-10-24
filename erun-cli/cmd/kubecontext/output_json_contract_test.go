@@ -10,8 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// emptyCloudConfig is the state the reported defect is about: a config that
-// resolves fine and lists no cloud contexts.
 type emptyCloudConfig struct{}
 
 func (emptyCloudConfig) LoadERunConfig() (config.ERunConfig, string, error) {
@@ -20,11 +18,6 @@ func (emptyCloudConfig) LoadERunConfig() (config.ERunConfig, string, error) {
 
 func (emptyCloudConfig) SaveERunConfig(config.ERunConfig) error { return nil }
 
-// TestContextListJSONAlwaysCarriesTheCollection drives the real command body
-// over the CLI half of the shape context_list shares with the MCP tool: an
-// environment with no managed contexts answered `{}`, so the field a caller
-// reads was not merely null but gone, indistinguishable from a result that
-// does not report contexts at all.
 func TestContextListJSONAlwaysCarriesTheCollection(t *testing.T) {
 	var buf bytes.Buffer
 	ctx := core.Context{Output: core.OutputJSON, Stdout: &buf, Stderr: &buf}

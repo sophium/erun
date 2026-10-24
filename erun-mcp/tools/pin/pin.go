@@ -17,11 +17,7 @@ import (
 type PinInput struct {
 	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment to re-pin; defaults to the MCP runtime context tenant"`
 	Environment string `json:"environment,omitempty" jsonschema:"environment to re-pin; defaults to the MCP runtime context environment"`
-	// ProjectRoot names the checkout to rewrite. A human at a shell has a cwd
-	// the skill's own guidance can point at ("run from inside the tenant
-	// repository"); an MCP caller has no cwd to be inside of, so this is its
-	// only way to say which repository it means when the server's own bound
-	// repo path is missing or wrong.
+	// ProjectRoot names the checkout to rewrite; an MCP caller has no cwd.
 	ProjectRoot string `json:"projectRoot,omitempty" jsonschema:"repo root holding the sites to re-pin (Terraform, umbrella charts, the build-env image tag); defaults to the runtime repo path. Required when that default is not resolvable -- there is no cwd fallback here"`
 	Version     string `json:"version,omitempty" jsonschema:"erun version to pin every reference to; omit to pin to the latest published stable release"`
 	Revert      bool   `json:"revert,omitempty" jsonschema:"when true, pin back to the version recorded before the last re-pin"`
@@ -52,10 +48,6 @@ func PinTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRe
 	}
 }
 
-// runPinToolCommand resolves the plan and applies it unless previewing. Split
-// out of pinTool's execute closure so the tenant/environment/root resolution,
-// the plan build, and the apply each read as one step rather than piling into
-// a single over-complex function.
 func runPinToolCommand(runtime shared.RuntimeConfig, input PinInput, runCtx core.Context) (*shared.PinOutput, error) {
 	tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {
@@ -69,9 +61,7 @@ func runPinToolCommand(runtime shared.RuntimeConfig, input PinInput, runCtx core
 	if err != nil {
 		return nil, err
 	}
-	// Not the MCP call's own context: an async pin runs in a background task
-	// job that outlives this call, so tying the registry lookup to a context
-	// the request already cancelled would fail it every time.
+	// Background, not the request context: an async pin outlives the call.
 	target, err := resolvePinToolTarget(context.Background(), runtime, input, projectRoot, tenant, environment)
 	if err != nil {
 		return nil, err
@@ -97,9 +87,8 @@ func runPinToolCommand(runtime shared.RuntimeConfig, input PinInput, runCtx core
 	return &out, nil
 }
 
-// applyPinPlanUnlessPreviewing writes the plan unless this is a preview or the
-// tree is already aligned. The previous version is recorded before anything
-// moves, so a revert has somewhere to go even if the rewrite fails partway.
+// applyPinPlanUnlessPreviewing records the previous version first so a revert
+// works even after a partial rewrite.
 func applyPinPlanUnlessPreviewing(runtime shared.RuntimeConfig, runCtx core.Context, plan lifecycle.PinPlan, workDir, tenant, environment string, envConfig config.EnvConfig) (shared.PinOutput, error) {
 	out := shared.PinOutput{Plan: plan, Changed: len(plan.Changes())}
 	if runCtx.DryRun || plan.Aligned() {
@@ -111,18 +100,13 @@ func applyPinPlanUnlessPreviewing(runtime shared.RuntimeConfig, runCtx core.Cont
 	if err := lifecycle.ApplyPinPlan(plan); err != nil {
 		return shared.PinOutput{}, err
 	}
-	// The CLI transport's own runtimeversion/runtimeimage/runtimechart sites
-	// live in erun's config store, not a repo file, so ApplyPinPlan never
-	// touches them -- this half was missing here entirely, leaving even
-	// runtimeversion unmoved by an MCP-driven re-pin.
+	// Runtime version/image/chart live in the config store, not the repo.
 	if updated, changed := lifecycle.ApplyPinnedEnvConfig(envConfig, plan); changed {
 		if err := runtime.Store.SaveEnvConfig(tenant, updated); err != nil {
 			return shared.PinOutput{}, err
 		}
 	}
-	// The lock beside a rewritten Chart.yaml still names the old versions, and
-	// deploy refuses a lock that disagrees with its chart — so an agent that
-	// re-pinned and stopped here would have left a tree deploy cannot use.
+	// deploy refuses a Chart.lock that disagrees with its Chart.yaml.
 	if err := lifecycle.RefreshPinnedChartLocks(runCtx, plan, nil); err != nil {
 		return shared.PinOutput{}, err
 	}
@@ -130,13 +114,8 @@ func applyPinPlanUnlessPreviewing(runtime shared.RuntimeConfig, runCtx core.Cont
 	return out, nil
 }
 
-// resolvePinToolProjectRoot answers which checkout pin rewrites. Unlike the CLI
-// (resolvePinProjectRoot, erun-cli/cmd/pin/pin.go), this never falls back to a
-// working directory: the CLI's cwd fallback stands in for a human who ran the
-// command from inside the tenant repo, but an MCP caller has no cwd to be
-// inside of, so a directory this process happens to be running in (its own
-// cwd, a pod home directory) is never an acceptable stand-in for "the tenant's
-// repo" — a missing root refuses instead of widening to whatever is there.
+// resolvePinToolProjectRoot never falls back to the working directory, which is
+// not the tenant repo for an MCP caller.
 func resolvePinToolProjectRoot(runtime shared.RuntimeConfig, input PinInput) (string, error) {
 	projectRoot := shared.FirstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 	if projectRoot == "" {
@@ -145,9 +124,8 @@ func resolvePinToolProjectRoot(runtime shared.RuntimeConfig, input PinInput) (st
 	return projectRoot, nil
 }
 
-// resolvePinToolTarget answers which version to move to, and refuses one that is
-// not published — a pin to an unpublished version only fails much later, at a
-// terraform init or a chart pull, far from the thing that caused it.
+// resolvePinToolTarget refuses an unpublished version, which would only fail
+// later at terraform init or chart pull.
 func resolvePinToolTarget(ctx context.Context, runtime shared.RuntimeConfig, input PinInput, workDir, tenant, environment string) (string, error) {
 	if input.Revert {
 		previous, ok := lifecycle.PinPrevious(workDir, tenant, environment)
@@ -167,8 +145,7 @@ func resolvePinToolTarget(ctx context.Context, runtime shared.RuntimeConfig, inp
 		}
 		return versions.LatestStable, nil
 	}
-	// An empty listing means the registry could not be read, which is not the
-	// same as the version being absent.
+	// An empty listing means the registry was unreadable, not that the version is absent.
 	if len(versions.Tags) > 0 {
 		wanted := strings.TrimPrefix(explicit, "v")
 		for _, tag := range versions.Tags {

@@ -14,19 +14,8 @@ import (
 )
 
 func testDeployDryRunRemoteEnvClusterRegistryChartFromRuntimeImage(t *testing.T) {
-	// The `--cluster-registry` branch of the chart-registry resolver. The env's
-	// deploy registry is the in-cluster erun-registry (a cluster: entry resolved
-	// from the kube-context), which holds the tenant's built app images but never
-	// the erun platform chart. So the runtime chart and RUNTIME_REGISTRY must
-	// resolve from the runtime image's own registry (ghcr.io/sophium), not the
-	// in-cluster pull host — resolving them to the cluster registry would fail
-	// every chart pull. This locks the branch that fix 49f7f92f introduced, the
-	// counterpart to the plain-env branch every other remote deploy golden pins.
-	// The cluster entry is concretized in dry-run via the kubectl svc ClusterIP
-	// lookup, which returns a placeholder without touching a cluster. The
-	// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam confirms erun-devops published
-	// specifically in ghcr.io/sophium, which is what proves resolution reaches
-	// that registry rather than refusing.
+	// With --cluster-registry, the runtime chart and RUNTIME_REGISTRY resolve from
+	// the runtime image's registry: the in-cluster registry never holds the platform chart.
 	setup := env.New(t)
 	fixture.SeedClusterRegistryRemoteTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.0")
@@ -38,15 +27,8 @@ func testDeployDryRunRemoteEnvClusterRegistryChartFromRuntimeImage(t *testing.T)
 }
 
 func testDeployDryRunRuntimeChartResolvesFromThePlatformRegistry(t *testing.T) {
-	// The reported deadlock: a tenant whose deploy registry is its own ECR
-	// holds that tenant's app images and no charts/* repository at all, so
-	// neither its umbrella nor the shared platform chart is in it and the
-	// deploy failed at every version. The ladder's last rung looks where erun
-	// actually publishes the platform chart — the runtime image's registry,
-	// ghcr.io/sophium here — and the deploy resolves there instead. The trace
-	// names each rung it passed over, so the search itself is auditable.
-	// The registry-qualified ERUN_PUBLISHED_CHART_PROBE_OVERRIDE entry is what
-	// puts erun-devops in one registry and not the other.
+	// A deploy registry without charts falls back to the runtime image's registry;
+	// the trace names each skipped rung.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.0")
@@ -58,10 +40,8 @@ func testDeployDryRunRuntimeChartResolvesFromThePlatformRegistry(t *testing.T) {
 }
 
 func testDeployDryRunRuntimeChartPrefersTheDeployRegistryOverThePlatformRegistry(t *testing.T) {
-	// No-regression guard on the widened search: when the deploy registry does
-	// publish the shared platform chart, that is still what installs — the
-	// runtime image's registry is a last resort, not a preference. Both
-	// registries publish erun-devops here, and the deploy stops at the first.
+	// The runtime image's registry is a last resort: the deploy registry wins when
+	// it publishes the chart.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=registry.example/test/erun-devops:1.0.0,ghcr.io/sophium/erun-devops:1.0.0")
@@ -73,11 +53,8 @@ func testDeployDryRunRuntimeChartPrefersTheDeployRegistryOverThePlatformRegistry
 }
 
 func testDeployDryRunOperatorSetRuntimeRegistryStandsOverADifferentResolution(t *testing.T) {
-	// The memo is how an operator redirects the runtime chart search
-	// (`erun init --runtime-registry`), so a deploy that resolves somewhere
-	// else keeps the operator's value and says so, naming the command that
-	// would change it. Without the trace the divergence is invisible: the
-	// deploy succeeds either way, and only reading the config would show it.
+	// A deploy resolving outside the runtimeregistry memo keeps the memo and traces
+	// the divergence.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	appendEnvConfig(t, setup, "team", "dev", "runtimeregistry: ghcr.io/petios\n")
@@ -90,11 +67,7 @@ func testDeployDryRunOperatorSetRuntimeRegistryStandsOverADifferentResolution(t 
 }
 
 func testDeployRealRunRecordsTheRegistryTheRuntimeChartResolvedFrom(t *testing.T) {
-	// The memo must name the rung the chart resolved at, not where the search
-	// started: an env whose deploy registry carries no platform chart must not
-	// record that registry as the place erun's artifacts live. Real-run because the persist is the
-	// side effect under test, and the assertion reads the config the goldens
-	// cannot see.
+	// The memo records the registry the chart resolved at, not where the search started.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envVars := deployStubEnv(t, setup, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.99")
@@ -106,9 +79,6 @@ func testDeployRealRunRecordsTheRegistryTheRuntimeChartResolvedFrom(t *testing.T
 }
 
 func testDeployRealRunRecordsTheDeployRegistryWhenTheChartResolvesThere(t *testing.T) {
-	// The twin: a chart found where the search started is memoized there,
-	// so environments whose chart is published beside their own images are
-	// unaffected.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envVars := deployStubEnv(t, setup, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=registry.example/test/erun-devops:1.0.0")
@@ -120,11 +90,7 @@ func testDeployRealRunRecordsTheDeployRegistryWhenTheChartResolvesThere(t *testi
 }
 
 func testDeployRealRunKeepsAnOperatorSetRuntimeRegistry(t *testing.T) {
-	// `erun init --runtime-registry` is the documented way out of an env whose
-	// deploy registry has no platform chart; a deploy that overwrote it reset
-	// the field by doing the very thing it was set to enable. The chart here
-	// resolves at ghcr.io/sophium while the operator named ghcr.io/petios, and
-	// the operator's value survives.
+	// A deploy never overwrites an operator-set runtimeregistry.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	appendEnvConfig(t, setup, "team", "dev", "runtimeregistry: ghcr.io/petios\n")
@@ -138,20 +104,8 @@ func testDeployRealRunKeepsAnOperatorSetRuntimeRegistry(t *testing.T) {
 }
 
 func testDeployDryRunRemoteEnvTenantComponentVerifiesAgainstTheClusterRegistry(t *testing.T) {
-	// A `--cluster-registry` env with an explicit runtimeregistry (a
-	// realistic pairing -- runtimeregistry names where the shared platform
-	// chart lives, containerregistries names the in-cluster registry the
-	// tenant's own images and component charts publish to) must verify its
-	// component chart against the registry `erun push` actually publishes
-	// tenant charts to, not the platform-chart registry (runtimeregistry). The
-	// registry-qualified ERUN_PUBLISHED_CHART_PROBE_OVERRIDE entry below is
-	// published only at the concretized cluster pull address (the dry-run
-	// placeholder <cluster-ip>:5000), never at the runtimeregistry, so this
-	// only passes when resolution reaches the cluster registry -- exactly
-	// the registry the cluster entry is marked insecure for, which
-	// erun-common's registry-scheme unit tests cover directly (a live HTTPS
-	// probe against a plain-HTTP registry cannot be observed from this
-	// harness; see erun-integration/AGENTS.md's coverage-gaps section).
+	// The component chart is verified against the cluster registry erun push
+	// publishes to, not runtimeregistry.
 	setup := env.New(t)
 	root := filepath.Join(setup.ConfigHome, "erun")
 	tenantDir := filepath.Join(root, "team")
@@ -194,15 +148,7 @@ func testDeployDryRunRemoteEnvTenantComponentVerifiesAgainstTheClusterRegistry(t
 }
 
 func testDeployRealRunPersistsRuntimeVersionAndRegistryToEnvConfig(t *testing.T) {
-	// `erun deploy --version X` updates helm's release appVersion, and a
-	// real-run deploy must write the deployed version back to
-	// EnvConfig.RuntimeVersion so the desktop runtime dialog and `erun list`
-	// never show a stale string.
-	//
-	// This extends to the source registry, persisted
-	// alongside the version as RuntimeRegistry, so a subsequent
-	// reopen can address the same image even if the user edits the
-	// project's container registry afterwards.
+	// A real-run deploy persists the deployed RuntimeVersion and RuntimeRegistry.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -231,12 +177,8 @@ func testDeployRealRunPersistsRuntimeVersionAndRegistryToEnvConfig(t *testing.T)
 }
 
 func testDeployDryRunPersistedVersionReopenUsesRuntimeRegistryProvenance(t *testing.T) {
-	// When the env has a persisted (RuntimeVersion,
-	// RuntimeRegistry) pair and the user reopens without --version,
-	// helm renders the runtime chart against RuntimeRegistry — not
-	// the project's currently-configured containerregistry. This
-	// protects users who edit the project registry after a deploy:
-	// the previously-deployed image stays reachable on reopen.
+	// A reopen without --version renders against the persisted RuntimeRegistry,
+	// not the current containerregistry.
 	setup := env.New(t)
 	root := filepath.Join(setup.ConfigHome, "erun")
 	tenantDir := filepath.Join(root, "team")
@@ -267,11 +209,7 @@ func testDeployDryRunPersistedVersionReopenUsesRuntimeRegistryProvenance(t *test
 }
 
 func testDeployDryRunExplicitVersionUsesProjectRegistryNotProvenance(t *testing.T) {
-	// An explicit --version is a fresh deploy intent.
-	// Even with RuntimeRegistry pinned in env config, helm renders
-	// against the project's current containerregistry — and the
-	// post-deploy persist step will rewrite RuntimeRegistry to that
-	// value. The provenance pin only protects no-override reopens.
+	// An explicit --version renders against the current containerregistry.
 	setup := env.New(t)
 	root := filepath.Join(setup.ConfigHome, "erun")
 	tenantDir := filepath.Join(root, "team")
@@ -302,11 +240,7 @@ func testDeployDryRunExplicitVersionUsesProjectRegistryNotProvenance(t *testing.
 }
 
 func testDeployDryRunPersistedVersionWithoutProvenanceUsesProjectRegistry(t *testing.T) {
-	// Legacy envs persisted by older binaries have
-	// runtimeversion but no runtimeregistry. On reopen we must NOT
-	// invent a provenance — fall back to the project's current
-	// containerregistry, the same behaviour callers had before the
-	// field existed. The next successful deploy backfills the pair.
+	// With no persisted runtimeregistry, reopen falls back to the current containerregistry.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")

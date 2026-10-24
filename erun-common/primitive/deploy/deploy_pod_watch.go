@@ -16,27 +16,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// kubectlPodWatchExecutionOperation is the ExecutionModeFor/
-// ExecutionModeReport key for the `kubectl [--context c] --namespace <ns> get
-// pods -o json` poll watchReleasePods runs throughout every real helm deploy
-// (runHelmDeployWithPodWatch, deploy_helm_run.go) to catch an early container failure
-// before helm's own timeout fires. Its file and function names say "watch",
-// but the mechanism has always been a ticker-driven re-Get, not a real
-// client-go Watch -- exactly the shape kubectl-deployment-wait
-// (kubernetes_client_go.go) already proved out, and the design pass behind
-// kubectl-secret-apply's client-side-apply choice judged this class of
-// operation safe for a read: a List writes no ownership metadata, so there is
-// no server-side-apply-style divergence to reproduce here, only the same List
-// the subprocess path already runs. It gets its own key rather than reusing
-// kubectl-deployment-wait: a different resource kind (Pod, not Deployment), a
-// List instead of a single Get, and its own classification logic entirely --
-// exactly the two-independent-polling-loops distinction that keeps the two
-// keys apart.
+// kubectlPodWatchExecutionOperation keys the ticker-driven `get pods` poll; a
+// List writes no ownership metadata, so the library path is a safe swap.
 const kubectlPodWatchExecutionOperation = "kubectl-pod-watch"
 
-// HelmReleaseContainerFailureError surfaces the real pod/container failure
-// behind an aborted helm release, so callers report the underlying reason
-// instead of helm's generic timeout text.
+// HelmReleaseContainerFailureError reports the pod failure behind an aborted
+// helm release instead of helm's timeout text.
 type HelmReleaseContainerFailureError struct {
 	ReleaseName string
 	Namespace   string
@@ -44,9 +29,7 @@ type HelmReleaseContainerFailureError struct {
 	Container   string
 	Reason      string
 	Message     string
-	// Err wraps the underlying helm process error so errors.As/Is still
-	// reaches helm-side error types.
-	Err error
+	Err         error
 }
 
 func (e *HelmReleaseContainerFailureError) Error() string {
@@ -55,8 +38,7 @@ func (e *HelmReleaseContainerFailureError) Error() string {
 	}
 	var head string
 	if strings.TrimSpace(e.Container) == "" {
-		// A pod-level failure (e.g. Unschedulable) precedes any container even
-		// existing, so there is no container name to report.
+		// A pod-level failure (e.g. Unschedulable) has no container yet.
 		head = fmt.Sprintf("deploy failed early: pod %s %s", e.Pod, e.Reason)
 	} else {
 		head = fmt.Sprintf("deploy failed early: pod %s container %s %s", e.Pod, e.Container, e.Reason)
@@ -80,9 +62,7 @@ type podWatchParams struct {
 	Namespace         string
 	KubernetesContext string
 	StatusOut         io.Writer
-	// Now returns the current time; nil defaults to time.Now. Tests inject a
-	// fake clock here rather than sleeping real wall-clock time to exercise the
-	// unschedulable grace period (see defaultUnscheduledGracePeriod).
+	// Now defaults to time.Now; tests inject a fake clock.
 	Now func() time.Time
 }
 
@@ -93,26 +73,14 @@ func (p podWatchParams) now() time.Time {
 	return time.Now()
 }
 
-// podWatchOutcome is the watcher's terminal observation. Failure is non-nil
-// only when a container has reached a state that will not recover without
-// operator intervention (image pull failures, config errors, repeated crashes).
+// podWatchOutcome's Failure is set only for a state that will not recover.
 type podWatchOutcome struct {
 	Failure *HelmReleaseContainerFailureError
-	// Pulling names the containers the last poll observed still waiting on
-	// their image, as described by describePullingContainer: the container and
-	// the image it is fetching.
-	// their image, as "<pod>/<container>". It is the one thing the watcher
-	// knows that helm does not: helm's rollout deadline is a fixed duration
-	// and expires the same way whether the image finished downloading or not,
-	// so a deploy that ran out its wait mid-pull reports "Progress deadline
-	// exceeded" for a rollout that was working exactly as intended. Empty when
-	// the last poll saw every container past its pull, including on a clean
-	// rollout.
+	// Pulling is what helm cannot know: whether its deadline expired mid-pull.
 	Pulling []string
 }
 
-// podStatusList is a deliberately partial parse of `kubectl get pods -o json`:
-// unknown fields are ignored so kubectl version drift does not break the watcher.
+// podStatusList is a partial parse so kubectl version drift does not break it.
 type podStatusList struct {
 	Items []PodStatusItem `json:"items"`
 }
@@ -134,10 +102,7 @@ type PodStatusItem struct {
 	} `json:"status"`
 }
 
-// SpecContainerEntry is `spec.containers[]`: the declared resource limits and
-// requests a container asked for, which status.containerStatuses carries
-// neither of. Requests is what the scheduler admits the pod on, and no cgroup
-// file records it (see runtime_pod_requests.go).
+// SpecContainerEntry carries the declared requests, which no cgroup file records.
 type SpecContainerEntry struct {
 	Name      string `json:"name"`
 	Resources struct {
@@ -146,10 +111,8 @@ type SpecContainerEntry struct {
 	} `json:"resources"`
 }
 
-// PodConditionEntry is a `status.conditions[]` entry. A pod that never gets
-// admitted to a node has no container statuses at all to report a waiting
-// reason from — the scheduler's own verdict lives only here, as
-// PodScheduled=False with reason Unschedulable.
+// PodConditionEntry carries the scheduler's verdict for a pod never admitted to
+// a node, which has no container statuses.
 type PodConditionEntry struct {
 	Type    string `json:"type"`
 	Status  string `json:"status"`
@@ -187,13 +150,8 @@ type containerStateTerminated struct {
 	ExitCode int    `json:"exitCode"`
 }
 
-// terminalWaitingReasons enumerate container `state.waiting.reason` values
-// that will not recover without operator intervention. Once a container
-// reports any of these, the watcher kills the helm upgrade rather than
-// waiting for the timeout. Image-pull reasons are deliberately NOT here — they
-// are handled by imagePullWaitingReasons / permanentImagePullFailure so a slow
-// pull keeps waiting. InvalidImageName stays terminal: the image reference is
-// malformed, so no amount of waiting makes it pullable.
+// terminalWaitingReasons never recover; image-pull reasons are handled
+// separately so a slow pull keeps waiting.
 var terminalWaitingReasons = map[string]struct{}{
 	"InvalidImageName":           {},
 	"CreateContainerConfigError": {},
@@ -202,27 +160,14 @@ var terminalWaitingReasons = map[string]struct{}{
 	"ContainerCannotRun":         {},
 }
 
-// imagePullWaitingReasons mark a container as still trying to fetch its image.
-// A large image on a slow or rate-limited registry legitimately cycles through
-// these states (Pulling -> ErrImagePull -> ImagePullBackOff -> retry) while the
-// kubelet retries with growing backoff, so they are NOT terminal on their own:
-// the watcher keeps waiting up to the rollout timeout. Only a *permanent* pull
-// error (permanentImagePullFailure) aborts the deploy early. ImagePullBackOff's
-// own message is a generic "Back-off pulling image" with no detail, but the
-// kubelet alternates into ErrImagePull whose message carries the real registry
-// error — that is where a permanent failure (missing tag, bad auth) is caught.
+// imagePullWaitingReasons are retried by the kubelet, so only a permanent
+// ErrImagePull message (permanentImagePullFailure) aborts early.
 var imagePullWaitingReasons = map[string]struct{}{
 	"ImagePullBackOff": {},
 	"ErrImagePull":     {},
 }
 
-// permanentImagePullFailureSubstrings are lowercased fragments of kubelet
-// image-pull error messages that retrying will never resolve: the registry has
-// definitively rejected the reference (missing tag/repo, denied auth, malformed
-// name). Transient causes (timeouts, DNS blips, connection resets, TLS
-// handshake failures) are deliberately excluded so a slow or briefly
-// unreachable registry keeps waiting up to the rollout timeout rather than
-// failing the deploy on a recoverable hiccup.
+// Transient network causes are excluded so a slow registry keeps waiting.
 var permanentImagePullFailureSubstrings = []string{
 	"manifest unknown",
 	"manifestunknown",
@@ -247,21 +192,11 @@ func permanentImagePullFailure(message string) bool {
 	return false
 }
 
-// crashLoopRestartThreshold guards against transient init crashes: a single
-// crash can be normal, so only repeated restarts mark a container terminal.
+// A single crash can be normal; only repeated restarts are terminal.
 const crashLoopRestartThreshold = 2
 
-// unscheduledGracePeriod is how long a pod may report PodScheduled=False
-// before the watcher treats it as terminal. A pod is briefly unscheduled on
-// the way to being scheduled — the scheduler re-evaluates on every relevant
-// cluster change, and a node that is about to free up or finish autoscaling
-// can easily take longer than one poll tick — so acting on the very first
-// unschedulable observation would abort deploys that were only ever waiting
-// normally. 30s is long enough to absorb that normal churn (roughly ten poll
-// ticks at the default 2s interval) while staying well under the 5-minute
-// helm rollout timeout it exists to beat: a genuine capacity/quota problem
-// (e.g. "Insufficient cpu") does not resolve itself in 30s, so the grace only
-// ever delays the honest failure, never turns it into a false positive.
+// Pods are briefly unscheduled on the way to being scheduled; 30s absorbs that
+// churn while staying well under helm's rollout timeout.
 const defaultUnscheduledGracePeriod = 30 * time.Second
 
 const (
@@ -285,12 +220,7 @@ func resolvePodWatchPollInterval() time.Duration {
 	return d
 }
 
-// resolveUnscheduledGracePeriod honors ERUN_DEPLOY_POD_WATCH_UNSCHEDULED_GRACE,
-// the test-only twin of ERUN_DEPLOY_POD_WATCH_INTERVAL: a real-run integration
-// scenario cannot wait out defaultUnscheduledGracePeriod's 30s and stay fast,
-// so it shrinks the grace instead of asserting on a wall-clock sleep tied to
-// the production value. Not a production knob — the reasoning for the default
-// lives on defaultUnscheduledGracePeriod, not on this override.
+// ERUN_DEPLOY_POD_WATCH_UNSCHEDULED_GRACE is a test-only override.
 func resolveUnscheduledGracePeriod() time.Duration {
 	raw := strings.TrimSpace(os.Getenv("ERUN_DEPLOY_POD_WATCH_UNSCHEDULED_GRACE"))
 	if raw == "" {
@@ -303,9 +233,8 @@ func resolveUnscheduledGracePeriod() time.Duration {
 	return d
 }
 
-// watchReleasePods is best-effort: transient kubectl errors are ignored so a
-// flaky `get pods` never aborts a deploy that helm would otherwise drive to
-// success.
+// watchReleasePods ignores transient kubectl errors so a flaky poll never aborts
+// a deploy.
 func watchReleasePods(ctx context.Context, params podWatchParams) podWatchOutcome {
 	if strings.TrimSpace(params.ReleaseName) == "" || strings.TrimSpace(params.Namespace) == "" {
 		return podWatchOutcome{}
@@ -316,28 +245,13 @@ func watchReleasePods(ctx context.Context, params podWatchParams) podWatchOutcom
 	defer ticker.Stop()
 
 	lastSummary := map[string]string{}
-	// lastPulling is the pull state of the most recent poll that produced a
-	// reading, replaced rather than merged: a container that finished pulling
-	// and started must stop being reported as still pulling, or a later
-	// deadline would blame a pull that had already completed. A poll that
-	// produced no reading at all is not one of those -- see the read guard
-	// below.
+	// Replaced, not merged, so a finished pull is never blamed.
 	var lastPulling []string
-	// unscheduledSince tracks, per pod name, the first poll that observed
-	// PodScheduled=False so classifyTerminalFailure can apply the grace period
-	// across polls rather than deciding on a single snapshot.
 	unscheduledSince := map[string]time.Time{}
 	for {
 		failure, summaries, pulling, read := pollOnce(ctx, params, unscheduledSince)
-		// Only a poll that actually read the release replaces what the last
-		// one saw. The read that fails is the one interrupted by this loop's
-		// own cancellation -- cancelling the context aborts the `get pods` in
-		// flight, and the watcher then returns immediately -- so letting it
-		// assign would blank the pull state at exactly the moment it is handed
-		// to the caller, and every deploy whose wait expired mid-pull would
-		// intermittently fall back to reporting helm's "not ready" instead of
-		// naming the download. That is the whole fact this watcher exists to
-		// contribute, so an unread poll must not be able to erase it.
+		// Only a poll that read replaces lastPulling: the read our own cancellation
+		// interrupts would otherwise erase the pull state as it is returned.
 		if read {
 			lastPulling = pulling
 			renderPodSummaries(params.StatusOut, summaries, lastSummary)
@@ -353,11 +267,8 @@ func watchReleasePods(ctx context.Context, params podWatchParams) podWatchOutcom
 	}
 }
 
-// pollOnce reads the release's pods once. read is false when the poll produced
-// no reading at all -- the kubectl call failed (including because the caller's
-// context was cancelled) or its output could not be parsed -- which is distinct
-// from a reading in which nothing is pulling, and callers must keep the
-// distinction: only the latter means a pull finished.
+// pollOnce's read is false when no reading was taken, which callers must not
+// treat as "nothing is pulling".
 func pollOnce(ctx context.Context, params podWatchParams, unscheduledSince map[string]time.Time) (failure *HelmReleaseContainerFailureError, summaries []podSummary, pulling []string, read bool) {
 	pods, ok := readPodStatusList(ctx, params)
 	if !ok {
@@ -368,8 +279,6 @@ func pollOnce(ctx context.Context, params podWatchParams, unscheduledSince map[s
 	return failure, summarizePods(releasePods), pullingContainers(releasePods), true
 }
 
-// readPodStatusList runs one kubectl get pods; ok is false when the call failed
-// or its output could not be parsed.
 func readPodStatusList(ctx context.Context, params podWatchParams) (podStatusList, bool) {
 	output, err := runKubectlGetPods(ctx, params)
 	if err != nil {
@@ -378,11 +287,7 @@ func readPodStatusList(ctx context.Context, params podWatchParams) (podStatusLis
 	return ParsePodStatusList(output)
 }
 
-// pullingContainers names every container of the release currently waiting on
-// its image, as "<pod>/<container> (<image>)". A container whose pull has
-// permanently failed is excluded: that is a terminal failure the watcher aborts
-// on, not a rollout still working through its download, and reporting it as
-// progress would misdescribe the failure the abort already carries.
+// pullingContainers excludes permanent pull failures, which are terminal.
 func pullingContainers(pods []PodStatusItem) []string {
 	var pulling []string
 	for _, pod := range pods {
@@ -405,17 +310,7 @@ func pullingContainers(pods []PodStatusItem) []string {
 	return pulling
 }
 
-// describePullingContainer locates one container a rollout is waiting on and
-// names the image it is waiting for: "<pod>/<container> (<image>)".
-//
-// The image belongs in the report because the two reasons a rollout can end its
-// wait mid-pull need opposite responses, and the container name alone does not
-// separate them: a legitimately slow cold pull is answered by a longer
-// `deploy.timeout`, while an image tag that was never published -- a version
-// resolved off the wrong product's release line, say -- is answered by
-// deploying the right one, and no timeout makes it pull. Empty when the
-// container status carries no image, which the caller renders as the bare
-// locator rather than an empty parenthesis.
+// The image separates a slow pull from a tag that was never published.
 func describePullingContainer(podName string, container ContainerStatusEntry) string {
 	locator := podName + "/" + container.Name
 	image := strings.TrimSpace(container.Image)
@@ -425,8 +320,6 @@ func describePullingContainer(podName string, container ContainerStatusEntry) st
 	return locator + " (" + image + ")"
 }
 
-// runKubectlGetPods dispatches to the subprocess or library path per the
-// kubectl-pod-watch execution mode (see execution_mode.go).
 func runKubectlGetPods(parent context.Context, params podWatchParams) ([]byte, error) {
 	if config.CurrentExecutionMode(kubectlPodWatchExecutionOperation) == config.ExecutionModeLibrary {
 		return libraryListReleasePods(parent, params)
@@ -434,17 +327,8 @@ func runKubectlGetPods(parent context.Context, params podWatchParams) ([]byte, e
 	return defaultRunKubectlGetPods(parent, params)
 }
 
-// libraryListReleasePods is the library-backed alternative to
-// defaultRunKubectlGetPods, listing the same namespace's pods via
-// k8s.io/client-go instead of shelling out to kubectl. The typed result is
-// re-marshaled to JSON and fed through the exact same
-// parsePodStatusList/classifyTerminalFailure/summarizePods pipeline the
-// subprocess path uses: corev1.PodList carries the identical json tags
-// kubectl's own `-o json` output does, so this is not a second parser to keep
-// in sync, only a second source of the same bytes. Bounded by the same
-// defaultPodWatchKubectlTimeout the subprocess path times its kubectl
-// invocation with, layered onto whatever deadline the parent (helm deploy
-// watch) context already carries.
+// libraryListReleasePods re-marshals to JSON: corev1.PodList shares kubectl's
+// json tags, so both paths feed the same parser.
 func libraryListReleasePods(parent context.Context, params podWatchParams) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(parent, defaultPodWatchKubectlTimeout)
 	defer cancel()
@@ -459,10 +343,8 @@ func libraryListReleasePods(parent context.Context, params podWatchParams) ([]by
 	return json.Marshal(list)
 }
 
-// defaultRunKubectlGetPods bounds a hung apiserver with its own timeout
-// beyond the parent context, and kills the subprocess only once cmd.Process
-// is set so a missing kubectl binary surfaces as the exec error rather than a
-// nil panic.
+// defaultRunKubectlGetPods kills only once cmd.Process is set, so a missing
+// binary surfaces as the exec error.
 func defaultRunKubectlGetPods(parent context.Context, params podWatchParams) ([]byte, error) {
 	args := []string{}
 	if c := strings.TrimSpace(params.KubernetesContext); c != "" {
@@ -488,14 +370,8 @@ func defaultRunKubectlGetPods(parent context.Context, params podWatchParams) ([]
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}
-		// Bound the drain. On Windows an endpoint-security agent can hold the
-		// killed kubectl's stdout pipe open (or a grandchild inherits its write
-		// end), so cmd.Output() never reaches EOF and never returns — even though
-		// the process is dead. Without this timeout the watcher goroutine, and the
-		// deploy that joins it after helm has already succeeded, hang forever
-		// (observed: `erun deploy` alive minutes past `helm STATUS=deployed`, no
-		// child processes, blocked in Go). done is buffered (cap 1), so abandoning
-		// it here leaks nothing — the goroutine's send still completes.
+		// Bound the drain: on Windows a security agent can hold the killed kubectl's
+		// pipe open, so cmd.Output() never returns. done is buffered, so nothing leaks.
 		select {
 		case <-done:
 		case <-time.After(defaultPodWatchKubectlTimeout):
@@ -553,11 +429,7 @@ func classifyTerminalFailure(pods []PodStatusItem, params podWatchParams, unsche
 			}
 		}
 	}
-	// A pod that never got admitted to a node has no container statuses at all
-	// to report a waiting reason from — the only place that carries why is
-	// status.conditions. Checked second, after container-level failures, so a
-	// pod that both failed to schedule once and later ran into a real
-	// container problem reports the more specific container failure.
+	// Checked after container failures so a more specific failure wins.
 	for _, pod := range pods {
 		message, unschedulable := podUnschedulableMessage(pod)
 		if !unschedulable {
@@ -584,11 +456,6 @@ func classifyTerminalFailure(pods []PodStatusItem, params podWatchParams, unsche
 	return nil
 }
 
-// podUnschedulableMessage returns the scheduler's own message when a pod
-// carries PodScheduled=False with reason Unschedulable, verbatim — so the
-// abort reaches both the deploy output and the recorded provision-error with
-// exactly what the scheduler said (e.g. "0/1 nodes are available: 1
-// Insufficient cpu, 1 Insufficient memory") rather than a generic timeout.
 func podUnschedulableMessage(pod PodStatusItem) (string, bool) {
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == "PodScheduled" && condition.Status == "False" && condition.Reason == "Unschedulable" {
@@ -665,10 +532,7 @@ func formatPodStatusLine(pod PodStatusItem) string {
 		if phase == "" {
 			phase = "Pending"
 		}
-		// A pod with no container statuses at all was never admitted to a node,
-		// so the scheduler's own reason (if any) is the only thing worth showing
-		// — visible immediately, even while still inside the grace period that
-		// classifyTerminalFailure applies before treating it as terminal.
+		// Shown immediately, even within the unscheduled grace period.
 		if message, unschedulable := podUnschedulableMessage(pod); unschedulable {
 			return fmt.Sprintf("pod %s: %s (Unschedulable: %s)", pod.Metadata.Name, phase, message)
 		}
@@ -683,10 +547,7 @@ func formatContainerStatus(c ContainerStatusEntry) string {
 		if reason == "" {
 			reason = "Waiting"
 		}
-		// Image-pull states are progress, not failure: label them "Pulling
-		// image" so the operator reads the rollout as still fetching the image
-		// (the deploy keeps waiting up to the rollout timeout) rather than
-		// mistaking "Waiting (ImagePullBackOff)" for a hard error.
+		// Pull states are progress, not failure.
 		verb := "Waiting"
 		if _, isPull := imagePullWaitingReasons[c.State.Waiting.Reason]; isPull {
 			verb = "Pulling image"
@@ -713,8 +574,6 @@ func formatContainerStatus(c ContainerStatusEntry) string {
 	return fmt.Sprintf("%s %s", c.Name, "Unknown")
 }
 
-// renderPodSummaries prefixes each line with four spaces to align with the
-// existing "    namespace ..." status block.
 func renderPodSummaries(out io.Writer, summaries []podSummary, last map[string]string) {
 	if out == nil {
 		return

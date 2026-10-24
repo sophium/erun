@@ -9,20 +9,10 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// request-invitation-dialog.spec.ts covers "Request an invitation" — the
-// RequestInvitationDialog opened from NotEnrolledState (the counterpart of
-// tenant-dashboard-requests.spec.ts's operator queue). Like tenant-dashboard-platform-state.spec.ts, this stubs the
-// __erun_invoke RPC boundary rather than a real erun-backend-api, which the
-// inert harness deliberately cannot reach; the Go side is covered by
-// erun-ui/tenant_platform_invite_requests_test.go.
+// Stubs the __erun_invoke boundary; the harness cannot reach erun-backend-api.
 
-// Applies the app's own class-based light/dark mechanism directly (root
-// AGENTS.md's Design-Language Decision Record: one shared `.dark` class
-// mechanism), the same escape hatch manage-dialog-status-badge.spec.ts uses,
-// rather than clicking the titlebar toggle -- Radix's Dialog primitive marks
-// the rest of the app aria-hidden while a modal is open, so the titlebar
-// button is unreachable via an accessible role query for as long as this
-// dialog stays open.
+// Radix's modal marks the titlebar aria-hidden, so the theme toggle is
+// unreachable while the dialog is open.
 async function forceDarkTheme(page: import('@playwright/test').Page): Promise<void> {
   await page.evaluate(() => {
     document.documentElement.classList.add('dark');
@@ -111,10 +101,6 @@ test.describe('request an invitation dialog', () => {
     }
   });
 
-  // The dialog's own guard against a too-soon resubmit is the closest thing
-  // this form has to field validation (there is nothing else to validate —
-  // identity is never typed in, kind always has a default). It must read as
-  // recoverable (root AGENTS.md's "blocked, not broken"), not as an error.
   test('a rate-limited submit shows the countdown as a recoverable status, not an error, both themes', async ({
     app,
     page,
@@ -134,9 +120,7 @@ test.describe('request an invitation dialog', () => {
       await expect(reason).toContainText('You can send another request in');
       await expect(reason).toHaveAttribute('role', 'status');
       await expect(app.tenantDashboard.requestSubmitButton()).toBeDisabled();
-      // Never rendered as a fault: no alert carries this outcome.
       await expect(app.tenantDashboard.requestInvitationDialog().getByRole('alert')).toHaveCount(0);
-      // The dialog stays open -- a rate limit is not a reason to lose the draft.
       await expect(app.tenantDashboard.requestInvitationDialog()).toBeVisible();
 
       await page.screenshot({
@@ -212,10 +196,6 @@ test.describe('request an invitation dialog', () => {
     }
   });
 
-  // A submit failure must be visible, not a silent no-op: the dialog stays
-  // open and an InlineAlert names what happened (root AGENTS.md's "an action
-  // that succeeds and changes nothing on screen" dead-end applies just as
-  // much to an action that fails and shows nothing).
   test('a failed submit renders a visible error and keeps the dialog open, both themes', async ({
     app,
     page,
@@ -250,7 +230,6 @@ test.describe('request an invitation dialog', () => {
         animations: 'disabled',
       });
 
-      // Cancel still backs out cleanly after a failure.
       await app.tenantDashboard.requestCancelButton().click();
       await expect(app.tenantDashboard.requestInvitationDialog()).toHaveCount(0);
     } finally {
@@ -258,10 +237,8 @@ test.describe('request an invitation dialog', () => {
     }
   });
 
-  // Guards tenant_platform_invite_requests.go's loadTenantDashboardMyInviteRequest:
-  // a transport failure reading the caller's own invite request must never
-  // read as "never requested" (which would offer "Request an invitation"
-  // again to someone who may already have a pending or approved request).
+  // A failed read must not look like "never requested", which would offer a
+  // duplicate request.
   test('a failed invite-request status read shows a visible error, not a fresh "Request an invitation" offer, both themes', async ({
     app,
     page,

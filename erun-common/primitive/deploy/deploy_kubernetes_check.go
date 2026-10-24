@@ -78,11 +78,8 @@ func KubernetesDeployContextAtDir(dir string) shared.KubernetesDeployContext {
 	return context
 }
 
-// traceConfiguredDeployPaths surfaces a configured paths.k8s override as a
-// dry-run decision line so the deploy plan shows the chart dir was resolved from
-// config rather than the -devops convention. It also warns when the project
-// config itself is gitignored, since that silently voids the very override it
-// just traced.
+// traceConfiguredDeployPaths also warns when the project config is gitignored,
+// which voids the override.
 func traceConfiguredDeployPaths(ctx core.Context, repoPath string) {
 	configpkg.WarnIfProjectConfigGitIgnored(ctx, repoPath)
 	paths, err := configpkg.LoadProjectPaths(repoPath)
@@ -99,17 +96,8 @@ func CheckKubernetesDeployment(ctx core.Context, params KubernetesDeploymentChec
 	if err == nil {
 		return deployed, nil
 	}
-	// `kubectl --context <name>` returns a "context does not exist"
-	// error when the requested context is missing from the local
-	// kubeconfig. The most common case is the contribute clone
-	// running inside an env's pod: the env config it reads has the
-	// *outer* desktop's context name (e.g.
-	// `erun-001-…-eu-west-2`), but the pod's kubeconfig only has
-	// `in-cluster`. Falling back to a context-less call uses
-	// kubectl's current-context, which on the pod is the in-cluster
-	// service-account context — exactly what we want. On a desktop
-	// where the configured context name *is* valid, we never enter
-	// this branch.
+	// Inside an env's pod the configured context is the desktop's; the pod's
+	// kubeconfig only has in-cluster, which current-context selects.
 	if isKubernetesContextMissingMessage(output) && strings.TrimSpace(params.KubernetesContext) != "" {
 		ctx.Trace(fmt.Sprintf("kubernetes deployment check: context %q not found in kubeconfig; retrying with current-context", params.KubernetesContext))
 		fallback, _, fallbackErr := checkKubernetesDeploymentWithContext(ctx, params, "")
@@ -121,22 +109,8 @@ func CheckKubernetesDeployment(ctx core.Context, params KubernetesDeploymentChec
 	return false, err
 }
 
-// checkKubernetesDeploymentWithContext runs the underlying kubectl
-// get + (optional) match check for the supplied context. Returns
-// the captured combined output alongside the error so the caller can
-// inspect kubectl's stderr (which carries the "context does not
-// exist" string that drives the retry-with-current-context fallback
-// in CheckKubernetesDeployment).
-//
-// A non-nil error here is never evidence the deployment is absent — that
-// case returns (false, output, nil) below. It means the check could not
-// resolve a definite answer, so the message names the recognized cause
-// (missing context, unreachable API server, credentials/permissions
-// refused) or, failing that, says plainly that the error is unrecognized —
-// never silently reads as "not deployed". The message carries kubectl's own
-// output instead of just the process's exit status, so a caller sees the
-// actual cause rather than two layers of the same content-free "exit status
-// 1".
+// checkKubernetesDeploymentWithContext returns an error only when it cannot
+// decide; absence is (false, output, nil).
 func checkKubernetesDeploymentWithContext(ctx core.Context, params KubernetesDeploymentCheckParams, kubectlContext string) (bool, string, error) {
 	args := make([]string, 0, 8)
 	if strings.TrimSpace(kubectlContext) != "" {
@@ -166,11 +140,7 @@ func checkKubernetesDeploymentWithContext(ctx core.Context, params KubernetesDep
 
 	detail := kubernetesDeploymentCheckFailureDetail(output, kubectlContext)
 	sanitized := sanitizeKubectlFailureOutput(output)
-	// The sanitized sentence is what reaches the operator; kubectl's raw
-	// combined output still goes to the per-env trace log (ActivateEnvTrace
-	// tees it unconditionally, so this reaches disk regardless of terminal
-	// verbosity) so the full diagnostic is never actually lost, only kept out
-	// of a surface too narrow to show it.
+	// The raw output still reaches the per-env trace log.
 	if trimmedRaw := strings.TrimSpace(output); trimmedRaw != "" {
 		ctx.Logger.Debug("kubectl deployment check raw output: " + trimmedRaw)
 	}
@@ -180,12 +150,8 @@ func checkKubernetesDeploymentWithContext(ctx core.Context, params KubernetesDep
 	return false, output, fmt.Errorf("could not determine whether deployment %q is deployed (%s): %s", params.Name, detail, sanitized)
 }
 
-// kubernetesAPIServerUnreachableSignal reports whether kubectl/helm's raw
-// output signals that the Kubernetes API server itself could not be
-// reached, as opposed to any other failure (RBAC, a missing resource, a
-// malformed chart). kubernetesDeploymentCheckFailureDetail and the doctor
-// deploy diagnosis (doctor_deploy.go) both classify off this same signal so
-// "cluster unreachable" cannot drift between the two call sites.
+// kubernetesAPIServerUnreachableSignal is shared with the doctor deploy
+// diagnosis so both classify "cluster unreachable" the same way.
 func kubernetesAPIServerUnreachableSignal(output string) bool {
 	message := strings.ToLower(output)
 	return strings.Contains(message, "unable to connect to the server") ||
@@ -195,17 +161,8 @@ func kubernetesAPIServerUnreachableSignal(output string) bool {
 		strings.Contains(message, "no configuration has been provided")
 }
 
-// kubernetesDeploymentCheckFailureDetail names why a kubectl deployment
-// presence check failed to resolve a definite answer, distinguishing causes
-// where erun could not ask the cluster at all (no context, an unreachable
-// API server, credentials or permissions refused) from an error it does not
-// recognize. Neither is evidence the deployment is absent. Reuses
-// isKubernetesContextMissingMessage for the context-missing case it already
-// covers instead of a second matcher for the same signal. Names the
-// kubectl context for the unreachable-API-server case: erun
-// already knows it from its own configuration, so the message can identify
-// the target cluster without depending on a substring of kubectl's own
-// output surviving whatever later truncates the message for display.
+// kubernetesDeploymentCheckFailureDetail names the context erun already knows,
+// so truncating kubectl's output for display cannot lose the target.
 func kubernetesDeploymentCheckFailureDetail(output, kubectlContext string) string {
 	if isKubernetesContextMissingMessage(output) {
 		return "the configured kubernetes context was not found in kubeconfig"
@@ -227,29 +184,14 @@ func kubernetesDeploymentCheckFailureDetail(output, kubectlContext string) strin
 	}
 }
 
-// klogFramePattern matches the severity+timestamp+goroutine-id+source-location
-// prefix klog stamps on every line it emits (e.g. `E0831 13:46:43.793908
-// 10289 memcache.go:265]`). None of it is operator-relevant: the
-// severity/timestamp duplicate context the caller's own message already
-// carries, and the goroutine id and Go source file are internal to
-// kubectl/client-go.
+// klogFramePattern matches klog's severity/timestamp/goroutine/source prefix.
 var klogFramePattern = regexp.MustCompile(`^[EWIF]\d{4} \d{2}:\d{2}:\d{2}\.\d+\s+\d+ \S+\.go:\d+\]\s*`)
 
-// klogUnhandledErrorPattern extracts the inner err="..." sentence klog's
-// "Unhandled Error" wrapper carries -- the one piece of a klog line an
-// operator can act on. The capture is greedy so it consumes through the
-// line's real closing quote rather than stopping at an escaped `\"` inside
-// the nested message.
+// Greedy so an escaped \" inside the nested message does not end the match.
 var klogUnhandledErrorPattern = regexp.MustCompile(`^"Unhandled Error"\s+err="(.*)"$`)
 
-// sanitizeKubectlFailureOutput reduces kubectl's raw combined output to the
-// one sentence an operator can act on, rather than pasting a klog line
-// verbatim: a fixed-width toast would keep the goroutine id and source
-// location and cut off the API server address that names the cause. It scans from the last non-blank line backward, strips klog's
-// frame if present, and unwraps an "Unhandled Error" carrier down to its
-// err= text; a line with neither shape is returned frame-stripped as-is, so
-// an unrecognized failure still reaches the operator rather than
-// disappearing. Returns "" only when there is truly nothing to show.
+// sanitizeKubectlFailureOutput reduces kubectl output to its last actionable
+// line: a fixed-width toast would otherwise cut off the cause.
 func sanitizeKubectlFailureOutput(raw string) string {
 	lines := strings.Split(strings.TrimRight(raw, "\n"), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -265,29 +207,12 @@ func sanitizeKubectlFailureOutput(raw string) string {
 	return ""
 }
 
-// KubernetesDeploymentAbsentMessageMarker is the fixed substring every
-// "runtime ... is not deployed" message carries when a caller has confirmed
-// a deployment is genuinely absent (checkKubernetesDeploymentWithContext
-// returning (false, _, nil) above; erun-cli/cmd/open.go's
-// ensureRuntimeDeployed builds the actual message). A caller that only has
-// the rendered error text — for example the desktop reading a CLI
-// subprocess's stderr — uses this marker to recognize that specific outcome
-// without re-deriving kubectl's own error grammar, and without mistaking a
-// check that could not resolve an answer (never contains this marker) for a
-// real absence.
+// KubernetesDeploymentAbsentMessageMarker lets callers holding only error text
+// (e.g. the desktop) recognize a confirmed absence; an unresolved check never
+// carries it.
 const KubernetesDeploymentAbsentMessageMarker = "is not deployed (deployment"
 
-// isKubernetesContextMissingMessage matches the family of kubectl
-// error messages that indicate the requested --context name is not
-// in the kubeconfig. kubectl reports this as:
-//
-//	error: context "<name>" does not exist
-//	context "<name>" does not exist
-//	no context exists with the name: "<name>"
-//
-// "does not exist" is the stable signal across kubectl versions;
-// "no context exists with the name" is the older shape that some
-// distributions still ship. Match case-insensitively.
+// "no context exists with the name" is the older kubectl wording.
 func isKubernetesContextMissingMessage(output string) bool {
 	msg := strings.ToLower(output)
 	if strings.Contains(msg, "does not exist") {
@@ -377,17 +302,8 @@ type deploymentExpectedMatches struct {
 	runtimePod bool
 }
 
-// expectedDeploymentMatches seeds the per-field match state. Each field
-// starts true when the corresponding expectation is unset (so a caller
-// that didn't ask about it doesn't gate the result), and false otherwise
-// — apply() flips it back to true on the first container env var that
-// confirms the expected value.
-//
-// ERUN_API_PORT is deliberately not part of this matcher: the erun-api
-// service is a separate Kubernetes deployment with its own port-forward
-// path and presence check. Tenant-owned <tenant>-devops charts can
-// legitimately omit ERUN_API_PORT from the runtime pod, and demanding it
-// here would force a redeploy on every open for those tenants.
+// expectedDeploymentMatches starts unset expectations as true. ERUN_API_PORT is
+// excluded: tenant charts may omit it, which would force a redeploy on every open.
 func expectedDeploymentMatches(params KubernetesDeploymentCheckParams) deploymentExpectedMatches {
 	return deploymentExpectedMatches{
 		repoPath:   strings.TrimSpace(params.ExpectedRepoPath) == "",

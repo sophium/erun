@@ -1,24 +1,11 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
-// Per-env "AI tab is producing output" latch, driven passively from the
-// Go side (the ai-activity Wails event); the sidebar renders a spinner on
-// busy env rows even after the user navigates away. The debounce policy
-// that flips it lives in erun-ui/terminal_sessions.go recordAIActivity,
-// not here. Keyed by the same selectionKey() as tabsByEnv, and stored as
-// Record<string, true> to keep the slice state serializable.
+// Per-env "AI tab is producing output" latch from the ai-activity event;
+// debounce lives in erun-ui/terminal_sessions.go recordAIActivity.
 export interface AIActivityState {
   aiBusyByEnv: Record<string, true>;
-  // Orchestrator sessions have no tenant/environment to key by, so their latch
-  // is keyed by session id. Same event, same debounce policy — only the address
-  // differs, because an orchestrator row is not an env row.
-  //
-  // Two writers feed this map, deliberately kept as one field so they cannot
-  // disagree: the ai-activity event (handleAIActivity) and
-  // loadOrchestrators seeding it from each orchestrator's own `busy` snapshot
-  // field (planOrchestratorBusySeed). The event is the fast path while a
-  // session runs; the snapshot is what makes a fetch that lands after a
-  // transition — boot, a reload, a reconnect — render the true state without
-  // having witnessed that transition.
+  // Orchestrator sessions are keyed by session id. Both the ai-activity event
+  // and loadOrchestrators' busy snapshot write this one map.
   aiBusyBySession: Record<number, true>;
 }
 

@@ -9,10 +9,7 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// exposePreviewRuntime is the smallest runtime the expose tool runs against
-// with no project to resolve: the platform coordinates come in as the explicit
-// servicesZone/platformNamespace override, which is the caller shape that
-// needs no .erun/config.yaml at all.
+// exposePreviewRuntime passes servicesZone/platformNamespace, so no project is needed.
 func exposePreviewRuntime(t *testing.T) shared.RuntimeConfig {
 	t.Helper()
 	return servicesTestRuntime(t, "frs", "dev")
@@ -31,17 +28,8 @@ func exposePreviewTrace(t *testing.T, runtime shared.RuntimeConfig, input expose
 	return strings.Join(output.Trace, "\n")
 }
 
-// TestExposeToolBackendServiceOverridesTheDerivedName is the MCP half of the
-// reported gap: `backendService` is the only way an agent or script can name
-// the in-namespace Service when the repo brought its own chart, and the input
-// is worthless if it does not reach the plan. The plan is what the Ingress is
-// rendered from, so the assertion is on the rendered manifest -- the resource
-// a real run pipes to `kubectl apply` -- and on the trace line naming the
-// routing target, not on the input struct having been read.
-//
-// Dropping the input (passing an empty BackendService through) silently falls
-// back to the <tenant>-<service> derivation, which is exactly the reported
-// failure: a hostname that resolves and an Ingress that 503s.
+// backendService must reach the rendered Ingress; dropping it falls back to
+// <tenant>-<service>, which 503s for repo-native charts.
 func TestExposeToolBackendServiceOverridesTheDerivedName(t *testing.T) {
 	runtime := exposePreviewRuntime(t)
 
@@ -61,9 +49,7 @@ func TestExposeToolBackendServiceOverridesTheDerivedName(t *testing.T) {
 		t.Fatalf("the rendered Ingress does not route to the named backend:\n%s", override)
 	}
 
-	// The control: with no backendService the derivation still applies, so the
-	// test above is reading the override and not the only value the tool can
-	// ever produce.
+	// Control: without backendService the derivation still applies.
 	derived := exposePreviewTrace(t, runtime, expose.ExposeInput{
 		Tenant:            "frs",
 		Environment:       "dev",

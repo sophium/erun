@@ -12,15 +12,8 @@ import (
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
-// resolveReportedRepository answers which repository the report's
-// remoteURL names, refusing a remote that contradicts the repository the
-// review already records. Verification is only meaningful against the
-// review's own repository: a caller pointing the platform at a different one
-// could have it confirm a commit that landed somewhere else entirely, which
-// is the confusion a review without repository identity made possible.
-//
-// The identity is canonicalized first, so the SSH remote a checkout reports
-// verifies against the HTTPS one the review recorded.
+// resolveReportedRepository refuses a remoteURL that contradicts the review's
+// recorded repository, so a commit elsewhere cannot verify this review.
 func resolveReportedRepository(review model.Review, remoteURL string) (string, error) {
 	reported, err := modelpkg.RepositoryIdentity(remoteURL)
 	if err != nil {
@@ -34,14 +27,8 @@ func resolveReportedRepository(review model.Review, remoteURL string) (string, e
 	return reported, nil
 }
 
-// acceptMerged is the one path to MERGED, open to any caller — the guarantee
-// is no longer who calls it, but what it can verify: a successful build
-// already recorded against this exact review (verifyMergeBuild), and that
-// build's commit's real presence on the target branch, descended from and
-// distinct from the tip this review was gated against
-// (verifyRepositoryState). Any check
-// failing refuses with *MergeNotVerifiedError; nothing about the review
-// changes.
+// acceptMerged is the queue's path to MERGED: it requires a successful build of
+// this review whose commit is verifiably on the target branch past the gated tip.
 func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, buildID, remoteURL, repositoryIdentity string) (model.Review, error) {
 	if review.Status != model.ReviewStatusMerge {
 		return model.Review{}, &InvalidTransitionError{From: review.Status, To: model.ReviewStatusMerged, ValidTargets: validTargetsFor(review.Status)}
@@ -49,8 +36,7 @@ func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, b
 	if buildID == "" {
 		return model.Review{}, &MissingBuildIDError{Status: model.ReviewStatusMerged}
 	}
-	// Whether this row is adopting an identity it never had, captured before
-	// the assignment below overwrites the evidence.
+	// Captured before the assignment below overwrites it.
 	adoptedFromNone := strings.TrimSpace(review.Repository) == ""
 	build, err := s.builds.Get(ctx, review.TenantID, buildID)
 	if err != nil {
@@ -65,12 +51,8 @@ func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, b
 
 	review.Status = model.ReviewStatusMerged
 	review.LastMergedBuildID = build.BuildID
-	// Recorded only now, once the merge is accepted: a review created before
-	// the platform recorded a repository adopts the one this report named,
-	// which is the only moment the platform ever holds it. A refused report
-	// changes nothing. The same identity is what both verification conditions
-	// above were answered against, so what the row ends up recording is what
-	// the check actually established, and not a second, unstated choice.
+	// Recorded only once accepted: a legacy review adopts the identity both checks
+	// above were answered against.
 	review.Repository = repositoryIdentity
 	if adoptedFromNone {
 		log.Printf("erun api reviews: review %s recorded no repository and adopted %s from its accepted MERGED report", review.ReviewID, repositoryIdentity)
@@ -86,19 +68,8 @@ func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, b
 	return updated, nil
 }
 
-// reconcileMerged is the other way to MERGED, for a review whose work landed
-// through something other than this platform's merge queue — in practice a
-// GitHub squash merge, where the branch's own commits are deliberately not
-// made ancestors of the target and no merge build was ever recorded, so
-// neither of acceptMerged's conditions can ever hold no matter how long the
-// review sits there. Without this the only way out was CLOSED, which renders
-// landed work as abandoned and so is worse than leaving it OPEN — and the
-// OPEN count grows by one for every change that lands this way.
-//
-// The platform still verifies rather than believes: ContainsChanges confirms
-// against the real remote that everything the source branch adds is present
-// in the target branch's history. What is reported here already happened
-// elsewhere, so unlike acceptMerged this triggers no release.
+// reconcileMerged accepts MERGED for work that landed outside the queue (e.g. a
+// GitHub squash merge), verified via ContainsChanges. It triggers no release.
 func (s *ReviewService) reconcileMerged(ctx context.Context, review model.Review, remoteURL, repositoryIdentity string) (model.Review, error) {
 	if review.Status == model.ReviewStatusMerged || review.Status == model.ReviewStatusClosed {
 		return model.Review{}, &InvalidTransitionError{From: review.Status, To: model.ReviewStatusMerged, ValidTargets: validTargetsFor(review.Status)}
@@ -115,11 +86,8 @@ func (s *ReviewService) reconcileMerged(ctx context.Context, review model.Review
 	}
 
 	review.Status = model.ReviewStatusMerged
-	// Deliberately no LastMergedBuildID: there was no build, and
-	// FindLastMergedReview skips build-less merges for exactly this reason —
-	// gatedTargetTip anchors the next queue-driven merge on a build's commit,
-	// which a reconciliation has none of. The repository this report named is
-	// recorded, though: that is review identity, not build provenance.
+	// No build exists, and FindLastMergedReview skips build-less merges so the next
+	// gated tip stays anchored on a build's commit.
 	review.LastMergedBuildID = ""
 	review.Repository = repositoryIdentity
 	updated, err := s.reviews.Update(ctx, review)
@@ -133,11 +101,8 @@ func (s *ReviewService) reconcileMerged(ctx context.Context, review model.Review
 	return updated, nil
 }
 
-// verifyMergeBuild is condition 3: a successful build already recorded
-// against this exact review, not a caller's word for it. The build's kind is
-// not consulted: the merge commit's build is an ordinary recorded build, and a
-// historical GATE build of a review already at MERGE still qualifies. Which
-// commit the build is of is verifyRepositoryState's question.
+// verifyMergeBuild requires a successful build recorded against this review; the
+// build kind is not consulted.
 func (s *ReviewService) verifyMergeBuild(review model.Review, build model.Build) error {
 	if build.ReviewID != review.ReviewID {
 		return &MergeNotVerifiedError{Reason: fmt.Sprintf("build %s is not a build of review %s", build.BuildID, review.ReviewID)}
@@ -145,41 +110,19 @@ func (s *ReviewService) verifyMergeBuild(review model.Review, build model.Build)
 	if !build.Successful {
 		return &MergeNotVerifiedError{Reason: fmt.Sprintf("build %s did not succeed", build.BuildID)}
 	}
-	// The READY build is the source branch's, not the merge's: even where its
-	// commit reached the target unchanged, the merge was never built.
+	// The READY build is of the source branch, not the merge.
 	if build.BuildID == review.LastReadyBuildID {
 		return &MergeNotVerifiedError{Reason: fmt.Sprintf("build %s is the READY build of source commit %s; record the build of the merge commit that landed this review", build.BuildID, build.CommitID)}
 	}
 	return nil
 }
 
-// verifyRepositoryState is conditions 1 and 2: the reported commit is
-// verifiably on the target branch, and the target tip this review was gated
-// against — the platform's own record of what that tip was, since only one
-// review may be MERGE per target branch at a time (see AGENTS.md "Merge
-// Queue") — is still really its ancestor, and is not the commit itself. A
-// commit is its own ancestor, so a build of the gated tip would otherwise
-// pass while naming a merge in which nothing landed. This is a reachability check, not
-// a strict parent-equality one: the release flow pushes its own
-// `[skip ci]` commits directly to the target branch between one review
-// landing and the next being reported, and requiring the
-// reported commit's immediate parent to equal the gated tip made every
-// review report unverifiable forever after the first release. Ancestry
-// tolerates any number of unrelated commits landing in between while still
-// refusing a commit whose history never really passed through the gated
-// tip at all — the case that matters, a rewritten or replaced history
-// (a force-push standing in for a buggy or malicious reporter).
+// verifyRepositoryState requires the reported commit to be on the target branch
+// and to strictly descend from the gated tip. Ancestry, not parent equality,
+// because release pushes `[skip ci]` commits in between.
 //
-// Both conditions are asked of repositoryIdentity — the repository the
-// report's remote names — and never of the review's own repository column,
-// which is empty on a row created before the platform recorded one. An empty
-// repository means "every repository" to FindLastMergedReview's filter, so
-// anchoring condition 2 on the column rather than on the identity would let
-// whichever repository merged onto a same-named target branch most recently
-// stand in as this row's gated base: it refuses a real landing because a
-// stranger's commit is not one of its ancestors, and it defeats the force-push
-// check for a repository whose own history really was rewritten, by finding
-// some other repository's commit where it should have found that repository's.
+// Both checks use repositoryIdentity, never the review's column: an empty column
+// means "every repository" to FindLastMergedReview and would anchor on a stranger's merge.
 func (s *ReviewService) verifyRepositoryState(ctx context.Context, review model.Review, repositoryIdentity, commit, remoteURL string) error {
 	if s.verifier == nil {
 		return &MergeNotVerifiedError{Reason: "this control plane has no way to verify merges against the real repository"}
@@ -211,20 +154,9 @@ func (s *ReviewService) verifyRepositoryState(ctx context.Context, review model.
 	return nil
 }
 
-// gatedTargetTip is the merge commit of the most recently MERGED review on
-// targetBranch in repositoryIdentity — still the right anchor even though it
-// can no longer be compared by strict equality: the one-MERGE-per-target-branch
-// invariant means nothing else advances the queue's own notion of the branch's
-// tip while a review holds MERGE, so this is the review's actual gated base
-// regardless of what else (a release push) landed on the branch around it.
-//
-// The repository is a parameter rather than something read off a review
-// because the two are not always the same question, and passing the wrong one
-// here is silent: a review that recorded no repository has to be anchored on
-// the repository its report names — the one it adopts — since asking for
-// "any repository" would answer with a stranger's merge. Empty with no error
-// means this repository has never merged onto this branch through the queue
-// yet — the bootstrap case, with nothing recorded to compare against.
+// gatedTargetTip is the merge commit of the latest MERGED review on targetBranch
+// in repositoryIdentity; the one-MERGE-per-branch invariant makes it the gated
+// base. Empty with no error means nothing has merged yet.
 func (s *ReviewService) gatedTargetTip(ctx context.Context, repositoryIdentity, targetBranch string) (string, error) {
 	last, err := s.reviews.FindLastMergedReview(ctx, repositoryIdentity, targetBranch)
 	if errors.Is(err, repository.ErrNotFound) {

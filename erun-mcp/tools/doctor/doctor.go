@@ -36,9 +36,7 @@ type DoctorInput struct {
 	sharedpkg.JobEnvelopeInput
 }
 
-// DoctorRepairAliasInput is the MCP equivalent of the interactive
-// "Re-initialize cloud provider alias?" prompt, shaped so a caller can
-// stitch it from the structured RootConfigInspection of a previous run.
+// DoctorRepairAliasInput answers the "Re-initialize cloud provider alias?" prompt.
 type DoctorRepairAliasInput struct {
 	Alias         string `json:"alias" jsonschema:"orphaned cloud provider alias (username+account@provider) to recreate"`
 	SSOStartURL   string `json:"ssoStartUrl" jsonschema:"AWS IAM Identity Center start URL"`
@@ -72,8 +70,7 @@ func runDoctorToolCommand(runtime sharedpkg.RuntimeConfig, input DoctorInput, ru
 	if input.ClearPendingHelm && input.Rollback {
 		return nil, errors.New("clearPendingHelm and rollback are alternative recoveries; request only one")
 	}
-	// Config drift is more fundamental than anything below it: a wrong projection
-	// mis-drives every later resolution, so reconcile first and return.
+	// Config drift mis-drives everything below, so reconcile first and return.
 	if input.SyncConfig {
 		return nil, runDoctorConfigSync(runCtx)
 	}
@@ -97,8 +94,7 @@ func runDoctorToolCommand(runtime sharedpkg.RuntimeConfig, input DoctorInput, ru
 	return report, nil
 }
 
-// runDoctorEnvConfigRestore runs the backup-restore leg when one was asked for,
-// reporting whether it was the whole request and nothing else needs to run.
+// runDoctorEnvConfigRestore reports whether the restore was the whole request.
 func runDoctorEnvConfigRestore(runtime sharedpkg.RuntimeConfig, input DoctorInput, runCtx core.Context, report *sharedpkg.DoctorRootConfigReport) (bool, error) {
 	selector := strings.TrimSpace(input.RestoreEnvConfigFromBackup)
 	if selector == "" {
@@ -110,11 +106,8 @@ func runDoctorEnvConfigRestore(runtime sharedpkg.RuntimeConfig, input DoctorInpu
 	return onlyEnvConfigRestoreInput(input), nil
 }
 
-// restoreDoctorEnvConfigFromBackup recovers a changed or corrupted env config
-// from a backup before any tenant/env work runs against it. tenant/environment
-// resolve through resolveLocalTarget so a backup restore, like every other
-// tenant/env action in this module, can never be pointed at an environment
-// this server's pod does not itself run.
+// restoreDoctorEnvConfigFromBackup restores the env config before any
+// tenant/env work; the target is pinned to this pod's environment.
 func restoreDoctorEnvConfigFromBackup(runtime sharedpkg.RuntimeConfig, runCtx core.Context, input DoctorInput, selector string, report *sharedpkg.DoctorRootConfigReport) error {
 	tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {
@@ -187,9 +180,7 @@ func runDoctorTenantEnvActions(runtime sharedpkg.RuntimeConfig, input DoctorInpu
 	if err := runDoctorRecoveryToolActions(runCtx, input, req); err != nil {
 		return err
 	}
-	// A host environment's daemon is this machine's own, so an unreachable
-	// cluster says nothing about it -- see the CLI's
-	// runDoctorCleanupActions for the same distinction.
+	// A host environment's daemon is local, so an unreachable cluster says nothing about it.
 	if diagnosis.ClusterUnreachable && doctor.ResolveDoctorDockerDaemon(req).Kind != doctor.DoctorDockerDaemonHost {
 		if err := writeDoctorPodUnreachableSkip(runCtx, "Docker storage"); err != nil {
 			return err
@@ -210,10 +201,8 @@ func anyDoctorActionRequested(input DoctorInput) bool {
 	return input.PruneImages || input.PruneBuildCache || input.PruneContainers
 }
 
-// onlyRootConfigDoctorInput mirrors the CLI's doctorOnlyRepairConfig: when the
-// run is scoped to root-config repair, skip the tenant/env fall-through, since
-// resolveDoctorOpenResult would fail on the very dangling alias the caller
-// asked us to fix.
+// onlyRootConfigDoctorInput skips tenant/env work, which would fail on the
+// dangling alias being repaired.
 func onlyRootConfigDoctorInput(input DoctorInput) bool {
 	if len(input.RepairOrphanedAliases) == 0 && strings.TrimSpace(input.RestoreConfigFromBackup) == "" {
 		return false
@@ -221,9 +210,8 @@ func onlyRootConfigDoctorInput(input DoctorInput) bool {
 	return !input.PruneImages && !input.PruneBuildCache && !input.PruneContainers
 }
 
-// runDoctorRootConfigToolFlow returns fatal=true when the root config is in a
-// state that must stop the flow before tenant/env work even when more was
-// requested — for example, the file is corrupted and no repair input was supplied.
+// runDoctorRootConfigToolFlow returns fatal=true when the root config must stop
+// the flow, e.g. it is corrupted and no repair input was given.
 func runDoctorRootConfigToolFlow(runtime sharedpkg.RuntimeConfig, input DoctorInput, runCtx core.Context) (*sharedpkg.DoctorRootConfigReport, bool, error) {
 	inspection, err := config.InspectRootConfig(runtime.Store)
 	if err != nil {
@@ -352,13 +340,8 @@ func firstNonBlank(values ...string) string {
 	return ""
 }
 
-// writeDoctorDeployDiagnosis reports helm release status and runtime pods so an
-// agent can see why a deploy failed before any cleanup runs. Read-only, so it
-// runs under preview/dry-run too — that mode withholds mutations, not reads.
-// The returned diagnosis carries ClusterUnreachable forward so every later
-// section that needs the runtime pod (git push access, docker storage) can
-// skip its own probe instead of independently rediscovering the same
-// unreachable cluster.
+// writeDoctorDeployDiagnosis is read-only, so it runs under preview too; later
+// sections reuse its ClusterUnreachable instead of re-probing.
 func writeDoctorDeployDiagnosis(runCtx core.Context, req config.ShellLaunchParams) (deploy.DeployDiagnosisResult, error) {
 	diagnosis := deploy.RunDeployDiagnosis(runCtx, req)
 	if status := strings.TrimSpace(diagnosis.HelmStatus); status != "" {
@@ -377,24 +360,15 @@ func writeDoctorDeployDiagnosis(runCtx core.Context, req config.ShellLaunchParam
 	return diagnosis, nil
 }
 
-// writeDoctorPodUnreachableSkip reports a doctor section skipped because an
-// earlier section already confirmed the cluster is unreachable
-// (deploy.DeployDiagnosisResult.ClusterUnreachable), instead of paying
-// another multi-minute kubectl timeout to rediscover the same fact. Mirrors
-// the CLI's reportPodSkippedUnreachable
-// (erun-cli/cmd/doctor/doctor_pod_diagnosis.go).
+// writeDoctorPodUnreachableSkip avoids another kubectl timeout on a cluster
+// already known unreachable.
 func writeDoctorPodUnreachableSkip(runCtx core.Context, header string) error {
 	_, err := fmt.Fprintf(runCtx.Stdout, "== %s ==\nskipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.\n\n", header)
 	return err
 }
 
-// writeDoctorInspection reports the docker-storage read, naming the daemon
-// behind every figure it prints.
-//
-// An environment with no daemon holding build images is a report rather than a
-// tool-call failure — nothing there is broken or transient, and the reason
-// carries the next step — unless the caller asked for a prune against it, which
-// cannot run at all: that one fails the call, the same as the CLI refusing it.
+// writeDoctorInspection reports docker storage. No build daemon is a report,
+// not a failure, unless a prune was requested against it.
 func writeDoctorInspection(runCtx core.Context, target config.OpenResult, req config.ShellLaunchParams, pruneRequested bool) error {
 	inspection, err := doctor.RunDoctorInspection(runCtx, nil, req)
 	var unavailable doctor.DoctorDockerDaemonUnavailableError
@@ -417,8 +391,7 @@ func writeDoctorInspection(runCtx core.Context, target config.OpenResult, req co
 	return writeDoctorOutput(runCtx, inspection.Stdout, inspection.Stderr)
 }
 
-// runDoctorRecoveryToolActions runs the caller-requested deploy-recovery actions
-// (clear pending helm / rollback). Mutates the live release.
+// runDoctorRecoveryToolActions mutates the live release.
 func runDoctorRecoveryToolActions(runCtx core.Context, input DoctorInput, req config.ShellLaunchParams) error {
 	for _, action := range deployRecoveryActionsFromInput(input) {
 		if !runCtx.DryRun {
@@ -473,9 +446,7 @@ func runDoctorToolActions(runCtx core.Context, input DoctorInput, req config.She
 	return nil
 }
 
-// writeDoctorAction names the action and the daemon it acts on: an action run
-// against a daemon that does not hold this environment's build images reclaims
-// nothing, and the reader has to be able to tell which daemon ran.
+// writeDoctorAction names the daemon too, since acting on the wrong one reclaims nothing.
 func writeDoctorAction(runCtx core.Context, req config.ShellLaunchParams, action doctor.DoctorAction) error {
 	if runCtx.DryRun {
 		return nil
@@ -499,11 +470,7 @@ func writeDoctorOutput(runCtx core.Context, stdout, stderr string) error {
 	return nil
 }
 
-// resolveDoctorOpenResult resolves tenant/environment through
-// resolveLocalTarget -- the same refusal every other typed MCP tool in this
-// module applies -- before asking the store to resolve the rest of the
-// OpenResult, so doctor's tenant/env actions can never be pointed at a
-// different environment than the one this server's pod actually runs in.
+// resolveDoctorOpenResult pins tenant/environment to this pod's environment.
 func resolveDoctorOpenResult(runtime sharedpkg.RuntimeConfig, input DoctorInput) (config.OpenResult, error) {
 	tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {
@@ -526,8 +493,7 @@ func doctorActionsFromInput(input DoctorInput) []doctor.DoctorAction {
 	return actions
 }
 
-// runDoctorConfigSync reconciles the in-pod config from the injected env. The
-// request is itself the confirmation, so it applies without a further prompt.
+// runDoctorConfigSync applies without a prompt; the request is the confirmation.
 func runDoctorConfigSync(runCtx core.Context) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {

@@ -6,10 +6,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestImagePullSecretGetArgsSharedByBothPaths locks the one argv builder
-// applyImagePullSecrets traces and defaultExistingImagePullSecretAuths
-// executes, so the dry-run trace can never drift from the subprocess
-// execution path regardless of which execution mode is active.
+// The dry-run trace and the subprocess path share one argv builder.
 func TestImagePullSecretGetArgsSharedByBothPaths(t *testing.T) {
 	got := ImagePullSecretGetArgs("team-dev", "my-context", "regcred")
 	want := []string{"--context", "my-context", "-n", "team-dev", "get", "secret", "regcred", "-o", "json"}

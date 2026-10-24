@@ -10,9 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestRuntimeUsageCPUUnavailableRendersAsStatedUnavailable covers the cgroup
-// v1 case: the reader reports Unavailable rather than a quota, and the UI
-// must not fold that into a confident "0.0%" utilisation figure.
 func TestRuntimeUsageCPUUnavailableRendersAsStatedUnavailable(t *testing.T) {
 	cpu := uiRuntimeCPUUsageFromReading(config.RuntimeCPUUsage{
 		Unavailable: "cgroup v2 not detected under /sys/fs/cgroup; CPU usage needs cpu.max/cpu.stat",
@@ -28,10 +25,6 @@ func TestRuntimeUsageCPUUnavailableRendersAsStatedUnavailable(t *testing.T) {
 	}
 }
 
-// TestRuntimeUsageMemoryUnlimitedRendersAsUnlimitedNotZeroPercent covers a
-// container whose memory.max is "max": the reading is available, but there is
-// no limit to divide by, so PercentOfLimit/Limit must stay empty rather than
-// reading as "using 0% of a 0-byte limit".
 func TestRuntimeUsageMemoryUnlimitedRendersAsUnlimitedNotZeroPercent(t *testing.T) {
 	memory := uiRuntimeMemoryUsageFromReading(config.RuntimeMemoryUsage{
 		CurrentBytes: 512 * 1024 * 1024,
@@ -52,10 +45,6 @@ func TestRuntimeUsageMemoryUnlimitedRendersAsUnlimitedNotZeroPercent(t *testing.
 	}
 }
 
-// TestRuntimeUsageMemoryUnavailableRendersAsStatedUnavailable covers the
-// unreadable-file case (memory.current itself could not be read): distinct
-// from Unlimited, this is an error state and every other memory field must
-// stay empty rather than defaulting to zero.
 func TestRuntimeUsageMemoryUnavailableRendersAsStatedUnavailable(t *testing.T) {
 	memory := uiRuntimeMemoryUsageFromReading(config.RuntimeMemoryUsage{
 		Unavailable: "memory.current was not readable",
@@ -71,8 +60,6 @@ func TestRuntimeUsageMemoryUnavailableRendersAsStatedUnavailable(t *testing.T) {
 	}
 }
 
-// TestRuntimeUsageDiskUnavailableRendersAsStatedUnavailable covers df failing
-// to report the watched mount: the panel must say so, not show "0%" used.
 func TestRuntimeUsageDiskUnavailableRendersAsStatedUnavailable(t *testing.T) {
 	disk := uiRuntimeDiskUsageFromReading(config.RuntimeDiskUsage{
 		Mount:       "/home/erun",
@@ -92,10 +79,6 @@ func TestRuntimeUsageDiskUnavailableRendersAsStatedUnavailable(t *testing.T) {
 	}
 }
 
-// TestRuntimeUsageFromReadingMixedAvailability covers a realistic reading
-// where CPU is unavailable but memory and disk are not, pinning that the
-// top-level mapping keeps each field's own unavailability independent rather
-// than collapsing the whole reading to one status.
 func TestRuntimeUsageFromReadingMixedAvailability(t *testing.T) {
 	usage := uiRuntimeUsageFromReading(config.RuntimeUsage{
 		Tenant:      "petios",
@@ -132,14 +115,7 @@ func TestRuntimeUsageFromReadingMixedAvailability(t *testing.T) {
 	}
 }
 
-// TestLoadRuntimeUsageReportsOwnTimeoutNotSignalKilled is the reported defect,
-// reproduced through the real production wiring (loadRuntimeUsageViaKubectl is
-// not mocked): with the app's own context already past its deadline, the
-// probe's internal runtimeUsageTimeout bound reads as already exceeded before
-// the kubectl exec even runs, so no kubectl binary is required for this test
-// to reach the same classification a real timeout would. The memory panel's
-// message must say so instead of "signal: killed" -- the exact phrase this
-// panel would otherwise misread as an OOM kill.
+// Uses the real wiring: the expired parent ctx triggers the timeout before kubectl runs.
 func TestLoadRuntimeUsageReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 	store := stubUIStore{
 		tenants: map[string]config.TenantConfig{
@@ -169,27 +145,14 @@ func TestLoadRuntimeUsageReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 	}
 }
 
-// An environment actively building is the state the report described: its
-// popover read "Busy — holding: release 1.0.302" beside a CPU of 0.2%, because
-// the figure was the runtime container's and every image build actually runs in
-// the erun-dind sidecar's own cgroup. The desktop's reader has always acquired
-// that second reading — erun-common's RunRuntimeUsage execs the same script into
-// the sidecar and hangs it on RuntimeUsage.Dind — and the UI mapping dropped it
-// on the floor, so the number that would have answered "is my build working" was
-// read and then thrown away.
-//
-// Asserted over the JSON the popover is handed rather than over the Go field:
-// this mapping's whole job is to produce that payload, and the field a caller
-// reads is the JSON key.
+// Image builds run in the dind sidecar's cgroup, so the runtime container alone
+// reads idle during a build. Asserted on the JSON the popover receives.
 func TestRuntimeUsageCarriesTheDindSidecarSoAnActiveBuildIsNotAnIdleReading(t *testing.T) {
 	usage := uiRuntimeUsageFromReading(config.RuntimeUsage{
-		Tenant:      "erun",
-		Environment: "build",
-		// The runtime container during a release: near-idle by construction,
-		// because the lane spends its time waiting on bounded job awaits.
-		CPU:    config.RuntimeCPUUsage{QuotaCores: 12, UtilizationPercent: 0.2},
-		Memory: config.RuntimeMemoryUsage{CurrentBytes: 1 << 30, LimitBytes: 23 << 30, PercentOfLimit: 2},
-		// What the same moment looks like in the container the build is in.
+		Tenant:         "erun",
+		Environment:    "build",
+		CPU:            config.RuntimeCPUUsage{QuotaCores: 12, UtilizationPercent: 0.2},
+		Memory:         config.RuntimeMemoryUsage{CurrentBytes: 1 << 30, LimitBytes: 23 << 30, PercentOfLimit: 2},
 		ExcludesBuilds: true,
 		Dind: &config.RuntimeDindUsage{
 			CPU:    config.RuntimeCPUUsage{QuotaCores: 8, UtilizationPercent: 91.5},
@@ -225,11 +188,6 @@ func TestRuntimeUsageCarriesTheDindSidecarSoAnActiveBuildIsNotAnIdleReading(t *t
 	}
 }
 
-// A sidecar with no cpu.max quota has no percentage to report, and the reader
-// carries its cumulative counter on the same unavailable reading precisely so a
-// caller can still state something. Losing it would leave a build environment
-// whose only CPU figure is the runtime container's near-zero — the reported
-// state — so the cumulative figure has to cross the mapping too.
 func TestRuntimeUsageCarriesTheSidecarCumulativeCPUWithNoQuota(t *testing.T) {
 	const noQuota = "cpu.max reports no quota (unlimited or not readable); utilisation needs a quota to measure against"
 	usage := uiRuntimeUsageFromReading(config.RuntimeUsage{
@@ -257,9 +215,7 @@ func TestRuntimeUsageCarriesTheSidecarCumulativeCPUWithNoQuota(t *testing.T) {
 		t.Fatalf("the cumulative counter is the only CPU figure this reading has, and it was dropped: %+v", usage.Dind.CPU)
 	}
 
-	// No sidecar read at all stays nil rather than becoming a zero reading: an
-	// older runtime image, a sidecar mid-restart, and a genuinely idle sidecar
-	// must not arrive looking the same.
+	// No sidecar reading stays nil, not a zero reading.
 	withoutSidecar := uiRuntimeUsageFromReading(config.RuntimeUsage{
 		Tenant:      "erun",
 		Environment: "remote",
@@ -271,11 +227,6 @@ func TestRuntimeUsageCarriesTheSidecarCumulativeCPUWithNoQuota(t *testing.T) {
 	}
 }
 
-// TestRuntimeUsageCarriesTheRuntimeContainersOwnRequest is the desktop half of
-// the reservation reading: the card's CPU and Memory rows are measured against
-// the runtime container's limit, so the request those rows must state beside it
-// is that same container's own -- resolved here rather than in the component,
-// so no frontend code has to know the chart's container name.
 func TestRuntimeUsageCarriesTheRuntimeContainersOwnRequest(t *testing.T) {
 	usage := uiRuntimeUsageFromReading(config.RuntimeUsage{
 		Tenant:      "erun",
@@ -299,10 +250,6 @@ func TestRuntimeUsageCarriesTheRuntimeContainersOwnRequest(t *testing.T) {
 	}
 }
 
-// TestRuntimeUsageDistinguishesAnUnreadReservationFromNone covers the pair that
-// must not collapse: no reading at all (a caller that never asked) stays nil,
-// while a pod spec that could not be read carries its reason -- so the card
-// renders "not read" and never a reservation of nothing.
 func TestRuntimeUsageDistinguishesAnUnreadReservationFromNone(t *testing.T) {
 	absent := uiRuntimeUsageFromReading(config.RuntimeUsage{Tenant: "erun", Environment: "code1"})
 	if absent.Requests != nil {

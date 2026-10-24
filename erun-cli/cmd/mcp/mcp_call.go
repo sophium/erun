@@ -124,9 +124,7 @@ func runMCPCallCommand(ctx context.Context, commandCtx core.Context, resolveOpen
 		return nil
 	}
 
-	// Not an idle probe: this command calls a caller-named tool, and whether that
-	// tool is read-only is not something the CLI can know generically — its own
-	// help text says as much ("A tool can change the environment").
+	// Not an idle probe: the named tool may change the environment.
 	result, err := shared.CallMCPToolWithReattach(ctx, commandCtx, target, tool, toolArguments, false)
 	if err != nil {
 		if tool == "activity_lease_take" {
@@ -162,9 +160,7 @@ func runMCPToolsCommand(ctx context.Context, commandCtx core.Context, resolveOpe
 	return writeMCPToolsText(commandCtx, target, list)
 }
 
-// listMCPToolsWithReattach is listMCPTools's counterpart to
-// callMCPToolWithReattach: the same one-shot reattach-then-retry for a
-// dropped or stale channel.
+// listMCPToolsWithReattach reattaches once on a dropped or stale channel.
 func listMCPToolsWithReattach(ctx context.Context, commandCtx core.Context, target shared.McpEdgeTarget) (mcp.MCPToolListResult, error) {
 	list := func() (mcp.MCPToolListResult, error) {
 		return mcp.ListMCPTools(ctx, mcp.MCPToolListParams{
@@ -275,9 +271,6 @@ func firstMCPDescriptionLine(description string) string {
 	return strings.TrimSpace(line)
 }
 
-// mcpToolArgumentSummary renders a tool's input schema as its property names,
-// required ones marked, so text output stays scannable while --output json keeps
-// the full schema.
 func mcpToolArgumentSummary(schema json.RawMessage) string {
 	if len(schema) == 0 {
 		return ""

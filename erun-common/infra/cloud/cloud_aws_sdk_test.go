@@ -15,9 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// stsCallerIdentityFixture starts a fake STS endpoint that answers
-// GetCallerIdentity with a fixed identity, honored via the SDK's own
-// AWS_ENDPOINT_URL env var (no daemon, no real AWS account needed).
+// stsCallerIdentityFixture serves a fake STS via AWS_ENDPOINT_URL.
 func stsCallerIdentityFixture(t *testing.T) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -45,9 +43,7 @@ func traceCapturingContext() (core.Context, *bytes.Buffer) {
 	return core.Context{Logger: logger}, &trace
 }
 
-// stsWebIdentityTokenFixture starts a fake STS endpoint that answers
-// GetWebIdentityToken with a fixed token, honored via the SDK's own
-// AWS_ENDPOINT_URL env var (no daemon, no real AWS account needed).
+// stsWebIdentityTokenFixture serves a fake STS via AWS_ENDPOINT_URL.
 func stsWebIdentityTokenFixture(t *testing.T) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -77,27 +73,19 @@ func TestLibraryResolveAWSIdentityMatchesSubprocessObservableResult(t *testing.T
 		t.Fatalf("libraryResolveAWSIdentity: %v", err)
 	}
 
-	// This is exactly the shape defaultResolveAWSIdentity parses out of `aws
-	// sts get-caller-identity --output json` stdout — the two paths must
-	// agree on the observable result for the same underlying identity.
+	// Must match what the subprocess path parses.
 	want := AWSIdentity{Account: "123456789012", Arn: "arn:aws:iam::123456789012:user/test-user", UserID: "AIDAEXAMPLE"}
 	if identity != want {
 		t.Fatalf("identity = %+v, want %+v", identity, want)
 	}
 
-	// The trace line must be byte-identical to what defaultResolveAWSIdentity
-	// renders for the subprocess path (root AGENTS.md's dry-run/audit
-	// contract: the equivalent CLI invocation, regardless of execution mode).
+	// The trace must match the subprocess path byte for byte.
 	wantTrace := core.FormatShellCommand("", "aws", awsGetCallerIdentityArgs("")...)
 	if got := strings.TrimSpace(trace.String()); got != wantTrace {
 		t.Fatalf("trace = %q, want %q", got, wantTrace)
 	}
 }
 
-// TestAWSGetCallerIdentityArgsSharedByBothPaths locks the one argv builder
-// defaultResolveAWSIdentity (subprocess) and traceAWSGetCallerIdentity
-// (library) both call, so a profile can never render differently between
-// execution modes.
 func TestAWSGetCallerIdentityArgsSharedByBothPaths(t *testing.T) {
 	got := awsGetCallerIdentityArgs("my-profile")
 	want := []string{"sts", "get-caller-identity", "--output", "json", "--profile", "my-profile"}
@@ -133,17 +121,13 @@ func TestLibraryRunAWSBearerTokenMatchesSubprocessObservableResult(t *testing.T)
 		t.Fatalf("libraryRunAWSBearerToken: %v", err)
 	}
 
-	// This is exactly what defaultRunAWSBearerToken parses out of `aws sts
-	// get-web-identity-token ... --output text` stdout — the two paths must
-	// agree on the observable result for the same underlying token.
+	// Must match what the subprocess path parses.
 	want := "header.payload.sig"
 	if token != want {
 		t.Fatalf("token = %q, want %q", token, want)
 	}
 
-	// The trace line must be byte-identical to what defaultRunAWSBearerToken
-	// renders for the subprocess path (root AGENTS.md's dry-run/audit
-	// contract: the equivalent CLI invocation, regardless of execution mode).
+	// The trace must match the subprocess path byte for byte.
 	wantTrace := core.FormatShellCommand("", "aws", awsGetWebIdentityTokenArgs("", "https://api.example")...)
 	if got := strings.TrimSpace(trace.String()); got != wantTrace {
 		t.Fatalf("trace = %q, want %q", got, wantTrace)
@@ -160,13 +144,8 @@ func TestIsAWSProfileNotConfiguredError(t *testing.T) {
 	}
 }
 
-// staticCredentialsProfileFixture points the SDK's shared-config resolution at
-// a temp credentials file holding a static keypair under profile, and clears
-// AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_PROFILE so the env-var and
-// ambient-profile provider ranked above shared config in the chain can never
-// shadow it — this fixture exists to prove the shared-config profile itself
-// resolved, the same thing `aws configure export-credentials --profile
-// <profile>` reads.
+// staticCredentialsProfileFixture clears the env-var and ambient-profile providers so only
+// the shared-config profile can resolve.
 func staticCredentialsProfileFixture(t *testing.T, profile string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -192,9 +171,7 @@ func TestLibraryRunAWSExportCredentialsMatchesSubprocessObservableResult(t *test
 		t.Fatalf("libraryRunAWSExportCredentials: %v", err)
 	}
 
-	// This is exactly what defaultRunAWSExportCredentials parses out of `aws
-	// configure export-credentials --format process` stdout — the two paths
-	// must agree on the observable result for the same underlying profile.
+	// Must match what the subprocess path parses.
 	if creds.AccessKeyID != "AKIAFIXTURE" || creds.SecretAccessKey != "fixturesecret" {
 		t.Fatalf("creds = %+v, want AKIAFIXTURE/fixturesecret", creds)
 	}
@@ -205,19 +182,13 @@ func TestLibraryRunAWSExportCredentialsMatchesSubprocessObservableResult(t *test
 		t.Fatalf("creds.Expiration = %v, want zero for a static-key profile that cannot expire", creds.Expiration)
 	}
 
-	// The trace line must be byte-identical to what defaultRunAWSExportCredentials
-	// renders for the subprocess path (root AGENTS.md's dry-run/audit contract:
-	// the equivalent CLI invocation, regardless of execution mode).
+	// The trace must match the subprocess path byte for byte.
 	wantTrace := core.FormatShellCommand("", "aws", awsConfigureExportCredentialsArgs("erun-test-export")...)
 	if got := strings.TrimSpace(trace.String()); got != wantTrace {
 		t.Fatalf("trace = %q, want %q", got, wantTrace)
 	}
 }
 
-// TestAWSConfigureExportCredentialsArgsSharedByBothPaths locks the one argv
-// builder defaultRunAWSExportCredentials (subprocess) and
-// traceAWSExportCredentials (library) both call, so a profile can never
-// render differently between execution modes.
 func TestAWSConfigureExportCredentialsArgsSharedByBothPaths(t *testing.T) {
 	got := awsConfigureExportCredentialsArgs("my-profile")
 	want := []string{"configure", "export-credentials", "--format", "process", "--profile", "my-profile"}
@@ -232,8 +203,7 @@ func TestAWSConfigureExportCredentialsArgsSharedByBothPaths(t *testing.T) {
 }
 
 func TestLibraryRunAWSExportCredentialsDryRunTracesWithoutResolvingCredentials(t *testing.T) {
-	// No fixture set up: a dry run must never resolve credentials, so an
-	// unconfigured profile would fail the test if it were reached.
+	// No fixture: a dry run must never resolve credentials.
 	ctx, trace := traceCapturingContext()
 	ctx.DryRun = true
 

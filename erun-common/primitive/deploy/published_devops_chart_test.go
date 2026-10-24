@@ -25,15 +25,9 @@ func TestRuntimeImageRegistry(t *testing.T) {
 	}
 }
 
-// TestPublishedDevopsChartRegistry pins the split between the runtime CHART
-// registry (where the erun platform chart is published) and the runtime IMAGE
-// registry (an image-only override). A `--cluster-registry` env is the one case
-// where the chart follows the runtime image's registry (ghcr), because its
-// in-cluster deploy registry never holds the platform chart; a plain env keeps its
-// chart on the deploy registry and must NOT follow a differing runtime image (the
-// over-generalization this guards against).
+// A --cluster-registry env's chart follows the runtime image registry; a plain env
+// must not follow a differing runtime image.
 func TestPublishedDevopsChartRegistry(t *testing.T) {
-	// A cluster: entry as the init path passes it through, unconcretized.
 	clusterRegistries := config.ContainerRegistries{
 		{Cluster: &config.ClusterRegistry{}, Roles: []config.RegistryRole{config.RegistryRoleBuild, config.RegistryRoleDeploy}},
 	}
@@ -60,12 +54,6 @@ func TestPublishedDevopsChartRegistry(t *testing.T) {
 	})
 }
 
-// TestPublishedTenantComponentChartRegistry: a tenant's own component charts
-// are published by `erun push` to the DEPLOY registry, never wherever
-// publishedDevopsChartRegistry resolves the SHARED platform chart to (an
-// explicit runtimeregistry, or -- for a cluster-registry env -- the runtime
-// image's own registry), so a cluster-registry env with an explicit
-// runtimeregistry must not probe the platform-chart registry for them.
 func TestPublishedTenantComponentChartRegistry(t *testing.T) {
 	t.Run("cluster-registry env with an explicit runtimeregistry still resolves components from the deploy registry", func(t *testing.T) {
 		target := config.OpenResult{
@@ -93,12 +81,6 @@ func TestPublishedTenantComponentChartRegistry(t *testing.T) {
 	})
 }
 
-// TestChartRegistryInsecure: only the deploy
-// target's own concretized cluster registry can ever be insecure, and only
-// when the registry under test is that exact resolved host -- a platform
-// registry (ghcr.io) that merely happens to be probed in the same search must
-// never be treated as insecure just because the env also has an insecure
-// cluster entry.
 func TestChartRegistryInsecure(t *testing.T) {
 	target := config.OpenResult{
 		ClusterPullRegistry:     "10.43.0.100:5000",
@@ -115,13 +97,7 @@ func TestChartRegistryInsecure(t *testing.T) {
 	}
 }
 
-// TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine: a tenant's own
-// <tenant>-devops image is versioned on the tenant's own release line,
-// independent of the erun version the environment runs (erun pin never
-// rewrites this tag). A persisted runtimeimage naming that image at the
-// tenant's own tag must survive a redeploy verbatim, never be replaced by a
-// guessed <tenant>-devops:<erun-version> tag, whichever registry holds the
-// deploy role (same recorded image, only the registry wiring differs).
+// A tenant's own devops image tag is on the tenant's line and must survive verbatim.
 func TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine(t *testing.T) {
 	const (
 		tenant           = "petios"
@@ -195,12 +171,7 @@ func TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine(t *testing.T) {
 	}
 }
 
-// TestResolveDeployRuntimeImagePersistNameForDefaultFallback pins the
-// bare-name-only persist contract for the plain default path (no runtimeimage
-// override at all): PersistRuntimeVersionFromDeploySpecs must be able to heal
-// EnvConfig.RuntimeImage without freezing whatever registry happened to be
-// current at this deploy, so a later registry change still resolves
-// dynamically -- only the bare component name is safe to persist here.
+// Only the bare name is persisted, so a later registry change still resolves dynamically.
 func TestResolveDeployRuntimeImagePersistNameForDefaultFallback(t *testing.T) {
 	ctx := core.Context{}
 	target := config.OpenResult{Tenant: "acme", EnvConfig: config.EnvConfig{}}
@@ -217,10 +188,6 @@ func TestResolveDeployRuntimeImagePersistNameForDefaultFallback(t *testing.T) {
 	}
 }
 
-// TestResolveDeployRuntimeImagePersistNameEmptyForErunsOwnEnvironments proves
-// the erun product's own environments (no tenant line of their own) get no
-// PersistRuntimeImage at all, so the persist step leaves RuntimeImage exactly
-// as recorded rather than write an empty string over an operator's own pin.
 func TestResolveDeployRuntimeImagePersistNameEmptyForErunsOwnEnvironments(t *testing.T) {
 	ctx := core.Context{}
 	target := config.OpenResult{Tenant: "erun", EnvConfig: config.EnvConfig{}}

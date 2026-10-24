@@ -13,10 +13,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// stubKubectlUploadAccepts answers the upload exec by draining stdin (the
-// piped local file, discarded — the stub never really lands it in a pod) and
-// reporting the canned size/sha256 a caller expects for that fixed payload.
-// sha is the sha256 of the exact bytes the scenario writes as the local file.
+// stubKubectlUploadAccepts drains stdin and reports the given size/sha without landing the file.
 func stubKubectlUploadAccepts(t *testing.T, stubs string, size int, sha string) {
 	t.Helper()
 	fixture.StubBinaryWithScript(t, stubs, "kubectl",
@@ -94,9 +91,6 @@ func testInputsUploadRemotePathMustBeAbsolute(t *testing.T) {
 }
 
 func testInputsUploadRealRun(t *testing.T) {
-	// "hello"'s sha256 is fixed, so the stub can report it without actually
-	// landing the file anywhere — this locks the argv/stdin wiring and the
-	// checksum-comparison success path, not a real cluster transfer.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	local := filepath.Join(setup.Cwd, "evidence.bin")
@@ -114,8 +108,6 @@ func testInputsUploadRealRun(t *testing.T) {
 }
 
 func testInputsUploadRealRunChecksumMismatch(t *testing.T) {
-	// The stub reports a checksum that doesn't match the bytes sent, which
-	// must fail the command clearly rather than report success.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	local := filepath.Join(setup.Cwd, "evidence.bin")
@@ -133,9 +125,7 @@ func testInputsUploadRealRunChecksumMismatch(t *testing.T) {
 }
 
 func testInputsUploadRealRunDestinationNotWritable(t *testing.T) {
-	// The stub simulates the remote script's own refusal for an unwritable
-	// destination directory, matching the exit code/stderr shape the real
-	// script emits.
+	// The stub mimics the remote script's exit code and stderr for an unwritable destination.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	local := filepath.Join(setup.Cwd, "evidence.bin")

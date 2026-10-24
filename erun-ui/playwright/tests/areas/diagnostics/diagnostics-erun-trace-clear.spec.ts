@@ -6,18 +6,11 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// "Clear" on the erun-trace pane is non-destructive: it baselines the view so
-// new lines stand out, without truncating the persistent log or the Copy reads.
-//
-// The headless harness has no real trace.log for an inert seeded env, so these
-// stub the trace RPC to drive deterministic, evolving content. The baseline
-// math lives in the useErunTraceBaseline hook; here we lock the rendered view.
+// Clear is non-destructive: it baselines the view without truncating the log or Copy reads.
 test.describe('diagnostics erun-trace clear', () => {
   test.beforeEach(async ({ app }) => {
     if (!(await app.debugPanel.isOpen())) {
       await app.debugPanel.toggle();
-      // Converge through the panel's own helper rather than expect's fixed
-      // budget, then on the tab the test needs.
       await app.debugPanel.waitForOpen();
     }
     await app.debugPanel.selectTab('erun trace');
@@ -26,8 +19,7 @@ test.describe('diagnostics erun-trace clear', () => {
   test.afterEach(async ({ app }) => {
     if (await app.debugPanel.isOpen()) {
       await app.debugPanel.toggle();
-      // Converge on the close so a slow restore can't leak an open panel into
-      // the next test in this worker.
+      // Converge on the close so a slow restore can't leak an open panel into the next test.
       await app.debugPanel.waitForClosed();
     }
   });
@@ -37,7 +29,6 @@ test.describe('diagnostics erun-trace clear', () => {
     page,
     seededEnv,
   }) => {
-    // Mutated later so a poll tick delivers a line that arrived after the baseline.
     let extra = '';
     await page.route('**/__erun_invoke', async (route, request) => {
       const body = JSON.parse(request.postData() ?? '{}') as { method: string };
@@ -58,16 +49,10 @@ test.describe('diagnostics erun-trace clear', () => {
 
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     const pane = app.debugPanel.erunTracePane();
-    // withTestBudget, not the 10s cap this carried: the content arrives from
-    // the environment open's own trace load, which this test declared 30s for,
-    // so a 10s inner cap expires a step that was still running with a third of
-    // its budget unspent.
     await expect(pane).toContainText('TRACE-OLD-1', withTestBudget());
 
     await app.debugPanel.erunTraceClearButton().click();
     const clearedNotice = page.getByText('Showing entries since you cleared.');
-    // waitFor (not expect) converges the clear's own render against this
-    // test's budget rather than expect's fixed one.
     await clearedNotice.waitFor({ state: 'visible' });
     await expect(clearedNotice).toBeVisible();
     await expect(pane).not.toContainText('TRACE-OLD-1');
@@ -77,7 +62,7 @@ test.describe('diagnostics erun-trace clear', () => {
     await expect(pane).toContainText('TRACE-NEW-1', withTestBudget());
     await expect(pane).not.toContainText('TRACE-OLD-1');
 
-    // Show all restores the full log, proving Clear hid rather than truncated it.
+    // Show all proves Clear hid rather than truncated.
     await app.debugPanel.erunTraceShowAllButton().click();
     await expect(pane).toContainText('TRACE-OLD-1', withTestBudget());
     await clearedNotice.waitFor({ state: 'hidden' });
@@ -85,9 +70,7 @@ test.describe('diagnostics erun-trace clear', () => {
   });
 
   test('the baseline is per-env: switching envs resets it', async ({ app, page, seededEnv }) => {
-    // Two throwaway envs (seededEnv plus one seeded inline) so opening both never
-    // leaves the shared baseline rows open for other specs. Per-env trace content
-    // makes a baseline that leaked across the switch visible.
+    // Throwaway envs so the shared baseline rows are never left open for other specs.
     const envA = seededEnv.environment;
     const envB = uniqueEnvironmentName('per-env-reset-b');
     seedEnvironment(SEED_TENANT, envB);
@@ -125,8 +108,6 @@ test.describe('diagnostics erun-trace clear', () => {
       await expect(clearedNotice).toBeVisible();
 
       await app.sidebar.openEnvironment(SEED_TENANT, envB);
-      // The switch's own render, not expect's fixed clock, decides when this
-      // baseline has been reset.
       await clearedNotice.waitFor({ state: 'hidden' });
       await expect(clearedNotice).toBeHidden();
       await expect(pane).toContainText(`LINE-FOR-${envB}-1`, withTestBudget());

@@ -1,5 +1,4 @@
-// Package golden compares actual integration output against a stored
-// expectation file.
+// Package golden compares integration output against stored golden files.
 package golden
 
 import (
@@ -13,9 +12,8 @@ import (
 // UpdateEnv is the env var that flips golden mode from compare to write.
 const UpdateEnv = "UPDATE_GOLDEN"
 
-// Equal compares actual output against the file at testdata/<name>.txt
-// relative to the test source directory. If UPDATE_GOLDEN=1, the file is
-// (re)written with the actual output and the test passes.
+// Equal compares actual against testdata/<name>.txt beside the calling test,
+// rewriting it instead when UPDATE_GOLDEN=1.
 func Equal(t *testing.T, name, actual string) {
 	t.Helper()
 	path := pathFor(t, name)
@@ -40,8 +38,6 @@ func Equal(t *testing.T, name, actual string) {
 	}
 }
 
-// pathFor keeps each command's goldens beside its own tests under
-// testdata/<command>/<name>.txt.
 func pathFor(t *testing.T, name string) string {
 	t.Helper()
 	if !strings.HasSuffix(name, ".txt") {

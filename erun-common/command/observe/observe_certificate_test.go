@@ -42,8 +42,7 @@ func orderOwnedBy(name, certificateRequestName, state, reason string) clusterrea
 
 func TestBuildObservedCertificatesReadyCertificateSkipsWalk(t *testing.T) {
 	certs := []clusterread.CertificateItem{readyCertificate("wildcard")}
-	// A ready certificate must never walk the chain, even when stale
-	// CertificateRequest/Order/Challenge objects for it still exist.
+	// A ready certificate never walks the chain, even with stale requests present.
 	requests := []clusterread.OwnedResourceItem{certificateRequestFor("wildcard-old", "wildcard", "2024-01-01T00:00:00Z")}
 	orders := []clusterread.OwnedResourceItem{orderOwnedBy("wildcard-order-old", "wildcard-old", "valid", "")}
 
@@ -60,9 +59,6 @@ func TestBuildObservedCertificatesReadyCertificateSkipsWalk(t *testing.T) {
 	}
 }
 
-// TestLatestCertificateRequestNamePicksMostRecent covers a Certificate that
-// has been reissued: multiple CertificateRequests carry its label, and only
-// the latest one's Order/Challenge chain is the live one worth walking.
 func TestLatestCertificateRequestNamePicksMostRecent(t *testing.T) {
 	requests := []clusterread.OwnedResourceItem{
 		certificateRequestFor("wildcard-old", "wildcard", "2024-01-01T00:00:00Z"),

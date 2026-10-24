@@ -5,8 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderWithStore } from '../test/renderWithStore';
 import { EnvironmentsPanel } from './EnvironmentsPanel';
 
-// fetch is mocked at the boundary so each flow exercises the real client +
-// controller against the api-protocol.md contract.
+// fetch is mocked at the boundary so the real client and controller run.
 
 interface MockReq {
   method: string;
@@ -230,8 +229,7 @@ describe('EnvironmentsPanel deploy flow', () => {
     expect(screen.getByText('No runtime environments to deploy.')).toBeInTheDocument();
   });
 
-  // The API refuses a deploy on a row whose delete is outstanding, so offering
-  // the button would only lead to a raw Kubernetes admission error.
+  // The API refuses a deploy while a delete is outstanding.
   it('offers no Deploy control for an environment that is being deleted', () => {
     renderWithStore(
       <EnvironmentsPanel
@@ -262,9 +260,7 @@ describe('EnvironmentsPanel deploy flow', () => {
 
     expect(screen.queryByRole('button', { name: 'Deploy' })).not.toBeInTheDocument();
     expect(screen.getByText(/delete is blocked and still outstanding/)).toBeInTheDocument();
-    // The blocker is what an operator can act on -- it names the finalizer
-    // actually holding the namespace -- so it is shown whole, not summarised.
-    // Matched by substring because Testing Library collapses the newlines.
+    // Substring match because Testing Library collapses the newlines.
     expect(screen.getByText(/did not finish terminating within 20m0s/)).toBeInTheDocument();
     expect(
       screen.getByText(/acme\.cert-manager\.io\/finalizer in 1 resource instances/),
@@ -287,8 +283,6 @@ describe('EnvironmentsPanel deploy flow', () => {
   });
 });
 
-// While an OPERATIONS caller is scoped to another tenant, every
-// row must name it -- otherwise the row reads as the caller's own.
 describe('EnvironmentsPanel tenant scope', () => {
   const OWN_TENANT_ENV: Environment = { ...RUNTIME_ENV, tenantId: 'tenant-own' };
   const OTHER_TENANT = {

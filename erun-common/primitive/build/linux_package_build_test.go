@@ -36,8 +36,6 @@ const (
 		"RUN dpkg-deb --build /pkg /erun.deb\n"
 )
 
-// linuxPackageProject lays out a <tenant>-devops tree with one image under
-// docker/ and two packages under linux/: one with tests, one without.
 func linuxPackageProject(t *testing.T) (projectRoot, uiDir, cliDir string) {
 	t.Helper()
 	projectRoot = t.TempDir()
@@ -101,9 +99,7 @@ func TestLinuxPackageDiscoveryFindsDockerfilesUnderLinux(t *testing.T) {
 	}
 }
 
-// fakeDockerRecorder installs a docker stub through the ERUN_DOCKER_BIN seam
-// that logs every invocation and, for a local export, writes a .deb named
-// after the platform's directory into the destination.
+// fakeDockerRecorder logs each docker call and writes a .deb for a local export.
 func fakeDockerRecorder(t *testing.T, exitCode string) string {
 	t.Helper()
 	logPath := filepath.Join(t.TempDir(), "docker.log")
@@ -169,9 +165,6 @@ func linuxPackageReleaseSpec(t *testing.T, version string) shared.ReleaseSpec {
 	return shared.ReleaseSpec{ProjectRoot: projectRoot, Version: version, LinuxPackages: packages, LinuxPackageDir: filepath.Join(t.TempDir(), "linux")}
 }
 
-// A release exports every package's dist stage for both release platforms, and
-// only the .deb files at the root of each export are uploaded. The release is
-// created, as a prerelease for a candidate version, when it does not exist.
 func TestReleaseExportsDistAndCreatesTheGitHubRelease(t *testing.T) {
 	spec := linuxPackageReleaseSpec(t, "1.4.2-rc.1")
 	dockerLog := fakeDockerRecorder(t, "0")
@@ -243,8 +236,6 @@ func TestReleaseUploadsToAnExistingGitHubRelease(t *testing.T) {
 	}
 }
 
-// A dist stage that exports no .deb at its root uploads nothing, and the error
-// says the tag is already public rather than suggesting the release be undone.
 func TestReleaseUploadRefusesAnExportWithoutPackages(t *testing.T) {
 	spec := linuxPackageReleaseSpec(t, "1.4.2")
 	ghLog := fakeGitHubCLI(t, "0")
@@ -258,8 +249,6 @@ func TestReleaseUploadRefusesAnExportWithoutPackages(t *testing.T) {
 	}
 }
 
-// The dry run traces every export and both GitHub release branches, and runs
-// nothing.
 func TestReleaseLinuxPackagesDryRunTracesWithoutRunning(t *testing.T) {
 	spec := linuxPackageReleaseSpec(t, "1.4.2")
 	dockerLog := fakeDockerRecorder(t, "0")
@@ -290,9 +279,6 @@ func TestReleaseLinuxPackagesDryRunTracesWithoutRunning(t *testing.T) {
 	}
 }
 
-// Inside a runtime pod every image build nests its RUN containers under the
-// environment's CPU cap; a package build (erun-ui's test stage, the release's
-// dist cross-builds) must too, or it escapes the dind sidecar's limit.
 func TestLinuxPackageBuildsNestUnderTheCPUCapInsideARuntimePod(t *testing.T) {
 	t.Setenv("ERUN_TENANT", "team")
 	t.Setenv("ERUN_ENVIRONMENT", "dev")
@@ -323,11 +309,7 @@ func TestLinuxPackageBuildsNestUnderTheCPUCapInsideARuntimePod(t *testing.T) {
 	}
 }
 
-// Below debug verbosity a package build's BuildKit output is captured, so its
-// test stage (erun-ui's runs for many minutes) is silent: the run's heartbeat is
-// the only sign it is working rather than wedged, and it must name the package
-// while its docker build runs. The stub holds the build until the test has
-// looked at the heartbeat.
+// The stub holds the build until the test has looked at the heartbeat.
 func TestLinuxPackageCheckIsOnTheBuildHeartbeatWhileItRuns(t *testing.T) {
 	projectRoot, uiDir, _ := linuxPackageProject(t)
 	packages := shared.NewLinuxPackageSpecs(projectRoot, []shared.LinuxPackageContext{{Dir: uiDir, DockerfilePath: filepath.Join(uiDir, "Dockerfile")}})

@@ -107,11 +107,8 @@ func (routes RoleRoutes) listUserRoles(w http.ResponseWriter, req *http.Request)
 
 type grantUserRoleRequest struct {
 	RoleID string `json:"roleId"`
-	// TenantID targets another tenant and is honored only for an
-	// operations-tenant caller, the same rule POST /v1/users applies. It is
-	// what recovers a tenant whose only grant-capable user cannot
-	// authenticate: role management is role-gated, so without this the
-	// identity that can sign in could never be given the role it needs.
+	// TenantID targets another tenant and is honored only for an operations-tenant caller;
+	// it recovers a tenant whose only grant-capable user cannot authenticate.
 	TenantID string `json:"tenantId"`
 }
 
@@ -136,8 +133,7 @@ func (routes RoleRoutes) grantUserRole(w http.ResponseWriter, req *http.Request)
 		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
-	// Passed through only when it differs from the caller's own session
-	// tenant; the common case relies on the tenant_id column default.
+	// Empty for the caller's own tenant, which the tenant_id column default covers.
 	overrideTenantID := ""
 	if targetTenantID != securityContext.TenantID {
 		overrideTenantID = targetTenantID
@@ -159,11 +155,7 @@ func (routes RoleRoutes) grantUserRole(w http.ResponseWriter, req *http.Request)
 	writeJSON(w, http.StatusCreated, grant)
 }
 
-// revokeUserRole takes its optional tenantId from the query string, not a body:
-// a DELETE carries no body here, the same way GET /v1/invites and
-// GET /v1/environments take theirs. Grant and Revoke have to be symmetrical —
-// a cross-tenant grant an operations caller could not undo would trade one
-// unrecoverable state for another.
+// revokeUserRole takes tenantId from the query string (DELETE has no body) so revoke stays symmetrical with grant.
 func (routes RoleRoutes) revokeUserRole(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {

@@ -14,31 +14,14 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// Most discovered images are independent of each other — the runtime build has
-// thirteen, of which one has a FROM edge onto a sibling — so building them
-// strictly one after another spends most of its wall-clock waiting. What must
-// stay ordered is narrow and known: a dependent may not start until every image
-// it FROMs has finished and written its tags.
-//
-// An image is therefore dispatched the moment its own bases are done, not when
-// every image that happens to share its dependency level is done. The difference
-// is not academic: the runtime image FROMs only erun-ubuntu, a cache hit that
-// finishes in under a second, and it used to wait out the whole level behind it
-// — ten minutes of erun-backend-api, which it never depends on.
-//
-// Concurrency is confined to execution. Every trace line is emitted before any
-// image builds, sequentially and in dependency order, so the dry-run contract
-// and the decision lines are byte-identical whatever the degree of parallelism.
+// An image is dispatched as soon as its own FROM bases finish. Trace lines are emitted
+// sequentially before any build, so output is identical at any degree of parallelism.
 
-// BuildJobsEnvVar overrides the resolved degree of build concurrency. It exists
-// so a scenario can pin the degree rather than inherit the host's core count,
-// which would make output depend on the machine that ran it.
+// BuildJobsEnvVar pins build concurrency so output does not depend on the host's core count.
 const BuildJobsEnvVar = "ERUN_BUILD_JOBS"
 
-// resolveBuildJobs picks how many images may build at once. Each build spawns
-// BuildKit and the foreign architecture runs under emulation, which is memory
-// heavy, so the automatic ceiling is half the cores rather than all of them —
-// oversubscribing here trades wall-clock for swap.
+// resolveBuildJobs picks how many images build at once. Emulated foreign-arch BuildKit is
+// memory heavy, so the automatic ceiling is half the cores.
 func resolveBuildJobs(ctx core.Context, images int) int {
 	jobs := ctx.BuildJobs
 	if jobs <= 0 {
@@ -52,10 +35,8 @@ func resolveBuildJobs(ctx core.Context, images int) int {
 	return min(jobs, max(1, images))
 }
 
-// buildBaseTags lists the sibling images this Dockerfile FROMs, in Dockerfile
-// order, and is the whole of what may hold a build back. A self-reference is not
-// a dependency — an image cannot wait for itself, and treating it as one would
-// strand it forever.
+// buildBaseTags lists the sibling images this Dockerfile FROMs, in Dockerfile order.
+// A self-reference is ignored; it would strand the image forever.
 func buildBaseTags(build shared.DockerBuildSpec, buildsByTag map[string]shared.DockerBuildSpec) []string {
 	tag := strings.TrimSpace(build.Image.Tag)
 	dependencies := dockerfileLocalBaseImageTags(build.DockerfilePath, buildsByTag)
@@ -69,13 +50,7 @@ func buildBaseTags(build shared.DockerBuildSpec, buildsByTag map[string]shared.D
 	return bases
 }
 
-// buildDependencies maps every image's tag to the sibling bases it must wait
-// for.
-//
-// It also detects a FROM cycle, which the sequential loop never had to: that
-// loop tolerated any order the traversal produced, whereas a scheduler waiting
-// on bases that are themselves waiting would simply hang. A cycle is reported
-// as an error rather than deadlocking.
+// buildDependencies maps each tag to its sibling bases and reports FROM cycles instead of deadlocking.
 func buildDependencies(builds []shared.DockerBuildSpec) (map[string][]string, error) {
 	buildsByTag := dockerBuildsByTag(builds)
 	dependencies := make(map[string][]string, len(builds))
@@ -89,8 +64,6 @@ func buildDependencies(builds []shared.DockerBuildSpec) (map[string][]string, er
 	return dependencies, nil
 }
 
-// The states a depth-first walk records for a tag: untouched (the map's zero
-// value), on the current path — so an edge back to it is the cycle — or cleared.
 const (
 	buildVisiting = iota + 1
 	buildVisited
@@ -131,8 +104,6 @@ func checkBuildDependenciesAreAcyclic(builds []shared.DockerBuildSpec, dependenc
 	return nil
 }
 
-// buildCycleStart finds where the walk re-entered the tag, so the error names
-// the images in the cycle rather than every image the walk had passed through.
 func buildCycleStart(path []string, tag string) int {
 	for i, entry := range path {
 		if entry == tag {
@@ -142,16 +113,8 @@ func buildCycleStart(path []string, tag string) int {
 	return 0
 }
 
-// traceBuildDependencyPlan records the base ordering the FROM graph implies. It
-// is a pure function of the Dockerfiles, so it is the same on every machine —
-// unlike the worker count, which is derived from the host and so is deliberately
-// not part of the audit line.
-//
-// It names the edges, not a schedule. A dependent starts when its own bases are
-// done, so there is no boundary between one level and the next for a line to
-// report, and a line that reported levels would describe a barrier the run does
-// not have. A build with nothing to order says nothing: there is no dependency
-// to explain, and saying so would churn every independent-image golden.
+// traceBuildDependencyPlan records the FROM edges, not a schedule; worker count is host-derived
+// and deliberately omitted. Nothing to order prints nothing.
 func traceBuildDependencyPlan(ctx core.Context, builds []shared.DockerBuildSpec, dependencies map[string][]string) {
 	waiting := make([]string, 0, len(builds))
 	for _, build := range builds {
@@ -166,27 +129,8 @@ func traceBuildDependencyPlan(ctx core.Context, builds []shared.DockerBuildSpec,
 	ctx.Trace(fmt.Sprintf("build: %d images, %d waiting on a sibling base — %s", len(builds), len(waiting), strings.Join(waiting, "; ")))
 }
 
-// runBuildDependencies executes the schedule. Each image is dispatched the
-// moment every base it FROMs has finished and written its tags, so an image
-// never starts before its bases — the same FROM edges as before, enforced by the
-// same graph — but it no longer waits out unrelated images that merely shared
-// its dependency level.
-//
-// The concurrency bound is unchanged: an image waits for its bases without
-// holding a worker slot and takes one only when it is ready to build, so the
-// pool still holds exactly `jobs` builds.
-//
-// Output is published in build order — see buildOutputOrder — so a reader sees
-// one image's output at a time and two runs of the same build produce the same
-// stream. At a degree of one the output streams live instead, which keeps the
-// single-job path exactly what it was.
-//
-// The run's heartbeat is the one deliberate exception, and it is not buffered:
-// it goes straight to the run's log stream while builds are still running,
-// because a liveness line held back until they finish would be reporting the
-// past. It is time-based and therefore not reproducible either, which is why it
-// is emitted at default verbosity only by a run that is actually building — see
-// build_heartbeat.go.
+// runBuildDependencies runs each image once its bases finish, holding at most `jobs` worker
+// slots. Output is published in build order; the heartbeat bypasses that buffering.
 func runBuildDependencies(ctx core.Context, builds []shared.DockerBuildSpec, dependencies map[string][]string, build DockerImageBuilderFunc, jobs int) error {
 	if jobs <= 1 || len(builds) <= 1 {
 		for _, buildInput := range builds {
@@ -207,8 +151,6 @@ func runBuildDependencies(ctx core.Context, builds []shared.DockerBuildSpec, dep
 	return dispatch.firstFailure()
 }
 
-// buildDispatch is one run's dispatch state: the images in build order, the
-// worker pool they share, what each image waits for, and how it turned out.
 type buildDispatch struct {
 	ctx         core.Context
 	builds      []shared.DockerBuildSpec
@@ -216,14 +158,10 @@ type buildDispatch struct {
 	baseIndexes [][]int
 	output      *buildOutputOrder
 	slots       chan struct{}
-	// finished[i] is closed exactly once, when image i is done or is known never
-	// to run, so the publisher can walk every image without having to know which
-	// of those happened. A base's failure is written before its own channel
-	// closes, so a dependent reads it through the close with no further locking.
+	// finished[i] is closed once image i is done or will never run. A base's failure is written
+	// before its channel closes, so dependents read it without locking.
 	finished []chan struct{}
 	failures []error
-	// outcomes[i] is image i's test outcome, set only when it built; it is
-	// reported after the run, in build order.
 	outcomes []string
 	running  sync.WaitGroup
 }
@@ -246,9 +184,7 @@ func newBuildDispatch(ctx core.Context, builds []shared.DockerBuildSpec, depende
 	return dispatch
 }
 
-// buildBaseIndexes resolves each image's sibling bases to positions in the build
-// order, which is what the dispatch waits on. A base that is not being built —
-// an image pulled from a registry — simply has no index and holds nothing back.
+// A base not built in this run (pulled from a registry) has no index and holds nothing back.
 func buildBaseIndexes(builds []shared.DockerBuildSpec, dependencies map[string][]string) [][]int {
 	indexByTag := make(map[string]int, len(builds))
 	for i, buildInput := range builds {
@@ -270,22 +206,16 @@ func (d *buildDispatch) run() {
 		d.running.Add(1)
 		go d.buildImage(i)
 	}
-	// The publisher waits for the images, and run waits for the publisher, so the
-	// run is not reported finished while output it has already produced is still
-	// on its way out.
 	published := make(chan struct{})
 	go func() {
 		defer close(published)
 		d.publish()
 	}()
 	d.running.Wait()
+	// Wait for the publisher too, so output still in flight is not cut off.
 	<-published
 }
 
-// publish walks the images in build order: it hands image i its output streams,
-// waits for that image to finish, then moves on. Nothing can be published out of
-// order, so the stream is the same however the images interleave — the order the
-// barrier used to impose by construction.
 func (d *buildDispatch) publish() {
 	for i := range d.builds {
 		d.output.publishStdout(i)
@@ -309,15 +239,8 @@ func (d *buildDispatch) buildImage(index int) {
 	d.failures[index] = err
 }
 
-// baseFailed waits for every base this image FROMs and reports whether one of
-// them failed. A base that failed takes its dependents with it: the FROM edge is
-// a real ordering constraint, not an advisory one, and building on a tag that
-// was never written cannot work.
-//
-// This is the only thing that skips work, and it is decided by the graph rather
-// than by who lost a race. An image another image's failure could have cancelled
-// would make both the work that ran and the failure reported depend on the
-// interleaving.
+// baseFailed waits for this image's bases and reports whether one failed. Skips are decided
+// by the graph, never by race order, so results don't depend on interleaving.
 func (d *buildDispatch) baseFailed(index int) bool {
 	for _, baseIndex := range d.baseIndexes[index] {
 		<-d.finished[baseIndex]
@@ -328,8 +251,6 @@ func (d *buildDispatch) baseFailed(index int) bool {
 	return false
 }
 
-// firstFailure reports the first failure in build order, so a build that fails
-// reports the same error whatever the interleaving happened to be.
 func (d *buildDispatch) firstFailure() error {
 	for _, failure := range d.failures {
 		if failure != nil {
@@ -339,19 +260,8 @@ func (d *buildDispatch) firstFailure() error {
 	return nil
 }
 
-// buildOutputOrder publishes every image's output in build order: image 0's
-// stdout and stderr, then image 1's, and so on to the last.
-//
-// The dependency-level barrier used to impose that order by construction —
-// nothing from a later level existed yet when the earlier one was flushed. Once
-// images are dispatched independently, something has to own the order, and it is
-// owned here rather than left to whichever image finishes first: interleaved
-// output from images racing each other is neither readable nor reproducible.
-//
-// The image whose turn it is streams live, so the build an operator is watching
-// is the build they can see; an image that ran ahead of it buffers until its
-// turn comes. Deferring a write never reorders one — an image's bytes go out
-// whole, in turn — so the published stream is the same either way.
+// buildOutputOrder publishes each image's output whole, in build order. The image whose turn
+// it is streams live; images that ran ahead buffer until their turn.
 type buildOutputOrder struct {
 	stdout []*buildOutputStream
 	stderr []*buildOutputStream
@@ -375,9 +285,6 @@ func (o *buildOutputOrder) stderrWriter(index int) io.Writer { return o.stderr[i
 func (o *buildOutputOrder) publishStdout(index int) { o.stdout[index].publish() }
 func (o *buildOutputOrder) publishStderr(index int) { o.stderr[index].publish() }
 
-// buildOutputStream is one image's half of the published stream: buffered until
-// its turn, live after. `dst` is the destination it will be published to, held
-// from construction and withheld only until publish hands it over.
 type buildOutputStream struct {
 	mu   sync.Mutex
 	dst  io.Writer
@@ -397,10 +304,7 @@ func (s *buildOutputStream) Write(p []byte) (int, error) {
 	return s.dst.Write(p)
 }
 
-// publish writes whatever this stream buffered while it waited its turn and then
-// marks it live, so nothing is dropped and nothing jumps ahead of an image whose
-// turn has not come. A stream with no destination discards the buffer rather
-// than holding it: nothing will ever read it.
+// A stream with no destination discards its buffer: nothing will read it.
 func (s *buildOutputStream) publish() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

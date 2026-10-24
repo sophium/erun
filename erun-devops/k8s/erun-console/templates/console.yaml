@@ -146,11 +146,7 @@ spec:
                   name: http
 {{- if $apexRedirectEnabled }}
 ---
-# The apex/www redirect Middleware: a plain 301 to the canonical console
-# origin, preserving path and query. Kept off the primary Ingress above so
-# that Ingress's rule stays the only one that ever reaches the Service — the
-# console's OIDC sign-in (Authorization Code + PKCE) depends on staying a
-# single origin.
+# Kept off the primary Ingress: OIDC sign-in (PKCE) requires a single console origin.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
@@ -226,20 +222,15 @@ spec:
           image: {{ $consoleImage }}
           imagePullPolicy: IfNotPresent
           env:
-            # In-cluster Service DNS: no CORS, no cross-origin call ever
-            # leaves the pod — nginx proxies /v1 to the API Service directly.
+            # nginx proxies /v1 in-cluster, so the API needs no CORS.
             - name: API_PROXY_HOST
               value: {{ $apiServiceName | quote }}
             - name: API_PROXY_PORT
               value: {{ $apiServicePort | quote }}
             - name: NGINX_PORT
               value: {{ $nginxPort | quote }}
-            # This instance's brand, at the one value that already defines it:
-            # erun-backend-api serves platform.brand as GET /v1/platform's
-            # "brand", and the console image's entrypoint stamps the same value
-            # into the served page, so the first paint before discovery
-            # resolves carries the instance's own name rather than the bundled
-            # product default that then changes underneath the user.
+            # Stamped into the page so first paint shows the instance brand
+            # before GET /v1/platform resolves.
             - name: ERUN_PLATFORM_BRAND
               value: {{ default "" $platform.brand | quote }}
           ports:
@@ -265,8 +256,7 @@ spec:
               cpu: "50m"
               memory: 64Mi
 ---
-# Always renders, whether the redirect is on or off, so the disabled state is
-# never a silent absence of resources — see the header comment above.
+# Always renders so a disabled redirect is visible, not a silent absence.
 apiVersion: v1
 kind: ConfigMap
 metadata:

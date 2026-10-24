@@ -8,77 +8,37 @@ import (
 	"time"
 )
 
-// A build's per-platform timing step used to bottom out at one duration, no
-// matter how long the underlying `docker build` ran. On a build where one
-// image's test stage is 97-99% of total wall clock, that single number cannot say
-// which part of the build was slow. BuildKit's own `--progress=plain` output
-// (already captured by runDockerBuildOnce, never discarded) already answers
-// that question at two levels of granularity: which Dockerfile step ran how
-// long, and — for a step that prints `>> <phase>` markers — which of those
-// phases ran how long inside it. Both levels are
-// parsed here and attached as timing children under the per-platform step.
+// Per-step and `>> <phase>` timings parsed from BuildKit's --progress=plain output.
 
-// buildkitVertexStartPattern matches BuildKit's per-step start line, e.g.
-//
-//	#7 [4/8] RUN go test ./...
-//	#3 [internal] load metadata for docker.io/library/golang:1.26.0
-//
-// The bracketed field is the stage index for a real Dockerfile instruction,
-// or a fixed keyword for BuildKit's own internal steps; either way, what
-// follows it is the step's own command.
+// buildkitVertexStartPattern matches a step start line, e.g. `#7 [4/8] RUN go test ./...`.
 var buildkitVertexStartPattern = regexp.MustCompile(`^#(\d+) \[([^\]]*)\] (.*)$`)
 
-// buildkitVertexDonePattern matches BuildKit's per-step completion line, e.g.
-//
-//	#7 DONE 1823.99s
-//
-// A step that never emits this line (a cache hit reported as `#7 CACHED`, or
-// one BuildKit never finished) has no known duration and is left out of the
-// phase tree rather than reported as zero.
+// buildkitVertexDonePattern matches `#7 DONE 1823.99s`. A step without it (cached
+// or unfinished) has no duration and is omitted, not reported as zero.
 var buildkitVertexDonePattern = regexp.MustCompile(`^#(\d+) DONE ([\d.]+)s$`)
 
-// BuildProgressPhasesTopN bounds how many phase rows attach at one level of
-// the tree — a Dockerfile can have dozens of steps, and one step dozens of
-// `>> phase` markers. Rows beyond the costliest N fold into one
-// synthetic "smaller steps" row (same shape as timing.go's own
-// "(unaccounted)"/"(ran concurrently)" synthetic rows) so nothing is silently
-// dropped from the total, but the tree stays a summary rather than a log.
+// BuildProgressPhasesTopN bounds rows per level; the rest fold into one "smaller
+// steps" row so the total is preserved.
 const BuildProgressPhasesTopN = 15
 
-// buildProgressConcurrentSentinel is the marker a step prints before it runs
-// its phases concurrently. Phase spans are derived from the gap between
-// one `>> phase` line and the next, which measures that phase's own work only
-// while the step runs its phases one at a time. Once several targets
-// interleave their output, a span covers whatever else was running too, so
-// the rows below such a step are elapsed windows rather than per-phase cost.
-// The recipe announces the fan-out rather than the parser guessing at it: a
-// heuristic on the step command would silently go wrong the next time a
-// recipe changes how it parallelises.
+// buildProgressConcurrentSentinel is printed by a step that runs its phases
+// concurrently, so its marker spans are elapsed windows, not per-phase cost.
 const buildProgressConcurrentSentinel = "concurrent-phase-spans"
 
-// BuildProgressConcurrentSuffix marks a row whose duration is an elapsed
-// window. Callers that sum these rows would otherwise read them as exclusive
-// costs and conclude the wrong step is expensive.
+// BuildProgressConcurrentSuffix marks an elapsed-window row; summing such rows
+// as exclusive costs is wrong.
 const BuildProgressConcurrentSuffix = " (elapsed window, concurrent)"
 
-// buildProgressSelfTimedPattern matches a phase marker that carries its own
-// measured duration, e.g. `>> golangci-lint erun-ui [83s]`. A runner that
-// replays each job's captured output only after the whole batch finishes
-// emits these: the interval between two of its markers describes the replay
-// rather than the work, so a span-derived duration for them is meaningless. A self-reported figure is the job's own
-// wall clock and is preferred wherever present.
+// buildProgressSelfTimedPattern matches a marker carrying its own duration, e.g.
+// `>> golangci-lint erun-ui [83s]`. Replayed output makes spans meaningless, so this wins.
 var buildProgressSelfTimedPattern = regexp.MustCompile(`^(.*) \[([0-9]+)s\]$`)
 
-// BuildProgressPhase is one node of the parsed phase tree, before it is
-// attached to the real *stepTiming tree via addFinishedChild.
 type BuildProgressPhase struct {
 	Name     string
 	Duration time.Duration
 	Children []BuildProgressPhase
 }
 
-// buildKitVertex accumulates everything parseBuildKitVertices learns about
-// one numbered BuildKit step across the whole captured output.
 type buildKitVertex struct {
 	label    string
 	hasDone  bool
@@ -86,17 +46,13 @@ type buildKitVertex struct {
 	markers  []BuildKitPhaseMarker
 }
 
-// BuildKitPhaseMarker is one `>> <phase>` line a step printed, tagged with
-// the elapsed-seconds offset BuildKit prefixed it with.
 type BuildKitPhaseMarker struct {
 	OffsetSecs float64
 	Name       string
 }
 
-// BuildKitProgressPhases parses a captured `docker build --progress=plain`
-// stream into the bounded phase tree described above. It never errors: a
-// malformed or unrecognisable stream simply yields no phases, the same
-// best-effort contract the rest of the timing collector holds to.
+// BuildKitProgressPhases parses a --progress=plain stream into the bounded phase
+// tree. It never errors; an unrecognised stream yields no phases.
 func BuildKitProgressPhases(output string) []BuildProgressPhase {
 	order, vertices := parseBuildKitVertices(output)
 	phases := make([]BuildProgressPhase, 0, len(order))
@@ -114,15 +70,8 @@ func BuildKitProgressPhases(output string) []BuildProgressPhase {
 	return boundProgressPhases(phases)
 }
 
-// parseBuildKitVertices walks the captured output once, returning every
-// numbered step in first-seen order alongside what is known about it. A step
-// with no start line (BuildKit always emits one before anything else about
-// that step) is never recorded, so a DONE or output line for an unknown id is
-// silently ignored rather than fabricating a step for it. The three line
-// shapes are mutually exclusive (a start line's bracketed stage index, a DONE
-// line's literal "DONE", and an output line's decimal offset can never match
-// the same line), so every line is offered to all three in turn rather than
-// short-circuiting on the first match.
+// parseBuildKitVertices returns steps in first-seen order. Lines for an id with
+// no start line are ignored.
 func parseBuildKitVertices(output string) (order []string, vertices map[string]*buildKitVertex) {
 	vertices = map[string]*buildKitVertex{}
 	for _, raw := range strings.Split(output, "\n") {
@@ -136,9 +85,6 @@ func parseBuildKitVertices(output string) (order []string, vertices map[string]*
 	return order, vertices
 }
 
-// applyVertexStart registers a vertex the first time its start line appears,
-// reporting isNew only that first time so the caller appends to `order`
-// exactly once per vertex.
 func applyVertexStart(line string, vertices map[string]*buildKitVertex) (id string, isNew bool) {
 	match := buildkitVertexStartPattern.FindStringSubmatch(line)
 	if match == nil {
@@ -152,8 +98,6 @@ func applyVertexStart(line string, vertices map[string]*buildKitVertex) (id stri
 	return id, true
 }
 
-// applyVertexDone records a step's completion duration when its DONE line
-// names a vertex already seen via a start line.
 func applyVertexDone(line string, vertices map[string]*buildKitVertex) {
 	match := buildkitVertexDonePattern.FindStringSubmatch(line)
 	if match == nil {
@@ -171,10 +115,6 @@ func applyVertexDone(line string, vertices map[string]*buildKitVertex) {
 	v.doneSecs = secs
 }
 
-// applyPhaseMarker records one `>> <phase>` line a step printed.
-// buildkitStepOutputPattern (build_failure_reason.go) matches any line a step
-// printed; only `>> <phase>` markers are structured enough here
-// to become sub-phases.
 func applyPhaseMarker(line string, vertices map[string]*buildKitVertex) {
 	match := BuildkitStepOutputPattern.FindStringSubmatch(line)
 	if match == nil {
@@ -195,9 +135,7 @@ func applyPhaseMarker(line string, vertices map[string]*buildKitVertex) {
 	v.markers = append(v.markers, BuildKitPhaseMarker{OffsetSecs: offset, Name: strings.TrimPrefix(text, ">> ")})
 }
 
-// MarkerPhases turns one step's ordered `>> phase` markers into sub-phases,
-// each running from its own offset to the next marker's (or, for the last
-// one, to the step's own DONE time).
+// MarkerPhases spans each marker to the next one, the last to the step's DONE time.
 func MarkerPhases(markers []BuildKitPhaseMarker, vertexDoneSecs float64) []BuildProgressPhase {
 	concurrent := false
 	kept := make([]BuildKitPhaseMarker, 0, len(markers))
@@ -238,11 +176,8 @@ func MarkerPhases(markers []BuildKitPhaseMarker, vertexDoneSecs float64) []Build
 	return phases
 }
 
-// boundProgressPhases keeps only the costliest buildProgressPhasesTopN
-// entries at one level, in their original relative order, and folds the rest
-// into one synthetic trailing row — mirroring timing.go's own
-// "(unaccounted)"/"(ran concurrently)" synthetic rows, which likewise report
-// a real total rather than dropping it.
+// boundProgressPhases keeps the costliest buildProgressPhasesTopN in original order
+// and folds the rest into one trailing row.
 func boundProgressPhases(phases []BuildProgressPhase) []BuildProgressPhase {
 	if len(phases) <= BuildProgressPhasesTopN {
 		return phases
@@ -282,9 +217,6 @@ func durationFromSeconds(seconds float64) time.Duration {
 	return time.Duration(seconds * float64(time.Second))
 }
 
-// dockerBuildPhaseLabel trims a Dockerfile step's own command down to
-// something a table row can show, the same truncate-a-long-line treatment
-// dockerBuildFailureReason gives a failing step's last words.
 func dockerBuildPhaseLabel(label string) string {
 	const maxLabelLength = 80
 	label = strings.TrimSpace(label)

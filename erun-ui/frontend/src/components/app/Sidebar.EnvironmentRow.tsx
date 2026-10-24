@@ -35,9 +35,7 @@ function LocalEnvBadge({ selected }: { selected: boolean }): React.ReactElement 
   );
 }
 
-// HostEnvBadge marks a host environment distinctly from a local-agent one: it
-// has no pod and no cluster at all, so it must never be presented as a pod
-// that failed to start.
+// HostEnvBadge: a host env has no pod, so it must never look like a failed pod.
 function HostEnvBadge({ selected }: { selected: boolean }): React.ReactElement {
   return (
     <span
@@ -122,11 +120,7 @@ function EnvironmentRowOutputsButton({
   );
 }
 
-// The indicator's shape carries the env's real condition (running / busy /
-// stopped / failed), not mere tab presence — open is not running, and an env in
-// use from the CLI is running without being open here. Conveyed via shape +
-// label, never colour alone. Independent of the busy spinner, which reports the
-// desktop's own in-flight command; both can show at once.
+// EnvStatusIndicator's shape carries the env's real condition, not tab presence; never colour alone.
 function EnvStatusIndicator({
   indicator,
   selection,
@@ -137,13 +131,9 @@ function EnvStatusIndicator({
   envState: string;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
-  // Fall back to the derived indicator, not to a literal: a condition the
-  // environment reports rather than the desktop (a broken port-forward) has no
-  // envState, and hard-coding "running" for it would leave the attribute
-  // contradicting the glyph beside it.
+  // Fall back to the derived dot so the attribute matches the glyph.
   const dataEnvState = envState || indicator.dot;
-  // Not opened here means there are no tabs to close, so the indicator is a
-  // passive status light rather than a control that would do nothing.
+  // Not opened here: a passive light, not a control.
   if (!indicator.opened) {
     return (
       <IconTooltip label={indicator.condition}>
@@ -192,7 +182,6 @@ function EnvStatusIndicator({
   );
 }
 
-// The row's main click target: selecting the environment opens it.
 function EnvironmentRowOpenButton({
   environmentName,
   rowLabel,
@@ -304,15 +293,11 @@ export function EnvironmentRow({
         busy={busy}
         busyLabel={busyLabel}
       />
-      {/* A host env has no pod, so it is never "running" or "stopped" — it
-          simply is. Showing the pod-shaped open/close status dot for it would
-          present a directory as a pod that failed to start. */}
+      {/* A host env has no pod, so no pod status dot. */}
       {!isHost && indicator.visible && (
         <EnvStatusIndicator indicator={indicator} selection={selection} envState={envState} />
       )}
-      {/* A second indicator, about the machine rather than the environment. It
-          is what keeps a row from rendering as "nothing to say" when the one
-          thing that IS known about it is that its node is down. */}
+      {/* About the node, so a down node still shows. */}
       {!isHost && <NodeStateIndicator indicator={nodeIndicator} />}
       <EnvironmentRowOutputsButton
         tenantName={tenantName}
@@ -330,10 +315,7 @@ export function EnvironmentRow({
   );
 }
 
-// PendingEnvironmentRow is an optimistic placeholder for an env being created
-// by `erun init`: during the ~1–2 min run state.selected points at an env not
-// yet in state.tenants, so without this row the selection has no visible
-// affordance.
+// PendingEnvironmentRow stands in for an env `erun init` is still creating.
 export function PendingEnvironmentRow({
   tenantName,
   environmentName,

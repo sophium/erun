@@ -9,14 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// ListRemoteAppSessions reports the persistent desktop sessions running in the
-// env's runtime pod so the frontend can rebuild tabs for custom terminals
-// another ERun window created; the default tabs attach-or-create on their own.
-// Fail-soft by design: unreachable or undeployed envs yield nil, never an
-// error, so the open flow never stalls on detection.
-//
-// A socket with no live program behind it is deliberately excluded: rebuilding a
-// tab for one would reattach to nothing and present a dead pane as a session.
+// ListRemoteAppSessions reports the live persistent sessions in the env's pod.
+// Fail-soft: unreachable envs yield nil so the open flow never stalls.
 func (a *App) ListRemoteAppSessions(selection uiSelection) []string {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -38,12 +32,8 @@ func (a *App) ListRemoteAppSessions(selection uiSelection) []string {
 	return ids
 }
 
-// endRemoteAppSession permanently ends one persistent desktop session so
-// detection will not rebuild its tab. Called only when the user explicitly
-// closes a custom terminal tab; without it the session would outlive the close
-// and resurrect on the next env open. Closing the env or quitting the app only
-// detach — they never end a session. Fail-soft: a missing pod means the
-// session is already gone.
+// endRemoteAppSession ends a session when the user closes its tab, so it is not
+// rebuilt on the next open. Fail-soft.
 func (a *App) endRemoteAppSession(selection uiSelection, sessionID string) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" || strings.TrimSpace(sessionID) == "" {

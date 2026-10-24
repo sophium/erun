@@ -5,9 +5,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// erunTestCloudStore is a mutable CloudStore stub: unlike
-// stubCloudContextStore (whose SaveERunConfig is a no-op), tests here need to
-// observe what a real save persisted.
+// erunTestCloudStore persists saves, unlike stubCloudContextStore.
 type erunTestCloudStore struct {
 	config configpkg.ERunConfig
 }

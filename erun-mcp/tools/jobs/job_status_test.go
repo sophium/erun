@@ -14,18 +14,10 @@ import (
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// exec_job_status and exec_job_await both echo back a job's command, and for
-// an agent job that command embeds the entire dispatch prompt: a caller
-// polling a lane, or re-awaiting one that keeps timing out, pays for that
-// prompt's tokens on every single call for a field it supplied itself. These
-// tests pin the two size/shape properties the fix relies on: the command a
-// status/await response carries never grows past the preview bound, and
-// asking for one job never smuggles a second copy of it into the list.
+// An agent job's command embeds its whole prompt, so status/await must bound
+// it and never echo it twice.
 
-// writeJobFixture plants a job record directly on disk in the shape
-// LoadEnvironmentJob/LoadEnvironmentJobs read back, without needing a real
-// supervisor process behind it -- job.State exited short-circuits the
-// liveness reconciliation that only applies to a job still claiming running.
+// writeJobFixture writes an exited job, which skips supervisor liveness checks.
 func writeJobFixture(t *testing.T, tenant, environment string, job shared.EnvironmentJob) {
 	t.Helper()
 	dir, err := activity.EnvironmentActivityDir(tenant, environment)
@@ -63,8 +55,6 @@ func TestJobStatusCollapsesALongCommandByDefault(t *testing.T) {
 	isolateLeaseCache(t)
 	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 
-	// Shaped like an agent job's argv: a tool invocation carrying a multi-KB
-	// prompt as one of its arguments.
 	prompt := strings.Repeat("investigate and fix the failing lane ", 200)
 	writeJobFixture(t, "tenant-a", "dev", finishedJobFixture("sweep", []string{"claude", "-p", prompt}))
 
@@ -151,8 +141,7 @@ func TestJobAwaitCollapsesALongCommand(t *testing.T) {
 	prompt := strings.Repeat("investigate and fix the failing lane ", 200)
 	writeJobFixture(t, "tenant-a", "dev", finishedJobFixture("sweep", []string{"claude", "-p", prompt}))
 
-	// The job is already finished, so await returns on its first read rather
-	// than actually waiting out the timeout.
+	// The job has exited, so await returns on its first read.
 	_, result, err := JobAwaitTool(runtime)(context.Background(), nil, JobAwaitInput{ID: "sweep", TimeoutSeconds: 5})
 	if err != nil {
 		t.Fatalf("job_await: %v", err)

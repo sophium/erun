@@ -35,9 +35,7 @@ func TestPush(t *testing.T) {
 }
 
 func testPushHelp(t *testing.T) {
-	// The root `erun push` shorthand only registers when a Dockerfile is
-	// present in cwd; without the seed, `push --help` falls through to root
-	// help and the push-specific flags never appear in the golden.
+	// The root `erun push` shorthand registers only when cwd has a Dockerfile.
 	setup := env.New(t)
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
 	fixture.SeedProjectDockerfile(t, setup)
@@ -49,11 +47,7 @@ func testPushHelp(t *testing.T) {
 }
 
 func testPushMissingVersionErrors(t *testing.T) {
-	// push is a pure primitive: it publishes the version `erun build`
-	// minted and never mints one, so a bare `erun push` with no version
-	// must fail fast (root AGENTS.md § "Command primitives vs
-	// orchestration"). The gate fires before any docker call, so no stub
-	// is needed.
+	// push never mints a version, so a bare push fails before any docker call.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -90,13 +84,8 @@ func testPushDevopsContainerPushRealRunResolvesSingleImageSpec(t *testing.T) {
 }
 
 func testPushDryRunSingleImageFromDockerfileCwd(t *testing.T) {
-	// Even in dry-run, push's incremental fingerprint check inspects the
-	// local image store (`docker image inspect`) to decide
-	// promote-vs-rebuild — a sanctioned dry-run decision input
-	// (erun-integration/AGENTS.md § "stubs as dry-run decision input").
-	// Stub docker for determinism and so no real daemon is needed (the
-	// erun-devops image test stage runs this gate with no docker on PATH);
-	// `inspect` exits 1 so nothing is cached and the plan traces rebuild.
+	// Dry-run still inspects the local image store to choose promote vs rebuild; the stub
+	// exits 1 so the plan traces a rebuild without a daemon.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -121,13 +110,8 @@ func testPushDryRunSingleImageFromDockerfileCwd(t *testing.T) {
 }
 
 func testPushDryRunInsecureClusterRegistryPassesInsecureToManifestCommands(t *testing.T) {
-	// `docker manifest` never consults the daemon's --insecure-registry
-	// list — it talks to the registry directly and defaults to HTTPS — so a
-	// BUILD-role cluster registry marked `insecure: true` must still see
-	// `--insecure` on every manifest subcommand that hits the network
-	// (create/push), or assembly fails "no such manifest" against a plain
-	// HTTP in-cluster registry even though both per-arch pushes succeeded.
-	// `manifest rm` never leaves the local store, so it must stay bare.
+	// `docker manifest` ignores the daemon's --insecure-registry list, so create/push need
+	// --insecure for an insecure registry; `manifest rm` is local and stays bare.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -154,13 +138,8 @@ func testPushDryRunInsecureClusterRegistryPassesInsecureToManifestCommands(t *te
 }
 
 func testPushDryRunConfiguredPlatformsDoNotNarrowPush(t *testing.T) {
-	// environments.<env>.docker.platforms in .erun/config.yaml narrows
-	// what a local build mints and never what a push publishes: push
-	// resolves every platform erun supports, the same override a release
-	// build applies, so a project whose machines all build amd64 alone
-	// still publishes a manifest that carries arm64. The pin reaching the
-	// registry is what shipped an amd64-only release manifest and left
-	// every aarch64 environment with no image to pull.
+	// docker.platforms narrows local builds only; push publishes every supported platform
+	// so the release manifest keeps arm64.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -188,8 +167,7 @@ func testPushDryRunConfiguredPlatformsDoNotNarrowPush(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// Stated separately from the snapshot so a blanket golden regeneration
-	// cannot quietly narrow a published version back to one architecture.
+	// Separate from the golden so a blanket regeneration cannot drop arm64.
 	if !strings.Contains(result.Combined, "linux/arm64") {
 		t.Fatalf("expected configured docker.platforms to leave arm64 in the push plan:\n%s", result.Combined)
 	}
@@ -197,9 +175,6 @@ func testPushDryRunConfiguredPlatformsDoNotNarrowPush(t *testing.T) {
 }
 
 func testPushDryRunBuildShortcutBuildsThenPushesMintedVersion(t *testing.T) {
-	// `erun push --build` is the operator shortcut that builds the current
-	// source first (minting a snapshot version) and pushes that exact
-	// version, no --version needed.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -224,8 +199,6 @@ func testPushDryRunBuildShortcutBuildsThenPushesMintedVersion(t *testing.T) {
 }
 
 func testPushDryRunBuildShortcutForceRebuilds(t *testing.T) {
-	// --force must propagate to the --build step so the build rebuilds
-	// every image instead of promoting from the fingerprint cache.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -250,9 +223,6 @@ func testPushDryRunBuildShortcutForceRebuilds(t *testing.T) {
 }
 
 func testPushBuildShortcutWithExplicitVersionErrors(t *testing.T) {
-	// --build mints the version itself, so combining it with an
-	// explicit --version is contradictory and must fail clearly before any
-	// build or push work.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -265,8 +235,6 @@ func testPushBuildShortcutWithExplicitVersionErrors(t *testing.T) {
 }
 
 func testPushRealRunSingleImageFromDockerfileCwd(t *testing.T) {
-	// The docker stub reports no cached fingerprint images (image inspect
-	// exit 1) so the real build+push path runs instead of promoting.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -291,11 +259,8 @@ func testPushRealRunSingleImageFromDockerfileCwd(t *testing.T) {
 }
 
 func testPushDryRunLocalPushAssemblesPerArchManifest(t *testing.T) {
-	// A locally-built multi-arch image only exists under per-arch tags, so
-	// a multi-image push must push those and assemble a manifest list, not
-	// `docker push` the arch-less version tag (which would fail "tag does
-	// not exist"). The stub answers every fingerprint inspect as present so
-	// images promote, mirroring the real failure this locks.
+	// Multi-arch images exist only under per-arch tags, so push assembles a manifest list
+	// instead of pushing the arch-less tag.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"
@@ -309,15 +274,11 @@ func testPushDryRunLocalPushAssemblesPerArchManifest(t *testing.T) {
 }
 
 func testPushRealRunLocalPushAssemblesPerArchManifest(t *testing.T) {
-	// Companion real-run to the dry-run manifest scenario: the per-arch
-	// manifest assembly must complete without an arch-less push.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"
 	fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 0})
 	fixture.StubBinary(t, stubs, "helm", "")
-	// The registry-credential preflight needs a resolvable credential
-	// to let this scenario reach the manifest-assembly behavior it is about.
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 	envVars = append(envVars, "GH_TOKEN=integration-test-token")
 	result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -328,12 +289,8 @@ func testPushRealRunLocalPushAssemblesPerArchManifest(t *testing.T) {
 }
 
 func testPushRealRunTransientChartVerifyReadRetriesThenVerifies(t *testing.T) {
-	// A release aborted mid-publish because the read-back of a chart erun had
-	// just pushed answered 403 denied — the registry minted the pull token
-	// before the new tag propagated. Verification reads an object erun itself
-	// wrote, so it must retry with bounded backoff instead of failing the
-	// publish. The helm stub fails the first `pull` with the exact ghcr error
-	// and succeeds after, so the whole push must still complete.
+	// The registry can answer 403 on a read-back of a just-pushed chart before the tag
+	// propagates, so verification retries with backoff.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"
@@ -354,8 +311,6 @@ func testPushRealRunTransientChartVerifyReadRetriesThenVerifies(t *testing.T) {
 		`  *) exit 0 ;;`,
 		`esac`,
 	}, "\n"))
-	// Give the registry-credential preflight a resolvable credential
-	// so this scenario still reaches the chart-verify-read retry it is about.
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 	envVars = append(envVars, "GH_TOKEN=integration-test-token")
 	result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -363,9 +318,7 @@ func testPushRealRunTransientChartVerifyReadRetriesThenVerifies(t *testing.T) {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "push/real_run_transient_chart_verify_read_retries_then_verifies", normalize.Apply(result.Combined))
-	// The pull count is a side effect outside the captured streams: 3 proves
-	// the failed read really was retried (api fail + retry, then base) rather
-	// than the failure being swallowed.
+	// 3 pulls prove the failed read was retried, not swallowed.
 	rawCount, err := os.ReadFile(counter)
 	if err != nil {
 		t.Fatalf("read helm pull counter: %v", err)
@@ -376,11 +329,8 @@ func testPushRealRunTransientChartVerifyReadRetriesThenVerifies(t *testing.T) {
 }
 
 func testPushRealRunPersistentChartVerifyReadReportsPartialPublish(t *testing.T) {
-	// The other half of the retry contract: a read that never succeeds must
-	// still fail the push, and because the version's images are already public
-	// by then, the failure must name exactly which charts landed, which did
-	// not, and that re-running push is the recovery. The extra `zeta` chart
-	// makes the middle chart fail so all three lists are non-empty.
+	// A read that never succeeds fails the push, naming which charts landed and which did not;
+	// `zeta` makes the middle chart fail so all lists are non-empty.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "k8s", "zeta", "Chart.yaml"),
@@ -399,8 +349,6 @@ func testPushRealRunPersistentChartVerifyReadReportsPartialPublish(t *testing.T)
 		`  *) exit 0 ;;`,
 		`esac`,
 	}, "\n"))
-	// Give the registry-credential preflight a resolvable credential
-	// so this scenario still reaches the partial-publish report it is about.
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 	envVars = append(envVars, "GH_TOKEN=integration-test-token")
 	result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})

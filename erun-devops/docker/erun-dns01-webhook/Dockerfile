@@ -1,10 +1,6 @@
 ARG ERUN_VERSION=1.0.0
 
-# Stages: `build` compiles the module natively, `test` runs its own lint and
-# tests on top of that, `dist` (FROM test) cross-compiles for the target, and
-# `runtime` ships the binary from `dist`. Because the shipped binary comes
-# through `test`, no image exists unless the tests passed, and a second
-# architecture reruns only `dist`.
+# `dist` builds FROM `test`, so no image exists unless the tests passed.
 FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build
 
 WORKDIR /src/erun-devops/dns01-webhook
@@ -21,9 +17,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -o /out/dns01-webhook .
 
-# The linter is pinned here rather than as a go.mod tool: as a tool its
-# dependency graph would force the webhook's cert-manager and k8s.io versions
-# up, and a lint pin must not change what ships.
+# Not a go.mod tool: its dependency graph would bump the shipped cert-manager and k8s.io versions.
 FROM build AS test
 
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -34,8 +28,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go run github.com/fe3dback/go-arch-lint@v1.19.0 check --project-path . && \
     go test -count=1 ./...
 
-# Cross-compiles with CGO disabled, so the compiler runs natively on the build
-# host.
 FROM test AS dist
 
 ARG TARGETOS=linux
@@ -55,7 +47,6 @@ COPY --from=dist --chmod=0755 /out/dns01-webhook /usr/local/bin/dns01-webhook
 
 USER erun
 
-# The cert-manager aggregated apiserver serves HTTPS on 443.
 EXPOSE 443
 
 ENTRYPOINT ["dns01-webhook"]

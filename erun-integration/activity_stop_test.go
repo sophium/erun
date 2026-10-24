@@ -25,9 +25,7 @@ func testActivityStopReadyBlocksWhenActive(t *testing.T) {
 }
 
 func testActivityStopReadyJSONEmitsStructuredDecision(t *testing.T) {
-	// The runtime entrypoint's idle-monitor bash loop needs the JSON on stdout
-	// regardless of the stop-eligible exit code, so it can record a tick even
-	// when the env stays active.
+	// The idle-monitor loop needs the JSON regardless of the exit code.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	erun.Run(t, []string{"activity", "touch", "--tenant", "team", "--environment", "dev", "--kind", "cli"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -44,10 +42,7 @@ func testActivityStopReadyJSONEmitsStructuredDecision(t *testing.T) {
 }
 
 func testActivityRecordStopFoldsStateStdinIntoHistory(t *testing.T) {
-	// The in-pod monitor pipes the stop-ready --json blob into record-stop
-	// because the Fire branch already cleared stop-pending.json by the time
-	// record-stop runs, so the state must round-trip through stdin for the
-	// History tab to answer "what triggered it?"
+	// Fire already cleared stop-pending.json, so the state round-trips via stdin.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stdin := `{
@@ -108,9 +103,6 @@ func testActivityRecordStopFoldsStateStdinIntoHistory(t *testing.T) {
 }
 
 func testActivityRecordStopHostManualWithoutPending(t *testing.T) {
-	// The path the desktop's Stop button takes when the user stops before the
-	// idle policy has armed any grace — no pending file, yet the row must still
-	// record the source and reason.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{
@@ -134,8 +126,7 @@ func testActivityRecordStopHostManualWithoutPending(t *testing.T) {
 	if !strings.Contains(text, `"reason": "Manual stop via desktop"`) {
 		t.Errorf("expected explicit reason carried through, got:\n%s", text)
 	}
-	// These fields are JSON-omitempty, so without a pending file they must be
-	// absent entirely, not empty.
+	// omitempty: absent, not empty.
 	if strings.Contains(text, `"armedAt"`) {
 		t.Errorf("expected no armedAt without pending, got:\n%s", text)
 	}
@@ -145,11 +136,7 @@ func testActivityRecordStopHostManualWithoutPending(t *testing.T) {
 }
 
 func testActivityStopReadyArmsGraceForManagedCloudEnv(t *testing.T) {
-	// First eligible stop-ready call on a cloud-managed idle env arms the grace
-	// and exits non-zero, so the in-pod monitor does not stop the instance yet.
-	// With no activity recorded every marker is idle, so the env is stop-eligible
-	// regardless of wall clock (outside working hours short-circuits to eligible;
-	// inside, all markers idle does the same).
+	// With no activity every marker is idle, so this is eligible at any hour.
 	setup := env.New(t)
 	seedManagedCloudTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"activity", "stop-ready", "--tenant", "team", "--environment", "dev", "--cloud-context", "mock-cluster"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -176,11 +163,8 @@ func testActivityStopReadyArmsGraceForManagedCloudEnv(t *testing.T) {
 }
 
 func testActivityStopReadyWaitsWhileGraceWindowOpen(t *testing.T) {
-	// Second eligible call inside the grace window takes the Wait branch: the
-	// pending file stays byte-identical. The remaining-seconds value depends on
-	// real wall time between the two subprocesses, so a golden cannot lock the
-	// stream; the branch is asserted structurally, per the intrinsically-variable-line
-	// exception in AGENTS.md.
+	// The remaining seconds depend on wall time, so this is asserted
+	// structurally (AGENTS.md's intrinsically-variable-line exception).
 	setup := env.New(t)
 	seedManagedCloudTenantEnv(t, setup, "team", "dev")
 	arm := erun.Run(t, []string{"activity", "stop-ready", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -210,10 +194,7 @@ func testActivityStopReadyWaitsWhileGraceWindowOpen(t *testing.T) {
 }
 
 func testActivityStopReadyFiresAfterGraceElapsed(t *testing.T) {
-	// Fire branch: a seeded Since long in the past keeps elapsed >> grace
-	// deterministic for decades. Exit 0 is the only exit-0 outcome — the
-	// monitor's cue to call ec2:StopInstances — and stop-pending.json is
-	// cleared before reporting for crash safety.
+	// A Since far in the past keeps elapsed > grace deterministic.
 	setup := env.New(t)
 	seedManagedCloudTenantEnv(t, setup, "team", "dev")
 	pendingPath := seedStopPending(t, setup.Home, "team", "dev", `{
@@ -236,8 +217,7 @@ func testActivityStopReadyFiresAfterGraceElapsed(t *testing.T) {
 		t.Fatalf("expected exit 0 on Fire, got %d:\n%s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "activity/stop_ready_fires_after_grace_elapsed", normalize.Apply(result.Combined))
-	// Normalization masks every timestamp to <TS>, so the seeded Since
-	// flowing through to pendingSince is asserted on the raw stream.
+	// Timestamps normalize to <TS>, so check the raw stream.
 	if !strings.Contains(result.Stdout, `"pendingSince":"2026-01-01T00:00:00Z"`) {
 		t.Errorf("expected seeded since to surface as pendingSince, got:\n%s", result.Stdout)
 	}
@@ -247,9 +227,6 @@ func testActivityStopReadyFiresAfterGraceElapsed(t *testing.T) {
 }
 
 func testActivityStopReadySkipClearsStalePending(t *testing.T) {
-	// Skip branch: when eligibility lapses (here the env is no longer
-	// cloud-managed), a leftover stop-pending.json must be deleted so a stale
-	// stop cannot fire later.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	pendingPath := seedStopPending(t, setup.Home, "team", "dev", `{"since": "2026-01-01T00:00:00Z", "graceSeconds": 600}
@@ -265,8 +242,6 @@ func testActivityStopReadySkipClearsStalePending(t *testing.T) {
 }
 
 func testActivityCancelStopPendingRemovesArmedGrace(t *testing.T) {
-	// cancel-stop-pending is the desktop Cancel button's dismissal path: it
-	// removes the pending file and exits 0, with no status resolution.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	pendingPath := seedStopPending(t, setup.Home, "team", "dev", `{"since": "2026-01-01T00:00:00Z", "graceSeconds": 600}
@@ -282,8 +257,6 @@ func testActivityCancelStopPendingRemovesArmedGrace(t *testing.T) {
 }
 
 func testActivityStopReadyRequiresTarget(t *testing.T) {
-	// The in-pod monitor must get a clear error, not a stack of resolver noise,
-	// when it invokes stop-ready without the target flags.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"activity", "stop-ready"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode == 0 {
@@ -293,10 +266,7 @@ func testActivityStopReadyRequiresTarget(t *testing.T) {
 }
 
 func testActivityStopReadyErrorsOnCorruptPending(t *testing.T) {
-	// A corrupt stop-pending.json must fail loudly, not be silently treated as
-	// "no grace armed" (which would re-arm and stretch the stop window forever).
-	// Status readers swallow the same load error by design, so the failure
-	// surfaces only from the decision path.
+	// Treating a corrupt file as "no grace armed" would re-arm forever.
 	setup := env.New(t)
 	seedManagedCloudTenantEnv(t, setup, "team", "dev")
 	seedStopPending(t, setup.Home, "team", "dev", "{not-json\n")
@@ -305,17 +275,13 @@ func testActivityStopReadyErrorsOnCorruptPending(t *testing.T) {
 		t.Fatalf("expected non-zero exit for corrupt pending file, got 0:\n%s", result.Combined)
 	}
 	golden.Equal(t, "activity/stop_ready_errors_on_corrupt_pending", normalize.Apply(result.Combined))
-	// The <TMP> rule swallows the whole path including the file name,
-	// so the "error names the offending file" contract is asserted on
-	// the raw stream.
+	// <TMP> swallows the file name, so check the raw stream.
 	if !strings.Contains(result.Combined, "stop-pending.json:") {
 		t.Errorf("expected error to name stop-pending.json, got:\n%s", result.Combined)
 	}
 }
 
 func testActivityRecordStopErrorsOnCorruptHistory(t *testing.T) {
-	// A corrupt stop-history.json must fail the append loudly instead of
-	// silently overwriting the audit trail.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	historyDir := filepath.Join(setup.Home, ".erun", "team", "dev")
@@ -330,9 +296,7 @@ func testActivityRecordStopErrorsOnCorruptHistory(t *testing.T) {
 		t.Fatalf("expected non-zero exit for corrupt history file, got 0:\n%s", result.Combined)
 	}
 	golden.Equal(t, "activity/record_stop_errors_on_corrupt_history", normalize.Apply(result.Combined))
-	// The <TMP> rule swallows the whole path including the file name,
-	// so the "error names the offending file" contract is asserted on
-	// the raw stream.
+	// <TMP> swallows the file name, so check the raw stream.
 	if !strings.Contains(result.Combined, "stop-history.json:") {
 		t.Errorf("expected error to name stop-history.json, got:\n%s", result.Combined)
 	}
@@ -348,10 +312,7 @@ func testActivityCancelStopPendingRequiresTarget(t *testing.T) {
 }
 
 func testActivityRecordStopFallsBackToOnDiskPending(t *testing.T) {
-	// A manual stop during an armed grace: with no --state-stdin, record-stop
-	// recovers the grace/policy/markers from the on-disk pending file, then
-	// clears it. A second record-stop locks newest-first ordering: the new row
-	// is prepended.
+	// Without --state-stdin, record-stop recovers state from the pending file.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	pendingPath := seedStopPending(t, setup.Home, "team", "dev", `{
@@ -395,8 +356,6 @@ func testActivityRecordStopFallsBackToOnDiskPending(t *testing.T) {
 	recordSecondStopNewestFirst(t, setup, historyPath)
 }
 
-// recordSecondStopNewestFirst records a second manual stop and requires it to
-// be prepended ahead of the stop already in the history.
 func recordSecondStopNewestFirst(t *testing.T, setup env.Setup, historyPath string) {
 	t.Helper()
 	second := erun.Run(t, []string{"activity", "record-stop", "--tenant", "team", "--environment", "dev", "--source", "host-manual", "--reason", "Manual stop via desktop"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

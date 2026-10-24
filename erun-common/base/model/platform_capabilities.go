@@ -1,29 +1,18 @@
 package model
 
-// PlatformCapability is one API surface the caller may reach: a canonical route
-// template such as `/v1/reviews/{review_id}`, never a concrete request URL.
+// PlatformCapability is a canonical route template, never a concrete URL.
 type PlatformCapability struct {
 	Method string `json:"method"`
 	Path   string `json:"path"`
 }
 
-// PlatformCapabilities is the caller's effective permission set as
-// erun-backend-api resolved it: every registered route the server would let
-// this caller through to, already expanded from the exact and pattern rules
-// their roles carry. It is advisory — a surface renders from it so it can
-// degrade instead of failing after the click — and the server's own
-// per-request check remains the only authority.
-//
-// Never derive permission from role names instead. A role's name says nothing
-// about what a tenant granted it, so a surface gated on the name is wrong for
-// every custom role and wrong again the moment a role's permissions change.
+// PlatformCapabilities is the caller's advisory permission set from
+// erun-backend-api; the server's per-request check is authoritative. Never gate
+// on role names: custom roles make them meaningless.
 type PlatformCapabilities []PlatformCapability
 
-// Known reports whether the caller learned its capability set at all. An
-// unknown set is not an empty one: a client that could not learn the answer
-// must attempt the call and report what the server says, rather than hide a
-// surface the caller may in fact be able to use. This is why the API serializes
-// an empty set as `[]` and an unavailable one as `null`.
+// Known reports whether the set was learned at all: an unknown set (null) is not
+// empty, and the caller must attempt the call rather than hide the surface.
 func (c PlatformCapabilities) Known() bool {
 	return c != nil
 }

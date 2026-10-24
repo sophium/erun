@@ -8,21 +8,8 @@ import { tenantNeedsSignIn } from '@/app/platformSignIn';
 
 import { InlineAlert } from './InlineAlert';
 
-// PlatformErrorAlert is InlineAlert plus a sign-in action: when the platform
-// reports the signed-in identity is no longer good, the fix is a "Log in"
-// click away — the same control the sidebar's cloud alias row already offers
-// — so it
-// renders right beside the message instead of leaving the operator to find
-// that control on their own. Every other message stays plain InlineAlert with
-// no action, which is correct for a remedy only a person can
-// carry out (e.g. "ask an administrator").
-//
-// A successful sign-in on its own leaves this exact surface rendered from the
-// stale state that produced it — the operator would see the identical
-// error and button after the problem is already fixed. onRecovered is the
-// caller's own re-fetch or error-clear for whatever produced `message`, so a
-// successful sign-in actually resolves what's on screen instead of just
-// updating the alias elsewhere.
+// PlatformErrorAlert adds a sign-in action for an expired identity.
+// onRecovered re-fetches whatever produced `message`, so a successful sign-in clears it.
 export function PlatformErrorAlert({
   message,
   alias,
@@ -42,16 +29,7 @@ export function PlatformErrorAlert({
   );
 }
 
-// SignInAction dispatches signInAndRecover, which itself dispatches the exact
-// same login thunk the sidebar's cloud alias login button uses, so a
-// re-authenticated alias updates every surface reading it — sidebar included
-// — not just the one that prompted the login. It only calls onRecovered once
-// the sign-in itself reports success; a failed sign-in says so right here
-// instead of silently leaving the same message and button on screen, which is
-// the identical trap one level down.
-// SignInAction is also reused directly by TenantPlatformState.tsx for the
-// dashboard's own not-signed-in state, which needs the exact same sign-in +
-// recover behavior beside a different (typed-state) message.
+// SignInAction uses the sidebar's login thunk so every surface updates, and calls onRecovered only on success.
 export function SignInAction({
   alias,
   onRecovered,
@@ -63,10 +41,7 @@ export function SignInAction({
   const busy = useAppSelector(
     (state) => (state.sidebar.sidebarCloudAliasBusyByAlias[alias] ?? '') !== '',
   );
-  // The real failure reason, not a generic sentence — updatePrimaryCloudProvider
-  // already computed one via readError and only threw it away here. "" clears
-  // on every new attempt so a stale failure never lingers beside a click that
-  // has not resolved yet.
+  // Cleared on each attempt so a stale failure never lingers.
   const [signInError, setSignInError] = React.useState('');
   return (
     <div className="grid gap-2">
@@ -78,9 +53,7 @@ export function SignInAction({
           setSignInError('');
           void (async () => {
             const outcome = await dispatch(signInAndRecover(alias, onRecovered));
-            // 'skipped' means this click found the alias already busy with
-            // another attempt (or blank) — nothing ran, so nothing failed;
-            // rendering an error here would blame a click that never happened.
+            // 'skipped' means another attempt was already running; nothing failed.
             if (outcome.status === 'failed') {
               setSignInError(outcome.message);
             }

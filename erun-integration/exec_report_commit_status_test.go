@@ -53,9 +53,6 @@ func testExecReportCommitStatusDryRunExplicitContextAndTargetUrl(t *testing.T) {
 }
 
 func testExecReportCommitStatusDryRunSshRemoteUrl(t *testing.T) {
-	// Exercises the ssh:// remote form, a distinct branch of
-	// cutGitHubRemotePrefix from the https/git@ forms the other scenarios
-	// already cover.
 	setup := env.New(t)
 	result := erun.Run(t, []string{
 		"exec", "report-commit-status", "deadbeefcafe",
@@ -71,9 +68,7 @@ func testExecReportCommitStatusDryRunSshRemoteUrl(t *testing.T) {
 }
 
 func testExecReportCommitStatusDryRunEmptyCommitTracesThenRefuses(t *testing.T) {
-	// COMMIT is a positional arg an empty string can still satisfy
-	// cobra.ExactArgs(1), so the shared validation (and its trace) is what
-	// actually catches this, not command-tree wiring.
+	// An empty string satisfies cobra.ExactArgs(1), so the shared validation must catch it.
 	setup := env.New(t)
 	result := erun.Run(t, []string{
 		"exec", "report-commit-status", "",
@@ -118,8 +113,6 @@ func testExecReportCommitStatusDryRunMissingDescriptionTracesThenRefuses(t *test
 }
 
 func testExecReportCommitStatusDryRunMalformedRemoteUrlTracesThenRefuses(t *testing.T) {
-	// A non-github.com remote reaches parseGitHubOwnerRepo's rejection
-	// branch, distinct from the missing-remote-url case below.
 	setup := env.New(t)
 	result := erun.Run(t, []string{
 		"exec", "report-commit-status", "deadbeefcafe",
@@ -149,9 +142,7 @@ func testExecReportCommitStatusDryRunMissingRemoteUrlTracesThenRefuses(t *testin
 }
 
 func testExecReportCommitStatusRealRunFailsCleanlyWithoutAToken(t *testing.T) {
-	// No --dry-run, no gh on the scrubbed PATH, and no GITHUB_TOKEN/GH_TOKEN
-	// in the environment: the real-run token resolution must refuse before
-	// ever reaching the network, naming the fix rather than a raw HTTP error.
+	// With no gh and no token, the real run must refuse before reaching the network.
 	setup := env.New(t)
 	result := erun.Run(t, []string{
 		"exec", "report-commit-status", "deadbeefcafe",
@@ -166,9 +157,6 @@ func testExecReportCommitStatusRealRunFailsCleanlyWithoutAToken(t *testing.T) {
 }
 
 func testExecReportCommitStatusRealRunSucceeds(t *testing.T) {
-	// Drives the real wire path (postGitHubCommitStatus) through
-	// ERUN_GITHUB_API_BASE_URL_OVERRIDE -- the same seam
-	// TestExecRulesetBypass uses -- instead of only the dry-run trace.
 	setup := env.New(t)
 	github := githubCommitStatusStubServer(t, 0)
 	envVars := append(setup.Env(), githubStubEnv(github)...)
@@ -185,8 +173,6 @@ func testExecReportCommitStatusRealRunSucceeds(t *testing.T) {
 }
 
 func testExecReportCommitStatusRealRunGithubRejects(t *testing.T) {
-	// postGitHubCommitStatus's own non-2xx branch: the request reached
-	// GitHub but the state was refused.
 	setup := env.New(t)
 	github := githubCommitStatusStubServer(t, http.StatusUnprocessableEntity)
 	envVars := append(setup.Env(), githubStubEnv(github)...)
@@ -202,9 +188,7 @@ func testExecReportCommitStatusRealRunGithubRejects(t *testing.T) {
 	golden.Equal(t, "exec/report_commit_status_real_run_github_rejects", normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
 }
 
-// githubCommitStatusStubServer answers the one call `exec
-// report-commit-status` makes in real-run mode (postGitHubCommitStatus).
-// forceStatus, when non-zero, makes the endpoint refuse instead of succeed.
+// githubCommitStatusStubServer refuses with forceStatus when it is non-zero.
 func githubCommitStatusStubServer(t testing.TB, forceStatus int) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()

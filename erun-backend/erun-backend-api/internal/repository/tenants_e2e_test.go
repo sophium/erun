@@ -16,10 +16,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// Reachable's whole point is a query that crosses tenant_id, which only means
-// something proven against real user_external_ids rows under a real migrated
-// PostgreSQL — a fake repository would just agree with itself about which
-// tenant_id values it decided to return.
 func tenantsDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -29,17 +25,9 @@ func tenantsDatabase(t *testing.T) *sql.DB {
 	return db
 }
 
-// seedReachableOrgClaim is the claim an org-scoped seed registers its issuer
-// on — the production shape, where the org that owns the identity is what
-// selects the tenant.
 const seedReachableOrgClaim = "urn:zitadel:iam:user:resourceowner:id"
 
-// seedReachableTenant creates a tenant, its issuer mapping, one user, and that
-// user's external identity — the minimum row set Reachable's join walks. An
-// org value implies an org-scoped issuer registration, because that is the
-// only shape resolution can ever match it through; seeding a value under a
-// single-tenant issuer would model a mapping the platform now refuses to
-// create.
+// An org value implies an org-scoped issuer, the only shape that can resolve it.
 func seedReachableTenant(t *testing.T, db *sql.DB, label, issuer, orgFieldValue, externalID string) string {
 	t.Helper()
 	var tenantID string
@@ -99,13 +87,6 @@ func clearReachableTenants(t *testing.T, db *sql.DB, tenantIDs ...string) {
 	}
 }
 
-// TestReachableOnlyReturnsTenantsMappedToCallersIdentity is the negative case
-// that matters: the same human maps to two tenants under one shared,
-// org-scoped issuer (same external_id, different org_field_value), and a
-// third, unrelated tenant on the same issuer belongs to a different human. A
-// caller resolving as the first human must see exactly their own two tenants
-// — never the third, and never anything keyed off a value the caller could
-// supply (Reachable takes no arguments; it reads only the security context).
 func TestReachableOnlyReturnsTenantsMappedToCallersIdentity(t *testing.T) {
 	db := tenantsDatabase(t)
 	const issuer = "https://idp.reachable-e2e.example"
@@ -119,9 +100,7 @@ func TestReachableOnlyReturnsTenantsMappedToCallersIdentity(t *testing.T) {
 
 	repo := NewTenantRepository(NewTxManager(db, DialectPostgres))
 	ctx := security.WithContext(context.Background(), security.Context{
-		// TenantID/TenantType stand in for whichever of the caller's own
-		// tenants this token actually resolved to; Reachable must ignore both
-		// and key only on ExternalIssuer/ExternalUserID.
+		// Reachable must ignore TenantID/TenantType and key only on the external identity.
 		TenantID:       tenantA,
 		TenantType:     "COMPANY",
 		ErunUserID:     "irrelevant-for-this-query",
@@ -147,9 +126,6 @@ func TestReachableOnlyReturnsTenantsMappedToCallersIdentity(t *testing.T) {
 	}
 }
 
-// TestReachableReturnsSingleTenantForSingleTenantCaller guards the common
-// case the negative test above doesn't cover on its own: a caller who maps to
-// only one tenant must see exactly that one, not zero and not more.
 func TestReachableReturnsSingleTenantForSingleTenantCaller(t *testing.T) {
 	db := tenantsDatabase(t)
 	const issuer = "https://idp.reachable-e2e-single.example"
@@ -174,11 +150,6 @@ func TestReachableReturnsSingleTenantForSingleTenantCaller(t *testing.T) {
 	}
 }
 
-// TestCreateReportsTenantNameConflictAndGetByNameResolvesIt: a tenant with the requested name was registered out-of-band
-// (a different issuer, standing in for "someone else got there first"), so
-// Create's own name-taken write must come back as the specific,
-// resolvable ErrTenantNameConflict rather than a generic 500, and GetByName
-// must resolve to the tenant that actually holds the name.
 func TestCreateReportsTenantNameConflictAndGetByNameResolvesIt(t *testing.T) {
 	db := tenantsDatabase(t)
 	repo := NewTenantRepository(NewTxManager(db, DialectPostgres))
@@ -209,12 +180,6 @@ func TestCreateReportsTenantNameConflictAndGetByNameResolvesIt(t *testing.T) {
 	}
 }
 
-// TestListReportsUserCountPerTenant proves List's UserCount is a real
-// per-tenant read, not a value that defaults to zero when nothing was
-// counted: a tenant seeded with a user reports 1, and a tenant registered
-// with none reports an explicit 0 (a non-nil pointer), the distinction the
-// console's inert-tenant flag depends on to tell "genuinely
-// empty" apart from "not computed".
 func TestListReportsUserCountPerTenant(t *testing.T) {
 	db := tenantsDatabase(t)
 	stamp := time.Now().Format("20060102150405.000000")
@@ -253,13 +218,6 @@ func TestListReportsUserCountPerTenant(t *testing.T) {
 	}
 }
 
-// TestReachableReportsWhetherEachMembershipCanActuallyResolve is the live
-// production case: one identity holding memberships in three tenants under
-// one org-scoped issuer, where only the tenant mapped to the org that owns
-// the identity can ever be signed into. The other two must still be reported
-// — an operator repairing them needs to see them — but each carries the
-// reason it cannot be reached, so a client never offers a switch target that
-// burns a full OIDC round trip to land back where it started.
 func TestReachableReportsWhetherEachMembershipCanActuallyResolve(t *testing.T) {
 	db := tenantsDatabase(t)
 	const issuer = "https://auth.reachability-e2e.example"
@@ -268,8 +226,7 @@ func TestReachableReportsWhetherEachMembershipCanActuallyResolve(t *testing.T) {
 
 	home := seedReachableTenant(t, db, "reachability-e2e-home", issuer, callerOrg, callerExternalID)
 	otherOrg := seedReachableTenant(t, db, "reachability-e2e-other-org", issuer, "reachability-e2e-org-other", callerExternalID)
-	// No org value under an issuer that resolves by one: unreachable by
-	// construction, for anybody, not merely for this caller.
+	// No org value under an org-scoped issuer: unreachable for anybody.
 	unconfigured := seedReachableTenant(t, db, "reachability-e2e-unconfigured", issuer, "", callerExternalID)
 	t.Cleanup(func() { clearReachableTenants(t, db, home, otherOrg, unconfigured) })
 
@@ -307,9 +264,6 @@ func TestReachableReportsWhetherEachMembershipCanActuallyResolve(t *testing.T) {
 	}
 }
 
-// TestReachableReportsASingleTenantIssuerAsResolvable guards the other half:
-// a caller on an issuer that resolves by iss alone presents no org, and their
-// membership must not be labelled broken for lacking one.
 func TestReachableReportsASingleTenantIssuerAsResolvable(t *testing.T) {
 	db := tenantsDatabase(t)
 	const issuer = "https://idp.reachability-e2e-single.example"
@@ -337,12 +291,6 @@ func TestReachableReportsASingleTenantIssuerAsResolvable(t *testing.T) {
 	}
 }
 
-// TestCreateRefusesATenantNoTokenCanResolveTo is the server-side refusal: an
-// issuer already registered as org-scoped resolves tenants by an org claim,
-// so registering one against it with no org value produces a tenant that
-// exists, lists, and can never be signed into. That must fail at the point of
-// creation, naming the claim, rather than surfacing later as a sign-in that
-// resolves somewhere else.
 func TestCreateRefusesATenantNoTokenCanResolveTo(t *testing.T) {
 	db := tenantsDatabase(t)
 	repo := NewTenantRepository(NewTxManager(db, DialectPostgres))
@@ -373,8 +321,7 @@ func TestCreateRefusesATenantNoTokenCanResolveTo(t *testing.T) {
 		t.Fatalf("refusal %q does not name the claim the issuer resolves by", unresolvable.Error())
 	}
 
-	// The refusal must leave nothing behind: a tenants row committed without
-	// its mapping would be exactly the orphan this refuses to create.
+	// The refusal must not leave an orphaned tenants row.
 	var count int
 	mustNoErr(t, db.QueryRow(`SELECT count(*) FROM tenants WHERE name = $1`, "createrefusalsecond"+stamp).Scan(&count), "count refused tenant")
 	if count != 0 {
@@ -382,17 +329,12 @@ func TestCreateRefusesATenantNoTokenCanResolveTo(t *testing.T) {
 	}
 }
 
-// TestListReportsWhetherATenantCanBeResolvedAtAll is the other half of the
-// silence: a tenant already carrying a dead mapping (registered before the
-// refusal existed) is listed to an operator identically to a healthy one.
-// Resolvable is what makes it visibly unreachable instead.
 func TestListReportsWhetherATenantCanBeResolvedAtAll(t *testing.T) {
 	db := tenantsDatabase(t)
 	const issuer = "https://auth.list-resolvable-e2e.example"
 
 	healthy := seedReachableTenant(t, db, "list-resolvable-e2e-healthy", issuer, "list-resolvable-e2e-org", "list-resolvable-e2e-user")
-	// Registered directly, the way a platform already holding one looks —
-	// TenantRepository.Create refuses to mint this shape now.
+	// Seeded directly; Create now refuses this shape.
 	dead := seedReachableTenant(t, db, "list-resolvable-e2e-dead", issuer, "", "list-resolvable-e2e-user")
 	t.Cleanup(func() { clearReachableTenants(t, db, healthy, dead) })
 

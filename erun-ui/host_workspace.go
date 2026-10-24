@@ -17,15 +17,9 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// A host workspace is the operator's host-machine copy of an env's worktree. For
-// a local-agent env that is the worktree itself (RepoPath); for a remote-agent
-// env it is the read-only mirror that workspace sync maintains on the host. Both
-// let the desktop run host-side actions — diff, IDE, running a cross-built
-// artifact — without reaching into the pod, which is what makes the flow usable
-// on Windows where the local-agent hostPath mount is not.
+// A host workspace is the local-agent worktree or the remote-agent sync mirror;
+// it lets host-side actions skip the pod, which matters on Windows.
 
-// hostWorkspacePath returns the env's host-accessible worktree path, or "" when
-// the env has none (a remote-agent without workspace sync, or a runtime env).
 func hostWorkspacePath(result config.OpenResult, findProjectRoot shared.ProjectFinderFunc) string {
 	if !result.RemoteRepo() {
 		return strings.TrimSpace(result.RepoPath)
@@ -51,19 +45,8 @@ func (a *App) resolveHostWorkspace(selection uiSelection) (config.OpenResult, st
 	return result, path, nil
 }
 
-// LoadDirectoryDiff diffs a directory the orchestrator works in directly: a path
-// on this machine that belongs to no environment, so there is no tenant to
-// resolve, no runtime to reach, and no MCP edge to call.
-//
-// The diff engine is not new. erun-common's ResolveGitDiffWithOptions already
-// runs host git on any path -- it is the same call LoadHostDiff makes below --
-// so what was missing is the path-addressed entrypoint, not a way to diff
-// locally. It deliberately does not reuse LoadHostDiff's env resolution, because
-// a directory is not an environment and resolving one would be exactly the
-// conflation this exists to remove.
-//
-// The path is validated here so a mistyped directory fails naming the path, at
-// this edge, rather than surfacing as git's own error from a layer down.
+// LoadDirectoryDiff diffs a directory that belongs to no environment, with no
+// env resolution or MCP. The path is validated here so errors name it.
 func (a *App) LoadDirectoryDiff(directory string, options uiDiffOptions) (lifecycle.DiffResult, error) {
 	path := strings.TrimSpace(directory)
 	if path == "" {
@@ -76,9 +59,6 @@ func (a *App) LoadDirectoryDiff(directory string, options uiDiffOptions) (lifecy
 	if !info.IsDir() {
 		return lifecycle.DiffResult{}, fmt.Errorf("load directory diff %s: not a directory", path)
 	}
-	// The contribute-clone target has no meaning for a bare directory: there is no
-	// environment whose clone it could be, so the diff is always the directory's
-	// own working tree.
 	return lifecycle.ResolveGitDiffWithOptions(path, lifecycle.DiffOptions{
 		Scope:          strings.TrimSpace(options.Scope),
 		SelectedCommit: strings.TrimSpace(options.SelectedCommit),
@@ -86,11 +66,8 @@ func (a *App) LoadDirectoryDiff(directory string, options uiDiffOptions) (lifecy
 	}, nil)
 }
 
-// LoadHostDiff computes the env's diff from its host workspace using host git,
-// reusing the same shared resolver that backs `erun diff` and the MCP diff tool.
-// Unlike LoadDiff it never dials the in-pod MCP, so it works for a remote-agent
-// env whose runtime pod is stopped or unforwarded — the review reads the synced
-// mirror directly.
+// LoadHostDiff diffs the env's host workspace with host git, never dialing the
+// in-pod MCP, so it works while the pod is stopped.
 func (a *App) LoadHostDiff(selection uiSelection, options uiDiffOptions) (lifecycle.DiffResult, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("load host diff", selection.Tenant, selection.Environment); err != nil {
@@ -100,8 +77,6 @@ func (a *App) LoadHostDiff(selection uiSelection, options uiDiffOptions) (lifecy
 	if err != nil {
 		return lifecycle.DiffResult{}, err
 	}
-	// The host mirror is the env worktree; the contribute-clone target has no
-	// host-side meaning, so the host diff is always scoped to the env worktree.
 	return lifecycle.ResolveGitDiffWithOptions(path, lifecycle.DiffOptions{
 		Scope:          strings.TrimSpace(options.Scope),
 		SelectedCommit: strings.TrimSpace(options.SelectedCommit),
@@ -109,9 +84,7 @@ func (a *App) LoadHostDiff(selection uiSelection, options uiDiffOptions) (lifecy
 	}, nil)
 }
 
-// OpenHostIDE launches VS Code or IntelliJ against the env's host workspace
-// (the local-agent worktree or the remote-agent synced mirror), never the
-// in-pod copy. The in-pod IDE path stays on OpenIDE for envs that want it.
+// OpenHostIDE launches VS Code or IntelliJ against the env's host workspace.
 func (a *App) OpenHostIDE(selection uiSelection, ide string) error {
 	selection = normalizeSelection(selection)
 	ide = strings.TrimSpace(ide)
@@ -145,16 +118,13 @@ func (a *App) OpenHostIDE(selection uiSelection, ide string) error {
 	return formatOpenIDEError(ide, output, err)
 }
 
-// hostArtifact describes one deliverable the outputs sync lane mirrored into the
-// host workspace's read-only artifact directory.
 type hostArtifact struct {
 	Name    string `json:"name"`
 	Size    int64  `json:"size"`
 	ModTime string `json:"modTime"`
 }
 
-// ListHostArtifacts lists the artifacts workspace sync mirrored from the pod's
-// $ERUN_OUTPUTS_DIR into the host workspace (e.g. a cross-built Windows .exe).
+// ListHostArtifacts lists artifacts sync mirrored from the pod's outputs dir.
 func (a *App) ListHostArtifacts(selection uiSelection) ([]hostArtifact, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("list host artifacts", selection.Tenant, selection.Environment); err != nil {
@@ -184,9 +154,8 @@ func (a *App) ListHostArtifacts(selection uiSelection) ([]hostArtifact, error) {
 	return artifacts, nil
 }
 
-// RunHostArtifact launches a synced artifact on the host, detached, so the
-// operator can run or debug a binary the agent cross-built in the pod. relPath
-// is validated to stay within the workspace's read-only artifact directory.
+// RunHostArtifact launches a synced artifact on the host, detached; relPath
+// must stay within the artifact directory.
 func (a *App) RunHostArtifact(selection uiSelection, relPath string) error {
 	selection = normalizeSelection(selection)
 	relPath = strings.TrimSpace(relPath)
@@ -213,8 +182,7 @@ func (a *App) RunHostArtifact(selection uiSelection, relPath string) error {
 	if info.IsDir() {
 		return fmt.Errorf("artifact %q is a directory", relPath)
 	}
-	// Sync signs what it mirrors, but an artifact can also predate that pass, so
-	// the launch re-checks rather than trusting the mirror to have done it.
+	// An artifact may predate sync-side signing, so re-check at launch.
 	a.reportHostArtifactSigning(codesign.SignHostArtifact(exePath))
 	return a.deps.launchHostArtifact(exePath, dir)
 }

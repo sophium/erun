@@ -22,15 +22,7 @@ func buildReportScenarios(t *testing.T) {
 }
 
 func testBuildDryRunWithPlatformAliasTracesTheBuildReport(t *testing.T) {
-	// With an erun platform alias configured, build traces the
-	// self-report it would make, never touching the network under
-	// --dry-run -- so a fixed, unresolvable API URL (no real server
-	// behind it) is fine here, the same choice review record-build's own
-	// dry-run scenario makes, and keeps the golden free of a real
-	// httptest server's randomly-assigned port. The commit resolved from
-	// the seeded git repo is content-derived and differs per run;
-	// normalize.Apply's existing <HEX> rule masks it the same way it
-	// already masks other long hex digests.
+	// --dry-run never touches the network, so an unresolvable API URL is fine.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -46,12 +38,7 @@ func testBuildDryRunWithPlatformAliasTracesTheBuildReport(t *testing.T) {
 }
 
 func testBuildRealRunWithPlatformAliasReportsASuccessfulBuild(t *testing.T) {
-	// A real (non-dry-run) build with a platform alias
-	// configured self-reports its outcome after it finishes. A real git
-	// repository is seeded so the report resolves and includes a real
-	// commit; the exact hash is masked by output normalization not
-	// applying to it, so this asserts shape (commitId= present) rather
-	// than the golden's exact bytes.
+	// The commit hash is not normalized, so assert shape, not bytes.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -84,8 +71,6 @@ func testBuildRealRunWithPlatformAliasReportsASuccessfulBuild(t *testing.T) {
 }
 
 func testBuildRealRunBuildReportFailureDoesNotFailTheBuild(t *testing.T) {
-	// A build must never fail -- or report itself as failed --
-	// because self-reporting to the platform is unavailable.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -114,11 +99,8 @@ func testBuildRealRunBuildReportFailureDoesNotFailTheBuild(t *testing.T) {
 	}
 }
 
-// buildReportAPIStubServer runs a minimal erun-backend-api double covering
-// GET /v1/environments and POST /v1/builds -- the two calls ReportBuildOutcome
-// makes to self-report an ordinary `erun build` run. buildStatus
-// lets a scenario force the report itself to fail (500) while still proving
-// the build's own exit code is untouched.
+// buildReportAPIStubServer fakes the two calls ReportBuildOutcome makes;
+// buildStatus can force the report itself to fail.
 func buildReportAPIStubServer(t testing.TB, buildStatus int) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()

@@ -38,8 +38,6 @@ func testWhipHelp(t *testing.T) {
 
 func testWhipDryRunNoTargetsConfigured(t *testing.T) {
 	t.Parallel()
-	// No environments and no orchestrators configured at all: the report
-	// has nothing to name, and the command still exits clean.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"whip", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode != 0 {
@@ -49,18 +47,8 @@ func testWhipDryRunNoTargetsConfigured(t *testing.T) {
 }
 
 func testWhipDryRunOneNamedEnvironmentNotOpenReportsCallFailed(t *testing.T) {
-	// Pinned to the 26100 range (erun-integration/AGENTS.md's "pin a high
-	// port range") rather than the plain SeedTenantEnv default, or the probe
-	// below can land on whatever a developer's live erun session already
-	// holds on the default 17000 range and read as a stale port-forward
-	// instead of the "nobody has this open" case the scenario means to test.
-	//
-	// This harness has no desktop identity to mint a bearer with, so the
-	// whip tool call itself fails before it ever reaches a pod -- reported
-	// as a call failure (orchestrator.WhipReasonCallFailed), never folded
-	// into "not alive": the tool call
-	// erroring out is never the same claim as the tool reporting a dead
-	// session, which comes back as a *successful* result.
+	// Pinned high so the probe cannot hit a live session's default ports. Without a desktop
+	// bearer the call fails, which must report as a call failure, never as "not alive".
 	skipIfPortsBusy(t, 26100)
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
@@ -72,11 +60,7 @@ func testWhipDryRunOneNamedEnvironmentNotOpenReportsCallFailed(t *testing.T) {
 }
 
 func testWhipDryRunScopedEnvironmentExcludesOrchestrators(t *testing.T) {
-	// An explicit TENANT/ENVIRONMENT scope must narrow every
-	// axis, not just the environment list. With an orchestrator
-	// configured alongside the named environment, a scoped call must
-	// name only that environment -- no orchestrator line at all --
-	// even though the unscoped scenario below would report it.
+	// A scoped call names only that environment, no orchestrator line.
 	skipIfPortsBusy(t, 26100)
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
@@ -89,12 +73,7 @@ func testWhipDryRunScopedEnvironmentExcludesOrchestrators(t *testing.T) {
 }
 
 func testWhipDryRunWhipsEveryConfiguredEnvironmentAndOrchestrator(t *testing.T) {
-	// With neither --tenant nor --environment, whip fans out over every
-	// configured environment (across every tenant) plus every persisted
-	// orchestrator. Orchestrators are always reported unreachable from
-	// this transport -- a CLI process has no channel into a desktop-held
-	// PTY -- independent of whether any environment edge is reachable.
-	// Pinned ports for the same reason as the scenario above.
+	// Orchestrators are always unreachable from the CLI: it has no channel to a desktop PTY.
 	skipIfPortsBusy(t, 26100, 26200)
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
@@ -108,7 +87,6 @@ func testWhipDryRunWhipsEveryConfiguredEnvironmentAndOrchestrator(t *testing.T) 
 }
 
 func testWhipDryRunJsonOutput(t *testing.T) {
-	// Pinned ports for the same reason as the scenarios above.
 	skipIfPortsBusy(t, 26100)
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
@@ -121,11 +99,7 @@ func testWhipDryRunJsonOutput(t *testing.T) {
 }
 
 func testWhipRealRunForwardsTheResolvedTarget(t *testing.T) {
-	// The "whip" MCP tool call must not rely on the pod defaulting to its
-	// own bound context. This proves the call restates the tenant/
-	// environment this host already resolved to reach the edge, through a
-	// real (fake) edge rather than the dry-run path above, which never
-	// reaches a live tool result to decode.
+	// The whip call must restate the tenant/environment rather than rely on the pod's default.
 	whipEdgeLocalPort := 26500
 	skipIfPortsBusy(t, whipEdgeLocalPort)
 	setup := env.New(t)
@@ -148,15 +122,8 @@ func testWhipRealRunForwardsTheResolvedTarget(t *testing.T) {
 }
 
 func testWhipSweepContinuesPastAnUnreachableChannelAndNamesIt(t *testing.T) {
-	// The whole point of a sweep is that it is useful when something is
-	// down: one environment whose edge is not answering must cost that
-	// environment's row, not the report. The reachable target is served by
-	// a fake edge, the other resolves to a port nothing listens on, and
-	// both must appear.
-	//
-	// Pinned to the 26300 range for the same reason as the scenarios above:
-	// a locally resolved environment's port range must be aligned to
-	// 100-port boundaries from 17000, so it cannot be OS-assigned.
+	// One dead edge must cost only its own row. Local port ranges align to 100 from 17000,
+	// so they cannot be OS-assigned.
 	reachablePort, unreachablePort := 26300, 26400
 	skipIfPortsBusy(t, reachablePort, unreachablePort)
 	setup := env.New(t)
@@ -183,13 +150,8 @@ func testWhipSweepContinuesPastAnUnreachableChannelAndNamesIt(t *testing.T) {
 }
 
 func testWhipDryRunNeverReattachesAnUnreachableChannel(t *testing.T) {
-	// A --dry-run must leave no child behind. The child would be a real
-	// `erun open --reconnect`, spawned by the reattach path, and its own
-	// lifetime is not something this suite can observe without racing its
-	// exit -- so what is asserted here is the spawn decision itself, through
-	// the trace the spawn is always preceded by, on the real binary. The
-	// unit test beside callMCPToolWithReattach asserts the same decision one
-	// layer in, on the spawn call never being invoked.
+	// The reconnect child cannot be observed without racing, so assert the spawn decision
+	// via its trace.
 	unreachablePort := 26800
 	skipIfPortsBusy(t, unreachablePort)
 	setup := env.New(t)
@@ -219,10 +181,7 @@ func testWhipDryRunOnlyTenantGivenRefuses(t *testing.T) {
 	golden.Equal(t, "whip/dry_run_only_tenant_given_refuses", normalize.Apply(result.Combined))
 }
 
-// seedOrchestrator appends a persisted orchestrator definition to the isolated
-// root config, mirroring what the desktop writes to ~/.erun/config.yaml (see
-// config.OrchestratorConfig) without exercising the desktop
-// UI that normally creates one.
+// seedOrchestrator writes what the desktop would to the root config.
 func seedOrchestrator(t testing.TB, setup env.Setup, id, name string) {
 	t.Helper()
 	path := filepath.Join(setup.ConfigHome, "erun", "config.yaml")

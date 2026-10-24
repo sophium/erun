@@ -1,7 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
 
-// ActivityQueueDrawer POM. The drawer slides in from the right when its
-// launcher (fixed floating button labelled "Open activities") is clicked.
 export class ActivityQueueDrawer {
   constructor(public readonly page: Page) {}
 
@@ -22,9 +20,7 @@ export class ActivityQueueDrawer {
     await this.locator().waitFor({ state: 'visible' });
   }
 
-  // Converge on the drawer actually having closed, mirroring open() above,
-  // instead of leaving callers to assert on it with their own fixed budget
-  // right after the click.
+  // Converges on the drawer having closed, like open().
   async close(): Promise<void> {
     await this.closeButton().click();
     await this.locator().waitFor({ state: 'hidden' });

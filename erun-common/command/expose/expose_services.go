@@ -10,35 +10,24 @@ import (
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
-// EnvironmentService is one Service in an environment's namespace as the
-// expose picker sees it: the Service an Ingress would route to, the ports it
-// offers, and the exposure it already has. It is the answer to "what is this
-// environment running", which until now nothing could report -- the only
-// listing was of exposures, so choosing something to expose meant already
-// knowing its name.
+// EnvironmentService is one Service in an environment's namespace with its
+// ports and any existing exposure.
 type EnvironmentService struct {
-	Name  string                            `json:"name"`
-	Type  string                            `json:"type,omitempty"`
-	Ports []clusterread.ObservedServicePort `json:"ports,omitempty"`
-	// Exposure is set when an erun-expose Ingress already fronts this Service,
-	// so a caller can offer "open" rather than "expose" for it.
-	Exposure *ServiceExposure `json:"exposure,omitempty"`
+	Name     string                            `json:"name"`
+	Type     string                            `json:"type,omitempty"`
+	Ports    []clusterread.ObservedServicePort `json:"ports,omitempty"`
+	Exposure *ServiceExposure                  `json:"exposure,omitempty"`
 }
 
-// ServiceExposure is the public face an EnvironmentService already has.
-// Label is the logical name in the hostname, which is not necessarily the
-// Service's own name.
+// ServiceExposure is an EnvironmentService's existing exposure; Label need not
+// be the Service's name.
 type ServiceExposure struct {
 	Label    string `json:"label"`
 	Hostname string `json:"hostname"`
 	Scheme   string `json:"scheme"`
 }
 
-// EnvironmentServiceList is the shared result of a services read: the
-// environment it describes and the Services its namespace runs, each carrying
-// the exposure erun-expose already gave it. It mirrors ObserveResult's shape
-// so the CLI's --output json and the MCP tool return one contract rather than
-// two renderings of the same read.
+// EnvironmentServiceList is the shared CLI/MCP result of a services read.
 type EnvironmentServiceList struct {
 	Tenant      string               `json:"tenant"`
 	Environment string               `json:"environment"`
@@ -46,17 +35,11 @@ type EnvironmentServiceList struct {
 	Services    []EnvironmentService `json:"services"`
 }
 
-// ErrListEnvironmentServicesForbidden reports that the caller's Kubernetes
-// credentials cannot list the namespace's Services, so a caller can render a
-// permission-restricted state rather than an empty environment.
+// ErrListEnvironmentServicesForbidden reports that the caller cannot list the namespace's Services.
 var ErrListEnvironmentServicesForbidden = errors.New("list environment services: forbidden")
 
-// RunListEnvironmentServices is the CLI's and MCP's entry point to the same
-// read the desktop's Ports tab picker makes: it traces the two `kubectl get`s
-// before running them, so `--dry-run` reports exactly the calls a real run
-// would make, in the same order. Traced and returned up front rather than
-// discovered during execution because ListEnvironmentServices itself holds no
-// Context -- it is the desktop's call, and the desktop has no trace to emit.
+// RunListEnvironmentServices traces both `kubectl get`s up front because
+// ListEnvironmentServices, the desktop's call, has no Context to trace with.
 func RunListEnvironmentServices(ctx core.Context, req config.ShellLaunchParams) (EnvironmentServiceList, error) {
 	result := EnvironmentServiceList{Tenant: req.Tenant, Environment: req.Environment, Namespace: req.Namespace}
 	ctx.TraceCommand("", "kubectl", clusterread.ObserveGetArgs(req, "service")...)
@@ -73,10 +56,8 @@ func RunListEnvironmentServices(ctx core.Context, req config.ShellLaunchParams) 
 	return result, nil
 }
 
-// ListEnvironmentServices reports the environment's Services and, for each,
-// the exposure erun-expose already gave it. Both reads are plain `kubectl
-// get`s, so this is safe to grant to a caller that must never be handed
-// `erun exec raw`.
+// ListEnvironmentServices runs only plain `kubectl get`s, so it is safe for
+// callers that must never get `erun exec raw`.
 func ListEnvironmentServices(req config.ShellLaunchParams) ([]EnvironmentService, error) {
 	services, err := clusterread.FetchObservedServices(clusterread.ObserveGetArgs(req, "service"))
 	if err != nil {
@@ -95,12 +76,8 @@ func ListEnvironmentServices(req config.ShellLaunchParams) ([]EnvironmentService
 	return mergeServicesWithExposures(services, ingresses), nil
 }
 
-// mergeServicesWithExposures attaches each erun-expose Ingress to the Service
-// it actually routes to, read from the Ingress backend rather than re-derived
-// from the naming convention that produced it -- the convention is what a
-// repo-native chart breaks, and re-deriving it here would reproduce that bug
-// in the list. Split out as a pure function so the matching is testable
-// without a cluster.
+// mergeServicesWithExposures reads the backend from the Ingress rather than
+// re-deriving it from the naming convention a repo-native chart breaks.
 func mergeServicesWithExposures(services []clusterread.ObservedService, ingresses []clusterread.ObservedIngress) []EnvironmentService {
 	exposures := exposuresByBackendService(ingresses)
 	out := make([]EnvironmentService, 0, len(services))

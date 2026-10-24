@@ -8,10 +8,6 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 )
 
-// TestJobServiceSweepAbandonsAStaleRunningJob: an actor that disappears
-// without closing its job is the orphaned running record nothing clears.
-// The sweep is what clears it -- and it records the transition rather than
-// deleting the row, so the queue still shows what was claimed and dropped.
 func TestJobServiceSweepAbandonsAStaleRunningJob(t *testing.T) {
 	repo := newFakeJobRepo()
 	svc := NewJobService(repo)
@@ -38,10 +34,6 @@ func TestJobServiceSweepAbandonsAStaleRunningJob(t *testing.T) {
 	}
 }
 
-// TestJobServiceSweepReleasesTheAbandonedScope is the sweep's whole purpose:
-// the scope a vanished actor held must become claimable again. Without this
-// the first abandoned job wedges its issue forever, which is worse than the
-// duplicate work the claim primitive exists to prevent.
 func TestJobServiceSweepReleasesTheAbandonedScope(t *testing.T) {
 	repo := newFakeJobRepo()
 	svc := NewJobService(repo)
@@ -62,9 +54,6 @@ func TestJobServiceSweepReleasesTheAbandonedScope(t *testing.T) {
 	}
 }
 
-// TestJobServiceSweepLeavesAFreshJobAlone: the sweep is bounded by a TTL, not
-// by a guess that a quiet job is a dead one. An agent mid-task that has not
-// needed to update yet must keep its scope.
 func TestJobServiceSweepLeavesAFreshJobAlone(t *testing.T) {
 	repo := newFakeJobRepo()
 	svc := NewJobService(repo)
@@ -93,9 +82,6 @@ func TestJobServiceSweepLeavesAFreshJobAlone(t *testing.T) {
 	}
 }
 
-// TestJobServiceSweepLeavesAFinishedJobAlone: only RUNNING jobs are swept. A
-// job that already reached an outcome keeps it -- a sweep is not a way to
-// rewrite history.
 func TestJobServiceSweepLeavesAFinishedJobAlone(t *testing.T) {
 	repo := newFakeJobRepo()
 	svc := NewJobService(repo)
@@ -127,9 +113,6 @@ func TestJobServiceSweepLeavesAFinishedJobAlone(t *testing.T) {
 	}
 }
 
-// TestJobServiceSweepOfNothingIsAnEmptyList: a quiet platform is the ordinary
-// case, not an error, and the answer must still be a definite empty list
-// rather than a nil a caller has to guard.
 func TestJobServiceSweepOfNothingIsAnEmptyList(t *testing.T) {
 	svc := NewJobService(newFakeJobRepo())
 
@@ -145,14 +128,7 @@ func TestJobServiceSweepOfNothingIsAnEmptyList(t *testing.T) {
 	}
 }
 
-// TestJobServiceSweepLeavesAPlannedJobAlone: ABANDONED is what the sweep does
-// to a job whose actor stopped updating it, and a parked plan has no actor yet
-// to stop. Sweeping one would turn the pipeline's first rung into "dropped"
-// inside the TTL, on a schedule, with nothing an operator did to cause it --
-// and would do it to every plan in the backlog at once.
-//
-// The job is backdated far past the TTL so the only thing keeping it out of
-// the sweep's result is the exemption itself, not the clock.
+// Backdated past the TTL so only the PLANNED exemption keeps it out.
 func TestJobServiceSweepLeavesAPlannedJobAlone(t *testing.T) {
 	repo := newFakeJobRepo()
 	svc := NewJobService(repo)

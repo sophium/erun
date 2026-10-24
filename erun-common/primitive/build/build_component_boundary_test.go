@@ -15,8 +15,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// boundaryProject lays out a <tenant>-devops tree with one component under
-// docker/ and one suite under e2e/, beside a VERSION the build can resolve.
 func boundaryProject(t *testing.T, componentDockerfile string) (projectRoot, componentDir, suiteDir string) {
 	t.Helper()
 	projectRoot = t.TempDir()
@@ -68,8 +66,6 @@ func TestDockerfileTestStageConsumerForms(t *testing.T) {
 	}
 }
 
-// Project-wide discovery walks docker/ only, so a suite beside it is never a
-// component, by directory scan or by component name.
 func TestComponentDiscoveryNeverReachesE2ESuites(t *testing.T) {
 	projectRoot, componentDir, _ := boundaryProject(t, consumedTestStageDockerfileContent)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, projectRoot)
@@ -119,8 +115,7 @@ func runOutcomeBuild(t *testing.T, buildInput shared.DockerBuildSpec, build Dock
 	return log.String(), err
 }
 
-// "Ran" and "reused" must stay distinct per component: a fingerprint promotion
-// reuses an earlier tested result and must not read as a fresh pass.
+// A fingerprint promotion reuses an earlier result and must not read as a fresh pass.
 func TestBuildReportsEachComponentsTestOutcome(t *testing.T) {
 	succeed := func(shared.DockerBuildSpec, io.Writer, io.Writer) error { return nil }
 
@@ -174,8 +169,6 @@ func TestFailedOrDryRunBuildReportsNoTestOutcome(t *testing.T) {
 	}
 }
 
-// Under concurrent dispatch the outcome lines follow the build order, not the
-// order images finished in, so the stream is reproducible.
 func TestConcurrentBuildsReportTestOutcomesInBuildOrder(t *testing.T) {
 	dir := t.TempDir()
 	slow := buildSpecFromDockerfile(t, dir, "slow", "debian:bookworm")

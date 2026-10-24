@@ -9,8 +9,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// openGatewayStore is an OpenStore whose root config carries a gateway catalog,
-// the way an operator's erun-level OpenRouter settings do.
 type openGatewayStore struct {
 	catalog  *config.OpenRouterConfig
 	claude   config.EnvironmentClaudeConfig
@@ -41,12 +39,6 @@ func (s openGatewayStore) env(name string) config.EnvConfig {
 	return config.EnvConfig{Name: name, LocalRepoPath: s.repoPath, KubernetesContext: "cluster", Claude: s.claude}
 }
 
-// TestOpenAILaunchHonoursTheEnvironmentsGateway is the reported flow from the
-// pod's side: an environment AI tab is `erun open --ai`, and its session must
-// launch on what the environment selected. The open path never handed the
-// launch the erun-level catalog, so a gateway environment launched on the
-// Anthropic default with Remote Control (which a gateway credential cannot
-// pair), and per-environment gateway choices changed nothing at all.
 func TestOpenAILaunchHonoursTheEnvironmentsGateway(t *testing.T) {
 	catalog := &config.OpenRouterConfig{
 		BaseURL:      "https://gateway.example/api",
@@ -92,9 +84,6 @@ func TestOpenAILaunchHonoursTheEnvironmentsGateway(t *testing.T) {
 	}
 }
 
-// TestOpenWithoutAReadableRootConfigLaunchesWithoutAGateway keeps the tolerant
-// read: a root config that cannot be read must not fail the open, and leaves
-// the launch on its gateway-less answer.
 func TestOpenWithoutAReadableRootConfigLaunchesWithoutAGateway(t *testing.T) {
 	if got := shared.ResolveOpenGateway(openTenantResolutionStore{}); got != nil {
 		t.Fatalf("an unreadable root config should resolve no gateway, got %+v", got)

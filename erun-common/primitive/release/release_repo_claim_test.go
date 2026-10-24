@@ -9,11 +9,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// TestReleaseClaimHolderDescriptionRendersSensiblyWithMissingFields guards the
-// rendering itself: either half of the holder/environment pair can be
-// missing (an older claim record predating the environment field, or a
-// holder with nothing else set), and the description must never leave an
-// empty fragment or a dangling separator.
 func TestReleaseClaimHolderDescriptionRendersSensiblyWithMissingFields(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -35,11 +30,7 @@ func TestReleaseClaimHolderDescriptionRendersSensiblyWithMissingFields(t *testin
 	}
 }
 
-// TestReleaseRepoClaimRefusalNamesTheDeliberateRemedy pins the handle the
-// refusal leaves an operator. Its promise now matches what the reclaim rule
-// actually delivers, and the one thing that can be acted on by hand — the
-// version's own claim ref — has to be readable off the message, because that
-// is what a version blocked by a holder nothing here can see leaves them with.
+// The claim ref is the only thing an operator can act on by hand.
 func TestReleaseRepoClaimRefusalNamesTheDeliberateRemedy(t *testing.T) {
 	start := time.Date(2026, 9, 21, 9, 0, 0, 0, time.UTC)
 	err := (&shared.ReleaseRepoClaimConflictError{

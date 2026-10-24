@@ -12,19 +12,13 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/zitadel"
 )
 
-// fakeMachineIdentityAdmin stands in for the identity provider. It holds one
-// identity per login name and returns the one it already has for a repeat
-// call, so a test can assert what provisioning did *not* mint on the second
-// pass -- the half idempotence actually rests on, since a provider that minted
-// a fresh identity every time would leave the service's own writes looking
-// idempotent while the credential in the environment had silently changed.
+// fakeMachineIdentityAdmin returns the existing identity on a repeat call, so a
+// test can assert that a second provisioning minted nothing new.
 type fakeMachineIdentityAdmin struct {
 	identities map[string]zitadel.MachineIdentity
 	ensureErr  error
 	calls      []zitadel.EnsureMachineIdentityParams
-	// deleteCalls records every revocation attempt, including the ones that
-	// found nothing, so a test can tell "revoked the identity" from "searched
-	// the right places and found none".
+	// deleteCalls includes revocations that found nothing.
 	deleteCalls []zitadel.DeleteMachineIdentityParams
 	deleteErr   error
 }
@@ -49,9 +43,7 @@ func (f *fakeMachineIdentityAdmin) EnsureMachineIdentity(_ context.Context, para
 	return identity, nil
 }
 
-// DeleteMachineIdentity reproduces the provider's find-first delete: what is
-// not there is reported as nothing removed, not as an error, so a test can
-// assert on what is left rather than only on which call was made.
+// DeleteMachineIdentity reports a missing identity as nothing removed, not an error.
 func (f *fakeMachineIdentityAdmin) DeleteMachineIdentity(_ context.Context, params zitadel.DeleteMachineIdentityParams) (bool, error) {
 	f.deleteCalls = append(f.deleteCalls, params)
 	if f.deleteErr != nil {
@@ -64,14 +56,11 @@ func (f *fakeMachineIdentityAdmin) DeleteMachineIdentity(_ context.Context, para
 	return true, nil
 }
 
-// hasIdentity reports whether the provider still holds an identity under
-// loginName — the credential half of "nothing usable left behind".
 func (f *fakeMachineIdentityAdmin) hasIdentity(loginName string) bool {
 	_, ok := f.identities[loginName]
 	return ok
 }
 
-// fakeMachineIdentityEnvironments is the environment read.
 type fakeMachineIdentityEnvironments struct {
 	environment model.Environment
 	err         error
@@ -88,18 +77,12 @@ func (f *fakeMachineIdentityEnvironments) Get(_ context.Context, environmentID s
 	return environment, nil
 }
 
-// fakeMachineIdentityUsers is an in-memory stand-in for UserRepository.Create
-// that reproduces the two behaviours the service depends on: an identity
-// already mapped in the tenant is a no-op that reports the existing user, and
-// a fresh one is inserted with the roles it was handed.
+// fakeMachineIdentityUsers treats an already-mapped identity as a no-op.
 type fakeMachineIdentityUsers struct {
-	bySubject map[string]model.User
-	grants    map[string]map[string]bool
-	createErr error
-	deleteErr error
-	// deleteCalls records what revocation asked the store to remove, so a test
-	// can assert the service scoped it to the environment's own tenant and to
-	// the name derived from the environment's id rather than to the session's.
+	bySubject   map[string]model.User
+	grants      map[string]map[string]bool
+	createErr   error
+	deleteErr   error
 	deleteCalls []deleteByUsernameCall
 }
 
@@ -128,11 +111,7 @@ func (f *fakeMachineIdentityUsers) Create(_ context.Context, params repository.C
 	return user, false, nil
 }
 
-// DeleteByUsername mirrors UserRepository.DeleteByUsername's contract: the
-// derived name is what finds the row, and removing the user removes the
-// identity's whole erun-side footprint — the row and the grants that pointed
-// at it. A name that is not there is reported as nothing removed, which is what
-// makes a second revocation a no-op.
+// DeleteByUsername removes the row and its grants; a missing name is nothing removed.
 func (f *fakeMachineIdentityUsers) DeleteByUsername(_ context.Context, tenantID string, username string) (bool, error) {
 	f.deleteCalls = append(f.deleteCalls, deleteByUsernameCall{tenantID: tenantID, username: username})
 	if f.deleteErr != nil {
@@ -149,13 +128,10 @@ func (f *fakeMachineIdentityUsers) DeleteByUsername(_ context.Context, tenantID 
 	return false, nil
 }
 
-// enrolledIdentities is how many distinct identities this tenant has rows
-// for. It is the count a second provisioning call must not increase.
 func (f *fakeMachineIdentityUsers) enrolledIdentities() int {
 	return len(f.bySubject)
 }
 
-// fakeMachineIdentityRoles is the role read and grant.
 type fakeMachineIdentityRoles struct {
 	roles      []model.Role
 	granted    map[string]map[string]bool
@@ -190,7 +166,6 @@ func (f *fakeMachineIdentityRoles) grantCount(userID string) int {
 	return len(f.granted[userID])
 }
 
-// fakeMachineIdentityIssuers is the tenant issuer mapping read.
 type fakeMachineIdentityIssuers struct {
 	issuers []model.TenantIssuer
 	err     error
@@ -203,9 +178,6 @@ func (f *fakeMachineIdentityIssuers) List(context.Context, repository.TenantIssu
 	return f.issuers, nil
 }
 
-// machineIdentityFixture is one assembled service plus the fakes behind it,
-// with a single org-scoped issuer mapping for the tenant and the seeded
-// machine role.
 type machineIdentityFixture struct {
 	service *MachineIdentityService
 	admin   *fakeMachineIdentityAdmin
@@ -213,9 +185,7 @@ type machineIdentityFixture struct {
 	roles   *fakeMachineIdentityRoles
 	issuers *fakeMachineIdentityIssuers
 	env     *fakeMachineIdentityEnvironments
-	// ctx is the tenant-scoped context every call runs under. The service
-	// names the tenant explicitly rather than leaning on RLS (an operations
-	// session bypasses it), so it needs one.
+	// The service names the tenant explicitly because an operations session bypasses RLS.
 	ctx context.Context
 }
 
@@ -228,10 +198,8 @@ func newMachineIdentityFixture(t *testing.T) *machineIdentityFixture {
 		issuers: &fakeMachineIdentityIssuers{issuers: []model.TenantIssuer{
 			{TenantID: "tenant-1", Issuer: "https://auth.example", OrgFieldKey: "urn:zitadel:iam:user:resourceowner:id", OrgFieldValue: "org-1"},
 		}},
-		// TenantID is what the environment row actually carries, and what
-		// revocation scopes the erun-side removal to: it is read off the row
-		// rather than the session, because the delete workflow may be running
-		// under an operations caller's own tenant.
+		// Revocation scopes to the row's tenant, not the session's: the delete workflow
+		// may run under an operations caller.
 		env: &fakeMachineIdentityEnvironments{environment: model.Environment{EnvironmentID: "env-1", TenantID: "tenant-1", Name: "alpha"}},
 	}
 	fixture.ctx = security.WithContext(context.Background(), security.Context{
@@ -243,9 +211,6 @@ func newMachineIdentityFixture(t *testing.T) *machineIdentityFixture {
 	return fixture
 }
 
-// TestProvisionEnrollsTheIdentityAndGrantsTheMachineRole is the ordinary first
-// provisioning: one identity in the tenant's org, one user row mapped to it,
-// and exactly the TenantAgent role.
 func TestProvisionEnrollsTheIdentityAndGrantsTheMachineRole(t *testing.T) {
 	fixture := newMachineIdentityFixture(t)
 
@@ -283,15 +248,7 @@ func assertHoldsExactlyTheMachineRole(t *testing.T, fixture *machineIdentityFixt
 	}
 }
 
-// TestRevokeRemovesTheIdentityTheUserRowAndTheGrant is the whole of what a
-// provisioned identity is, removed: the provider application that mints the
-// credential, the erun user a token from it resolves to, and the role grant
-// that would otherwise still name a user that is gone.
-//
-// Removing only the provider application would leave an erun user behind, and
-// removing only the user would leave a live client secret minting tokens — the
-// half-measure that makes a revoked identity look revoked while it is not. This
-// asserts both halves together.
+// Removing only one half would leave either a stale user or a live client secret.
 func TestRevokeRemovesTheIdentityTheUserRowAndTheGrant(t *testing.T) {
 	fixture := newMachineIdentityFixture(t)
 	provisioned, err := fixture.service.Provision(fixture.ctx, "env-1")
@@ -314,10 +271,6 @@ func TestRevokeRemovesTheIdentityTheUserRowAndTheGrant(t *testing.T) {
 	if grants := len(fixture.users.grants[provisioned.UserID]); grants != 0 {
 		t.Fatalf("expected the user's grants to go with it, got %d", grants)
 	}
-	// The erun-side removal is scoped to the environment's own tenant and to
-	// the name derived from the environment's id: it runs behind the
-	// environment-delete workflow, where the session's tenant may be an
-	// operations caller's rather than the one that owns the environment.
 	if len(fixture.users.deleteCalls) != 1 {
 		t.Fatalf("expected the user store to be asked to delete once, got %+v", fixture.users.deleteCalls)
 	}
@@ -326,11 +279,7 @@ func TestRevokeRemovesTheIdentityTheUserRowAndTheGrant(t *testing.T) {
 	}
 }
 
-// TestRevokeIsIdempotentAndToleratesAnEnvironmentThatNeverHadAnIdentity: the
-// revocation runs inside the environment-delete workflow, which retries an
-// attempt that failed partway from the top, so a second call must be the state
-// asked for rather than a conflict — including for the common environment that
-// was never provisioned a machine identity at all.
+// The environment-delete workflow retries from the top, so revocation must be idempotent.
 func TestRevokeIsIdempotentAndToleratesAnEnvironmentThatNeverHadAnIdentity(t *testing.T) {
 	fixture := newMachineIdentityFixture(t)
 
@@ -354,12 +303,8 @@ func TestRevokeIsIdempotentAndToleratesAnEnvironmentThatNeverHadAnIdentity(t *te
 	}
 }
 
-// TestRevokeLeavesTheUserRowIntactWhenTheProviderCannotBeReached is the
-// ordering property that keeps a partial failure recoverable: the erun-side
-// rows are removed first and the provider application last, because the user
-// row is found by the client id the provider holds. A revocation that deleted
-// the application first and then failed would have lost the only thing that
-// names the user row, stranding it — and re-running would find nothing.
+// The user row is found via the provider's client id, so erun-side rows go
+// first; deleting the application first would strand the row on failure.
 func TestRevokeLeavesTheUserRowIntactWhenTheProviderCannotBeReached(t *testing.T) {
 	fixture := newMachineIdentityFixture(t)
 	if _, err := fixture.service.Provision(fixture.ctx, "env-1"); err != nil {
@@ -375,22 +320,12 @@ func TestRevokeLeavesTheUserRowIntactWhenTheProviderCannotBeReached(t *testing.T
 	}
 }
 
-// TestRevokeSearchesEveryOrgScopedIssuer: provisioning refuses a tenant with
-// several org-scoped issuers rather than guessing which organization an
-// identity belongs to. Revocation has the opposite job — it must not refuse,
-// because refusing leaves the identity alive exactly when the tenant's issuer
-// configuration has drifted — so it searches every one of them and removes
-// whatever it finds.
+// Unlike provisioning, revocation must not refuse ambiguous issuers: it searches them all.
 func TestRevokeSearchesEveryOrgScopedIssuer(t *testing.T) {
 	fixture := newMachineIdentityFixture(t)
-	// Provisioned while the tenant resolved by exactly one org-scoped issuer,
-	// which is the only state provisioning permits.
 	if _, err := fixture.service.Provision(fixture.ctx, "env-1"); err != nil {
 		t.Fatalf("Provision: %v", err)
 	}
-	// And revoked after the tenant's mappings grew a second org-scoped entry
-	// and a single-tenant one — the drift that used to be indistinguishable
-	// from "there is nothing to revoke".
 	fixture.issuers.issuers = []model.TenantIssuer{
 		{TenantID: "tenant-1", Issuer: "https://auth.example", OrgFieldValue: "org-1"},
 		{TenantID: "tenant-1", Issuer: "https://auth.example", OrgFieldValue: "org-2"},
@@ -410,11 +345,7 @@ func TestRevokeSearchesEveryOrgScopedIssuer(t *testing.T) {
 	}
 }
 
-// TestRevokeWithoutAProviderStillRemovesTheERunSide: a control plane that
-// administers no identity provider never minted an application, but the erun
-// user row is still the platform's own to remove — and it is what makes a token
-// unusable here, so leaving it because the provider is unconfigured would be
-// the wrong half to skip.
+// The erun user row is what makes a token unusable, so it goes even without a provider.
 func TestRevokeWithoutAProviderStillRemovesTheERunSide(t *testing.T) {
 	fixture := newMachineIdentityFixture(t)
 	if _, err := fixture.service.Provision(fixture.ctx, "env-1"); err != nil {
@@ -430,10 +361,6 @@ func TestRevokeWithoutAProviderStillRemovesTheERunSide(t *testing.T) {
 	}
 }
 
-// TestProvisionIsIdempotentForOneEnvironment is the property the whole design
-// rests on, and the one this change has to demonstrate rather than assert:
-// provisioning the same environment twice must not create a second identity,
-// a second user row, or a second grant.
 func TestProvisionIsIdempotentForOneEnvironment(t *testing.T) {
 	fixture := newMachineIdentityFixture(t)
 
@@ -463,16 +390,11 @@ func TestProvisionIsIdempotentForOneEnvironment(t *testing.T) {
 	}
 }
 
-// TestProvisionRegrantsTheMachineRoleToAnIdentityThatLostIt covers the
-// reconcile half: an identity enrolled earlier (by hand, or with the grant
-// since revoked) is not left holding nothing, which would make every call it
-// makes refused while provisioning reported success.
 func TestProvisionRegrantsTheMachineRoleToAnIdentityThatLostIt(t *testing.T) {
 	fixture := newMachineIdentityFixture(t)
 	if _, err := fixture.service.Provision(fixture.ctx, "env-1"); err != nil {
 		t.Fatalf("Provision: %v", err)
 	}
-	// Simulate a revoked grant on an identity that is still enrolled.
 	for userID := range fixture.roles.granted {
 		fixture.roles.granted[userID] = map[string]bool{}
 	}
@@ -486,14 +408,10 @@ func TestProvisionRegrantsTheMachineRoleToAnIdentityThatLostIt(t *testing.T) {
 	}
 }
 
-// TestProvisionRefusesWithoutAProvider is the unconfigured control plane: not
-// a refusal of the caller, and distinguishable from one, because the route
-// answers it 501 rather than 4xx.
+// An unconfigured provider is answered 501, distinct from a caller refusal.
 func TestProvisionRefusesWithoutAProvider(t *testing.T) {
 	fixture := newMachineIdentityFixture(t)
-	// A literal nil, not a typed nil fake: an interface holding a typed nil
-	// would not compare equal to nil and would be reached as a configured
-	// provider.
+	// A literal nil: a typed nil would read as a configured provider.
 	fixture.service = NewMachineIdentityService(fixture.env, fixture.users, fixture.roles, fixture.issuers, nil)
 
 	if _, err := fixture.service.Provision(fixture.ctx, "env-1"); !errors.Is(err, ErrMachineIdentityProviderUnavailable) {
@@ -501,10 +419,6 @@ func TestProvisionRefusesWithoutAProvider(t *testing.T) {
 	}
 }
 
-// TestProvisionRefusesATenantWithNoOrgScopedIssuer: without an organization
-// the platform administers, there is nowhere to create the identity, and
-// minting one somewhere else would be the attribution collapse this feature
-// exists to remove.
 func TestProvisionRefusesATenantWithNoOrgScopedIssuer(t *testing.T) {
 	fixture := newMachineIdentityFixture(t)
 	fixture.issuers.issuers = []model.TenantIssuer{
@@ -520,9 +434,7 @@ func TestProvisionRefusesATenantWithNoOrgScopedIssuer(t *testing.T) {
 	}
 }
 
-// TestProvisionRefusesAmbiguousOrgScopedIssuers: two org-scoped mappings is a
-// question the caller did not answer, and picking one by list order would put
-// the identity under whichever happened to sort first.
+// Picking one by list order would be arbitrary.
 func TestProvisionRefusesAmbiguousOrgScopedIssuers(t *testing.T) {
 	fixture := newMachineIdentityFixture(t)
 	fixture.issuers.issuers = []model.TenantIssuer{
@@ -539,17 +451,11 @@ func TestProvisionRefusesAmbiguousOrgScopedIssuers(t *testing.T) {
 	}
 }
 
-// TestProvisionUsesTheEnvironmentsOwnIDForTheIdentityName: the derived name is
-// the only link between an environment and the identity it already has, so two
-// environments must never derive the same one and one environment must always
-// derive the same one.
 func TestProvisionUsesTheEnvironmentsOwnIDForTheIdentityName(t *testing.T) {
 	if MachineIdentityLoginName("env-a") == MachineIdentityLoginName("env-b") {
 		t.Fatal("two environments derived the same identity name")
 	}
-	// Derived from the id rather than the name, and trimmed: the id is what is
-	// stable and unique, and a padded one must not derive a different identity
-	// than the same id unpadded.
+	// A padded id must derive the same identity as the unpadded one.
 	if got, want := MachineIdentityLoginName(" env-a "), "erun-env-env-a"; got != want {
 		t.Fatalf("MachineIdentityLoginName(%q) = %q, want %q", " env-a ", got, want)
 	}

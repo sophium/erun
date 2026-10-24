@@ -2,24 +2,11 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
 import type { UISelection } from '@/types';
 
-// PIN_LATEST_STABLE_TARGET is the Version select's "no explicit choice" option.
-// It has to be a real, non-empty value: Radix Select reads an empty SelectItem
-// value as invalid and treats '' as "nothing selected" (SelectField passes
-// `value || undefined` to the underlying Select), which is exactly why the
-// trigger rendered blank instead of "Latest stable". It is deliberately not a
-// version-shaped string, since the registry can publish a literal `latest`
-// tag (docker's own convention) and this must never collide with that.
-// pinVersionThunks maps it back to '' at the Go call boundary, where an empty
-// target has always meant "resolve the latest published stable release".
+// PIN_LATEST_STABLE_TARGET must be non-empty (Radix Select treats '' as no
+// selection) and not version-shaped; pinVersionThunks maps it back to ''.
 export const PIN_LATEST_STABLE_TARGET = '__erun_pin_latest_stable__';
 
-// One erun version is recorded in several places — the Terraform module refs, an
-// erun image reference set directly in Terraform variables, each umbrella's erun
-// chart dependencies, the build-env image tag, a stated runtime chart or runtime
-// image naming erun's own stock release, and the environment's own runtime
-// version — and they only work when they agree. This dialog moves
-// them together, and shows the plan first: a re-pin edits files across a repo,
-// so it should be something an operator agrees to rather than trusts.
+// PinSiteView is one place the erun version is recorded; all must agree.
 export interface PinSiteView {
   kind: string;
   label: string;
@@ -34,9 +21,7 @@ export interface PinPlanView {
   target: string;
   previous?: string;
   sites: PinSiteView[];
-  // skipped explains, in order, what the plan deliberately left out and why —
-  // a reference the environment's own config puts on another release line, which
-  // is not erun's version to move.
+  // skipped lists references on another release line, not erun's to move.
   skipped?: string[];
   changed: number;
   aligned: boolean;
@@ -51,15 +36,10 @@ export interface PinVersionState {
   previewing: boolean;
   applying: boolean;
   plan: PinPlanView | null;
-  // applied marks the plan as the outcome of a real run rather than a preview,
-  // so the dialog reports what changed instead of what would.
   applied: boolean;
   error: string;
   status: string;
-  // checkoutResolvable is optimistic (true) until the check comes back, so the
-  // dialog does not flash a blocking notice for the common case while it
-  // loads. checkoutReason explains a false result — a sourceless runtime
-  // environment with no known checkout of its repo on this machine.
+  // checkoutResolvable is optimistic until the check returns.
   checkoutResolvable: boolean;
   checkoutReason: string;
 }
@@ -100,8 +80,7 @@ export const pinVersionSlice = createSlice({
     },
     setPinTarget(state, action: PayloadAction<string>) {
       state.target = action.payload;
-      // A plan describes one target, so it stops being an answer the moment the
-      // target changes — keeping it on screen would invite applying the wrong one.
+      // A plan is for one target; clear it so the wrong one cannot be applied.
       state.plan = null;
       state.applied = false;
       state.status = '';

@@ -7,21 +7,11 @@ import (
 	"testing"
 )
 
-// accessRemedyRolesJSON is the tenant's role list, ordered so the role that
-// does NOT cover the review read comes first: a remedy matched by position
-// rather than by permission would then name the wrong role, and the tests
-// below would see it.
+// The non-covering role comes first, so matching by position would pick the wrong one.
 const accessRemedyRolesJSON = `[{"roleId":"role-audit","name":"Auditor","permissions":[{"apiMethod":"GET","apiPath":"/v1/audit-events"}]},{"roleId":"role-reviewer","name":"Reviewer","permissions":[{"apiMethodPattern":"^GET$","apiPathPattern":"^/v1/reviews/[^/]+$"}]}]`
 
-// reviewReadDeniedCapabilities is whoami's answer for a caller enrolled in the
-// tenant but refused the review read — the caller whose denial has to carry a
-// next step.
 const reviewReadDeniedCapabilities = `[{"method":"GET","path":"/v1/whoami"},{"method":"GET","path":"/v1/audit-events"},{"method":"GET","path":"/v1/roles"}]`
 
-// reviewReadDeniedAPI serves the identity read and the role list a denied
-// review-detail load needs. Anything else is a 404: the review read is refused
-// before it is attempted, so a test that reached another path would be testing
-// a different caller.
 func reviewReadDeniedAPI(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -37,12 +27,7 @@ func reviewReadDeniedAPI(t *testing.T) *httptest.Server {
 	}))
 }
 
-// TestReviewDetailDenialHandsOverTheGrantCommand is the contract this change
-// exists for: a caller refused a review is given the exact command that grants
-// them a role carrying the read, with their own user id already in it. An
-// assertion that the denial merely names the missing read — the old behaviour
-// — would pass on the version that stopped short, which is why this one reads
-// the command itself.
+// Asserts the command itself, not just that the denial names the missing read.
 func TestReviewDetailDenialHandsOverTheGrantCommand(t *testing.T) {
 	server := reviewReadDeniedAPI(t)
 	defer server.Close()
@@ -65,9 +50,6 @@ func TestReviewDetailDenialHandsOverTheGrantCommand(t *testing.T) {
 	}
 }
 
-// TestRestrictedDashboardPanelHandsOverTheGrantCommand covers the same
-// contract on the dashboard's tabs, where the missing read is a different one
-// (audit events) and so the remedy has to resolve a different role.
 func TestRestrictedDashboardPanelHandsOverTheGrantCommand(t *testing.T) {
 	requests := []string{}
 	server := tenantDashboardAPI(t, `[{"method":"GET","path":"/v1/whoami"},{"method":"GET","path":"/v1/roles"}]`, nil, &requests)
@@ -91,10 +73,6 @@ func TestRestrictedDashboardPanelHandsOverTheGrantCommand(t *testing.T) {
 	}
 }
 
-// TestRestrictedPanelWithoutACoveringRoleOffersNoCommand locks down the other
-// half: when nothing in the tenant grants the missing read, the denial keeps
-// its plain sentence rather than handing over a command that would grant a
-// role while leaving the caller exactly as refused as before.
 func TestRestrictedPanelWithoutACoveringRoleOffersNoCommand(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -117,10 +95,6 @@ func TestRestrictedPanelWithoutACoveringRoleOffersNoCommand(t *testing.T) {
 	}
 }
 
-// TestReviewCreateCapabilityHandsOverTheGrantCommand covers the issue's named
-// sibling: the notice that says "You do not have access to create reviews"
-// names the capability and nothing else, leaving the operator to work out how
-// it is granted. It has to carry the command too.
 func TestReviewCreateCapabilityHandsOverTheGrantCommand(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -145,8 +119,6 @@ func TestReviewCreateCapabilityHandsOverTheGrantCommand(t *testing.T) {
 	if capability.AccessRemedy == nil {
 		t.Fatal("expected the notice to carry a next step")
 	}
-	// The role is resolved by the method it grants: the role that only reads
-	// reviews must not be offered as the one that lets the caller open one.
 	want := "erun platform user grant-role --user-id user-1 --role-id role-author"
 	if capability.AccessRemedy.Command != want {
 		t.Fatalf("expected the copyable command %q, got %q", want, capability.AccessRemedy.Command)

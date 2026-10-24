@@ -27,9 +27,7 @@ func initCredentialProvisioningScenarios(t *testing.T) {
 }
 
 func testInitRemoteDryRunTracesRegistryCredentialCheck(t *testing.T) {
-	// Dry-run must show the new check as a trace line like every other
-	// action init takes, and must not fail the plan preview over pod state a
-	// preview cannot know (the pod does not exist yet in dry-run).
+	// A preview must not fail over pod state that does not exist yet.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "dev",
@@ -50,12 +48,7 @@ func testInitRemoteDryRunTracesRegistryCredentialCheck(t *testing.T) {
 }
 
 func testInitRemoteDryRunProvisionsRegistryCredentialFromHost(t *testing.T) {
-	// When the host running `erun init` already has a ghcr.io credential
-	// (docker config, gh session, or GH_TOKEN), init mints the
-	// dockerconfigjson Secret the runtime chart mounts, rather than leaving
-	// the pod to hand-carry one. DOCKER_CONFIG points the host resolver at
-	// this isolated dir instead of the developer's real ~/.docker, the same
-	// seam TestVersion's docker-config scenarios use.
+	// DOCKER_CONFIG isolates the host credential resolver from the developer's ~/.docker.
 	setup := env.New(t)
 	dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
 	if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
@@ -90,13 +83,7 @@ func testInitRemoteDryRunProvisionsRegistryCredentialFromHost(t *testing.T) {
 }
 
 func testInitRemoteDryRunTracesMachineIdentityProvisioning(t *testing.T) {
-	// The host running init is signed in to an erun platform alias, so the
-	// environment can be given its own identity instead of a delegated copy of
-	// the operator's session. A preview can only name what it would ask for:
-	// both the environment's platform id and the identity itself are
-	// server-side facts, so the trace has to carry the request rather than a
-	// credential it could not have. Nothing is minted -- a dry run that called
-	// the platform would be creating state it promised not to.
+	// A dry run names the identity request but must not mint anything.
 	stub := &machineIdentityStub{}
 	server := machineIdentityServer(t, stub)
 	setup := env.New(t)
@@ -123,14 +110,7 @@ func testInitRemoteDryRunTracesMachineIdentityProvisioning(t *testing.T) {
 }
 
 func testInitRemoteRealRunProvisionsTheEnvironmentsOwnMachineIdentity(t *testing.T) {
-	// The point of the whole feature: a fresh environment's platform calls are
-	// attributed to the environment, not to whoever ran init. The host's own
-	// signed-in alias is what asks for the identity -- it is the only
-	// credential this process holds -- and the credential that comes back is
-	// exchanged for a token before anything is written, so the environment
-	// never trades a working identity for one nothing accepts. The Secret it
-	// lands in is the same one the delegated path mints, because an environment
-	// has one platform identity and the entry inside says which kind it is.
+	// The minted credential is exchanged for a token before anything is written.
 	stub := &machineIdentityStub{}
 	server := machineIdentityServer(t, stub)
 	setup := env.New(t)
@@ -167,13 +147,7 @@ func testInitRemoteRealRunProvisionsTheEnvironmentsOwnMachineIdentity(t *testing
 }
 
 func testInitRemoteRealRunFallsBackWhenTheMintedCredentialIsRefused(t *testing.T) {
-	// The platform minted an identity but the issuer it named would not accept
-	// the credential -- an IdP the platform's own binding disagreed with, or a
-	// clock far enough out to expire the assertion on arrival. A machine
-	// identity nothing accepts is worse than none: it replaces a working
-	// delegated session with a pod that can reach nothing. So the run keeps the
-	// delegated alias and says so, and the environment stays exactly as capable
-	// as it was before this existed.
+	// A machine identity nothing accepts is worse than none, so the delegated alias stays.
 	stub := &machineIdentityStub{TokenRefusal: http.StatusUnauthorized}
 	server := machineIdentityServer(t, stub)
 	setup := env.New(t)
@@ -206,12 +180,7 @@ func testInitRemoteRealRunFallsBackWhenTheMintedCredentialIsRefused(t *testing.T
 }
 
 func testInitRemoteRealRunIgnoresAnIdentityWithNoCredential(t *testing.T) {
-	// The platform answered 200 with an identity row but no client
-	// credential in it -- a plane that recorded the identity and could not
-	// return its secret. There is nothing to write, and writing an alias entry
-	// whose secret is absent would leave the pod holding a reference to a
-	// credential that was never delivered, so the run says so and keeps the
-	// delegated session.
+	// An identity with no secret would leave the pod referencing an undelivered credential.
 	stub := &machineIdentityStub{MintOmitCredential: true}
 	server := machineIdentityServer(t, stub)
 	setup := env.New(t)
@@ -244,11 +213,7 @@ func testInitRemoteRealRunIgnoresAnIdentityWithNoCredential(t *testing.T) {
 }
 
 func testInitRemoteRealRunStaysOnTheDelegatedAliasWhenThePlatformRefusesToMint(t *testing.T) {
-	// A tenant the platform will not mint an identity for -- one resolving by
-	// no issuer it administers is the case the API answers 409
-	// MACHINE_IDENTITY_UNAVAILABLE for. That is a decline, not a failure of the
-	// init: the environment still gets the operator's delegated session, which
-	// is exactly what it would have had before the machine identity existed.
+	// A 409 MACHINE_IDENTITY_UNAVAILABLE is a decline, not an init failure.
 	stub := &machineIdentityStub{MintRefusal: &machineIdentityRefusal{Status: http.StatusConflict, Code: "MACHINE_IDENTITY_UNAVAILABLE"}}
 	server := machineIdentityServer(t, stub)
 	setup := env.New(t)

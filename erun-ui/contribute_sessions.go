@@ -15,8 +15,7 @@ const (
 	sessionKindContributeAI   sessionKind = "contribute-ai"
 )
 
-// StartContributeSession spawns the contribute ERun tab: a shell in the
-// operator's local erun clone where `erun` runs the locally-built CLI.
+// StartContributeSession spawns a shell in the operator's erun clone running the locally-built CLI.
 func (a *App) StartContributeSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("start contribute ERun session", selection.Tenant, selection.Environment); err != nil {
@@ -27,8 +26,7 @@ func (a *App) StartContributeSession(selection uiSelection, slot, cols, rows int
 	})
 }
 
-// StartContributeAISession spawns the contribute AI tab: like the contribute
-// ERun tab, but boots the env's AI assistant inside the clone.
+// StartContributeAISession is StartContributeSession with the env's AI assistant.
 func (a *App) StartContributeAISession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("start contribute AI session", selection.Tenant, selection.Environment); err != nil {
@@ -68,9 +66,7 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 		return reused, managed, nil
 	}
 
-	// Setup runs as the remote session's create-time program exactly once, so
-	// reopening the tab reconnects to the live session instead of re-running
-	// setup or spawning a parallel one.
+	// Setup is the remote session's create-time program, so a reopen reconnects rather than re-running it.
 	appSessionID := "contribute-erun"
 	if withAI {
 		appSessionID = "contribute-ai"
@@ -157,8 +153,6 @@ func contributeSessionKey(selection uiSelection, slot int, withAI bool) string {
 	return prefix + "\x00" + selectionKey(selection) + "\x00" + fmt.Sprintf("%d", slot)
 }
 
-// closeContributeSessionsForSelection runs when the operator toggles
-// contribute mode off for the env.
 func (a *App) closeContributeSessionsForSelection(selection uiSelection) {
 	selection = normalizeSelection(selection)
 	prefixes := []string{

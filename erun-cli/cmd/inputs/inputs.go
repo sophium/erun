@@ -11,11 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewInputsCmd has no in-pod MCP counterpart: the edge in erun-mcp runs
-// inside the pod and cannot read a path on the operator's host. An
-// MCP-connected orchestrator reaches the same transfer through the
-// inputs_upload local tool erun mcp proxy serves (see mcp_proxy.go),
-// mirroring how workspace_sync is host-served rather than edge-served.
+// NewInputsCmd has no in-pod MCP counterpart: the edge cannot read host paths.
+// erun mcp proxy serves the inputs_upload local tool instead.
 func NewInputsCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return shared.NewCommandGroup(
 		"inputs",

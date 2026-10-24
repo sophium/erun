@@ -164,10 +164,7 @@ func (s *bootstrapRunState) resolveTenantFromDirectory() error {
 	return nil
 }
 
-// envsByTenant loads each tenant's environments for cwd→tenant matching. It is
-// best-effort: a store that does not expose ListEnvConfigs (or a tenant whose
-// envs fail to load) yields no envs for that tenant, so matching simply finds
-// no owner and the caller falls back to the default-tenant / selection path.
+// envsByTenant is best-effort: load failures yield no envs for that tenant.
 func (s *bootstrapRunState) envsByTenant(tenants []configpkg.TenantConfig) map[string][]configpkg.EnvConfig {
 	lister, ok := s.runner.Store.(interface {
 		ListEnvConfigs(string) ([]configpkg.EnvConfig, error)
@@ -258,11 +255,8 @@ func (s *bootstrapRunState) tenantProjectRoot() (string, error) {
 	return project.root, nil
 }
 
-// TenantSelectionUnavailableError reports that a tenant had to be chosen and the
-// run has nobody to ask. Its message names the flag that resolves it: whoever
-// hits this is by definition not a person looking at a prompt -- a script, an
-// orchestrator, or an unattended agent -- and a menu it cannot answer is a dead
-// end, not an answer.
+// TenantSelectionUnavailableError names the flag that resolves the choice, since
+// nobody can answer a prompt.
 type TenantSelectionUnavailableError struct {
 	Tenants []string
 }
@@ -299,9 +293,7 @@ func (s BootstrapRunner) selectTenant(params open.BootstrapInitParams, tenants [
 		}}
 	}
 	if s.TenantSelectionUnavailable {
-		// Nothing can answer a prompt, so asking one would only print a menu
-		// and read EOF. A sole tenant is the option an empty line already
-		// takes, so it needs no answer; a real choice does.
+		// A sole tenant is what an empty answer would pick anyway.
 		if len(tenants) == 1 {
 			return TenantSelectionResult{Tenant: tenants[0].Name}, nil
 		}
@@ -320,12 +312,8 @@ func (s BootstrapRunner) selectTenant(params open.BootstrapInitParams, tenants [
 	return selection, nil
 }
 
-// findTenantForDirectory resolves which tenant owns the working directory,
-// longest matching repo path wins. The host path lives on the env, not the
-// tenant, because a tenant can host both local and remote envs; a remote env
-// with no host worktree owns no directory. Ties across tenants resolve to no
-// match, so the caller falls back to the default-tenant / selection path rather
-// than guessing.
+// findTenantForDirectory picks the longest matching env repo path; ties across
+// tenants resolve to no match.
 func findTenantForDirectory(dir string, tenants []configpkg.TenantConfig, envsByTenant map[string][]configpkg.EnvConfig) (configpkg.TenantConfig, bool) {
 	cleanDir := filepath.Clean(dir)
 	bestTenant := -1

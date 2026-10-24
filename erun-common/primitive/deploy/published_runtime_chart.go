@@ -13,9 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// ociChartReferenceRegistry is PublishedDevopsChartOCIRepo's inverse: the
-// registry a published-chart reference addresses, or "" for a reference that is
-// not an OCI chart URL under that path.
+// ociChartReferenceRegistry is PublishedDevopsChartOCIRepo's inverse, or "" for a non-OCI reference.
 func ociChartReferenceRegistry(reference string) string {
 	trimmed := strings.TrimSpace(reference)
 	if !isOCIChartReference(trimmed) {
@@ -28,10 +26,7 @@ func ociChartReferenceRegistry(reference string) string {
 	return registry
 }
 
-// runtimeChartCandidate is one coordinate the published-runtime-chart ladder
-// probes: a chart name, a registry it could be published in, and why that
-// registry is a place to look. The reason travels with the candidate so both
-// the resolve trace and the not-found error can say what was tried and why.
+// runtimeChartCandidate carries why its registry is a place to look, for traces and errors.
 type runtimeChartCandidate struct {
 	registry string
 	chart    string
@@ -46,14 +41,9 @@ func (c runtimeChartCandidate) describe() string {
 	return strings.TrimSpace(c.registry) + "/charts/" + c.chart + " (" + c.why + ")"
 }
 
-// runtimeChartCandidates orders every place a by-reference runtime chart can be.
-// The tenant's own umbrella comes first, so a tenant that publishes its own
-// artifacts still resolves to them. The shared platform chart follows in the
-// same registry, then in the registry the runtime image comes from: erun
-// publishes charts/erun-devops only where it releases, so a deploy registry that
-// holds nothing but this project's own app images — its own ECR, or the
-// in-cluster erun-registry — never has it, and stopping at the deploy registry
-// left such an environment undeployable at every version.
+// runtimeChartCandidates orders the places a runtime chart can be: the tenant
+// umbrella first, then the shared chart in the deploy registry, then beside the
+// runtime image, since erun publishes erun-devops only where it releases.
 func runtimeChartCandidates(target config.OpenResult, chartRegistry string) []runtimeChartCandidate {
 	chartRegistry = strings.TrimSpace(chartRegistry)
 	candidates := make([]runtimeChartCandidate, 0, 3)
@@ -68,10 +58,7 @@ func runtimeChartCandidates(target config.OpenResult, chartRegistry string) []ru
 	return candidates
 }
 
-// platformChartRegistry names the registry erun's own artifacts come from for
-// this env: the runtime image's registry when the env states one, else erun's
-// default. Both are the same claim — the platform chart is published beside the
-// platform image, never beside the tenant's app images.
+// platformChartRegistry is where erun's platform chart is published: beside the platform image.
 func platformChartRegistry(target config.OpenResult) (registry, why string) {
 	if imageRegistry := config.RuntimeImageRegistry(target.EnvConfig.RuntimeImage); imageRegistry != "" {
 		return imageRegistry, "the shared platform chart in the runtime image's registry"
@@ -79,54 +66,26 @@ func platformChartRegistry(target config.OpenResult) (registry, why string) {
 	return config.DefaultContainerRegistry, "the shared platform chart in erun's own registry"
 }
 
-// resolvedRuntimeChart is the coordinate a runtime deploy installs: the chart
-// reference, its name, the version to pull it at (empty means the deploy
-// version), and the registry the chart resolved from. registry is empty for a
-// chart the env states outright, which is a coordinate the operator gave rather
-// than one a search produced.
+// resolvedRuntimeChart is the coordinate a runtime deploy installs; an empty
+// version means the deploy version.
 type resolvedRuntimeChart struct {
 	reference  string
 	name       string
 	version    string
 	registry   string
 	candidates []string
-	// searched is true when the candidate ladder produced this coordinate, and
-	// false when it is the coordinate the env states outright. The distinction
-	// is what makes the coordinate the operator's own: a chart the env states is
-	// the operator saying so, in config, and erun installs it as given (see
-	// resolveRuntimeChartCoordinate) -- including a tenant that deliberately
-	// states the stock erun-devops chart on erun's line while running its own
-	// image line, which is a legitimate configuration and not an inference
-	// erun made. Only a searched coordinate is erun's own conclusion, and so
-	// only a searched one is checked against the line the environment runs.
+	// searched marks erun's own conclusion; only a searched coordinate is checked
+	// against the env's line, while a stated one is installed as given.
 	searched bool
-	// movedPin is true when the env's own stated chart version was a lagging
-	// pin on the deploy's line and version -- rather than the coordinate the
-	// env states -- so the caller records the chart it actually installs back
-	// to EnvConfig.RuntimeChart. Left false for a chart stated at a version the
-	// deploy is not on, and for one with no version of its own, which already
-	// follows the deploy version.
+	// movedPin is true when a lagging stated pin was moved to the deploy version and
+	// must be recorded back to EnvConfig.RuntimeChart.
 	movedPin bool
 }
 
-// resolvePublishedRuntimeChartReference walks the candidate ladder and installs
-// the first coordinate confirmed to publish the deploy version, probed against
-// the chart repo (authenticated like every registry read). Every candidate
-// tried and passed over is traced, so a dry-run reader sees the whole search
-// rather than only its answer. It never substitutes an unconfirmed coordinate:
-// when no candidate is confirmed published, it refuses rather than guessing --
-// the shared erun-devops chart is versioned on erun's own release line, so
-// installing it at a tenant's own version is a coordinate that can never
-// exist. A registry read that fails outright (auth, network, an unreachable
-// registry) is reported as "could not determine", never folded into "not
-// found": a blind probe is not evidence of absence.
-//
-// deferToOverride is true when the caller already knows this search's answer
-// is about to be replaced by an operator-stated --runtime-chart: refusing here
-// would block a deploy the operator has already resolved themselves, so the
-// search reports what it found (or didn't) without failing the deploy, and the
-// caller installs a placeholder coordinate that the override immediately
-// supersedes.
+// resolvePublishedRuntimeChartReference installs the first candidate confirmed to
+// publish the version and never substitutes an unconfirmed one; a failed read is
+// "could not determine", not "not found". With deferToOverride it reports without
+// failing, since --runtime-chart will replace the coordinate.
 func resolvePublishedRuntimeChartReference(ctx core.Context, target config.OpenResult, chartRegistry, version string, deferToOverride bool) (resolvedRuntimeChart, error) {
 	probed := runtimeChartCandidates(target, chartRegistry)
 	candidates := make([]string, 0, len(probed))
@@ -159,26 +118,10 @@ func resolvePublishedRuntimeChartReference(ctx core.Context, target config.OpenR
 	return resolvedRuntimeChart{}, &RuntimeChartConfirmationError{Version: version, Candidates: outcomes, Inconclusive: inconclusive}
 }
 
-// resolveRuntimeChartCoordinate answers which runtime chart to install, at which
-// version. An env that states its chart (EnvConfig.RuntimeChart) is taken at its
-// word -- that is the coordinate, and its version, when it carries one, is the
-// chart's own rather than the deploy version. Otherwise the chart is looked up
-// along the candidate ladder, at the deploy version. deferToOverride is
-// forwarded to resolvePublishedRuntimeChartReference -- see its doc comment.
-//
-// The returned chart version is empty for the looked-up case, meaning "the deploy
-// version", so nothing changes for the envs whose chart and image were published
-// as a pair.
-//
-// A stated version is normally taken as the chart's own, which is how an env
-// rides a chart on another line entirely. The exceptions are both cases where
-// the chart and the image the same deploy installs are one coordinate that must
-// move together: a stated stock erun-devops chart on the deploy's own line at a
-// version the deploy has moved past (stockRuntimePinMovesWithDeployVersion),
-// and a stated <tenant>-devops umbrella at a version behind the deploy on that
-// umbrella's own line (resolveTenantUmbrellaPin). Honoring either installs the
-// older chart while the deploy records the newer version, so the operator reads
-// a version roll that did not happen.
+// resolveRuntimeChartCoordinate takes an env's stated chart at its word, else
+// searches the ladder at the deploy version (returned version empty). A stated
+// version moves only when chart and image are one coordinate: a lagging stock
+// pin on the deploy's line, or a lagging tenant umbrella.
 func resolveRuntimeChartCoordinate(ctx core.Context, target config.OpenResult, registry, version, reason string, deferToOverride bool) (resolvedRuntimeChart, error) {
 	if named := strings.TrimSpace(target.EnvConfig.RuntimeChart); named != "" {
 		reference, chartVersion := SplitChartReferenceVersion(named)
@@ -208,35 +151,10 @@ func resolveRuntimeChartCoordinate(ctx core.Context, target config.OpenResult, r
 	return chart, nil
 }
 
-// resolveTenantUmbrellaPin decides what a stated <tenant>-devops umbrella does
-// when the deploy is at a different version on that umbrella's own line, and
-// reports the decision. It returns handled=false when the stated chart is not
-// the tenant's own umbrella, leaving the coordinate to the caller's own trace.
-//
-// A tenant that publishes its own artifacts runs its runtime on the tenant's
-// own version line: <tenant>-devops wraps the canonical erun-devops as a
-// subchart, and it is the umbrella that names the erun version the environment
-// actually runs. --version names that same line, so a stated umbrella behind it
-// is a lagging pin, not a cross-line coordinate: the image the same deploy
-// derives is the deploy version, and honoring the older umbrella installs a
-// newer runtime image under an umbrella wrapped around an older erun -- then
-// reports success. This is the tenant-umbrella counterpart of
-// stockRuntimePinMovesWithDeployVersion, which covers the stock chart on erun's
-// own line; a tenant stating the *stock* erun-devops chart is genuinely naming
-// another line (that tenant's own line is not erun's) and stays untouched.
-//
-// The move is never a guess. The deploy version must be confirmed published for
-// this chart -- the same probe the by-reference ladder uses -- because a
-// tenant's umbrella is published per version by the tenant's own release, so a
-// coordinate without a published chart behind it cannot be installed. An
-// unconfirmed deploy version (absent, or a registry read that failed outright
-// and is therefore not evidence of absence) leaves the pin alone and says so
-// rather than staying silent: the reported failure's whole harm was that
-// nothing distinguished a moved umbrella from a stranded one.
-//
-// overrideComing is true when an operator-stated --runtime-chart is about to
-// replace this coordinate wholesale; the hold is reported against the
-// coordinate that override discards, so nothing is said or probed here.
+// resolveTenantUmbrellaPin moves a lagging <tenant>-devops umbrella to the deploy
+// version only when that version is confirmed published, and otherwise reports
+// the hold. handled=false means the chart is not the tenant's umbrella. With
+// overrideComing nothing is probed or reported.
 func resolveTenantUmbrellaPin(ctx core.Context, target config.OpenResult, chart resolvedRuntimeChart, deployVersion string, overrideComing bool) (resolvedRuntimeChart, bool) {
 	name, stated, version, lagging := laggingTenantUmbrellaPin(target, chart, deployVersion, overrideComing)
 	if !lagging {
@@ -260,25 +178,17 @@ func resolveTenantUmbrellaPin(ctx core.Context, target config.OpenResult, chart 
 	return chart, true
 }
 
-// laggingTenantUmbrellaPin answers whether a stated chart coordinate is the
-// tenant's own runtime umbrella left at a version this deploy has moved past,
-// and names the chart, the version it states, and the version to move it to.
 func laggingTenantUmbrellaPin(target config.OpenResult, chart resolvedRuntimeChart, deployVersion string, overrideComing bool) (name, stated, version string, ok bool) {
 	if overrideComing || !isTenantRuntimeUmbrella(target.Tenant, chart.name) {
 		return "", "", "", false
 	}
 	stated, version = strings.TrimSpace(chart.version), strings.TrimSpace(deployVersion)
 	if stated == "" || version == "" || stated == version {
-		// Nothing to decide: either the chart already rides the deploy version,
-		// or there is no version to move it to.
 		return "", "", "", false
 	}
 	return strings.TrimSpace(chart.name), stated, version, true
 }
 
-// isTenantRuntimeUmbrella reports whether chartName is the runtime umbrella a
-// tenant publishes for itself, rather than the shared erun-devops chart the
-// canonical product tenant installs directly.
 func isTenantRuntimeUmbrella(tenant, chartName string) bool {
 	tenant, chartName = strings.TrimSpace(tenant), strings.TrimSpace(chartName)
 	if tenant == "" || chartName == "" {
@@ -287,20 +197,13 @@ func isTenantRuntimeUmbrella(tenant, chartName string) bool {
 	return chartName == config.RuntimeReleaseName(tenant) && chartName != config.DevopsComponentName
 }
 
-// tenantUmbrellaHoldTrace is the one message both unconfirmed outcomes share:
-// what the deploy left in place, why it could not move it, and the remedy.
-// reason is the outcome-specific clause.
 func tenantUmbrellaHoldTrace(chart resolvedRuntimeChart, name, stated, version, reason string) string {
 	return "deploy: holding back the env's runtime umbrella " + chart.reference + " at " + stated + ": the tenant's own " + name + " " +
 		reason + ". The runtime image still moves to " + version + ", so the umbrella stays wrapped around an older " + config.DevopsComponentName +
 		" than the one deployed; publish the tenant's charts at " + version + " (`erun push --version " + version + "`) and redeploy"
 }
 
-// tenantUmbrellaChartRegistry answers which registry an umbrella reference is
-// probed in: the one the reference itself addresses, so the line under question
-// is the one the operator pointed at, falling back to the deploy registry the
-// tenant's own charts are published to for a reference that is not an OCI chart
-// URL.
+// tenantUmbrellaChartRegistry probes the registry the reference addresses, else the deploy registry.
 func tenantUmbrellaChartRegistry(target config.OpenResult, reference string) string {
 	if registry := ociChartReferenceRegistry(reference); registry != "" {
 		return registry
@@ -308,13 +211,8 @@ func tenantUmbrellaChartRegistry(target config.OpenResult, reference string) str
 	return publishedTenantComponentChartRegistry(target)
 }
 
-// traceRuntimeRegistryMemo surfaces what this deploy does to the env's
-// runtimeregistry memo when the chart resolved somewhere other than where the
-// search started — the only case where the memo changes meaning. An env with no
-// memo gets the registry the chart actually came from, so the next search
-// short-circuits there; an env that already names one keeps it, because the memo
-// is how an operator redirects this search and a deploy must not take that choice
-// back silently.
+// traceRuntimeRegistryMemo: an env with no memo records where the chart came from;
+// an existing memo is the operator's redirect and is kept.
 func traceRuntimeRegistryMemo(ctx core.Context, target config.OpenResult, searchedFrom, resolvedFrom string) {
 	resolvedFrom = strings.TrimSpace(resolvedFrom)
 	if resolvedFrom == "" || resolvedFrom == strings.TrimSpace(searchedFrom) {
@@ -327,18 +225,9 @@ func traceRuntimeRegistryMemo(ctx core.Context, target config.OpenResult, search
 	ctx.Trace("deploy: recording runtime registry " + resolvedFrom + ", where the runtime chart resolved, rather than " + strings.TrimSpace(searchedFrom) + ", where the search started")
 }
 
-// publishedUmbrellaSubchartKey returns the value-scope key of the canonical
-// erun-<base> chart that a tenant's published umbrella wraps as a subchart, or
-// "" when the chart is a canonical erun-<base> chart installed directly (no
-// wrapper). A tenant that ships its own artifacts publishes <tenant>-<base>
-// umbrellas — the runtime <tenant>-devops and each <tenant>-<component> — that
-// reference the canonical erun-<base> chart as a subchart (per erun-build-env /
-// erun-blueprint-platform: the dependency is named erun-<base>, no alias). helm
-// does not pass a by-reference deploy's top-level --set values into subchart
-// scope, so deploy nests them under this key (command -> prefixHelmSetKeys) —
-// the by-reference analogue of the local runtime umbrella's
-// helmChartRuntimeSubchartKey. The erun product tenant's charts ARE the
-// canonical charts, installed directly, so they resolve to "".
+// publishedUmbrellaSubchartKey returns the erun-<base> subchart scope a tenant
+// umbrella wraps, or "" for a canonical chart; helm does not pass top-level --sets
+// into subcharts.
 func publishedUmbrellaSubchartKey(tenant, chartName string) string {
 	chartName = strings.TrimSpace(chartName)
 	base, ok := strings.CutPrefix(chartName, shared.TenantResourcePrefix(tenant)+"-")
@@ -352,14 +241,9 @@ func publishedUmbrellaSubchartKey(tenant, chartName string) string {
 	return canonical
 }
 
-// ensureTenantChartsPublished verifies, before any spec is built, that a
-// tenant-artifact deploy's charts all exist at the resolved version. A tenant
-// runs its runtime and components together on its own version line (independent
-// of the shared erun-devops line), so once a deploy rolls out the tenant's own
-// component charts the tenant runtime chart (<tenant>-devops) and every selected
-// component chart must be published at the version. Failing here keeps the deploy
-// from silently installing the vanilla erun-devops runtime via the chart fallback,
-// or half-applying before a missing chart aborts the rollout.
+// ensureTenantChartsPublished verifies up front that the tenant runtime and
+// component charts exist at the version, so the deploy neither falls back to
+// erun-devops nor half-applies.
 func ensureTenantChartsPublished(ctx core.Context, target config.OpenResult, versionOverride string, runtimeSelected bool, components []string) error {
 	version := strings.TrimSpace(versionOverride)
 	if version == "" {
@@ -369,32 +253,18 @@ func ensureTenantChartsPublished(ctx core.Context, target config.OpenResult, ver
 		ctx.Trace("deploy: no version resolved; cannot verify the tenant's charts are published")
 		return fmt.Errorf("version is required to deploy the tenant's charts: pass --version or persist runtimeversion in the env config")
 	}
-	// Components are published to the DEPLOY registry by `erun push`, never the
-	// platform-chart registry publishedDevopsChartRegistry resolves (an explicit
-	// runtimeregistry, or the runtime image's own registry for a
-	// cluster-registry env) -- a tenant's own artifacts are never published
-	// beside the platform image.
+	// `erun push` publishes tenant charts to the deploy registry, never beside the platform image.
 	registry := publishedTenantComponentChartRegistry(target)
 
 	required := make([]string, 0, len(components)+1)
 	runtimeChart := config.RuntimeReleaseName(target.Tenant)
-	// An env that states its runtime chart is not riding a tenant chart at this
-	// version, so requiring one here would fail a deploy that is perfectly
-	// coherent: the components run on the tenant's line, the runtime chart on the
-	// line the env named. Its components are still verified.
+	// An env stating its runtime chart is coherent without a tenant runtime chart; its components are still verified.
 	runtimeChartStated := strings.TrimSpace(target.EnvConfig.RuntimeChart) != ""
 	runtimeRegistry := registry
 	switch {
 	case runtimeSelected && runtimeChartStated:
 		ctx.Trace("deploy: the env states its runtime chart " + strings.TrimSpace(target.EnvConfig.RuntimeChart) + "; verifying only the tenant's component charts at " + version)
 	case runtimeSelected && runtimeChart != config.DevopsComponentName:
-		// The tenant's own runtime chart is normally published alongside its
-		// components by the same `erun push`, so it usually shares their
-		// registry and is verified together, below. When it doesn't -- an
-		// explicit runtimeregistry, or the cluster-registry env's platform-chart
-		// fallback -- it is verified separately, against the same registry
-		// resolvePublishedDevopsDeploySpecWithReason's own ladder actually
-		// installs it from.
 		runtimeRegistry = publishedDevopsChartRegistry(target)
 		if runtimeRegistry == registry {
 			required = append(required, runtimeChart)
@@ -414,15 +284,8 @@ func ensureTenantChartsPublished(ctx core.Context, target config.OpenResult, ver
 	return nil
 }
 
-// publishedTenantComponentChartRegistry answers where a tenant's own
-// component charts (and its own runtime chart, when it publishes one) are
-// published: `erun push` writes them to the DEPLOY registry -- concretized to
-// its in-cluster pull host for a cluster-registry env -- never the
-// runtimeregistry override or the runtime-image fallback
-// publishedDevopsChartRegistry applies for the shared platform chart. A
-// tenant's own artifacts are never published beside the platform image, so
-// following that registry here probed a registry the tenant's charts were
-// never going to be in.
+// publishedTenantComponentChartRegistry is the deploy registry `erun push` writes
+// to, concretized for a cluster-registry env.
 func publishedTenantComponentChartRegistry(target config.OpenResult) string {
 	if registry, ok := target.EnvConfig.ContainerRegistries.DeployRegistry(); ok {
 		return registry
@@ -433,22 +296,14 @@ func publishedTenantComponentChartRegistry(target config.OpenResult) string {
 	return config.DefaultContainerRegistry
 }
 
-// chartRegistryInsecure reports whether registry is the deploy target's own
-// concretized cluster registry, marked insecure (plain HTTP) on its cluster:
-// entry. It is the only registry a chart probe can ever need to address over
-// plain HTTP -- erun's own platform registries (ghcr.io, an ECR account, a
-// project's static `registry:` entry) are always TLS.
+// chartRegistryInsecure: only the target's concretized cluster registry may be plain HTTP.
 func chartRegistryInsecure(target config.OpenResult, registry string) bool {
 	registry = strings.TrimSpace(registry)
 	return registry != "" && target.ClusterRegistryInsecure && registry == strings.TrimSpace(target.ClusterPullRegistry)
 }
 
-// reportUnconfirmedTenantCharts probes each chart in required and returns an
-// error naming whichever charts could not be confirmed published at version --
-// distinguishing "could not determine" (a probe error, which must never be read
-// as "not published") from "confirmed absent" (missing). A probe that could not
-// answer takes priority: it is not evidence the chart is missing, so refusing on
-// it takes precedence over refusing on a genuine miss.
+// reportUnconfirmedTenantCharts refuses on "could not determine" ahead of
+// "confirmed absent", since a failed probe is not evidence of absence.
 func reportUnconfirmedTenantCharts(required []string, registry string, insecure bool, version string) error {
 	missing := make([]string, 0, len(required))
 	unresolved := make([]string, 0, len(required))
@@ -470,11 +325,7 @@ func reportUnconfirmedTenantCharts(required []string, registry string, insecure 
 	return nil
 }
 
-// probeChartVersion answers whether chartName publishes version in
-// containerRegistry. A non-nil error means the registry read itself failed --
-// credentials, network, or an unreachable registry -- and must never be read as
-// "not found": a blind probe is not evidence of absence, only a definitive read
-// that excludes the version is.
+// probeChartVersion returns an error only when the read failed, which must never be read as "not found".
 func probeChartVersion(ctx context.Context, containerRegistry, chartName, version string, insecure bool) (bool, error) {
 	if override, ok := os.LookupEnv(PublishedChartProbeOverrideEnv); ok {
 		return publishedChartOverrideHasVersion(override, containerRegistry, chartName, version), nil

@@ -18,11 +18,7 @@ func StopCloudContext(ctx core.Context, store CloudContextStore, params CloudCon
 	switch {
 	case err == nil:
 	case isAWSIncorrectInstanceStateError(err):
-		// AWS rejects stop-instances when the instance is already not
-		// running (already-stopping, already-stopped, terminating, …).
-		// For our purposes that's the intended end state — fall through
-		// to the wait below so the function only returns once AWS
-		// observes the instance fully stopped.
+		// Already not running is the desired end state; still wait for "stopped".
 		ctx.Trace("cloud-context stop: instance is already in a non-running state — waiting for stopped")
 		status, err = resolveCloudContextStatusForName(store, params.Name)
 		if err != nil {
@@ -35,10 +31,7 @@ func StopCloudContext(ctx core.Context, store CloudContextStore, params CloudCon
 	if err != nil {
 		return configpkg.CloudContextStatus{}, err
 	}
-	// stop-instances returns as soon as AWS accepts it, but the instance
-	// takes ~30-60 s to reach "stopped". Wait for the observed end state so a
-	// follow-up start does not race the transition and hit
-	// IncorrectInstanceState.
+	// Wait for "stopped" so a follow-up start does not hit IncorrectInstanceState.
 	if _, err := deps.RunAWS(ctx, provider, status.Region, []string{"ec2", "wait", "instance-stopped", "--instance-ids", status.InstanceID}); err != nil {
 		return configpkg.CloudContextStatus{}, fmt.Errorf("cloud context %q: stop was accepted but the instance was not observed stopped — it may still be transitioning; check its state in the AWS console and retry: %w", status.Name, classifyCloudContextPowerError("stop-instances", status.CloudContextConfig, err))
 	}
@@ -59,10 +52,7 @@ func resolveCloudContextStatusForName(store CloudContextStore, name string) (con
 	}, nil
 }
 
-// isAWSIncorrectInstanceStateError reports whether err is AWS's
-// IncorrectInstanceState rejection — a transition the instance's current
-// state cannot accept. Substring-matching the wrapped stderr is the most
-// stable signal across AWS CLI versions.
+// isAWSIncorrectInstanceStateError matches stderr text, the most stable signal across AWS CLI versions.
 func isAWSIncorrectInstanceStateError(err error) bool {
 	if err == nil {
 		return false
@@ -70,9 +60,7 @@ func isAWSIncorrectInstanceStateError(err error) bool {
 	return strings.Contains(err.Error(), "IncorrectInstanceState")
 }
 
-// awsExpiredCredentialsMarkers are the AWS CLI stderr signatures that mean
-// the call failed on authentication (expired SSO/STS or missing credentials),
-// not on the requested operation.
+// awsExpiredCredentialsMarkers are AWS CLI stderr signatures of an authentication failure.
 var awsExpiredCredentialsMarkers = []string{
 	"Token has expired",
 	"SSO session associated with this profile has expired",
@@ -96,11 +84,8 @@ func isAWSExpiredCredentialsError(err error) bool {
 	return false
 }
 
-// classifyCloudContextPowerError turns a raw start/stop-instances failure
-// into an actionable operator message for the two failures with a known fix
-// — stop protection (unlock it) and expired credentials (sign in again) —
-// and passes everything else through unchanged, so callers that key off the
-// raw AWS text (the IncorrectInstanceState absorption) still see it.
+// classifyCloudContextPowerError makes stop-protection and expired-credential failures
+// actionable; other errors pass through unchanged because callers match the raw AWS text.
 func classifyCloudContextPowerError(awsAction string, config configpkg.CloudContextConfig, err error) error {
 	switch {
 	case err == nil:
@@ -181,11 +166,8 @@ func enforceCloudContextStartWorkingHoursGate(ctx core.Context, store CloudConte
 	return nil
 }
 
-// recoverCloudContextStartFromTransitionalState retries a start that AWS
-// rejected because the instance is still transitional (usually stopping):
-// start-instances only accepts fully-stopped instances. Without it, a click
-// on an env whose linked context just auto-stopped fails with a confusing
-// AWS error while the desktop's reconnect loop spins pointlessly.
+// recoverCloudContextStartFromTransitionalState retries a start rejected because the
+// instance is still stopping; start-instances only accepts stopped instances.
 func recoverCloudContextStartFromTransitionalState(ctx core.Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies, startErr error) (configpkg.CloudContextStatus, error) {
 	if !isAWSIncorrectInstanceStateError(startErr) {
 		return configpkg.CloudContextStatus{}, startErr
@@ -219,31 +201,21 @@ func refreshSingleCloudContextStatus(ctx core.Context, store configpkg.CloudRead
 	return seed, nil
 }
 
-// InClusterKubernetesContext is the kubernetes context a runtime pod resolves to
-// when the chart injects none: every kubectl and helm call inside the pod talks
-// to the cluster the pod itself runs in.
+// InClusterKubernetesContext is the kube-context a runtime pod uses when the chart injects none.
 const InClusterKubernetesContext = "in-cluster"
 
-// IsInClusterCloudContext reports whether a cloud context names the cluster this
-// process runs in. Such a context is already running by definition: it has no
-// instance to power on and no working-hours gate to clear, so no power
-// management path may treat it as startable.
+// IsInClusterCloudContext reports whether a context names this process's own cluster, which is always running.
 func IsInClusterCloudContext(config configpkg.CloudContextConfig) bool {
 	return strings.TrimSpace(config.Name) == InClusterKubernetesContext ||
 		strings.TrimSpace(config.KubernetesContext) == InClusterKubernetesContext
 }
 
-// ensureCloudContextRunningForPreflight powers on the matched cloud context when
-// the environment is down. An in-cluster context is the cluster the current
-// process runs in, so it is already running: there is no instance to power on
-// and no working-hours gate to clear.
+// ensureCloudContextRunningForPreflight powers on the matched context; in-cluster contexts need nothing.
 func ensureCloudContextRunningForPreflight(ctx core.Context, store CloudContextStore, deps CloudContextDependencies, status configpkg.CloudContextStatus) error {
 	if IsInClusterCloudContext(status.CloudContextConfig) {
 		return nil
 	}
-	// Reach AWS for the authoritative state before deciding to start. Preflight
-	// runs at most once per context per CLI run (the started cache), so the
-	// extra describe call is a fair cost-quality trade.
+	// Preflight runs at most once per context per CLI run, so a live describe is affordable.
 	live, err := refreshSingleCloudContextStatus(ctx, store, deps, status)
 	if err != nil {
 		return err
@@ -289,10 +261,8 @@ func CloudContextPreflight(store CloudContextStore, deps CloudContextDependencie
 	}
 }
 
-// cloudContextStartBlockedByWorkingHours returns a non-empty reason when every
-// environment attached to the named cloud context is currently outside its
-// working hours. If any attached environment permits start, or no environments
-// reference this context, the gate is not engaged.
+// cloudContextStartBlockedByWorkingHours returns a reason only when every attached
+// environment is outside its working hours.
 func cloudContextStartBlockedByWorkingHours(store configpkg.CloudReadStore, lookup CloudContextEnvLookup, contextName string, now time.Time) (string, error) {
 	kubeContext, ok, err := resolveCloudContextWorkingHoursKubeContext(store, contextName)
 	if err != nil || !ok {
@@ -324,10 +294,7 @@ func cloudContextStartBlockedByWorkingHours(store configpkg.CloudReadStore, look
 	return blockedReason, nil
 }
 
-// resolveCloudContextWorkingHoursKubeContext returns the kube-context the
-// working-hours gate matches envs against. ok=false with a nil error means
-// there is nothing to gate (blank or unknown context), and the caller should
-// treat the gate as not engaged.
+// resolveCloudContextWorkingHoursKubeContext returns ok=false when there is nothing to gate.
 func resolveCloudContextWorkingHoursKubeContext(store configpkg.CloudReadStore, contextName string) (string, bool, error) {
 	contextName = strings.TrimSpace(contextName)
 	if contextName == "" {
@@ -375,10 +342,7 @@ func evaluateTenantWorkingHoursGate(tenant configpkg.TenantConfig, envs []config
 	return false, blockedReason
 }
 
-// changeCloudContextPowerState runs the power-state mutation and returns the
-// intended new Status without persisting: the persisted shape carries no
-// Status, so Stop has nothing to write and Start does its own follow-up save
-// after this returns.
+// changeCloudContextPowerState returns the new Status without persisting it.
 func changeCloudContextPowerState(ctx core.Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies, awsAction, status string) (configpkg.CloudContextStatus, error) {
 	if store == nil {
 		return configpkg.CloudContextStatus{}, fmt.Errorf("store is required")

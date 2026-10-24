@@ -11,9 +11,8 @@ import (
 	"testing"
 )
 
-// ghcrStub emulates the GHCR token exchange + tags list. A request carrying HTTP
-// Basic auth on /token mints a "scoped" bearer that can read tags; anonymous
-// requests mint "anon", which the tags endpoint rejects unless allowPublic.
+// ghcrStub mints a readable "scoped" bearer for Basic auth and an "anon" one
+// that tags rejects unless allowPublic.
 func ghcrStub(t *testing.T, tags []string, allowPublic bool) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -58,8 +57,7 @@ func TestRegistryStatusErrorClassification(t *testing.T) {
 	if err := RegistryStatusError("x", "s", http.StatusInternalServerError); errors.Is(err, ErrRegistryAuthRequired) {
 		t.Fatal("500 must not classify as auth-required")
 	}
-	// A definitive HTTP status (even 5xx/429) is terminal for retry purposes: the
-	// registry answered, so a retry re-asks an already-answered question.
+	// Any HTTP status, even 5xx/429, is terminal: the registry answered.
 	if isTransientRegistryError(RegistryStatusError("x", "s", http.StatusTooManyRequests)) {
 		t.Fatal("a 429 status response must not be retried")
 	}
@@ -72,8 +70,7 @@ func withZeroRegistryRetryBackoff(t *testing.T) {
 	t.Cleanup(func() { registryListRetryBase = prev })
 }
 
-// fakeNetError models a transport-level failure; timeout distinguishes a slow/hung
-// registry (terminal) from a momentary blip (retryable).
+// fakeNetError's timeout marks a hung registry (terminal) versus a blip (retryable).
 type fakeNetError struct{ timeout bool }
 
 func (fakeNetError) Error() string   { return "fake network error" }
@@ -201,10 +198,7 @@ func TestIsRuntimeRegistryVersionTag(t *testing.T) {
 	}
 }
 
-// A stray registry tag must not reach Tags: Tags is what every surface
-// enumerates, and the desktop picker maps it into its version select with no
-// filter of its own, so an entry here is presented to the operator as a
-// pinnable version.
+// Tags feeds the desktop picker unfiltered, so a stray tag would appear pinnable.
 func TestLatestRuntimeVersionsFromTagsOffersOnlyVersionShapedTags(t *testing.T) {
 	versions := latestRuntimeVersionsFromTags([]string{
 		"1.0.250",

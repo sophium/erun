@@ -80,11 +80,9 @@ const config: Config = {
           mainBkg: '#f4f8f7',
           edgeLabelBackground: '#ffffff',
           labelColor: '#0f1320',
-          // State diagram specifics
           transitionColor: '#0891b2',
           transitionLabelColor: '#0f1320',
           altBackground: '#ffffff',
-          // Typography matches the rest of the site
           fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif',
           fontSize: '14px',
         },

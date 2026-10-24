@@ -9,12 +9,8 @@ import {
 } from '../../../fixtures/seedRoot.js';
 import type { AppShell } from '../../../pages/index.js';
 
-// The desktop could read a review but do nothing else: no create, no close,
-// no merge-queue advance. These specs cover the new write
-// surface over the stubbed platform RPC — see tenant-dashboard-reviews.spec.ts
-// for why the collaboration API is stubbed rather than staged for real: it
-// comes from a hosted erun-backend-api the inert harness deliberately has no
-// access to. The Go side is covered by erun-ui/tenant_review_write_test.go.
+// The collaboration API is hosted and unreachable from the harness, so the RPC
+// is stubbed.
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
   seedEnvironment(SEED_TENANT, environment, 'apiurl: http://127.0.0.1:1/unreachable\n');
@@ -94,8 +90,7 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
             route,
             dashboardResponse(environment, {
               canCreateReview: true,
-              // Two target branches already in use, so the field has a known
-              // set to offer rather than asking the operator to retype one.
+              // Existing target branches give the field a known set to offer.
               reviews: [REVIEW, { ...REVIEW, reviewId: 'review-2', targetBranch: 'release/1.0' }],
             }),
           );
@@ -140,11 +135,9 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
       const dialog = app.createReviewDialog;
       await dialog.waitForOpen();
       await expect(dialog.locator()).toContainText('feature/1348-x');
-      // Every write in this dialog lands in one environment, so the dialog
-      // names it before anything runs.
+      // Every write lands in one environment, so the dialog names it up front.
       await expect(dialog.locator()).toContainText(`${SEED_TENANT} / ${environment}`);
-      // Create is unavailable until the review has a name, and says so rather
-      // than presenting a dead button.
+      // Create says why it is unavailable rather than showing a dead button.
       await expect(dialog.requirementHint()).toBeVisible();
       await expect(dialog.createButton()).toBeDisabled();
 
@@ -156,9 +149,7 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
       await dialog.fillName('Add widget');
       await expect(dialog.requirementHint()).toHaveCount(0);
 
-      // The target branch is offered from the branches this tenant's reviews
-      // already target. Page-scoped locators from here: the open choices
-      // popover is itself a role="dialog".
+      // Page-scoped from here: the choices popover is itself a role="dialog".
       await dialog.openTargetBranchChoices();
       await expect(page.getByRole('button', { name: 'release/1.0' })).toBeVisible();
       await page.getByRole('button', { name: 'main', exact: true }).click();
@@ -217,21 +208,15 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
 
       await dialog.push();
       await expect(dialog.locator()).toContainText('Pushed to origin/feature/1348-x');
-      // The failure belonged to an attempt the operator has moved past; left
-      // in place it sits beside the green badge saying the opposite.
+      // A stale failure would contradict the green badge beside it.
       await expect(dialog.locator().getByRole('alert')).toHaveCount(0);
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
   });
 
-  // operatorPlatformError's "sign-in expired" sentence must not be a dead end
-  // wherever a review write surfaces it. The alert offers the same "Log in"
-  // the sidebar's cloud alias row already uses, and clicking it must actually
-  // dispatch LoginCloudProvider for the tenant's primary alias — not just
-  // render inert text. A successful sign-in must also clear the stale write
-  // error, so the operator sees the dialog ready to retry Create rather than
-  // the identical failure.
+  // The "sign-in expired" error must offer a working Log in, and success must
+  // clear the stale error.
   test('a stale-identity error on create offers to sign in, and a successful sign-in clears it', async ({
     app,
     page,
@@ -297,16 +282,10 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
       const signIn = dialog.locator().getByRole('button', { name: 'Log in' });
       await expect(signIn).toBeVisible();
       await signIn.click();
-      // The alias the sign-in carried is this spec's own route handler's to
-      // record, so this step waits on that answer arriving -- and
-      // `expect.poll` carries no timeout of its own, resolving to expect's
-      // 10s default rather than the 30s this test declares. Pointed at that
-      // budget (see tenant-dashboard-permissions.spec.ts's held-answer case).
+      // expect.poll defaults to expect.timeout, not the test deadline.
       await expect.poll(() => loginAlias, withTestBudget()).toBe('pw-aws');
 
-      // The dialog must recover: the stale write error and its Log in
-      // button are gone, and the dialog is ready for the operator to retry
-      // Create themselves — the sign-in fixed the session, not the submit.
+      // Sign-in fixes the session, not the submit: the operator retries Create.
       await expect(alert).toHaveCount(0);
       await expect(dialog.locator().getByRole('button', { name: 'Log in' })).toHaveCount(0);
       await expect(dialog.locator()).toBeVisible();
@@ -315,8 +294,6 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
     }
   });
 
-  // An unrelated create failure (not the stale-identity sentence) renders the
-  // message only, with no manufactured button.
   test('an unrelated create failure offers no sign-in action', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('review-create-other-error');
     try {
@@ -387,10 +364,7 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
       await openDashboardReviewsTab(app, environment);
       await expect(app.tenantDashboard.newReviewButton()).toHaveCount(0);
       await expect(app.tenantDashboard.reviewsRestrictedNote()).toBeVisible();
-      // The empty state's body names two ways to open a review, and this
-      // caller has neither: the button's slot holds the notice asserted above,
-      // and the CLI posts the same route this flag is read from. It may only
-      // point at the notice, so it must not name either route.
+      // The caller can use neither route, so the empty state must name neither.
       await expect(app.tenantDashboard.reviewsEmptyState()).toBeVisible();
       await expect(app.tenantDashboard.activePanel()).not.toContainText('New review button above');
       await expect(app.tenantDashboard.activePanel()).not.toContainText('erun review create');
@@ -410,10 +384,8 @@ test.describe('tenant dashboard — closing a review (#1348)', () => {
     environment: string,
     canClose: boolean,
   ): Promise<void> {
-    // Closing dispatches submitCloseReview, which reloads LoadReviewDetail —
-    // the stub must reflect the new status on that reload the same way the
-    // real platform would, or the assertion below would pass for the wrong
-    // reason (a dialog that never re-rendered at all).
+    // The stub must reflect the close on reload, or the assertion passes for a
+    // dialog that never re-rendered.
     let closed = false;
     await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
       const body = invokeBody(request);
@@ -575,10 +547,6 @@ test.describe('tenant dashboard — advancing the merge queue (#1348)', () => {
   });
 });
 
-// The desktop could read a review's reviewers but do nothing else: no way to
-// assign one, so `erun review list --waiting-on-me`'s own filter had nothing
-// to ever return. These specs cover the Add reviewers action over the
-// stubbed platform RPC, mirroring the close/advance specs above.
 test.describe('tenant dashboard — assigning reviewers', () => {
   const JANE = { userId: 'user-2', username: 'jane' };
   const BOB = { userId: 'user-3', username: 'bob' };

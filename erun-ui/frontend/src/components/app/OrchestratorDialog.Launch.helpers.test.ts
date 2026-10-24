@@ -39,8 +39,6 @@ function values(options: { value: string }[]): string[] {
   return options.map((option) => option.value);
 }
 
-// The form seeds from what is stored, so an orchestrator with no settings
-// sends defaults back on save rather than the values they resolve to.
 test('seeds the form from the stored settings, defaulting absent ones', () => {
   assert.deepEqual(orchestratorLaunchSettingsOf(null), {
     useGateway: false,
@@ -64,8 +62,7 @@ test('round-trips the default sentinel to the empty field value', () => {
   assert.equal(orchestratorLaunchSelectValue('high'), 'high');
 });
 
-// The CLI clears a setting with `--model default` in any case; the free-entry
-// field accepts the same word, and it must clear rather than be stored.
+// The CLI's `--model default` is case-insensitive too.
 test('the clearing word typed in any case is sent as the default', () => {
   for (const typed of ['default', 'Default', 'DEFAULT', '  default ']) {
     assert.equal(orchestratorLaunchValue(typed), '');
@@ -81,8 +78,7 @@ test('the clearing word typed in any case is sent as the default', () => {
   assert.match(orchestratorModelHelper(choices(), 'Default'), /Using the default \(opus\)/);
 });
 
-// A catalog-less gateway is refused at write and at launch, so offering the
-// switch would promise a save that cannot land.
+// A catalog-less gateway is refused at write and at launch.
 test('disables the gateway switch when no catalog is configured', () => {
   const control = orchestratorGatewayControl(choices({ gatewayConfigured: false }), false);
   assert.equal(control.disabled, true);
@@ -90,8 +86,6 @@ test('disables the gateway switch when no catalog is configured', () => {
   assert.match(control.helper, /ERun settings/);
 });
 
-// A stored "on" with no catalog cannot launch; turning it off is the remedy,
-// so the switch stays usable and the state reads as a problem.
 test('keeps a stored gateway-on usable when the catalog is gone', () => {
   const control = orchestratorGatewayControl(choices({ gatewayConfigured: false }), true);
   assert.equal(control.disabled, false);
@@ -119,8 +113,6 @@ test('offers the catalog models and names the catalog default', () => {
   assert.equal(options[0]?.label, 'Default (deepseek/deepseek-v4.1-flash)');
 });
 
-// A catalog with no driveable model supplies no default, so the launch falls
-// back to the orchestrator's own and the label must say so.
 test('names the orchestrator default when the catalog lists none', () => {
   const options = orchestratorGatewayModelOptions(
     choices({ gatewayModels: [], gatewayDefaultModel: '' }),
@@ -129,9 +121,7 @@ test('names the orchestrator default when the catalog lists none', () => {
   assert.equal(options[0]?.label, 'Default (opus)');
 });
 
-// A model typed off the gateway, or one since removed from the catalog, must
-// still render: a trigger with no matching item is blank, hiding the value the
-// next save sends back.
+// A trigger with no matching item renders blank.
 test('keeps a stored model the catalog does not list', () => {
   const options = orchestratorGatewayModelOptions(choices(), 'opus');
   assert.equal(options[options.length - 1]?.value, 'opus');
@@ -142,8 +132,6 @@ test('keeps a stored model the catalog does not list', () => {
   );
 });
 
-// The catalog can name a model the gateway cannot drive. Stored, it would be
-// refused at launch, so it reads as that rather than as merely unlisted.
 test('flags a stored model the gateway cannot drive', () => {
   const options = orchestratorGatewayModelOptions(choices(), 'acme/reasoner');
   assert.equal(
@@ -169,8 +157,7 @@ test('keeps a stored effort level this build does not know', () => {
   assert.match(options[options.length - 1]?.label ?? '', /not a known effort level/);
 });
 
-// Mirrors the Go launch guard: a value that would reach --model as a flag or
-// as shell syntax is flagged where it is typed.
+// Mirrors the Go launch guard.
 test('flags a model the launch guard would refuse', () => {
   assert.equal(orchestratorModelInvalid(''), false);
   assert.equal(orchestratorModelInvalid('claude-opus-4.1'), false);

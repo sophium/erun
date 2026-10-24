@@ -29,8 +29,7 @@ test('never nudged is distinct from capped', () => {
 test('a session nudged and then answered still reports having been nudged, not "Not nudged"', () => {
   const now = Date.now();
   const lastAutoNudgeAtUnix = Math.floor(now / 1000) - 65;
-  // nudgeCount is 0 (the cap gauge rearmed on the reply); the cumulative
-  // history is what must carry the fact that a nudge happened.
+  // nudgeCount rearmed on the reply; the cumulative history carries the nudge.
   const summary = orchestratorNudgeSummary(
     fields({ nudgeCount: 0, autoNudgeCount: 2, lastAutoNudgeAtUnix }),
     now,
@@ -114,12 +113,8 @@ test('orchestratorHasNudgeHistory is true for cumulative history, a cap, or an u
   assert.equal(orchestratorHasNudgeHistory(fields({ nudgeHistoryUnreadable: true })), true);
 });
 
-// The could-not half of the Nudges row: a frozen count cannot say whether an
-// orchestrator needed no nudge or whether no nudge was possible from here.
 test('a session this desktop cannot pace says so, scoped to this desktop', () => {
   const note = orchestratorPacingUnreachableNote({ pacingUnreachable: true });
-  // The scope wording is the point: the session may be healthy and paced by
-  // something else, so the line claims only what this desktop can know.
   assert.match(note, /^Not paced from this desktop/);
 });
 

@@ -8,8 +8,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
-// listTools returns the full Tool objects, not just names, so the wire metadata
-// itself can be asserted.
 func listTools(t *testing.T, session *mcp.ClientSession) []*mcp.Tool {
 	t.Helper()
 	result, err := session.ListTools(context.Background(), nil)
@@ -19,10 +17,7 @@ func listTools(t *testing.T, session *mcp.ClientSession) []*mcp.Tool {
 	return result.Tools
 }
 
-// TestNoToolShipsOnTheSpecDefaults: the SDK models destructiveHint and
-// openWorldHint as *bool and treats nil as TRUE, so a tool that declares
-// nothing goes out as destructive and open-world, leaving a client that gates
-// on destructiveHint gating everything or nothing.
+// The SDK treats a nil destructiveHint/openWorldHint as true.
 func TestNoToolShipsOnTheSpecDefaults(t *testing.T) {
 	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	tools := listTools(t, session)
@@ -55,10 +50,6 @@ func TestNoToolShipsOnTheSpecDefaults(t *testing.T) {
 	}
 }
 
-// TestReadOnlyToolsSaySoOnTheWire: the acceptance criterion names these
-// explicitly, and they are the tools whose mislabelling was most obviously
-// wrong -- `version` returns a version string and was advertised as capable of
-// destructive updates to an open world.
 func assertToolAdvertisedReadOnly(t *testing.T, byName map[string]*mcp.Tool, name string) {
 	t.Helper()
 	tool, ok := byName[name]
@@ -85,8 +76,7 @@ func TestReadOnlyToolsSaySoOnTheWire(t *testing.T) {
 		assertToolAdvertisedReadOnly(t, byName, name)
 	}
 
-	// And the counterexample, so the test cannot pass by marking everything
-	// read-only: exec_raw runs arbitrary argv.
+	// The counterexample keeps the test from passing by marking everything read-only.
 	raw, ok := byName["exec_raw"]
 	if !ok {
 		t.Fatal("exec_raw is not on the surface")
@@ -102,8 +92,6 @@ func TestReadOnlyToolsSaySoOnTheWire(t *testing.T) {
 	}
 }
 
-// TestRenamedToolsKeepTheirOldNamesForOneRelease: the rename is worth doing, but
-// not at the cost of breaking a client pinned to `raw` on an upgrade.
 func TestRenamedToolsKeepTheirOldNamesForOneRelease(t *testing.T) {
 	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	present := map[string]bool{}
@@ -124,10 +112,7 @@ func TestRenamedToolsKeepTheirOldNamesForOneRelease(t *testing.T) {
 	}
 }
 
-// TestEveryRegisteredToolIsDescribed is the structural gate. addTool panics on a
-// tool with no descriptor, so this test failing to panic is the assertion --
-// and it means a tool cannot be added without a decision about its blast radius,
-// which is what let the surface drift in the first place.
+// addTool panics on a tool with no descriptor; not panicking is the assertion.
 func TestEveryRegisteredToolIsDescribed(t *testing.T) {
 	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	for _, tool := range listTools(t, session) {

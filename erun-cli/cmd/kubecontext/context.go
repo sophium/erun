@@ -39,8 +39,7 @@ func newContextListCmd(store cloud.CloudContextStore, deps cloud.CloudContextDep
 }
 
 func runContextListCommand(ctx core.Context, store cloud.CloudContextStore, deps cloud.CloudContextDependencies) error {
-	// Status isn't persisted, so it must be refreshed from AWS to show the
-	// live authoritative state rather than an empty value.
+	// Status isn't persisted, so refresh it from AWS.
 	result, err := cloud.RefreshCloudContextList(ctx, store, deps)
 	if err != nil {
 		return err
@@ -58,10 +57,7 @@ func WriteCloudContextList(ctx core.Context, result cloud.CloudContextListResult
 	if _, err := fmt.Fprintln(ctx.Stdout, "Cloud Contexts:"); err != nil {
 		return err
 	}
-	// A batched refresh covers every context sharing its (alias, region) and
-	// fails as one fact, so it is reported once here rather than on each row it
-	// covered -- where it repeats the whole command per context and quotes the
-	// instance IDs of every context that shared the batch.
+	// A batched refresh failure is reported once, not on every row it covered.
 	for _, failure := range result.RefreshFailures {
 		line := "  status refresh failed for alias=" + shared.QuotedValueOrNone(failure.Alias) +
 			" region=" + shared.QuotedValueOrNone(failure.Region) + ": " + failure.Message
@@ -158,9 +154,7 @@ func newContextEnableAPIStopCmd(store cloud.CloudContextStore, deps cloud.CloudC
 	)
 }
 
-// The stop-protection flip is global at the AWS layer, so while locked even
-// the automatic idle monitor can't stop the env — the lever to hold an
-// unhealthy env up for the duration of a repair.
+// Stop protection also holds off the idle monitor.
 func newContextStopProtectionCmd(use, short string, enabled bool, store cloud.CloudContextStore, deps cloud.CloudContextDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          use + " CONTEXT",

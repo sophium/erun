@@ -14,13 +14,8 @@ import (
 )
 
 func testReleaseRealRunEmitsReleaseLifecycleTraces(t *testing.T) {
-	// Real-run (no --dry-run) candidate release. The `==> Releasing` /
-	// `==> Released ... in <ELAPSED>` umbrella traces are emitted only on
-	// a real run, so dry-run goldens cannot cover them; the desktop
-	// activity queue keys off them to light the sidebar spinner for a
-	// standalone `erun release`. git is stubbed so the tag is not skipped
-	// and every mutation is a no-op, keeping output deterministic without
-	// a real remote.
+	// The `==> Releasing`/`==> Released` traces appear only on real runs and drive the
+	// desktop spinner. git is stubbed so mutations are deterministic no-ops.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"
@@ -41,18 +36,8 @@ esac
 }
 
 func testReleaseRealRunForceStableSyncsMarketplaceAndBumpsVersion(t *testing.T) {
-	// Real-run (no --dry-run) stable release with --force and a
-	// marketplace.json. Three behaviors only a real run can prove:
-	//   1. --force tag replacement runs the local `git tag -d` and remote
-	//      `git push --delete` when the tag exists locally and on origin;
-	//   2. the checksum-sync stage resolves the release commit and
-	//      rewrites marketplace.json's source.sha on disk;
-	//   3. the bump-stage file updates land: the chart gets the release
-	//      version and VERSION gets the next patch.
-	// git is stubbed so the tag probes report a stale tag and every
-	// mutation is a no-op, keeping output deterministic without a real
-	// remote. The on-disk rewrites are asserted directly because they are
-	// side effects outside the captured streams.
+	// Real-run --force replaces a stale local+remote tag, rewrites marketplace.json's
+	// source.sha, and bumps chart and VERSION on disk.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 	fixture.SeedMarketplaceJSON(t, setup.Cwd)
@@ -97,13 +82,8 @@ func testReleaseRealRunForceStableSyncsMarketplaceAndBumpsVersion(t *testing.T) 
 }
 
 func testReleaseRealRunRefusesWhenTheDockerRootIsNearlyFull(t *testing.T) {
-	// The release that fills the node's disk is the one most likely
-	// to get evicted by it, so low headroom at the docker root refuses the
-	// release before the build spends anything — the same "known failure
-	// caught up front" shape as the registry-permission preflight. docker
-	// and df are both stubbed to report a real (if fake) low-space
-	// filesystem, exercising the conclusive refusal branch rather than the
-	// "not observable" fallback the other release scenarios take.
+	// Low headroom at the docker root refuses the release before the build; docker and df
+	// are stubbed to report a low-space filesystem.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 	seedBareOrigin(t, setup)
@@ -119,16 +99,14 @@ func testReleaseRealRunRefusesWhenTheDockerRootIsNearlyFull(t *testing.T) {
 		`  *) exit 0 ;;`,
 		`esac`,
 	}, "\n"))
-	// 1 GiB available, well under the 20 GiB default floor.
+	// 1 GiB available, under the 20 GiB floor.
 	fixture.StubBinaryAdvanced(t, stubs, "df", fixture.StubBinarySpec{
 		Stdout: "Filesystem     1024-blocks     Used Available Capacity Mounted on\n" +
 			"overlay          104857600 93763584   1048576      99% " + dockerRoot + "\n",
 	})
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "df")...)
 
-	// release marks source control only, so the publish and the preflights it
-	// owns now live in `build --release`: this asserts them where they moved to
-	// rather than dropping the coverage.
+	// The publish preflights live in `build --release`.
 	result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit for low disk headroom, got 0: %s", result.Combined)
@@ -136,8 +114,7 @@ func testReleaseRealRunRefusesWhenTheDockerRootIsNearlyFull(t *testing.T) {
 	if !strings.Contains(result.Combined, "only 1.0 GiB free at "+dockerRoot+", below the 20.0 GiB a multi-arch release build needs") {
 		t.Fatalf("expected the disk-headroom refusal, naming the filesystem it measured, in output:\n%s", result.Combined)
 	}
-	// docker's own stores were not measured here, so the remedy a docker-root
-	// shortage can still use must survive.
+	// Docker stores were not measured, so the docker remedy must remain.
 	if !strings.Contains(result.Combined, "free up space (docker system prune, remove unused images)") {
 		t.Fatalf("expected the docker remediation a docker-root shortage can still use:\n%s", result.Combined)
 	}
@@ -145,20 +122,12 @@ func testReleaseRealRunRefusesWhenTheDockerRootIsNearlyFull(t *testing.T) {
 		t.Fatalf("expected the eviction-risk explanation in output:\n%s", result.Combined)
 	}
 
-	// Outside the captured streams: the refusal must leave the version
-	// file on the version it was releasing, so re-running retries it.
 	assertVersionFile(t, setup, "1.4.2\n")
 }
 
 func testReleaseRealRunRefusalDoesNotNameADockerRemedyDockerCannotPerform(t *testing.T) {
-	// The reported failure: the headroom that ran out was on the home PVC,
-	// with every docker store on the node already empty — so the docker
-	// remediation the refusal named could not free a byte of it, the number
-	// did not move, and the real cause was never named. A docker prune is a
-	// remedy only when docker was measured still holding space on the
-	// filesystem that is short; here it is measured holding none, and the
-	// only nonzero row is local volumes, which `docker system prune` does
-	// not reclaim either.
+	// When the short filesystem is the home PVC and docker is measured holding nothing there,
+	// docker prune is not a remedy and must not be offered.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 	seedBareOrigin(t, setup)
@@ -175,16 +144,14 @@ func testReleaseRealRunRefusalDoesNotNameADockerRemedyDockerCannotPerform(t *tes
 		`  *) exit 0 ;;`,
 		`esac`,
 	}, "\n"))
-	// 1 GiB available, well under the 20 GiB default floor.
+	// 1 GiB available, under the 20 GiB floor.
 	fixture.StubBinaryAdvanced(t, stubs, "df", fixture.StubBinarySpec{
 		Stdout: "Filesystem     1024-blocks     Used Available Capacity Mounted on\n" +
 			"overlay          104857600 93763584   1048576      99% " + dockerRoot + "\n",
 	})
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "df")...)
 
-	// release marks source control only, so the publish and the preflights it
-	// owns now live in `build --release`: this asserts them where they moved to
-	// rather than dropping the coverage.
+	// The publish preflights live in `build --release`.
 	result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit for low disk headroom, got 0: %s", result.Combined)
@@ -204,12 +171,8 @@ func testReleaseRealRunRefusalDoesNotNameADockerRemedyDockerCannotPerform(t *tes
 }
 
 func testReleaseRealRunDirtyWorktreeFails(t *testing.T) {
-	// Real-run with a modified tracked file: the worktree-clean
-	// precondition (waived in dry-run so audits work anywhere) must
-	// fail the run before any stage executes, and the `==> Release
-	// failed after <ELAPSED>` umbrella trace must close the lifecycle
-	// the desktop's activity queue opened on `==> Releasing`. Real git
-	// throughout: the dirty state is a real uncommitted change.
+	// The worktree-clean precondition (waived in dry-run) fails the run, and `==> Release failed`
+	// must close the desktop lifecycle.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "docker", "api", "Dockerfile"), "FROM alpine:3.23\n")
@@ -222,13 +185,8 @@ func testReleaseRealRunDirtyWorktreeFails(t *testing.T) {
 }
 
 func testReleaseRealRunUnpushedUnreachableStaleTagNamesTheLeftoverAndItsRemedy(t *testing.T) {
-	// A previous release run tagged a commit and was interrupted
-	// before it pushed anything (e.g. the pod holding the worktree was
-	// replaced) — this run's own worktree has since moved past that
-	// commit, so origin/main never saw it either. That is a safely
-	// reclaimable leftover, not a real tag collision, so the refusal
-	// names the diagnosis and the exact remedy instead of only "already
-	// exists at <sha>, expected HEAD <sha>".
+	// An interrupted earlier run left a local tag on a commit origin/main never saw; the
+	// refusal names it as reclaimable and gives the remedy.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 	seedBareOrigin(t, setup)
@@ -250,10 +208,7 @@ func testReleaseRealRunUnpushedUnreachableStaleTagNamesTheLeftoverAndItsRemedy(t
 }
 
 func testReleaseRealRunATagCollisionReachableFromOriginGetsNoReclaimSuggestion(t *testing.T) {
-	// The mirror case: the tag's commit already reached origin/main (a
-	// genuine prior release, not a local leftover), so suggesting `git tag
-	// -d` would offer to discard part of the published, agreed history.
-	// The refusal must stay the plain "already exists" message.
+	// When the tag's commit is on origin/main, `git tag -d` must not be suggested.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 	seedBareOrigin(t, setup)

@@ -175,8 +175,7 @@ func newPlatformEnvRegisterCmd(store config.CloudReadStore, alias *string, deps 
 	return cmd
 }
 
-// parseLocalEnvironmentRef splits the TENANT/ENVIRONMENT form the definition
-// flags take, refusing anything that does not name exactly one environment.
+// parseLocalEnvironmentRef splits TENANT/ENVIRONMENT, refusing anything else.
 func parseLocalEnvironmentRef(ref string) (string, string, error) {
 	trimmed := strings.TrimSpace(ref)
 	tenant, environment, found := strings.Cut(trimmed, "/")
@@ -186,10 +185,7 @@ func parseLocalEnvironmentRef(ref string) (string, string, error) {
 	return strings.TrimSpace(tenant), strings.TrimSpace(environment), nil
 }
 
-// newPlatformEnvPushCmd re-uploads an already-registered local environment's
-// portable settings to the platform row its hosted marker names. It is the
-// sibling of `register --definition`: that one adopts a row and writes
-// revision 1, this one writes the next revision after local settings changed.
+// newPlatformEnvPushCmd uploads local settings as the next revision of the env's platform row.
 func newPlatformEnvPushCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "push TENANT ENVIRONMENT",
@@ -233,8 +229,7 @@ func newPlatformEnvPushCmd(store config.CloudReadStore, alias *string, deps clou
 	return cmd
 }
 
-// newPlatformEnvPullCmd pulls the platform's stored definition into a local
-// environment, creating it first when it does not exist on this machine.
+// newPlatformEnvPullCmd pulls the platform's definition into a local env, creating it if absent.
 func newPlatformEnvPullCmd(store config.CloudReadStore, alias *string, promptRunner shared.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var params platform.EnvDefinitionPullParams
 	var yes bool
@@ -357,11 +352,8 @@ func newPlatformEnvStopCmd(store config.CloudReadStore, alias *string, deps clou
 	return cmd
 }
 
-// pullConfirmation renders the two-sided-edit diff and asks about it. It
-// returns nil when the caller passed --yes or has no prompt available, which
-// makes erun-common refuse a two-sided edit rather than resolve it silently —
-// the non-interactive transports' behaviour, reused here rather than
-// re-implemented.
+// pullConfirmation asks about a two-sided edit. It returns nil under --yes or with no
+// prompt, which makes erun-common refuse the edit rather than resolve it silently.
 func pullConfirmation(ctx core.Context, promptRunner shared.PromptRunner, tenant, environment string, yes bool) func(config.EnvDefinitionPlan) (bool, error) {
 	if yes || promptRunner == nil {
 		return nil

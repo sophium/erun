@@ -58,10 +58,6 @@ func (r *stubTenantRepository) Current(_ context.Context) (model.Tenant, error) 
 	return r.current, nil
 }
 
-// stubBootstrapNameReconciler is TenantBootstrapNameReconciler with a fixed
-// answer, recording whether it was ever called — the assertion that matters
-// for the non-operations-caller test, since reaching the reconciler at all
-// would mean the route's OPERATIONS gate failed to hold.
 type stubBootstrapNameReconciler struct {
 	calls  int
 	result model.Tenant
@@ -76,8 +72,6 @@ func (r *stubBootstrapNameReconciler) ReconcileBootstrapName(_ context.Context, 
 func postCreateTenant(t *testing.T, tenants *stubTenantRepository, tenantType string, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/tenants", bytes.NewBufferString(body))
-	// Authentication middleware stamps the resolved security context before route
-	// code runs; the OPERATIONS gate reads TenantType from it.
 	req = req.WithContext(security.WithContext(req.Context(), security.Context{
 		TenantID:   "tenant-caller",
 		TenantType: tenantType,
@@ -116,10 +110,6 @@ func patchReconcileBootstrapName(t *testing.T, tenants *stubTenantRepository, re
 	return rec
 }
 
-// TestReconcileBootstrapNameForbidsNonOperationsCaller locks the
-// authorization boundary: reconciling the platform's own tenant name is
-// restricted to an operations tenant the same way createTenant is, and a
-// non-operations caller must never reach the reconciler at all.
 func TestReconcileBootstrapNameForbidsNonOperationsCaller(t *testing.T) {
 	for _, tenantType := range []string{string(model.TenantTypeCompany), ""} {
 		t.Run("type="+tenantType, func(t *testing.T) {
@@ -136,9 +126,6 @@ func TestReconcileBootstrapNameForbidsNonOperationsCaller(t *testing.T) {
 	}
 }
 
-// TestReconcileBootstrapNameOperationsCallerReachesReconciler proves the
-// converse: an operations caller's own resolved tenant reaches the
-// reconciler, and its answer is what the route returns.
 func TestReconcileBootstrapNameOperationsCallerReachesReconciler(t *testing.T) {
 	tenants := &stubTenantRepository{current: model.Tenant{TenantID: "tenant-caller", Name: "operations"}}
 	reconciler := &stubBootstrapNameReconciler{result: model.Tenant{TenantID: "tenant-caller", Name: "frs"}}
@@ -198,7 +185,6 @@ func TestCreateTenantOperationsCallerPersists(t *testing.T) {
 	if tenants.createCalls != 1 {
 		t.Fatalf("expected exactly one Create call, got %d", tenants.createCalls)
 	}
-	// The handler must thread the issuer mapping through to the repository.
 	if tenants.createParams.Issuer != "https://idp.example" || tenants.createParams.OrgFieldValue != "42" {
 		t.Fatalf("unexpected create params: %+v", tenants.createParams)
 	}
@@ -212,12 +198,6 @@ func TestCreateTenantOperationsCallerPersists(t *testing.T) {
 	}
 }
 
-// TestCreateTenantDuplicateIssuerReturnsConflict locks the 409's remedy text:
-// retrying this same create call with --org-field-key/--org-field-value can
-// never work (ON CONFLICT DO NOTHING leaves the existing issuer row's
-// org_field_key untouched), so the message must point at the operations-only
-// PATCH /v1/tenant-issuers conversion that actually rewrites it and backfills
-// the existing mapping.
 func TestCreateTenantDuplicateIssuerReturnsConflict(t *testing.T) {
 	tenants := &stubTenantRepository{err: repository.ErrConflict}
 	rec := postCreateTenant(t, tenants, string(model.TenantTypeOperations), `{
@@ -285,14 +265,7 @@ func TestListTenantsSurfacesRepositoryError(t *testing.T) {
 	}
 }
 
-// TestReachableTenantsHasNoOperationsGate is the route-level half of the
-// negative requirement: unlike createTenant/listTenants' admin branch, a
-// COMPANY-tenant caller must reach this handler at all, because it answers
-// about the caller's own identity, not the platform's tenant registry. The
-// real scoping guarantee (a caller only ever sees tenants their own verified
-// identity maps to) lives in TenantRepository.Reachable's SQL, exercised by
-// TestReachableOnlyReturnsTenantsMappedToCallersIdentity in the repository
-// package against a real database.
+// Scoping itself is enforced by TenantRepository.Reachable's SQL.
 func TestReachableTenantsHasNoOperationsGate(t *testing.T) {
 	want := []model.Tenant{{TenantID: "tenant-1", Name: "acme", Type: model.TenantTypeCompany}}
 	tenants := &stubTenantRepository{list: want}
@@ -330,12 +303,6 @@ func TestReachableTenantsSurfacesRepositoryError(t *testing.T) {
 	}
 }
 
-// TestCreateTenantRefusesAnUnresolvableIssuerMapping is the server-side half
-// of the switcher fix: registering a tenant whose org mapping contradicts its
-// issuer's org-scoping mode produces a tenant no token can ever resolve to,
-// discoverable today only as a failed sign-in. The refusal must reach the
-// caller as a distinguishable code with a message naming the claim, not as a
-// bare 500.
 func TestCreateTenantRefusesAnUnresolvableIssuerMapping(t *testing.T) {
 	tenants := &stubTenantRepository{err: &repository.UnresolvableIssuerMappingError{
 		Issuer:      "https://auth.example",

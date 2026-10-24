@@ -48,12 +48,7 @@ func NewUnexposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, 
 func runUnexposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot sharedpkg.ProjectFinderFunc, tenant, environment string, skipIfUnconfigured bool, servicesZone, platformNamespace, erunAlias string) error {
 	servicesZone = strings.TrimSpace(servicesZone)
 	platformNamespace = strings.TrimSpace(platformNamespace)
-	// --services-zone/--platform-namespace supply what a project checkout would
-	// otherwise resolve, precisely so a caller with no checkout at all (the
-	// hosted delete Job, which has no git repo to find — mirroring the expose
-	// side) can still run unexpose. Skip the project lookup entirely in
-	// that case, rather than failing on it before RunUnexposeService even gets
-	// a chance to use the override.
+	// The zone/namespace overrides let a caller with no checkout (the hosted delete Job) run unexpose.
 	projectRoot := ""
 	if servicesZone == "" && platformNamespace == "" {
 		root, err := findExposeProjectRoot(findProjectRoot)

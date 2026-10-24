@@ -12,12 +12,6 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// The lease tools are how an orchestrator driving detached work in this pod
-// tells the environment what it is doing. What matters here is the transport
-// contract: the server's own tenant/environment context is used when the caller
-// omits it, and every call reports the whole claim set rather than only the
-// lease it just moved.
-
 func isolateLeaseCache(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -39,9 +33,7 @@ func TestExclusiveLeaseToolRenewalSkipsTheOperatorPresenceGate(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("first take: %v", err)
 	}
-	// Record ssh activity directly to simulate an operator session, and
-	// confirm the *renewal* by the same id still succeeds - only a fresh
-	// claim is gated on operator presence.
+	// Only a fresh claim is gated on operator presence; a renewal still succeeds.
 	if err := activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
 		Tenant: "erun", Environment: "ux", Kind: config.ActivityKindSSH,
 	}); err != nil {
@@ -78,10 +70,7 @@ func TestExclusiveLeaseToolRefusesAFreshClaimWhileAnOperatorSSHSessionIsActive(t
 	}
 }
 
-// The lease id defaults to the name and is never sanitized by the caller,
-// but the store sanitizes it before persisting. A renewal must normalize the
-// raw id the same way before comparing against the stored lease, or a name
-// needing sanitization (a space, here) always misreads as a fresh claim.
+// The store sanitizes the id, so a renewal must normalize the raw id before comparing.
 func TestExclusiveLeaseRenewalNormalizesASanitizedIDForTheSameCaller(t *testing.T) {
 	isolateLeaseCache(t)
 	runtime := shared.RuntimeConfig{
@@ -114,9 +103,7 @@ func TestExclusiveLeaseRenewalNormalizesASanitizedIDForTheSameCaller(t *testing.
 	}
 }
 
-// The presence gate must still catch a genuinely fresh claim even when its id
-// happens to need sanitization - the fix must normalize both sides of the
-// comparison, not simply stop comparing.
+// Normalization must apply to both sides, not disable the comparison.
 func TestExclusiveLeaseFreshClaimWithASanitizedIDStillRefusedWhileOperatorPresent(t *testing.T) {
 	isolateLeaseCache(t)
 	runtime := shared.RuntimeConfig{
@@ -140,10 +127,7 @@ func TestExclusiveLeaseFreshClaimWithASanitizedIDStillRefusedWhileOperatorPresen
 	}
 }
 
-// The lease's persisted Scope is only trimmed and defaulted, never run
-// through the id's filename sanitisation, so an untrimmed scope - not a
-// sanitized one - is the analogous mismatch on this field: the renewal check
-// must trim it the same way the store does before comparing.
+// Scope is trimmed, not sanitized, so the renewal check must trim it too.
 func TestExclusiveLeaseRenewalNormalizesAnUntrimmedScopeForTheSameCaller(t *testing.T) {
 	isolateLeaseCache(t)
 	runtime := shared.RuntimeConfig{

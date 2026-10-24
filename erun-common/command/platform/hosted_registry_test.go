@@ -12,10 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// TestHostedRegistryProbeTreatsUnauthorizedAsAvailable pins the rule the whole
-// gate depends on: a token-authenticated registry answers an unauthenticated
-// GET /v2/ with 401, so reading a non-2xx status as "down" would report every
-// correctly configured registry as missing and refuse a choice that works.
+// A token-authenticated registry answers an unauthenticated GET /v2/ with 401.
 func TestHostedRegistryProbeTreatsUnauthorizedAsAvailable(t *testing.T) {
 	for _, status := range []int{http.StatusOK, http.StatusUnauthorized} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -32,8 +29,6 @@ func TestHostedRegistryProbeTreatsUnauthorizedAsAvailable(t *testing.T) {
 	}
 }
 
-// TestHostedRegistryProbeNamesAnUnresolvableHost checks the dead-end rule: an
-// unavailable status must name what it observed and carry a way forward.
 func TestHostedRegistryProbeNamesAnUnresolvableHost(t *testing.T) {
 	got := setup.ProbeHostedRegistryAt(context.Background(), nil, "https://registry.invalid.erun-does-not-exist./v2/", config.HostedRegistryHost)
 	if got.Available {
@@ -51,9 +46,6 @@ func TestHostedRegistryProbeNamesAnUnresolvableHost(t *testing.T) {
 	}
 }
 
-// TestErunRegistryRefusesWhenUnreachable: choosing the hosted registry must
-// fail at the choice, naming the reason, rather than writing an environment
-// whose every push resolves to a host that is not there.
 func TestErunRegistryRefusesWhenUnreachable(t *testing.T) {
 	runner := setup.BootstrapRunner{BootstrapInitDependencies: setup.BootstrapInitDependencies{
 		ProbeHostedRegistry: func(context.Context) setup.HostedRegistryStatus {
@@ -78,8 +70,6 @@ func TestErunRegistryRefusesWhenUnreachable(t *testing.T) {
 	}
 }
 
-// TestErunRegistryAcceptedWhenAvailable keeps the refusal from swallowing the
-// working case.
 func TestErunRegistryAcceptedWhenAvailable(t *testing.T) {
 	runner := setup.BootstrapRunner{BootstrapInitDependencies: setup.BootstrapInitDependencies{
 		ProbeHostedRegistry: func(context.Context) setup.HostedRegistryStatus {

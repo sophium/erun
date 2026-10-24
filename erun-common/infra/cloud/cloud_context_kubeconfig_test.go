@@ -19,10 +19,7 @@ func testCloudContextConfig() configpkg.CloudContextConfig {
 	}
 }
 
-// TestConfigureCloudKubeContextSubprocessModeStillExecutesRunKubectl pins the
-// default (unset) execution mode to the existing subprocess fallback, with
-// the real (unredacted) argv still reaching RunKubectl -- only the trace is
-// redacted, execution is unaffected.
+// Only the trace is redacted; RunKubectl still gets the real argv.
 func TestConfigureCloudKubeContextSubprocessModeStillExecutesRunKubectl(t *testing.T) {
 	ctx, _ := traceCapturingContext()
 	var calls [][]string
@@ -51,9 +48,6 @@ func TestConfigureCloudKubeContextSubprocessModeStillExecutesRunKubectl(t *testi
 	}
 }
 
-// TestLibraryConfigureCloudKubeContextWritesKubeconfig is the library path's
-// equivalence proof: starting from no kubeconfig file at all, it must land
-// the same cluster/authinfo/context fields the three subprocess calls would.
 func TestLibraryConfigureCloudKubeContextWritesKubeconfig(t *testing.T) {
 	kubeconfigPath := filepath.Join(t.TempDir(), "config")
 	t.Setenv("KUBECONFIG", kubeconfigPath)
@@ -65,9 +59,6 @@ func TestLibraryConfigureCloudKubeContextWritesKubeconfig(t *testing.T) {
 	assertCloudKubeContextEntryWritten(t, kubeconfigPath, "erun-001", "https://203.0.113.10:6443", "s3cret-admin-token-value")
 }
 
-// assertCloudKubeContextEntryWritten reloads the kubeconfig at path and
-// asserts the named cluster/authinfo/context entries carry the values the
-// three subprocess `kubectl config` calls would have written.
 func assertCloudKubeContextEntryWritten(t *testing.T, path, name, server, token string) {
 	t.Helper()
 	written, err := clientcmd.LoadFromFile(path)
@@ -91,11 +82,6 @@ func assertCloudKubeContextEntryWritten(t *testing.T, path, name, server, token 
 	}
 }
 
-// TestLibraryConfigureCloudKubeContextPreservesUnrelatedEntries proves the
-// library path merges into an existing kubeconfig the same way kubectl
-// itself would -- an unrelated cluster/context (and CurrentContext) already
-// on disk survives untouched, and re-running against the same name updates
-// that entry in place rather than duplicating it.
 func TestLibraryConfigureCloudKubeContextPreservesUnrelatedEntries(t *testing.T) {
 	kubeconfigPath := filepath.Join(t.TempDir(), "config")
 	seedKubeconfigWithOneEntry(t, kubeconfigPath, "existing-cluster", "existing-context")
@@ -119,8 +105,7 @@ func TestLibraryConfigureCloudKubeContextPreservesUnrelatedEntries(t *testing.T)
 		t.Fatalf("new cluster was not added: %+v", written.Clusters)
 	}
 
-	// Re-running against the same name (e.g. the instance's public IP
-	// changed on restart) must update the existing entry, not duplicate it.
+	// The public IP can change on restart; the entry must update, not duplicate.
 	updated := testCloudContextConfig()
 	updated.PublicIP = "203.0.113.20"
 	if err := libraryConfigureCloudKubeContext(updated); err != nil {
@@ -138,9 +123,6 @@ func TestLibraryConfigureCloudKubeContextPreservesUnrelatedEntries(t *testing.T)
 	}
 }
 
-// seedKubeconfigWithOneEntry writes a minimal existing kubeconfig with one
-// cluster/user/context (and CurrentContext set to it) so a merge test can
-// prove unrelated entries survive.
 func seedKubeconfigWithOneEntry(t *testing.T, path, clusterName, contextName string) {
 	t.Helper()
 	config := clientcmdapi.NewConfig()

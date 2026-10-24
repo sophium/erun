@@ -10,11 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// LoadProjectConfigForDockerSecrets reads the project config a build resolves
-// its `docker.secrets` from. It reports ok=false for a project that has no
-// `.erun/config.yaml` at all, which is not an error: such a project declares no
-// secrets, and its docker build command stays byte-for-byte what it was before
-// this key existed.
+// LoadProjectConfigForDockerSecrets reports ok=false, not an error, without a config.
 func LoadProjectConfigForDockerSecrets(projectRoot string) (config.ProjectConfig, bool, error) {
 	if strings.TrimSpace(projectRoot) == "" {
 		return config.ProjectConfig{}, false, nil
@@ -30,13 +26,8 @@ func LoadProjectConfigForDockerSecrets(projectRoot string) (config.ProjectConfig
 	return cfg, true, nil
 }
 
-// NormalizeDockerBuildSecrets trims the configured entries, drops the wholly
-// blank ones a YAML list literal can leave behind, and refuses anything that
-// would not mean what it says.
-//
-// Validation is a trust-boundary concern: the config file is written by hand,
-// and a malformed entry that is passed through silently is how a build ends up
-// mounting nothing while reporting success. Each refusal names the remedy.
+// NormalizeDockerBuildSecrets refuses malformed entries, which would otherwise
+// mount nothing while the build reports success.
 func NormalizeDockerBuildSecrets(secrets []config.DockerBuildSecret) ([]config.DockerBuildSecret, error) {
 	out := make([]config.DockerBuildSecret, 0, len(secrets))
 	for i, secret := range secrets {
@@ -54,8 +45,6 @@ func NormalizeDockerBuildSecrets(secrets []config.DockerBuildSecret) ([]config.D
 	return out, nil
 }
 
-// normalizeDockerBuildSecret trims one configured entry and reports whether it
-// declares anything at all, refusing one that would not mean what it says.
 func normalizeDockerBuildSecret(index int, secret config.DockerBuildSecret) (config.DockerBuildSecret, bool, error) {
 	secret.ID = strings.TrimSpace(secret.ID)
 	secret.Env = strings.TrimSpace(secret.Env)
@@ -79,10 +68,7 @@ func normalizeDockerBuildSecret(index int, secret config.DockerBuildSecret) (con
 	return secret, true, nil
 }
 
-// validateDockerSecretFields refuses a field value docker would misread. docker
-// parses the --secret value as a comma-separated key=value list, so a comma
-// inside a field would be read as the start of another pair and silently change
-// which secret gets mounted.
+// validateDockerSecretFields refuses commas, which docker reads as a new pair.
 func validateDockerSecretFields(secret config.DockerBuildSecret) error {
 	for _, field := range []struct{ name, value string }{
 		{"id", secret.ID},
@@ -96,9 +82,7 @@ func validateDockerSecretFields(secret config.DockerBuildSecret) error {
 	return nil
 }
 
-// DescribeDockerBuildSecrets renders a resolved secret list for a trace line.
-// Only references appear here — an id and the variable or path it reads from —
-// so the rendered form is safe to log.
+// DescribeDockerBuildSecrets renders only references, so it is safe to log.
 func DescribeDockerBuildSecrets(secrets []config.DockerBuildSecret) string {
 	parts := make([]string, 0, len(secrets))
 	for _, secret := range secrets {
@@ -111,18 +95,8 @@ func DescribeDockerBuildSecrets(secrets []config.DockerBuildSecret) string {
 	return strings.Join(parts, ", ")
 }
 
-// ApplyDockerSecrets resolves this build's declared build secrets onto the
-// build spec, and fails the build when one of them cannot actually be supplied.
-//
-// Failing is the point, and it is the reason this is an error rather than a
-// warning. A declared secret that is absent at build time does not make
-// BuildKit mount nothing loudly: the Dockerfile's own `if [ -f
-// /run/secrets/<id> ]` guard — or a mount left at its default
-// `required=false` — degrades to skipping precisely the work the secret exists
-// to enable. The build then reports success having verified less than the
-// project asked it to, which is the one outcome a build must never have. An
-// error here names the config key, the id, and the missing variable or path
-// instead, and the remedy is a one-line config or environment change.
+// ApplyDockerSecrets fails on a missing secret: a Dockerfile's `-f` guard
+// would otherwise silently skip the work and the build would report success.
 func ApplyDockerSecrets(ctx core.Context, projectRoot, environment string, build *DockerBuildSpec) error {
 	cfg, ok, err := LoadProjectConfigForDockerSecrets(projectRoot)
 	if err != nil {
@@ -149,8 +123,6 @@ func ApplyDockerSecrets(ctx core.Context, projectRoot, environment string, build
 	return nil
 }
 
-// validateDockerSecretsAvailable refuses a declared secret that cannot be
-// supplied, naming what is missing and the one-line remedy.
 func validateDockerSecretsAvailable(secrets []config.DockerBuildSecret) error {
 	for _, secret := range secrets {
 		if secret.Env != "" {
@@ -166,11 +138,7 @@ func validateDockerSecretsAvailable(secrets []config.DockerBuildSecret) error {
 	return nil
 }
 
-// DockerSecretArgs renders each declared build secret as the
-// `--secret <reference>` pair BuildKit expects, for the docker build argv.
-// Every reference names where the credential comes from — an environment
-// variable, or a path — never what it is, so nothing secret is ever placed on
-// the command line.
+// DockerSecretArgs names where each credential comes from, never its value.
 func DockerSecretArgs(secrets []config.DockerBuildSecret) []string {
 	args := make([]string, 0, len(secrets)*2)
 	for _, secret := range secrets {
@@ -179,9 +147,6 @@ func DockerSecretArgs(secrets []config.DockerBuildSecret) []string {
 	return args
 }
 
-// dockerSecretArg renders one declared build secret as the value BuildKit's
-// --secret expects: `id=<id>,env=<VAR>` or `id=<id>,src=<path>`. Both forms
-// name where the credential comes from, never what it is.
 func dockerSecretArg(secret config.DockerBuildSecret) string {
 	if secret.Env != "" {
 		return "id=" + secret.ID + ",env=" + secret.Env

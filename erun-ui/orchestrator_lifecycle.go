@@ -10,10 +10,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
-// CreateOrchestrator persists a new orchestrator: it prepares each linked env's
-// host review directory (creating the mirror and wiring its sync where the env
-// needs one), then stores the definition. Created stopped — StartOrchestrator
-// spawns the session.
+// CreateOrchestrator persists a new, stopped orchestrator and wires each env's review directory.
 func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput, dirs []string, alias string, launch orchestratorLaunchInput) (orchestratorInfo, error) {
 	refs, dirRefs, err := a.resolveOrchestratorScope(envs, dirs)
 	if err != nil {
@@ -40,16 +37,8 @@ func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput, dirs 
 	return orchestratorInfoWithLaunchSettings(info, launch, false), nil
 }
 
-// UpdateOrchestrator edits an existing orchestrator's linked environments, the
-// directories it names for itself, its name, the platform alias it acts as, and
-// its gateway, model and effort, re-wiring sync for the current set.
-//
-// Every field comes from the caller rather than being read back off the stored
-// definition, because the save below replaces the whole entry: a field this
-// literal omits is not left alone, it is erased. alias and the launch settings
-// in particular are settable from the terminal (`erun orchestrator set-*`) as
-// well as from this dialog, so the dialog must send back what it was shown even
-// when the operator edited something else entirely.
+// UpdateOrchestrator replaces the whole entry, so every field comes from the caller:
+// the dialog must send back what it was shown, including terminal-set values.
 func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput, dirs []string, alias string, launch orchestratorLaunchInput) (orchestratorInfo, error) {
 	id = strings.TrimSpace(id)
 	refs, dirRefs, err := a.resolveOrchestratorScope(envs, dirs)
@@ -87,17 +76,11 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput, d
 	return orchestratorInfoWithLaunchSettings(info, launch, a.orchestratorLaunchSettingsChanged(configs[index], catalog)), nil
 }
 
-// updatedOrchestratorRunningSnapshot is UpdateOrchestrator's own read of live
-// session state, split out to keep that function's complexity within budget.
-// "stopped" (the zero snapshots, restartRequired false) when nothing is
-// running for id.
+// updatedOrchestratorRunningSnapshot reads live session state; zero when nothing runs.
 func (a *App) updatedOrchestratorRunningSnapshot(id string, configuredEnvs []configpkg.OrchestratorEnvConfig) (status string, sessionID int, busy orchestratorBusySnapshot, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, restartRequired, roleChanged bool) {
 	info, ok := a.runningOrchestratorInfo(id)
 	if !ok {
-		// Not running is not "never nudged": read the persisted cumulative
-		// history the same way ListOrchestrators' stopped branch does, so
-		// saving an edit to a stopped orchestrator does not flash its hover
-		// card back to "Not nudged".
+		// Not running is not "never nudged": read the persisted history.
 		entry, _, unreadable := orchestratorNudgeHistoryFor(a.deps.orchestratorNudgeHistoryPath, id)
 		return "stopped", 0, orchestratorBusySnapshot{}, orchestratorShellSnapshot{}, orchestratorPacingSnapshotFromHistory(entry, unreadable), false, false
 	}
@@ -114,13 +97,7 @@ func (a *App) updatedOrchestratorRunningSnapshot(id string, configuredEnvs []con
 		LastCappedAtUnix:    info.LastCappedAtUnix,
 		HistoryUnreadable:   info.NudgeHistoryUnreadable,
 	}
-	// The session already running still holds whatever it was spawned with;
-	// saving a different scope here does not touch it (see
-	// orchestratorScopeMismatch). Restart is the only thing that re-wires it,
-	// so the operator is told rather than shown "running" as if the save took
-	// effect immediately. A role-only edit doesn't affect wiring the same way
-	// (see orchestratorRolesChanged), but is still reported so the dialog can
-	// tell the operator their edit is not guaranteed live yet.
+	// The running session keeps its spawned scope until Restart, so report that.
 	if wired, wiredScope, ok := a.orchestratorWiredEnvs(id); ok {
 		restartRequired = orchestratorScopeMismatch(wiredScope, configuredEnvs)
 		roleChanged = orchestratorRolesChanged(wired, configuredEnvs)
@@ -128,9 +105,7 @@ func (a *App) updatedOrchestratorRunningSnapshot(id string, configuredEnvs []con
 	return "running", info.SessionID, busy, shell, pacing, restartRequired, roleChanged
 }
 
-// StartOrchestrator opens a persisted orchestrator: it attaches to the
-// orchestrator's Claude background agent, creating the agent when there is
-// none, and reuses a PTY that is already attached.
+// StartOrchestrator attaches to the orchestrator's background agent, creating it if needed.
 func (a *App) StartOrchestrator(id string, cols, rows int) (orchestratorInfo, error) {
 	id = strings.TrimSpace(id)
 	if info, ok := a.runningOrchestratorInfo(id); ok {
@@ -156,10 +131,8 @@ func (a *App) StartOrchestrator(id string, cols, rows int) (orchestratorInfo, er
 	})
 }
 
-// refreshLinkedEnvDirectories re-derives each local-agent link's review directory
-// from the env config as a session starts, so an orchestrator keeps reviewing a
-// worktree whose repository path moved after it was linked. A mirror path is the
-// operator's own choice, so it is left exactly as persisted.
+// refreshLinkedEnvDirectories re-derives local-agent worktree paths, which can move;
+// mirror paths are the operator's choice and stay as persisted.
 func (a *App) refreshLinkedEnvDirectories(envs []configpkg.OrchestratorEnvConfig) []configpkg.OrchestratorEnvConfig {
 	out := make([]configpkg.OrchestratorEnvConfig, 0, len(envs))
 	for _, ref := range envs {
@@ -174,16 +147,9 @@ func (a *App) refreshLinkedEnvDirectories(envs []configpkg.OrchestratorEnvConfig
 	return out
 }
 
-// RestartOrchestrator stops a persisted orchestrator's background agent and
-// starts it again, so the operator can recycle a stuck agent, or apply changed
-// settings, without losing context: the agent comes back on its own current
-// conversation and re-reads the settings and MCP config written for it. The
-// definition is resolved before teardown because stopOrchestratorSession
-// forgets the live session, and a transient (Investigate) orchestrator has no
-// persisted definition to respawn — findOrchestratorConfig then returns an
-// error, so transients are intentionally not restartable. The launch is
-// resolved before teardown too, so settings that cannot launch leave the
-// running session in place rather than stopping it for nothing.
+// RestartOrchestrator restarts the background agent on its current conversation.
+// Definition and launch resolve before teardown, so bad settings leave the session
+// running; transients have no definition and are not restartable.
 func (a *App) RestartOrchestrator(id string, cols, rows int) (orchestratorInfo, error) {
 	id = strings.TrimSpace(id)
 	def, err := a.findOrchestratorConfig(id)
@@ -221,10 +187,8 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 	return orchestratorInfoFor(session.id, session.name, session.alias, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, a.envActivity, a.envUsage, false, false), true
 }
 
-// orchestratorWiredEnvs returns the environments id's live session was opened
-// with and the scope its agent's MCP config actually holds — what the agent
-// last started with, not necessarily what the orchestrator is configured with
-// right now — or ok=false when nothing is running for it.
+// orchestratorWiredEnvs returns what the live session started with, which may differ
+// from the current config.
 func (a *App) orchestratorWiredEnvs(id string) ([]configpkg.OrchestratorEnvConfig, []string, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -236,9 +200,7 @@ func (a *App) orchestratorWiredEnvs(id string) ([]configpkg.OrchestratorEnvConfi
 	return session.envs, session.wiredScope, true
 }
 
-// orchestratorScopeOf renders linked environments as sorted tenant/environment
-// pairs. Review directories are deliberately left out: where an environment is
-// reviewed on this host can move without changing what the orchestrator drives.
+// Review directories are left out: they can move without changing what is driven.
 func orchestratorScopeOf(envs []configpkg.OrchestratorEnvConfig) []string {
 	out := make([]string, 0, len(envs))
 	for _, env := range envs {
@@ -252,10 +214,8 @@ func orchestratorScopeOf(envs []configpkg.OrchestratorEnvConfig) []string {
 	return out
 }
 
-// unreachableOrchestratorIDs names every configured orchestrator this desktop
-// cannot pace from here: one report read each, since the question is whether the
-// orchestrator's OWN hooks are reporting a session, which no in-memory state can
-// answer. See orchestratorPacingUnreachable.
+// unreachableOrchestratorIDs reads each orchestrator's own hook report; no in-memory
+// state can answer that.
 func unreachableOrchestratorIDs(configs []configpkg.OrchestratorConfig, now time.Time) map[string]bool {
 	out := make(map[string]bool, len(configs))
 	for _, config := range configs {
@@ -268,23 +228,14 @@ func unreachableOrchestratorIDs(configs []configpkg.OrchestratorConfig, now time
 	return out
 }
 
-// ListOrchestrators merges the persisted definitions (each tagged running or
-// stopped) with any transient running sessions (Investigate), id-ordered.
+// ListOrchestrators merges persisted definitions with transient sessions, id-ordered.
 func (a *App) ListOrchestrators() []orchestratorInfo {
-	// The catalog comes from the same read: each running row resolves its
-	// definition against it to tell whether a restart would change anything.
 	configs, catalog, err := a.loadOrchestratorConfigsWithCatalog()
 	if err != nil {
 		configs, catalog = nil, nil
 	}
-	// Read once for the whole list rather than once per orchestrator: the
-	// "stopped" branch below has no live session to read cumulative pacing
-	// history from, so it falls back to this persisted record instead of the
-	// zero snapshot a stopped orchestrator otherwise reported unconditionally.
+	// File reads happen before taking a.mu.
 	historyEntries, historyUnreadable := readOrchestratorNudgeHistoryEntries(a.deps.orchestratorNudgeHistoryPath)
-	// Gathered before the lock for the same reason the history above is: one
-	// small report read per configured orchestrator, and the result is only
-	// consulted for the ones this desktop turns out to hold no session for.
 	unreachable := unreachableOrchestratorIDs(configs, time.Now())
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -297,9 +248,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		shell := orchestratorShellSnapshot{}
 		historyEntry, _ := orchestratorNudgeHistoryEntryIn(historyEntries, config.ID)
 		pacing := orchestratorPacingSnapshotFromHistory(historyEntry, historyUnreadable)
-		// Only the stopped branch can be unpaced-but-running: a running one is
-		// a session this desktop holds, and the branch below rebuilds the
-		// snapshot from that session, which drops this flag by construction.
+		// Only a stopped row can be unpaced-but-running.
 		pacing.Unreachable = unreachable[config.ID]
 		restartRequired := false
 		roleChanged := false
@@ -312,10 +261,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 				busy = orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}
 				shell = orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 				pacing = orchestratorPacingSnapshotFromSession(session)
-				// The persisted config is the operator's intent; the session
-				// still runs on whatever it was spawned with. A poll that
-				// shows the new set as if it were live is exactly the defect
-				// this flag exists to stop (see orchestratorScopeMismatch).
+				// The session still runs on its spawned scope.
 				restartRequired = orchestratorScopeMismatch(session.wiredScope, config.Environments)
 				roleChanged = orchestratorRolesChanged(session.envs, config.Environments)
 				launchSettingsChanged = orchestratorLaunchDiffers(config, catalog, session.launched)
@@ -341,10 +287,8 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 	return out
 }
 
-// StopOrchestrator ends a running session while keeping a persisted definition:
-// it detaches the desktop's terminal and stops the orchestrator's background
-// agent, whose conversation is kept for the next start. A transient session is
-// forgotten entirely.
+// StopOrchestrator keeps a persisted definition and agent conversation; a transient
+// session is forgotten.
 func (a *App) StopOrchestrator(id string) error {
 	id = strings.TrimSpace(id)
 	stopped := a.stopOrchestratorSession(id)
@@ -376,25 +320,15 @@ func (a *App) stopOrchestratorSession(id string) bool {
 	if managed != nil {
 		_ = a.closeManaged(managed)
 	}
-	// Stopping is the operator saying this orchestrator should not come back, so
-	// it stays closed on every later launch. A restart clears and re-records in
-	// the same breath, which is the same statement about what is open.
+	// A stopped orchestrator stays closed on later launches.
 	if err := clearOpenOrchestrator(a.deps.orchestratorOpenPath, id); err != nil {
 		log.Printf("erun-app: clear open orchestrator %s: %v", id, err)
 	}
 	return session != nil || managed != nil
 }
 
-// DeleteOrchestrator stops the session if running, removes the orchestrator's
-// background agent, and removes the persisted definition. The linked
-// environments' sync config is left intact, and so is the agent's conversation
-// transcript, which is Claude's.
-//
-// It also clears this id's persisted nudge history: the id is a
-// name-derived slug (uniqueOrchestratorID), not a uuid, so creating a new
-// orchestrator with the same name after this delete reuses it. Leaving the
-// old record in place would hand that unrelated new orchestrator a nudge
-// history that was never its own.
+// DeleteOrchestrator also clears the nudge history: ids are name-derived and get
+// reused by a new orchestrator of the same name.
 func (a *App) DeleteOrchestrator(id string) error {
 	id = strings.TrimSpace(id)
 	a.stopOrchestratorSession(id)
@@ -417,8 +351,6 @@ func (a *App) DeleteOrchestrator(id string) error {
 	return a.saveOrchestratorConfigs(filtered)
 }
 
-// uniqueOrchestratorID derives a stable, human-readable id from the name that
-// does not collide with an existing definition.
 func uniqueOrchestratorID(name string, existing []configpkg.OrchestratorConfig) string {
 	stem := orchestratorIDStem(name)
 	taken := make(map[string]struct{}, len(existing))
@@ -434,8 +366,6 @@ func uniqueOrchestratorID(name string, existing []configpkg.OrchestratorConfig) 
 	}
 }
 
-// orchestratorIDStem slugifies name into a stable id stem, falling back to
-// "orchestrator" when the name carries no id-safe characters.
 func orchestratorIDStem(name string) string {
 	var slug strings.Builder
 	for _, r := range strings.ToLower(strings.TrimSpace(name)) {

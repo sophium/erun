@@ -10,13 +10,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// loadTenantDashboardReviewFilterCounts reports how many reviews are Mine and
-// how many are Waiting on me, independent of whichever filter the caller
-// currently has applied: the Reviews tab's filter buttons need the
-// distribution visible before the caller clicks either one, not only
-// after. Best effort like the other row-enrichment reads: a restricted or
-// failing count simply leaves the corresponding field unset rather than
-// reporting a false zero.
+// loadTenantDashboardReviewFilterCounts counts Mine and Waiting regardless of the
+// active filter; a failed count stays unset, never a false zero.
 func loadTenantDashboardReviewFilterCounts(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, userID string) {
 	if strings.TrimSpace(userID) == "" || restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviews) != "" {
 		return
@@ -31,10 +26,7 @@ func loadTenantDashboardReviewFilterCounts(ctx context.Context, client *platform
 	}
 }
 
-// reviewsLoadOutcome carries the Reviews panel's own result forward to the
-// Builds panel, which needs the same review list but must not blank on a
-// restriction or failure the Reviews panel already reported for a different
-// reason than its own.
+// reviewsLoadOutcome lets the Builds panel reuse the review list without inheriting its restriction.
 type reviewsLoadOutcome struct {
 	reviews    []platformclient.PlatformReview
 	err        error
@@ -59,12 +51,7 @@ func loadTenantDashboardReviews(ctx context.Context, client *platformclient.Plat
 	return reviewsLoadOutcome{reviews: reviews}
 }
 
-// loadTenantDashboardReviewThreadCounts enriches each review row with its
-// unresolved-thread count, so "is this review actually finished" is readable
-// from the list itself, not only inside the detail dialog. A review is left
-// without a count (rather than a false zero) when the caller cannot read
-// comments at all, or when its own comment read failed — supplemental detail
-// on a row, not worth a panel error the way the Reviews/Builds panels get.
+// A review without a readable comment list gets no count rather than a false zero.
 func loadTenantDashboardReviewThreadCounts(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, reviewsOutcome reviewsLoadOutcome) {
 	if reviewsOutcome.restricted != "" || reviewsOutcome.err != nil {
 		return
@@ -82,15 +69,8 @@ func loadTenantDashboardReviewThreadCounts(ctx context.Context, client *platform
 	}
 }
 
-// maxConcurrentReviewCommentReads mirrors maxConcurrentReviewBuildReads for
-// the same reason: bound the per-review /comments reads a big tenant's
-// listing pays for, inside the one dashboard load's shared timeout.
 const maxConcurrentReviewCommentReads = 8
 
-// fetchReviewThreadCountsConcurrently reads every review's comments in
-// parallel, bounded by maxConcurrentReviewCommentReads, mirroring
-// fetchReviewBuildsConcurrently's shape. A review whose comment read fails is
-// simply absent from the returned map rather than reported as zero.
 func fetchReviewThreadCountsConcurrently(ctx context.Context, client *platformclient.PlatformClient, reviews []platformclient.PlatformReview) map[string]int {
 	counts := make(map[string]int, len(reviews))
 	semaphore := make(chan struct{}, maxConcurrentReviewCommentReads)
@@ -120,16 +100,10 @@ func fetchReviewThreadCountsConcurrently(ctx context.Context, client *platformcl
 	return counts
 }
 
-// maxConcurrentReviewBuildReads bounds how many /builds requests run at once,
-// so a tenant with many reviews still fits comfortably inside one request's
-// share of tenantDashboardTimeout instead of paying N sequential round trips.
+// maxConcurrentReviewBuildReads keeps a big tenant within tenantDashboardTimeout.
 const maxConcurrentReviewBuildReads = 8
 
-// fetchReviewBuildsConcurrently reads every review's builds in parallel,
-// bounded by maxConcurrentReviewBuildReads, and flattens the results in the
-// review order. Every read runs to completion regardless of another review's
-// failure, so the result keeps every review that succeeded and still reports
-// the first failure, independent of where in the list it landed.
+// Every read runs to completion; the first failure is reported in review order.
 func fetchReviewBuildsConcurrently(ctx context.Context, client *platformclient.PlatformClient, reviews []platformclient.PlatformReview) ([]uiTenantDashboardBuild, error) {
 	perReview := make([][]platformclient.PlatformBuild, len(reviews))
 	semaphore := make(chan struct{}, maxConcurrentReviewBuildReads)
@@ -188,11 +162,7 @@ func tenantDashboardReviews(reviews []platformclient.PlatformReview, usernames m
 	return converted
 }
 
-// tenantDashboardReviewWithUsername mirrors tenantDashboardCommentWithUsername:
-// the read paths (listings, single-review load) have a resolved user
-// directory to enrich with; the write paths in tenant_review_write.go return
-// the review the caller themselves just acted on and use the base converter
-// directly, unresolved.
+// Write paths use the base converter unresolved.
 func tenantDashboardReviewWithUsername(review platformclient.PlatformReview, usernames map[string]string) uiTenantDashboardReview {
 	converted := tenantDashboardReview(review)
 	converted.AuthorUsername = usernames[review.AuthorUserID]

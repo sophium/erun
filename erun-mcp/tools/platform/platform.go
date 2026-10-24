@@ -130,10 +130,8 @@ type PlatformIdentityOrgResult struct {
 	Trace   []string                   `json:"trace,omitempty"`
 }
 
-// PlatformIdentityOrgCreateTool creates an organization on the platform's own
-// IdP -- the org an org-scoped tenant mapping needs before platform_tenant_create
-// can produce one any token will ever resolve to. Requires an
-// operations-tenant caller.
+// PlatformIdentityOrgCreateTool creates an org on the platform's IdP; requires
+// an operations-tenant caller.
 func PlatformIdentityOrgCreateTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformIdentityOrgCreateInput) (*mcp.CallToolResult, PlatformIdentityOrgResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input PlatformIdentityOrgCreateInput) (*mcp.CallToolResult, PlatformIdentityOrgResult, error) {
 		if strings.TrimSpace(input.Name) == "" {
@@ -164,10 +162,8 @@ type PlatformTenantIssuerResult struct {
 	Trace        []string                            `json:"trace,omitempty"`
 }
 
-// PlatformTenantRepairOrgMappingTool fixes a tenant already stuck with an
-// unresolvable (issuer, org) mapping -- a tenant that lists but that no token
-// can ever authenticate into. There is no tenant delete on the platform at
-// all, so this is the only way back short of direct database access.
+// PlatformTenantRepairOrgMappingTool fixes an unresolvable (issuer, org)
+// mapping; the platform has no tenant delete.
 func PlatformTenantRepairOrgMappingTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformTenantRepairOrgMappingInput) (*mcp.CallToolResult, PlatformTenantIssuerResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input PlatformTenantRepairOrgMappingInput) (*mcp.CallToolResult, PlatformTenantIssuerResult, error) {
 		if strings.TrimSpace(input.Issuer) == "" || strings.TrimSpace(input.OrgFieldKey) == "" || strings.TrimSpace(input.OrgFieldValue) == "" {
@@ -402,20 +398,12 @@ func PlatformEnvStopTool(runtime shared.RuntimeConfig) func(context.Context, *mc
 type PlatformEnvDeleteInput struct {
 	shared.PlatformAliasInput
 	EnvironmentID string `json:"environmentId" jsonschema:"environment id to delete"`
-	// Confirm replaces the CLI's interactive confirmation prompt: MCP-exposed
-	// paths never prompt, so the caller must explicitly opt in to the
-	// irreversible action.
+	// Confirm stands in for the CLI's prompt; MCP never prompts.
 	Confirm bool `json:"confirm" jsonschema:"must be true to actually delete; required because this call never prompts. Ignored when preview is true."`
 }
 
-// PlatformEnvDeleteTool starts an environment's delete and returns
-// immediately rather than waiting for the namespace to actually disappear: a
-// namespace stuck on an unsatisfiable finalizer can otherwise wedge
-// for as long as Kubernetes is willing to sit in Terminating. The returned
-// Environment reflects the claim (status "deleting"); call platform_env_get
-// to watch it converge to gone (not found) or "deletion-blocked" (its
-// deleteError names why). Calling delete again against a blocked or
-// still-deleting environment retries it.
+// PlatformEnvDeleteTool returns once the delete is claimed, since a stuck
+// finalizer can wedge it indefinitely; poll platform_env_get, and call again to retry.
 func PlatformEnvDeleteTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformEnvDeleteInput) (*mcp.CallToolResult, PlatformEnvResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input PlatformEnvDeleteInput) (*mcp.CallToolResult, PlatformEnvResult, error) {
 		if strings.TrimSpace(input.EnvironmentID) == "" {
@@ -493,9 +481,7 @@ type PlatformContextCreateInput struct {
 	InstanceType       string `json:"instanceType,omitempty" jsonschema:"instance type for the context's VM"`
 	DiskType           string `json:"diskType,omitempty" jsonschema:"root disk type"`
 	DiskSizeGB         int    `json:"diskSizeGb,omitempty" jsonschema:"root disk size in GB"`
-	// PlanOnly is the platform's own server-side preview (it still reaches the
-	// platform and resolves a real plan); Preview is this tool's local one and
-	// skips the network call entirely. The two are independent.
+	// PlanOnly is the platform's server-side preview; Preview skips the network.
 	PlanOnly bool `json:"planOnly,omitempty" jsonschema:"ask the platform to resolve and return the bootstrap plan without creating anything, still a real API call unlike preview"`
 }
 

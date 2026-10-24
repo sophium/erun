@@ -51,16 +51,11 @@ func TestSetOrchestratorAliasWritesAndClears(t *testing.T) {
 		t.Fatalf("persisted alias = %q", got)
 	}
 
-	// Other fields must survive the write: the alias is one field of the
-	// orchestrator, not a replacement for it.
 	if len(store.config.Orchestrators[0].Environments) != 1 || store.config.Orchestrators[0].Name != "Orchestrator One" {
 		t.Fatalf("write dropped the rest of the orchestrator: %+v", store.config.Orchestrators[0])
 	}
 
-	// Running the same write twice converges rather than accumulating: the
-	// alias is a field of an existing entry, so a repeated set must leave one
-	// orchestrator carrying one alias, never a second entry or a duplicate
-	// mapping.
+	// A repeated set converges to one entry with one alias.
 	mustSetOrchestratorAlias(t, store, "orch-1", "erun+erunpaas.com@erun")
 	if len(store.config.Orchestrators) != 1 {
 		t.Fatalf("a repeated write changed the orchestrator count: %+v", store.config.Orchestrators)
@@ -96,10 +91,6 @@ func TestSetOrchestratorAliasMissingOrchestratorID(t *testing.T) {
 	}
 }
 
-// TestSetOrchestratorAliasDryRunValidatesAndWritesNothing pins the dry-run
-// contract the integration scenarios depend on: the same resolution runs, the
-// write does not, and an alias a real run would refuse is refused here too --
-// a dry run that planned a write it cannot perform would be worse than none.
 func TestSetOrchestratorAliasDryRunValidatesAndWritesNothing(t *testing.T) {
 	store := newOrchestratorAliasStubStore()
 	store.saved = false
@@ -135,11 +126,7 @@ func mustSetOrchestratorAlias(t *testing.T, store *orchestratorAliasStubStore, i
 	return orchestrator
 }
 
-// orchestratorAliasStubStore is the minimal OrchestratorAliasStore the
-// set-alias writer needs: one orchestrator, and a cloudproviders list holding
-// one erun-type alias and one of another type. saved records whether a write
-// actually reached the config, so a refused alias can be shown to have written
-// nothing.
+// saved records whether a write reached the config.
 type orchestratorAliasStubStore struct {
 	config configpkg.ERunConfig
 	saved  bool

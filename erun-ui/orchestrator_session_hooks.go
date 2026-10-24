@@ -7,37 +7,16 @@ import (
 	"strings"
 )
 
-// orchestratorContractFallback is printed when the shared CLAUDE.md is somehow
-// missing, so a session still boots knowing it is under the contract.
 const orchestratorContractFallback = "You are a host-side erun orchestrator. Read and follow the CLAUDE.md in this directory and the erun-orchestrate skill before doing anything, even a trivial-looking question."
 
-// orchestratorSkillHookCommand is the SessionStart hook command written into the
-// orchestrators root's .claude/settings.json. It INJECTS the operating contract
-// into the session by printing the shared CLAUDE.md to plain stdout (added to the
-// session context), so an orchestrator always has its contract in context instead
-// of being asked to load a skill it can skip. Plain stdout — not JSON — sidesteps
-// the 10,000-char additionalContext cap.
-//
-// Runs through node rather than cat/echo chained with a POSIX shell: this is a
-// SessionStart hook, and Windows' own hook shell (PowerShell) parses
-// `[ -n ... ]` test syntax as something else entirely rather than executing
-// it. Node reads each file directly and writes its bytes straight to stdout,
-// so neither file's body ever passes through the shell at all -- only the
-// two forward-slashed paths are baked into the script, and node resolves
-// identically regardless of the host's own hook shell.
+// orchestratorSkillHookCommand prints the shared CLAUDE.md to plain stdout,
+// avoiding the 10,000-char additionalContext cap. It runs through node because
+// Windows' PowerShell hook shell misparses POSIX test syntax.
 func orchestratorSkillHookCommand(dir string) string {
 	claudeMd := filepath.ToSlash(filepath.Join(dir, "CLAUDE.md"))
-	// The per-orchestrator layer, injected AFTER the shared contract so the
-	// ordering is the precedence rule: a role file can add to the common
-	// contract or override a line of it, and a reader can see which won.
-	//
-	// ERUN_ORCHESTRATOR_ID is set at launch and resolved at run time, since
-	// this settings file is shared by every orchestrator. A transient
-	// (Investigate) session has an empty id by design, so the guard skips it
-	// and it gets the shared contract only.
-	//
-	// Absent file is a silent no-op: most orchestrators will not have one, and
-	// a missing file must neither fail the hook nor write to stderr.
+	// The role file is injected after the shared contract, so ordering is the
+	// precedence rule. ERUN_ORCHESTRATOR_ID resolves at run time because this
+	// settings file is shared; an empty id or missing file is a silent no-op.
 	roleDir := filepath.ToSlash(dir)
 	script := `try{const fs=require("fs");` +
 		`try{process.stdout.write(fs.readFileSync("` + claudeMd + `","utf8"));}` +
@@ -49,9 +28,7 @@ func orchestratorSkillHookCommand(dir string) string {
 }
 
 // orchestratorRoleFileSeed is written once into CLAUDE.<id>.md and never
-// rewritten. Deliberately the inverse of the shared CLAUDE.md, which erun
-// overwrites on every launch: one layer is erun's and always current, the other
-// is the operator's and always preserved. That asymmetry is the feature.
+// rewritten, unlike the shared CLAUDE.md.
 const orchestratorRoleFileSeed = `<!--
 This file is yours. erun creates it once and never overwrites it, unlike the
 shared CLAUDE.md in this directory, which erun rewrites on every launch.
@@ -70,15 +47,8 @@ contradict it and go stale the next time the orchestrator's links change.
 -->
 `
 
-// ensureOrchestratorRoleFile creates the per-orchestrator role file if it is
-// absent and leaves it strictly alone otherwise. Called on every launch rather
-// than only at creation, so an orchestrator that already existed gets one too.
-// An empty id (a transient session) seeds nothing.
-//
-// The id is slugified to [a-z0-9-] by orchestratorIDStem, so for any id erun
-// mints the filename is safe by construction; it is still resolved with an exact
-// filepath.Join and never a glob, so a hand-edited config.yaml id cannot widen
-// what gets read.
+// ensureOrchestratorRoleFile seeds the role file if absent, on every launch.
+// The path uses filepath.Join, never a glob, so a hand-edited id cannot widen it.
 func ensureOrchestratorRoleFile(dir, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -86,20 +56,15 @@ func ensureOrchestratorRoleFile(dir, id string) error {
 	}
 	path := filepath.Join(dir, "CLAUDE."+id+".md")
 	if _, err := os.Stat(path); err == nil {
-		return nil // the operator's file; never rewritten
+		return nil
 	} else if !os.IsNotExist(err) {
 		return err
 	}
 	return os.WriteFile(path, []byte(orchestratorRoleFileSeed), 0o644)
 }
 
-// ensureOrchestratorSessionStartHook writes a SessionStart hook into the shared
-// orchestrators root's .claude/settings.json, merging so it never clobbers other
-// keys, hook events, or hook blocks already there -- including a SessionStart
-// block the operator added themselves. SessionStart fires on a new session
-// (startup), a reopened one (resume), a cleared one (clear), and a compacted
-// one (compact), so every orchestrator has its contract re-injected on every
-// session boundary rather than only the first two.
+// ensureOrchestratorSessionStartHook merges into the shared settings file without
+// clobbering the operator's keys or hook blocks.
 func ensureOrchestratorSessionStartHook(dir string) error {
 	claudeDir := filepath.Join(dir, ".claude")
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
@@ -108,7 +73,7 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 	path := filepath.Join(claudeDir, "settings.json")
 	settings := map[string]any{}
 	if b, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(b, &settings) // best-effort; the hook is rebuilt below regardless
+		_ = json.Unmarshal(b, &settings) // best-effort; the hook is rebuilt regardless
 	}
 	hooks, _ := settings["hooks"].(map[string]any)
 	if hooks == nil {
@@ -116,32 +81,19 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 	}
 	hooks["SessionStart"] = mergeOrchestratorHookBlocks(
 		hooks["SessionStart"], orchestratorSessionStartHook(dir), isOrchestratorSessionStartHookBlock)
-	// The agent reports its own turn boundaries. Whether it is working cannot be
-	// read off its terminal: an agent TUI repaints continuously, so an
-	// output-driven latch never clears.
-	//
-	// The busy report goes on the tool-call events as well as the turn's start, so
-	// a turn longer than the staleness bound renews it instead of letting it
-	// expire underneath work that is still running. Each event is merged rather
-	// than assigned: this settings file is shared with the operator, and the
-	// tool-call events in particular are somewhere they are likely to have hooks
-	// of their own, which an assignment would silently delete.
+	// An agent TUI repaints continuously, so activity is self-reported. Busy also
+	// goes on tool-call events so long turns renew it; merging preserves the
+	// operator's own hooks there.
 	busyHook, idleHook := orchestratorActivityHooks()
 	for _, event := range []string{"UserPromptSubmit", "PreToolUse", "PostToolUse"} {
 		hooks[event] = mergeOrchestratorHookBlocks(hooks[event], busyHook, isOrchestratorActivityHookBlock)
 	}
 	stop := mergeOrchestratorHookBlocks(hooks["Stop"], idleHook, isOrchestratorActivityHookBlock)
 	hooks["Stop"] = mergeOrchestratorHookBlocks(stop, orchestratorNoAskStopGuardBlock(), isOrchestratorNoAskStopGuardBlock)
-	// A background shell's start and its completion are both only visible in a
-	// tool call's own result, which PreToolUse never carries — so unlike the
-	// turn-boundary busy report above, this one lives on PostToolUse alone.
-	// See orchestrator_shell_activity.go.
+	// Shell start and completion appear only in tool results, so PostToolUse alone.
 	hooks["PostToolUse"] = mergeOrchestratorHookBlocks(
 		hooks["PostToolUse"], orchestratorShellActivityHookBlocks(), isOrchestratorShellActivityHookBlock)
-	// Not installing the retired conversation recorders is not enough: every
-	// machine that ever ran an older build still carries them, and they would go
-	// on writing files nothing reads on every turn boundary. Strip them wherever
-	// they are found.
+	// Older builds' recorders keep writing; strip them wherever found.
 	for event := range hooks {
 		hooks[event] = pruneRetiredSessionRecorderHooks(hooks[event])
 	}
@@ -153,52 +105,21 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 	return os.WriteFile(path, append(out, '\n'), 0o644)
 }
 
-// orchestratorNoAskGuardMarker identifies the stop guard this file wrote, so a
-// rewrite replaces its own previous block instead of stacking another copy.
+// orchestratorNoAskGuardMarker lets a rewrite replace its own block.
 const orchestratorNoAskGuardMarker = "noask_guard=1"
 
-// orchestratorNoAskStopGuardReason is fed back to the session when the guard
-// fires. ASCII-only and apostrophe-free, since it is embedded as a plain JS
-// string inside a script wrapped in a single-quoted shell argument -- a
-// literal single quote in the text would close that argument early.
+// orchestratorNoAskStopGuardReason must stay ASCII and apostrophe-free: it sits
+// inside a single-quoted shell argument.
 const orchestratorNoAskStopGuardReason = "Your closing message hands the operator a decision. " +
 	"The orchestrator contract resolves ambiguity itself and carries the task to a verified end, " +
 	"so a question is a defect, not caution. Do what you offered, or state it as a decision already taken, " +
 	"and finish. If the action is outward-facing, announce it and proceed - a heads-up is not a gate."
 
-// orchestratorNoAskStopGuardCommand refuses a turn that ends by handing the
-// operator a decision, which the launch flag cannot reach: denying the tool
-// removes the question form, not the closing sentence that stalls the work just
-// as long. Reading the turn's own last words is what puts the guarantee at the
-// layer the behaviour surfaces on.
-//
-// Every failure path falls through to node's default exit code, 0. A guard
-// that wedged a session on a transcript it could not parse would cost more
-// than the stalls it prevents, and an already nudged turn (stop_hook_active)
-// is let go so a session is corrected once rather than looped.
-//
-// Runs through node rather than a POSIX shell reading its own stdin with sed
-// and grep: this fires on every Stop event of every orchestrator, and
-// Windows' own hook shell (PowerShell) parses `[ -f ... ]` test syntax as
-// something else entirely rather than executing it. Node needs no helper
-// binary on PATH -- the AI harness that launched the session is itself an
-// npm package -- and resolves identically regardless of the host's own hook
-// shell.
-//
-// It reads the turn's last ASSISTANT entry, never the raw tail of the
-// transcript. A firing is itself recorded in the transcript, and the record
-// carries this command — every trigger phrase included — so a window of raw
-// lines matches the guard's own echo from then on and the session can never
-// end again. It is also what let an operator's own question ("would you like
-// me to…") refuse the reply that answered it. Only what the turn said can
-// decide whether the turn handed back a decision.
-//
-// Within that entry, only the turn's own unquoted words count. A report that
-// quotes an earlier violation -- or the contract, or the operator -- is
-// describing an offer, not making one, and re-firing on it refuses the very
-// turn that documents the fix. Quoted, code-spanned, and blockquoted spans are
-// cut before the trigger phrases are matched, so a genuine offer still fires
-// and a citation of one does not.
+// orchestratorNoAskStopGuardCommand refuses a turn ending by handing the operator
+// a decision. It fails open, lets an already-nudged turn go, and runs via node
+// for Windows. It reads only the last assistant entry, since the transcript
+// echoes the guard's own trigger phrases, and strips quoted spans so citing an
+// offer does not fire.
 func orchestratorNoAskStopGuardCommand() string {
 	script := `/*` + orchestratorNoAskGuardMarker + `*/` +
 		`let d="";process.stdin.on("data",c=>{d+=c});process.stdin.on("end",()=>{try{` +
@@ -222,15 +143,13 @@ func orchestratorNoAskStopGuardCommand() string {
 	return `node -e '` + script + `'`
 }
 
-// orchestratorNoAskStopGuardBlock is the guard bound to the Stop event.
 func orchestratorNoAskStopGuardBlock() []any {
 	return []any{map[string]any{
 		"hooks": []any{map[string]any{"type": "command", "command": orchestratorNoAskStopGuardCommand()}},
 	}}
 }
 
-// isOrchestratorNoAskStopGuardBlock reports whether a settings hook block is the
-// guard. Anything it cannot read is somebody else's and is kept.
+// isOrchestratorNoAskStopGuardBlock keeps anything it cannot read.
 func isOrchestratorNoAskStopGuardBlock(block any) bool {
 	group, ok := block.(map[string]any)
 	if !ok {
@@ -252,27 +171,15 @@ func isOrchestratorNoAskStopGuardBlock(block any) bool {
 	return false
 }
 
-// orchestratorSessionStartMatcher is one regex alternation over every
-// SessionStart source this hook cares about, rather than duplicate blocks.
-//
-// clear and compact are included because a /clear drops the injected
-// CLAUDE.<id>.md role layer from context, and a compaction forks the transcript
-// to a new session id the live-session record must pick up. Re-printing the
-// contract is harmless.
+// clear and compact are included because /clear drops the role layer and
+// compaction forks to a new session id.
 const orchestratorSessionStartMatcher = "startup|resume|clear|compact"
 
-// orchestratorSessionStartHook is the SessionStart hook block: the contract-
-// injecting command runs on new starts (startup), reopens (resume), and every
-// session boundary that can otherwise drop it from context (clear, compact).
 func orchestratorSessionStartHook(dir string) []any {
 	command := map[string]any{"type": "command", "command": orchestratorSkillHookCommand(dir)}
-	// A session killed mid-turn never writes its end, so a new or reopened one
-	// would inherit the previous run's "working" and spin on arrival with nothing
-	// running. Clearing it here is what makes that guarantee real.
+	// A session killed mid-turn never writes idle, so reset it on start.
 	idle := map[string]any{"type": "command", "command": orchestratorActivityHookCommand(false)}
-	// A background shell report has the exact same hazard: a shell the previous
-	// run started (or its clear) can outlive that run entirely, and nothing else
-	// resets it at a boundary — see orchestrator_shell_activity.go.
+	// A previous run's background shell report can outlive it too.
 	shellIdle := map[string]any{"type": "command", "command": orchestratorShellActivityResetHookCommand()}
 	return []any{map[string]any{
 		"matcher": orchestratorSessionStartMatcher,
@@ -280,10 +187,8 @@ func orchestratorSessionStartHook(dir string) []any {
 	}}
 }
 
-// isOrchestratorSessionStartHookBlock reports whether a settings hook block is
-// one of ours, so a rewrite replaces any block(s) it wrote, including the
-// legacy per-source pair, instead of stacking another copy. The
-// contract-injection command's fallback text is unique to us in every shape.
+// isOrchestratorSessionStartHookBlock matches our blocks, including the legacy
+// per-source pair, by the unique fallback text.
 func isOrchestratorSessionStartHookBlock(block any) bool {
 	group, ok := block.(map[string]any)
 	if !ok {

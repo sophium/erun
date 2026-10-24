@@ -14,11 +14,8 @@ import (
 	"github.com/sophium/erun/erun-common/command/jobs"
 )
 
-// orchestratorMCPServer is one Claude Code MCP server entry: a linked env's erun
-// MCP edge (emcp in the pod, exposing raw/diff/build/push/deploy/outputs_*),
-// reached by launching `erun mcp proxy` over stdio. The proxy mints a bearer per
-// request, so no credential is written here and a session cannot lose its envs
-// partway through to an aged-out token.
+// orchestratorMCPServer runs `erun mcp proxy` over stdio; the proxy mints a bearer
+// per request, so no credential is written here.
 type orchestratorMCPServer struct {
 	Type    string   `json:"type"`
 	Command string   `json:"command"`
@@ -29,48 +26,24 @@ type orchestratorMCPConfig struct {
 	MCPServers map[string]orchestratorMCPServer `json:"mcpServers"`
 }
 
-// mcpPortResolver is a seam so the config assembly is unit testable without a
-// live config store.
 type mcpPortResolver func(tenant, environment string) int
 
-// mcpReachabilityProber reports whether a local MCP edge answers right now.
-// The same shape as App.deps.canReachMCPEndpoint, so writeOrchestratorMCPConfig
-// passes that seam straight through and this stays unit testable without a
-// live port-forward.
 type mcpReachabilityProber func(port int) bool
 
-// mcpEnvTypeResolver reports an environment's resolved type (an
-// config.EnvironmentType constant, or its zero value when the environment
-// no longer resolves), so the builder can tell an environment that has no MCP
-// edge AT ALL from one whose edge merely failed to answer. A host environment
-// is the former: it has no pod, so nothing runs the erun MCP edge for it and no
-// port-forward can ever reach one. A seam rather than a field on
-// config.OrchestratorEnvConfig, which records where an orchestrator reviews
-// an environment, not what the environment is.
+// mcpEnvTypeResolver lets the builder tell an env with no MCP edge at all (host)
+// from one whose edge failed to answer.
 type mcpEnvTypeResolver func(tenant, environment string) configpkg.EnvironmentType
 
-// orchestratorMCPSkip is one linked environment that produced no MCP server
-// entry, and why. Carried out of the builder rather than dropped: an
-// orchestrator is told by its own operating contract to know which environments
-// are its own, so an environment silently missing from its toolset is a
-// falsehood it cannot detect from the inside.
+// orchestratorMCPSkip is a linked env with no MCP entry, reported so the
+// orchestrator does not mistake it for unlinked.
 type orchestratorMCPSkip struct {
 	Label  string
 	Reason string
-	// HostEnv marks a skip that is not a defect: a host environment has no pod,
-	// so it has no MCP edge by design and the orchestrator drives it through its
-	// review directory instead. Kept apart from the other skip reasons so an
-	// orchestrator whose linked environments are all host environments — a
-	// working configuration — is not reported as the failure every other skip
-	// reason describes.
+	// HostEnv marks a skip by design, not a failure.
 	HostEnv bool
 }
 
-// orchestratorMCPOnlyHostSkips reports that the only reason nothing wired is
-// that every linked environment is a host environment. That is a working
-// configuration rather than a failure, so it must not take the "no linked
-// environment resolved an MCP port" error path meant for a real resolution
-// failure.
+// orchestratorMCPOnlyHostSkips: all-host is a working configuration, not an error.
 func orchestratorMCPOnlyHostSkips(skipped []orchestratorMCPSkip) bool {
 	if len(skipped) == 0 {
 		return false
@@ -83,12 +56,8 @@ func orchestratorMCPOnlyHostSkips(skipped []orchestratorMCPSkip) bool {
 	return true
 }
 
-// splitOrchestratorMCPHostSkips separates the linked environments that have no
-// MCP edge by design from those that failed to wire. The two need different
-// words and different recoveries: a host environment exists and works, and
-// restarting the orchestrator would change nothing, while every other skip is a
-// real problem the partial notice's "check those environments still exist"
-// advice does fit.
+// splitOrchestratorMCPHostSkips separates by-design skips from failures; they need
+// different wording and recovery.
 func splitOrchestratorMCPHostSkips(skipped []orchestratorMCPSkip) (hostEnvs, problems []orchestratorMCPSkip) {
 	for _, skip := range skipped {
 		if skip.HostEnv {
@@ -100,44 +69,19 @@ func splitOrchestratorMCPHostSkips(skipped []orchestratorMCPSkip) (hostEnvs, pro
 	return hostEnvs, problems
 }
 
-// orchestratorMCPUnreachable is one linked environment that got a wired MCP
-// server entry — it is NOT skipped — even though its edge did not answer a
-// quick probe at launch time. Reported separately from orchestratorMCPSkip
-// because the environment IS wired: infra/mcp's proxy already recovers
-// a transient edge outage per request ("a transient edge outage must not kill
-// the session"), so dropping the environment here would strand it for the
-// whole session even after the edge recovers. What is missing without this is
-// only that an orchestrator whose env has no tools right now cannot tell "not
-// linked" apart from "linked but the edge was down at launch".
+// orchestratorMCPUnreachable is a wired env whose edge did not answer at launch.
+// It stays wired because the proxy recovers transient outages per request.
 type orchestratorMCPUnreachable struct {
 	Label string
 }
 
-// orchestratorMCPWiredEnv is one environment buildOrchestratorMCPConfig wired,
-// carried alongside its resolved port so the reachability probe below can
-// check it after the server map is assembled.
 type orchestratorMCPWiredEnv struct {
 	Label string
 	Port  int
 }
 
-// buildOrchestratorMCPConfig assembles the per-env MCP server map, keyed
-// "<tenant>-<environment>". An env is skipped (not an error) when its MCP port
-// does not resolve — that env is not wired for MCP at all — so an orchestrator
-// still gets the envs it can reach. Every skip is returned alongside, so a
-// PARTIAL skip is reportable: otherwise a session missing one of two
-// environments looks identical to a healthy one until its first call into the
-// missing env.
-//
-// An env whose port resolves but whose edge does not answer a quick probe is
-// wired anyway and reported as unreachable rather than skipped — see
-// orchestratorMCPUnreachable.
-//
-// A host env is skipped before the port lookup, flagged as a host skip rather
-// than one of the failure reasons: it has no pod, so it has no MCP edge at all
-// and never will. It is still reported — as an informational line, not a
-// warning — because an environment absent from the toolset otherwise reads as
-// "not linked".
+// buildOrchestratorMCPConfig keys servers "<tenant>-<environment>". Skipped envs
+// are returned; unanswering edges stay wired but are reported.
 func buildOrchestratorMCPConfig(envs []configpkg.OrchestratorEnvConfig, executable string, mcpPort mcpPortResolver, envType mcpEnvTypeResolver, reachable mcpReachabilityProber) (orchestratorMCPConfig, []orchestratorMCPSkip, []orchestratorMCPUnreachable) {
 	servers := map[string]orchestratorMCPServer{}
 	var skipped []orchestratorMCPSkip
@@ -156,12 +100,8 @@ func buildOrchestratorMCPConfig(envs []configpkg.OrchestratorEnvConfig, executab
 			})
 			continue
 		}
-		// A host env has no pod, so no erun MCP edge runs for it and no
-		// port-forward can ever reach one. Checked before the port lookup
-		// because port allocation is type-blind: a host env does resolve a
-		// port, so it would otherwise be wired and then reported as merely
-		// unreachable — naming a deploy-or-reopen recovery that a host env
-		// refuses outright.
+		// Checked before the port lookup: allocation is type-blind, so a host env
+		// resolves a port too.
 		if envType != nil && envType(tenant, environment) == configpkg.EnvironmentTypeHost {
 			skipped = append(skipped, orchestratorMCPSkip{
 				Label:   orchestratorEnvLabel(tenant, environment),
@@ -188,11 +128,7 @@ func buildOrchestratorMCPConfig(envs []configpkg.OrchestratorEnvConfig, executab
 	return orchestratorMCPConfig{MCPServers: servers}, skipped, probeOrchestratorMCPEdges(wired, reachable)
 }
 
-// probeOrchestratorMCPEdges checks every wired env's edge concurrently, so N
-// environments cost about one probe's worth of latency rather than N in
-// series — this runs on every orchestrator launch and must never noticeably
-// delay it. A nil prober (no seam wired) or nothing wired both answer "nothing
-// unreachable" rather than probing.
+// probeOrchestratorMCPEdges probes concurrently so launch latency stays at one probe.
 func probeOrchestratorMCPEdges(wired []orchestratorMCPWiredEnv, reachable mcpReachabilityProber) []orchestratorMCPUnreachable {
 	if len(wired) == 0 || reachable == nil {
 		return nil
@@ -216,8 +152,6 @@ func probeOrchestratorMCPEdges(wired []orchestratorMCPWiredEnv, reachable mcpRea
 	return unreachable
 }
 
-// orchestratorEnvLabel names an environment for an operator-facing line, staying
-// readable when the config entry itself is the thing that is malformed.
 func orchestratorEnvLabel(tenant, environment string) string {
 	switch {
 	case tenant == "" && environment == "":
@@ -231,18 +165,12 @@ func orchestratorEnvLabel(tenant, environment string) string {
 	}
 }
 
-// The two ways an orchestrator ends up with linked environments but none of
-// their tools. They stay distinct because the operator's fix differs: one is a
-// missing erun install, the other a linked environment that no longer resolves.
+// Distinct because the operator's fix differs.
 var (
 	errOrchestratorMCPExecutable = errors.New("the erun executable could not be resolved")
 	errOrchestratorMCPNoPort     = errors.New("no linked environment resolved an MCP port")
 )
 
-// orchestratorMCPUnwiredNotice is the operator-facing line for an orchestrator
-// that launched without the tools for the environments it is linked to. It names
-// the cause and the matching recovery, since the session otherwise looks healthy
-// right up to the first environment call.
 func orchestratorMCPUnwiredNotice(name string, err error) string {
 	label := strings.TrimSpace(name)
 	if label == "" {
@@ -260,11 +188,7 @@ func orchestratorMCPUnwiredNotice(name string, err error) string {
 	return fmt.Sprintf("%s started without its environment tools: %s. %s", label, cause, recovery)
 }
 
-// orchestratorMCPUnwiredAction names the control the frontend can render
-// beside orchestratorMCPUnwiredNotice's message so its named recovery is
-// something the operator can click rather than type: the executable-missing
-// cause also links the install docs, since "install the erun command line
-// tool" has no in-app affordance of its own.
+// orchestratorMCPUnwiredAction also links install docs for the missing-executable cause.
 func orchestratorMCPUnwiredAction(err error) string {
 	if errors.Is(err, errOrchestratorMCPExecutable) {
 		return notificationActionInstallAndRestartOrchestrator
@@ -272,18 +196,8 @@ func orchestratorMCPUnwiredAction(err error) string {
 	return notificationActionRestartOrchestrator
 }
 
-// orchestratorMCPPartialNotice is the operator-facing line for an orchestrator
-// that got SOME of its environments' tools. Distinct from the unwired notice
-// because the session is usable and will look entirely healthy: the missing
-// environment surfaces only as a tool that is not there, which an agent reads as
-// "not linked" rather than "failed to wire".
-//
-// wired and total both count the orchestrator's LINKED environments, host ones
-// included, so the sentence stays literally true. Counting only the environments
-// that could have had tools is simpler and false: it makes a three-environment
-// orchestrator read as a two-environment one. hostEnvs is taken only to name
-// them, so the gap between wired and total is not left for the operator to
-// account for.
+// orchestratorMCPPartialNotice reports a partially wired orchestrator. wired and
+// total count all linked envs, host ones included, so the sentence stays true.
 func orchestratorMCPPartialNotice(name string, wired, total int, hostEnvs, skipped []orchestratorMCPSkip) string {
 	label := strings.TrimSpace(name)
 	if label == "" {
@@ -293,8 +207,7 @@ func orchestratorMCPPartialNotice(name string, wired, total int, hostEnvs, skipp
 	for _, skip := range skipped {
 		missing = append(missing, fmt.Sprintf("%s (%s)", skip.Label, skip.Reason))
 	}
-	// Absent when no host env is linked, so the message an orchestrator without
-	// one has always shown stays byte-for-byte unchanged.
+	// Absent with no host env, so that message is unchanged.
 	hostNote := ""
 	if len(hostEnvs) > 0 {
 		names := make([]string, 0, len(hostEnvs))
@@ -307,12 +220,7 @@ func orchestratorMCPPartialNotice(name string, wired, total int, hostEnvs, skipp
 		label, wired, total, hostNote, strings.Join(missing, "; "))
 }
 
-// orchestratorMCPHostEnvNotice is the operator-facing line for an orchestrator
-// linked to host environments, which have no MCP edge to wire. Informational
-// rather than a warning: this is a working configuration, and the recovery is
-// not to fix anything but to work in the environment's own directory. It is
-// still said out loud because an environment absent from the toolset otherwise
-// reads as "not linked" rather than "not applicable".
+// orchestratorMCPHostEnvNotice is informational: host envs have no edge by design.
 func orchestratorMCPHostEnvNotice(name string, hostEnvs []orchestratorMCPSkip) string {
 	label := strings.TrimSpace(name)
 	if label == "" {
@@ -326,13 +234,8 @@ func orchestratorMCPHostEnvNotice(name string, hostEnvs []orchestratorMCPSkip) s
 		"Work in its directory directly.", label, strings.Join(names, ", "))
 }
 
-// orchestratorMCPUnreachableNotice is the operator-facing line for an
-// orchestrator that wired an environment's tools even though its edge is not
-// answering right now. Distinct from the partial notice above: that one names
-// an environment left OUT of the toolset, this one names environments that ARE
-// in it and will recover on their own once the edge comes back — the point is
-// telling an orchestrator that finds an env's tools missing "linked, but the
-// edge was down at launch" rather than leaving it to read as "not linked".
+// orchestratorMCPUnreachableNotice names envs that are wired but whose edge was
+// down at launch; they recover on their own.
 func orchestratorMCPUnreachableNotice(name string, unreachable []orchestratorMCPUnreachable) string {
 	if len(unreachable) == 0 {
 		return ""
@@ -350,13 +253,8 @@ func orchestratorMCPUnreachableNotice(name string, unreachable []orchestratorMCP
 		label, strings.Join(names, ", "))
 }
 
-// orchestratorMCPUnreachableEnv splits one unreachable edge's Label into the
-// environment a deploy action can target. The label is normally
-// orchestratorEnvLabel's well-formed "<tenant>/<environment>" — the shape
-// probeOrchestratorMCPEdges wires — so the degenerate shapes that helper also
-// produces report false and their notice carries no action: "?" is its
-// placeholder for the half of a malformed entry that did not resolve, and a
-// deploy aimed at it would be a control that cannot work.
+// orchestratorMCPUnreachableEnv reports false for malformed labels ("?" halves), so
+// no deploy action is offered.
 func orchestratorMCPUnreachableEnv(label string) (tenant, environment string, ok bool) {
 	tenant, environment, found := strings.Cut(label, "/")
 	if !found || tenant == "" || environment == "" || tenant == "?" || environment == "?" {
@@ -365,40 +263,18 @@ func orchestratorMCPUnreachableEnv(label string) (tenant, environment string, ok
 	return tenant, environment, true
 }
 
-// orchestratorEdgeRepairBudget bounds how long a launch waits for the edge of a
-// linked environment it has just found not answering. It is the same window an
-// MCP client allows its own first connect (erun-common's
-// mcpStartupReachabilityWait), so a launch never makes the operator wait longer
-// than the client behind it was already prepared to. The wait is a ceiling
-// rather than a delay: a rebind that settles sooner — and the ordinary rebind
-// does — returns the launch immediately.
+// orchestratorEdgeRepairBudget matches the MCP client's own first-connect window
+// (mcpStartupReachabilityWait); it is a ceiling, not a delay.
 const orchestratorEdgeRepairBudget = 20 * time.Second
 
-// repairOrchestratorMCPEdges opens the port-forward for every linked
-// environment whose edge is not answering right now, and returns once each
-// rebind has settled or the budget has elapsed.
-//
-// This runs on the one path where the answer has to be right: the config
-// written moments later names a loopback port, and the client reading it
-// connects once, at launch, and does not ask again. An invoke of `erun open`
-// that merely got kicked off here would land after that connect, so the
-// environment would come back wired to a dead edge with every one of its tools
-// unavailable for the whole session — the operator told to run a command nobody
-// had asked them for.
-//
-// It is not a gate on the launch: an environment that genuinely cannot be
-// reached does not hold the orchestrator up, it is reported as unreachable by
-// the probe that follows (see wireOrchestratorMCP). Environments with no edge
-// to open — a host env, or one whose MCP port does not resolve — are left to
-// the builder, which reports them on their own terms.
+// repairOrchestratorMCPEdges must finish before the config is written: the client
+// connects only once, at launch. It is not a gate; the next probe reports failures.
 func (a *App) repairOrchestratorMCPEdges(envs []configpkg.OrchestratorEnvConfig) {
 	dead := a.orchestratorEdgesNotAnswering(envs)
 	if len(dead) == 0 {
 		return
 	}
-	// Concurrently: several unreachable environments cost one budget between
-	// them, not one each, so a launch with a few dead links still returns
-	// inside a single window.
+	// Concurrent, so several dead links share one budget.
 	var wg sync.WaitGroup
 	for _, selection := range dead {
 		wg.Add(1)
@@ -410,11 +286,8 @@ func (a *App) repairOrchestratorMCPEdges(envs []configpkg.OrchestratorEnvConfig)
 	wg.Wait()
 }
 
-// orchestratorEdgesNotAnswering narrows a linked scope to the environments that
-// have an MCP edge and are not carrying traffic through it. The probe is the
-// same round trip the builder uses, and a missing probe answers "cannot tell",
-// which must not be read as "not answering": repairing on a probe that never
-// ran would restart a forward on no evidence.
+// A missing probe means "cannot tell", never "not answering": do not restart a
+// forward on no evidence.
 func (a *App) orchestratorEdgesNotAnswering(envs []configpkg.OrchestratorEnvConfig) []uiSelection {
 	var dead []uiSelection
 	for _, ref := range envs {
@@ -432,9 +305,7 @@ func (a *App) orchestratorEdgesNotAnswering(envs []configpkg.OrchestratorEnvConf
 	return dead
 }
 
-// orchestratorMCPPort resolves a linked environment's local MCP port, or 0 when
-// none resolves. Shared with the builder so the environment a launch opens a
-// forward for is the one it is about to wire.
+// Shared with the builder so the forward opened is the one about to be wired.
 func (a *App) orchestratorMCPPort(tenant, environment string) int {
 	ports, err := configpkg.ResolveEnvironmentLocalPorts(a.deps.store, tenant, environment)
 	if err != nil {
@@ -443,10 +314,8 @@ func (a *App) orchestratorMCPPort(tenant, environment string) int {
 	return ports.MCP
 }
 
-// orchestratorMCPEnvType resolves a linked environment's type, or its zero
-// value when the environment no longer resolves. An environment whose config
-// will not load has no known type, so it falls through to the port path and is
-// reported as the wiring failure it is — never silently excused as a host env.
+// An unloadable env has no type, so it falls through to the port path and is
+// reported as a failure, never excused as host.
 func (a *App) orchestratorMCPEnvType(tenant, environment string) configpkg.EnvironmentType {
 	env, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
 	if err != nil {
@@ -455,22 +324,13 @@ func (a *App) orchestratorMCPEnvType(tenant, environment string) configpkg.Envir
 	return env.ResolvedType()
 }
 
-// writeOrchestratorMCPConfig writes a per-orchestrator Claude Code --mcp-config
-// file wiring each linked env's erun MCP into the orchestrator session, so it
-// drives its envs through the MCP rather than raw kubectl. Returns "" with an
-// error naming why when nothing could be wired, so the caller skips
-// --mcp-config and can tell the operator which fix applies -- except when the
-// only reason nothing wired is that every linked env is a host env, which is a
-// working configuration and returns no error. Because a host env is a skip like
-// any other, the caller gets every skip either way, host ones included, and can
-// name what is absent instead of leaving it to read as "not linked".
+// writeOrchestratorMCPConfig writes the per-orchestrator --mcp-config file. It
+// returns "" with an error when nothing was wired, except when every env is host.
 func (a *App) writeOrchestratorMCPConfig(id string, envs []configpkg.OrchestratorEnvConfig) (string, []orchestratorMCPSkip, []orchestratorMCPUnreachable, error) {
-	// An orchestrator with no linked envs has nothing to wire, and that is normal.
 	if len(envs) == 0 {
 		return "", nil, nil, nil
 	}
-	// No erun binary means no proxy to launch, so the session launches without
-	// its envs rather than with entries that would fail on first use.
+	// Without an erun binary there is no proxy, so launch without envs.
 	executable, err := jobs.ResolveErunExecutable()
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("%w: %w", errOrchestratorMCPExecutable, err)
@@ -478,10 +338,6 @@ func (a *App) writeOrchestratorMCPConfig(id string, envs []configpkg.Orchestrato
 	config, skipped, unreachable := buildOrchestratorMCPConfig(envs, executable,
 		a.orchestratorMCPPort, a.orchestratorMCPEnvType, a.deps.canReachMCPEndpoint)
 	if len(config.MCPServers) == 0 {
-		// Nothing wired because every linked env is a host env is a working
-		// configuration, not a failure: a host env has no MCP edge by design and
-		// the orchestrator drives it through its review directory. Only a real
-		// failure to resolve a port takes the unwired-error path.
 		if orchestratorMCPOnlyHostSkips(skipped) {
 			return "", skipped, nil, nil
 		}
@@ -501,10 +357,7 @@ func (a *App) writeOrchestratorMCPConfig(id string, envs []configpkg.Orchestrato
 	return path, skipped, unreachable, nil
 }
 
-// orchestratorMCPConfigPath is a per-orchestrator sibling of
-// orchestrator-restore.json under UserConfigDir()/ERun, so each orchestrator's
-// env-MCP wiring is isolated (the shared orchestrators workspace can't hold a
-// per-orchestrator .mcp.json).
+// A shared workspace cannot hold a per-orchestrator .mcp.json, so it lives under UserConfigDir.
 func orchestratorMCPConfigPath(id string) string {
 	configDir, err := os.UserConfigDir()
 	if err != nil {

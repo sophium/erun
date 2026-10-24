@@ -16,37 +16,19 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// activity is a hidden command group the runtime entrypoint uses to record
-// SSH/MCP/CLI/Codex traffic; its subcommands are exercised here.
-
-// The working-hours window decides which arm of the stop-eligibility branch a
-// scenario takes, and the resolved policy always has one (the default is
-// 08:00-20:00 in the host's zone), so a scenario that leaves it alone exercises
-// a different arm depending on the wall clock and the host's TZ. These two
-// blocks pin the arm: 00:00-23:59 is the all-day span (fixed to stay inside
-// for every minute, including 23:59, since HH:MM has no way to spell
-// midnight/24:00), and 23:59-00:00 is its inversion — the narrowest
-// window the parser accepts, inside only during the 23:59 UTC minute. Landing
-// on that one minute costs the inverted block nothing — a held lease refuses
-// the stop identically on both arms, which is the point these scenarios
-// make — so what the pin buys is that each scenario reliably exercises the
-// arm it names.
+// The working-hours window decides the stop-eligibility arm, so these pin it:
+// 00:00-23:59 is always inside (HH:MM cannot spell 24:00) and 23:59-00:00 is
+// inside only during the 23:59 UTC minute.
 const (
 	insideWorkingHoursIdleBlock  = "idle:\n  workinghours: 00:00-23:59\n  timezone: UTC\n"
 	outsideWorkingHoursIdleBlock = "idle:\n  workinghours: 23:59-00:00\n  timezone: UTC\n"
 )
 
-// seedManagedCloudTenantEnv marks the seeded env cloud-managed so the idle
-// resolver's Arm/Wait/Fire branches become reachable.
 func seedManagedCloudTenantEnv(t *testing.T, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	seedManagedCloudTenantEnvWithIdle(t, setup, tenant, environment, "")
 }
 
-// seedManagedCloudTenantEnvWithIdle is seedManagedCloudTenantEnv with an
-// explicit idle block appended, so a scenario whose outcome depends on the
-// working-hours window can pin that window instead of inheriting the default
-// 08:00-20:00 and reading differently depending on the wall clock.
 func seedManagedCloudTenantEnvWithIdle(t *testing.T, setup env.Setup, tenant, environment, idleBlock string) {
 	t.Helper()
 	fixture.SeedTenantEnv(t, setup, tenant, environment)
@@ -62,8 +44,6 @@ func seedManagedCloudTenantEnvWithIdle(t *testing.T, setup env.Setup, tenant, en
 	}
 }
 
-// seedStopPending lets a scenario enter the grace state machine mid-flight with
-// a deterministic Since timestamp instead of sleeping through a real grace window.
 func seedStopPending(t *testing.T, home, tenant, environment, body string) string {
 	t.Helper()
 	dir := filepath.Join(home, ".erun", tenant, environment)
@@ -77,8 +57,6 @@ func seedStopPending(t *testing.T, home, tenant, environment, body string) strin
 	return path
 }
 
-// seedActivitySnapshot lets scenarios seed stale activity timestamps that stay
-// deterministically past the idle timeout for decades.
 func seedActivitySnapshot(t *testing.T, cacheHome, tenant, environment, kind, body string) {
 	t.Helper()
 	dir := filepath.Join(cacheHome, "erun", "activity", tenant, environment)
@@ -160,8 +138,7 @@ func testActivityTouchRecordsCLIActivity(t *testing.T) {
 }
 
 func testActivityStatusWithSeededEnv(t *testing.T) {
-	// The working-hours line varies by wall clock; assert the stable lines
-	// exactly and the variable line structurally so the test is time-of-day-agnostic.
+	// The working-hours line varies by wall clock, so it is asserted structurally.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"activity", "status", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -199,8 +176,6 @@ func testActivityStatusJSONOutput(t *testing.T) {
 }
 
 func testActivityStatusJSONIncludesPerClientBreakdown(t *testing.T) {
-	// The desktop tooltip and external `activity status --json` consumers both
-	// read the per-client `clients` breakdown, so this JSON contract is locked here.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	erun.Run(t, []string{
@@ -233,7 +208,6 @@ func testActivityStatusJSONIncludesPerClientBreakdown(t *testing.T) {
 }
 
 func testActivityTouchRejectsUnknownKind(t *testing.T) {
-	// An unsupported kind must fail loudly instead of writing a stray snapshot file.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"activity", "touch", "--tenant", "team", "--environment", "dev", "--kind", "bogus"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -244,9 +218,7 @@ func testActivityTouchRejectsUnknownKind(t *testing.T) {
 }
 
 func testActivityTouchEvictsOldestClientBeyondCap(t *testing.T) {
-	// The first-touched address is deterministically the oldest (evicted at the
-	// 8-client cap) because the touches run as sequential subprocesses, each
-	// stamping LastActivity with its own wall-clock now.
+	// Sequential subprocesses make the first-touched client the one evicted at the cap.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	for i := 1; i <= 9; i++ {
@@ -280,11 +252,7 @@ func testActivityTouchEvictsOldestClientBeyondCap(t *testing.T) {
 }
 
 func testActivityStatusDistinguishesStaleAndCodexOpenMarkers(t *testing.T) {
-	// A stale marker reports "last activity exceeded timeout", while codex with
-	// a fresh --seen heartbeat but stale activity reports "codex is open but
-	// idle". Timestamps are seeded in the past so they stay idle for decades; no
-	// whole-stream golden is possible because the working-hours line depends on
-	// wall clock.
+	// The working-hours line depends on wall clock, so no whole-stream golden.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedActivitySnapshot(t, setup.CacheHome, "team", "dev", "cli", `{"lastActivity": "2026-01-01T08:00:00Z", "lastSeen": "2026-01-01T08:00:00Z"}
@@ -327,7 +295,6 @@ func testActivitySSHProxyRequiresListenAndTarget(t *testing.T) {
 }
 
 func testActivitySSHProxyRejectsNegativeIdleTrafficThreshold(t *testing.T) {
-	// A negative byte threshold is a misconfiguration, not "always idle".
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev", "--listen", "127.0.0.1:0", "--target", "127.0.0.1:1", "--idle-traffic-bytes=-1"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -338,9 +305,7 @@ func testActivitySSHProxyRejectsNegativeIdleTrafficThreshold(t *testing.T) {
 }
 
 func testActivitySSHProxyRejectsUnlistenableAddress(t *testing.T) {
-	// A listen address with no port fails deterministically (no DNS, no port
-	// collision), so the listener-setup error path is locked without starting
-	// the accept loop.
+	// A port-less address fails listener setup deterministically.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev", "--listen", "127.0.0.1", "--target", "127.0.0.1:1"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})

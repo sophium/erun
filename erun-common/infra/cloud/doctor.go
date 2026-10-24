@@ -19,10 +19,7 @@ func TraceAndWaitForRuntime(ctx core.Context, req config.ShellLaunchParams) erro
 	}
 	if config.CurrentExecutionMode(kube.KubectlDeploymentWaitExecutionOperation) == config.ExecutionModeLibrary {
 		if err := kube.LibraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, config.RuntimeReleaseName(req.Tenant), DefaultShellLaunchWaitTimeout); err != nil {
-			// normalizeDoctorKubectlError's diagnostics (doctorKubectlDiagnostic)
-			// pattern-match literal kubectl CLI stderr text, which a client-go
-			// error never produces, so library-mode failures return unadorned
-			// rather than trying to force them through that string matching.
+			// The diagnostics match kubectl stderr text, which client-go errors never produce.
 			return err
 		}
 		return nil
@@ -49,9 +46,6 @@ func NormalizeDoctorKubectlError(req config.ShellLaunchParams, stderr string, er
 	diagnostic := doctorKubectlDiagnostic(req, stderr)
 	stderr = strings.TrimSpace(stderr)
 	if diagnostic == "" {
-		// No recognized cause, but kubectl's own stderr was still captured --
-		// include it rather than falling back to the bare "%w" (which renders
-		// as content-free "exit status N") that this branch used to return.
 		if stderr == "" {
 			return err
 		}

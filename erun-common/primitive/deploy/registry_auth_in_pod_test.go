@@ -12,9 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// useInPodIdentity marks this process as the target env's own runtime pod and
-// clears every other credential route, reproducing the pod's boot state: no
-// docker config, no gh session, no GH_TOKEN/GITHUB_TOKEN.
+// useInPodIdentity reproduces the pod's boot state: no docker config, gh session, or GH_TOKEN.
 func useInPodIdentity(t *testing.T) {
 	t.Helper()
 	useDockerConfigDir(t, t.TempDir())
@@ -26,9 +24,7 @@ func useInPodIdentity(t *testing.T) {
 	t.Setenv("ERUN_NAMESPACE", "")
 }
 
-// ghcrPrivateRegistryServer answers the token exchange and tag list the way a
-// private ghcr namespace does: anonymous token requests are refused, a Basic
-// credential mints a pull token for the declared tag.
+// ghcrPrivateRegistryServer refuses anonymous token requests and accepts Basic credentials, like private ghcr.
 func ghcrPrivateRegistryServer(t *testing.T, version string) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,9 +62,6 @@ func resolveGHCRChartWithDeclaredCredential(t *testing.T, version string) (regis
 	})
 }
 
-// The refusal direction is unchanged: a genuinely credential-less run gets the
-// same anonymous 401, so the read stays indeterminate and deploy still refuses
-// with the message it has today rather than guessing.
 func TestCredentiallessRunStillRefusesWithTheSameMessage(t *testing.T) {
 	useInPodIdentity(t)
 	registry.InPodDeclaredRegistryAuth = nil

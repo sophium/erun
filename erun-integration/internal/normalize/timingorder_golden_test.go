@@ -7,20 +7,8 @@ import (
 	"testing"
 )
 
-// The step-timing table is rendered in real wall-clock order (erun-common's
-// orderedTimingRows sorts by measured duration), so the only thing that makes
-// it safe to store in a golden is canonicalizeStepTimingOrder reordering every
-// level by name. A row shape the canonicalizer cannot parse ends the block
-// early and silently leaves the rest of that tree in wall-clock order — green
-// on an idle machine, red wherever the timings actually diverge.
-//
-// These tests assert the property directly rather than the pattern that
-// implements it: for every golden that carries a timing block, canonicalizing
-// a sibling-reordered copy must reproduce the golden byte for byte. The
-// reordering is derived from indentation alone, deliberately independent of
-// timingLinePattern, so this stays a check ON the pattern instead of a
-// restatement of it.
-
+// TestGoldenTimingBlocksAreOrderInvariant: every golden timing block survives a
+// sibling reorder built from indentation alone, independent of timingLinePattern.
 func TestGoldenTimingBlocksAreOrderInvariant(t *testing.T) {
 	goldens := goldensWithTimingBlocks(t)
 	if len(goldens) == 0 {
@@ -47,25 +35,9 @@ func TestGoldenTimingBlocksAreOrderInvariant(t *testing.T) {
 	}
 }
 
-// TestCanonicalizeStepTimingOrderIgnoresInterleavedOutput pins the property
-// the canonicalizer exists to provide for a table that has unrelated output
-// inside it: the canonical form must not depend on where that output landed.
-//
-// The block is the release scenario's own table, whose five rows are
-// build -> publish -> api plus release and sync-remote beside publish. Two
-// captures of exactly that table are built below, differing only in the order
-// the run measured its children in and in which boundaries an unrelated
-// writer's line landed on -- the difference a loaded machine produces
-// against the recorded golden.
-//
-// Unlike the golden-driven test above, this needs no golden to carry an
-// interleaved line: a row's own multi-line message is rendered indented
-// (core.RenderStepTimingRows), so no recorded table has one, and a
-// probe driven by the committed goldens would assert nothing at all while
-// still reporting green.
+// TestCanonicalizeStepTimingOrderIgnoresInterleavedOutput: two captures that
+// differ in child order and where unrelated output landed canonicalize alike.
 func TestCanonicalizeStepTimingOrderIgnoresInterleavedOutput(t *testing.T) {
-	// The recorded capture: children measured in name order, the writer's
-	// lines landing after three of them.
 	recorded := strings.Join([]string{
 		timingBlockHeader,
 		"  build (failed) [<ELAPSED>] — docker buildx inspect: exit status 1",
@@ -79,8 +51,6 @@ func TestCanonicalizeStepTimingOrderIgnoresInterleavedOutput(t *testing.T) {
 		"timing record written to <TMP>",
 	}, "\n")
 
-	// The same table off a loaded machine: build's children measured in the
-	// other order, so the writer's lines land on different boundaries.
 	loaded := strings.Join([]string{
 		timingBlockHeader,
 		"  build (failed) [<ELAPSED>] — docker buildx inspect: exit status 1",
@@ -94,8 +64,6 @@ func TestCanonicalizeStepTimingOrderIgnoresInterleavedOutput(t *testing.T) {
 		"timing record written to <TMP>",
 	}, "\n")
 
-	// The block the canonical form names: rows in name order at every level,
-	// the unrelated lines together after them, before the footer.
 	want := strings.Join([]string{
 		timingBlockHeader,
 		"  build (failed) [<ELAPSED>] — docker buildx inspect: exit status 1",
@@ -142,11 +110,8 @@ func goldensWithTimingBlocks(t *testing.T) []string {
 	return out
 }
 
-// reverseTimingSiblings rewrites every timing block in s with each level's
-// children in reverse order — the cheapest reordering that is guaranteed to
-// differ from the canonical one whenever more than one sibling exists. It
-// nests rows by leading indentation only, so it agrees with the canonicalizer
-// about the tree without borrowing its notion of what a row looks like.
+// reverseTimingSiblings reverses each level's children in every timing block,
+// nesting by indentation only.
 func reverseTimingSiblings(s string) string {
 	lines := strings.Split(s, "\n")
 	out := make([]string, 0, len(lines))
@@ -164,14 +129,8 @@ func reverseTimingSiblings(s string) string {
 	return strings.Join(out, "\n")
 }
 
-// timingBlockEndIndentAware returns the end of the table the header at
-// headerIdx opens. It prefers the block's own footer -- the line
-// core.ReportStepTiming writes after the table -- and falls back to the
-// indentation rule when there is none, matching where the canonicalizer stops
-// reordering. Using indentation alone here would cut the probe off at the
-// first interleaved stderr line, a boundary the canonicalizer does not
-// draw, so the probe would skip asserting the
-// property on exactly the golden shapes this file exists to check.
+// timingBlockEndIndentAware returns the footer index, else the end of the
+// indented run, matching where the canonicalizer stops.
 func timingBlockEndIndentAware(lines []string, bodyStart int) int {
 	const footer = "timing record written to "
 	for i := bodyStart; i < len(lines); i++ {
@@ -198,13 +157,8 @@ type indentNode struct {
 	children []*indentNode
 }
 
-// reverseIndentTree parses an indentation-nested run of lines and re-serializes
-// it with every level's children reversed. A row is a line carrying the
-// redacted duration token; any line after it without one is part of that row's
-// multi-line error message and stays attached to it. That is the whole of what
-// this borrows from the production side — it never consults timingLinePattern,
-// so a row shape the pattern stops recognizing still gets reordered here and
-// the mismatch surfaces.
+// reverseIndentTree reverses every level's children; a line without
+// "[<ELAPSED>]" stays with the row above. It never consults timingLinePattern.
 func reverseIndentTree(lines []string) []string {
 	root := &indentNode{}
 	stack := []*indentNode{root}
@@ -225,10 +179,7 @@ func reverseIndentTree(lines []string) []string {
 		stack = append(stack, node)
 		depths = append(depths, depth)
 	}
-	// Lines the root accumulated sit before the first row, so they belong to
-	// no node: emitting them first keeps them in the block rather than
-	// dropping them, which would make every comparison below fail for a reason
-	// that has nothing to do with the property under test.
+	// Lines before the first row belong to no node; keep them first.
 	out := append([]string(nil), root.lines...)
 	var walk func(*indentNode)
 	walk = func(n *indentNode) {

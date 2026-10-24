@@ -8,11 +8,6 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 )
 
-// TestIssuerMappingIsResolvable locks the one rule both the write refusal and
-// Reachable's verdict rest on: an issuer's org-scoping mode and a mapping's
-// org value must agree, or nothing can ever resolve through the pair. Empty
-// counts as absent on both sides — neither resolution branch matches an empty
-// string.
 func TestIssuerMappingIsResolvable(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -35,10 +30,6 @@ func TestIssuerMappingIsResolvable(t *testing.T) {
 	}
 }
 
-// TestAssertResolvableIssuerMappingNamesTheClaimAndTheMode is the refusal an
-// operator has to be able to act on: a message that says only "invalid" leaves
-// them to work out for themselves that the issuer resolves by an org claim
-// their new tenant has no value for.
 func TestAssertResolvableIssuerMappingNamesTheClaimAndTheMode(t *testing.T) {
 	err := assertResolvableIssuerMapping("https://auth.example", "urn:zitadel:iam:user:resourceowner:id", "")
 	if err == nil {
@@ -58,9 +49,6 @@ func TestAssertResolvableIssuerMappingNamesTheClaimAndTheMode(t *testing.T) {
 	}
 }
 
-// TestAssertResolvableIssuerMappingNamesTheOrgCreateCommand covers a refusal
-// that names the claim but leaves an operator with no way to actually obtain
-// an org value. The message must point at the command that closes that gap.
 func TestAssertResolvableIssuerMappingNamesTheOrgCreateCommand(t *testing.T) {
 	err := assertResolvableIssuerMapping("https://auth.example", "urn:zitadel:iam:user:resourceowner:id", "")
 	if err == nil {
@@ -71,10 +59,6 @@ func TestAssertResolvableIssuerMappingNamesTheOrgCreateCommand(t *testing.T) {
 	}
 }
 
-// TestAssertResolvableIssuerMappingRefusesAnOrgValueOnASingleTenantIssuer is
-// the mirror case: the value is read by nothing, so the mapping is just as
-// dead, and the message must say which way round the mismatch is rather than
-// reusing the org-scoped wording.
 func TestAssertResolvableIssuerMappingRefusesAnOrgValueOnASingleTenantIssuer(t *testing.T) {
 	err := assertResolvableIssuerMapping("https://idp.example", "", "386994597030592700")
 	if err == nil {
@@ -94,9 +78,6 @@ func TestAssertResolvableIssuerMappingAcceptsAConsistentMapping(t *testing.T) {
 	}
 }
 
-// TestUnresolvableIssuerMappingErrorReportsAnUnmappedIssuer covers the
-// enrollment-side reason: the target tenant has no mapping for this issuer at
-// all, which used to surface as a bare foreign-key violation.
 func TestUnresolvableIssuerMappingErrorReportsAnUnmappedIssuer(t *testing.T) {
 	err := &UnresolvableIssuerMappingError{Issuer: "https://idp.example", Reason: model.TenantReachabilityIssuerNotMapped}
 	if !strings.Contains(err.Error(), "not mapped to this tenant") {

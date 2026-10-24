@@ -4,11 +4,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  // Repo-relative so the erun-devops Dockerfile's cache mount at
-  // /src/.cache/frontend-vite (WORKDIR /src) covers it without any env-var
-  // plumbing; resolves under the repo root locally too, same convention as
-  // the tsc build-info path in tsconfig.json and the eslint/prettier caches
-  // under .cache/frontend-lint.
+  // Repo-relative so the erun-devops Dockerfile's cache mount covers it.
   cacheDir: '../../.cache/frontend-vite/erun-ui-frontend',
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -18,14 +14,9 @@ export default defineConfig({
     },
   },
   test: {
-    // No component ever renders in these tests (the few that touch
-    // window/document stub them by hand), so the default 'node' environment
-    // -- not jsdom -- matches what the suite already exercised under
-    // `node --test`.
+    // No component renders in these tests, so no jsdom.
     environment: 'node',
-    // Same rationale as erun-console's vite.config.ts: the gate's test stage
-    // runs on a shared, cgroup-unaware container, so the 5s default can trip
-    // under contention with nothing wrong in the test itself.
+    // The gate's shared, cgroup-unaware container can trip the 5s default.
     testTimeout: 60000,
   },
 });

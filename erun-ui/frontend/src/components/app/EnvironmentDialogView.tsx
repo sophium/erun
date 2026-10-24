@@ -50,8 +50,7 @@ export function EnvironmentDialogView(): React.ReactElement {
   const tenantRef = React.useRef<HTMLInputElement>(null);
   const environmentRef = React.useRef<HTMLInputElement>(null);
 
-  // The focus-on-open effect below reads the tenant through this ref so it stays
-  // scoped to dialog.open; adding dialog.tenant to its deps would yank focus while the user types.
+  // Read through a ref so typing in tenant does not re-run the focus-on-open effect.
   const tenantValueRef = React.useRef(dialog.tenant);
   React.useEffect(() => {
     tenantValueRef.current = dialog.tenant;
@@ -79,11 +78,8 @@ export function EnvironmentDialogView(): React.ReactElement {
       }}
     >
       <DialogContent
-        // Bound the panel to the viewport and let the field region scroll, so the
-        // top fields (Tenant/Environment) stay reachable and the footer stays
-        // visible on short windows — a plain centered grid overflowed off both
-        // edges with nothing scrollable. Overrides the shadcn base grid/gap/p via
-        // tailwind-merge; no generated ui/dialog.tsx edit needed.
+        // Bound to the viewport with a scrolling field region so the top fields
+        // and footer stay reachable on short windows.
         className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-md"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
@@ -225,10 +221,7 @@ function EnvironmentNameFields({
 }
 
 function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
-  // A host env has no pod and no cluster at all: no kubernetes context, no
-  // runtime pod sizing, no container registry — none of those apply to it.
-  // Showing them as required fields would block creating a host env entirely
-  // (a dead end per root AGENTS.md "Smooth, Seamless, No Dead Ends").
+  // A host env has no pod or cluster, so cluster fields are hidden.
   const isHost = dialog.envType === 'host';
   return (
     <>
@@ -264,9 +257,6 @@ function RuntimePodFields({ dialog }: { dialog: EnvironmentDialog }): React.Reac
 
 function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
-  // "Initialize without Git checkout" is a no-op for local-agent and host
-  // envs — both resolve their worktree from this machine's own directory,
-  // never a remote checkout — so hide it there.
   const skipsRemoteCheckoutAlready = dialog.envType === 'local-agent' || dialog.envType === 'host';
   return (
     <div className="grid gap-3">
@@ -346,23 +336,12 @@ interface EnvironmentSubmitGate {
   reason: string;
 }
 
-// The returned reason is rendered next to the disabled submit button so users see
-// why submit is blocked instead of guessing (Nielsen #5, error prevention).
 function environmentDialogSubmitGate(dialog: EnvironmentDialog): EnvironmentSubmitGate {
   if (dialog.busy) {
     return { disabled: true, reason: '' };
   }
-  // kubernetesContextBlocker (contexts loading / none discovered) is an
-  // environmental blocker and must win over missingRequiredFieldReason, which
-  // would otherwise say "Select a Kubernetes context" when there are none to
-  // select. missingRequiredFieldReason then covers the value requirements —
-  // including a context that is available but not yet selected — so the button's
-  // enabled state matches exactly what submitEnvironmentDialog will accept.
-  // A host env has no pod and no cluster at all, so neither cluster-shaped
-  // blocker applies to it: each would report the absence of a cluster as the
-  // reason Create is disabled, naming a field that is not rendered for this
-  // type. Its own requirements (tenant, environment, directory) are covered by
-  // missingRequiredFieldReason.
+  // Environmental blockers win over missingRequiredFieldReason, which would
+  // otherwise ask to select a context when none exist. Neither applies to a host env.
   const isHost = environmentTypeIsHost(dialog.envType);
   const blocker =
     (isHost ? null : kubernetesContextBlocker(dialog)) ??

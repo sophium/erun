@@ -20,12 +20,8 @@ type E2EInput struct {
 	shared.JobEnvelopeInput
 }
 
-// E2eTool discovers this project's <tenant>-devops/e2e/<component>/Dockerfile
-// suites the way build discovers docker/ and deploy discovers k8s/, then runs
-// each one's `e2e` stage against this server's own resolved tenant/environment
-// -- never a different one, the same same-environment constraint every other
-// typed tool in this module applies. A project with no e2e/ suite is a clean
-// no-op.
+// E2eTool runs each <tenant>-devops/e2e/<component> suite against this server's
+// own environment; no suites is a no-op.
 func E2eTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, E2EInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input E2EInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
 		component := strings.TrimSpace(input.Component)
@@ -49,10 +45,8 @@ func E2eTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRe
 					Namespace:         config.KubernetesNamespaceName(runtime.Context.Tenant, runtime.Context.Environment),
 					KubernetesContext: strings.TrimSpace(runtime.Context.KubernetesContext),
 				},
-				BaseURL: baseURL,
-				Version: version,
-				// This server's own environment is always named: it is the
-				// one environment every typed tool here targets.
+				BaseURL:     baseURL,
+				Version:     version,
 				TargetNamed: true,
 			})
 			return err

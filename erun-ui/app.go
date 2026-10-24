@@ -77,10 +77,7 @@ type erunUIDeps struct {
 	reconnectMCP           func(context.Context, config.OpenResult, func(string)) error
 	ensureSSHD             func(context.Context, config.OpenResult) error
 	canConnectLocalPort    func(int) bool
-	// canReachMCPEndpoint answers whether an MCP port carries traffic, which a
-	// dial cannot: a stale port-forward accepts and never answers, so a
-	// dial-gated recovery never fires and the environment stays dead behind a
-	// healthy-looking listener.
+	// canReachMCPEndpoint checks traffic, not a dial: a stale port-forward accepts and never answers.
 	canReachMCPEndpoint       func(int) bool
 	setRemoteCloudAlias       func(context.Context, string, string, string, string, string) (config.EnvConfig, error)
 	startTerminal             func(startTerminalSessionParams) (terminalSession, error)
@@ -88,39 +85,33 @@ type erunUIDeps struct {
 	launchHostArtifact        func(exePath, dir string) error
 	launchHostOpener          func(executable string, args []string) error
 	resolveOrchestratorLaunch func(launch orchestrator.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error)
-	// claudeAgents drives the Claude background agents persisted orchestrators
-	// run as, injectable so no test ever starts or stops a real one.
-	claudeAgents claudeAgentCLI
-	// resolveGatewayCredential reads the secret an orchestrator launched through
-	// the gateway sends, injectable so a test never reads the real secret store.
-	resolveGatewayCredential func(*config.OpenRouterConfig) (string, error)
-	savePastedFile           func(pastedFileSaveParams) (string, error)
-	listAgentOutputs         func(config.OpenResult, jobs.RuntimeOutputsParams) (jobs.RuntimeOutputsListResult, error)
-	downloadAgentOutput      func(config.OpenResult, jobs.RuntimeOutputDownloadParams) (jobs.RuntimeOutputResult, error)
-	loadDiff                 func(context.Context, string, string, uiDiffOptions) (lifecycle.DiffResult, error)
-	execCommit               func(ctx context.Context, endpoint, bearer, branch, message string) (gitx.CommitWorkingTreeResult, error)
-	execPush                 func(ctx context.Context, endpoint, bearer, branch, remote string) (gitx.PushWorkingTreeBranchResult, error)
-	loadIdleStatus           func(context.Context, string, string) (activity.EnvironmentIdleStatus, error)
-	loadEnvironmentJobs      func(context.Context, string, string) ([]shared.EnvironmentJob, error)
-	readEnvironmentJobOutput func(context.Context, string, string, jobs.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, error)
-	cancelEnvironmentJob     func(context.Context, string, string, jobs.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error)
-	whipEnvironment          func(context.Context, string, string, string, string) (orchestrator.WhipResult, error)
-	loadAPILog               func(context.Context, uiTenantDashboardInput) (string, error)
-	workspaceSyncReady       func(context.Context, string) error
-	syncWorkspace            func(context.Context, workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error)
-	workspaceSyncInterval    time.Duration
-	recordActivity           func(activity.EnvironmentActivityParams) error
-	runWorkingIssueCommand   workingIssueCommandRunner
-	loadPodBranch            func(context.Context, string, string) (string, error)
-	runPodRaw                func(context.Context, string, string, []string) (string, error)
-	execRuntimePod           func(context.Context, uiSelection, string) (string, error)
-	loadRuntimeUsage         func(context.Context, uiSelection) (uiRuntimeUsage, error)
-	stopCloudContext         func(context.Context, string) (config.CloudContextStatus, error)
-	windowStatePath          string
-	windowMaximised          func(context.Context) bool
-	// skipLoginShellEnv leaves the process environment as the caller gave it.
-	// Set for --headless, whose caller always supplies its environment on
-	// purpose -- the importer exists for launchd's minimal Finder/Dock env.
+	claudeAgents              claudeAgentCLI
+	resolveGatewayCredential  func(*config.OpenRouterConfig) (string, error)
+	savePastedFile            func(pastedFileSaveParams) (string, error)
+	listAgentOutputs          func(config.OpenResult, jobs.RuntimeOutputsParams) (jobs.RuntimeOutputsListResult, error)
+	downloadAgentOutput       func(config.OpenResult, jobs.RuntimeOutputDownloadParams) (jobs.RuntimeOutputResult, error)
+	loadDiff                  func(context.Context, string, string, uiDiffOptions) (lifecycle.DiffResult, error)
+	execCommit                func(ctx context.Context, endpoint, bearer, branch, message string) (gitx.CommitWorkingTreeResult, error)
+	execPush                  func(ctx context.Context, endpoint, bearer, branch, remote string) (gitx.PushWorkingTreeBranchResult, error)
+	loadIdleStatus            func(context.Context, string, string) (activity.EnvironmentIdleStatus, error)
+	loadEnvironmentJobs       func(context.Context, string, string) ([]shared.EnvironmentJob, error)
+	readEnvironmentJobOutput  func(context.Context, string, string, jobs.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, error)
+	cancelEnvironmentJob      func(context.Context, string, string, jobs.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error)
+	whipEnvironment           func(context.Context, string, string, string, string) (orchestrator.WhipResult, error)
+	loadAPILog                func(context.Context, uiTenantDashboardInput) (string, error)
+	workspaceSyncReady        func(context.Context, string) error
+	syncWorkspace             func(context.Context, workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error)
+	workspaceSyncInterval     time.Duration
+	recordActivity            func(activity.EnvironmentActivityParams) error
+	runWorkingIssueCommand    workingIssueCommandRunner
+	loadPodBranch             func(context.Context, string, string) (string, error)
+	runPodRaw                 func(context.Context, string, string, []string) (string, error)
+	execRuntimePod            func(context.Context, uiSelection, string) (string, error)
+	loadRuntimeUsage          func(context.Context, uiSelection) (uiRuntimeUsage, error)
+	stopCloudContext          func(context.Context, string) (config.CloudContextStatus, error)
+	windowStatePath           string
+	windowMaximised           func(context.Context) bool
+	// skipLoginShellEnv is set for --headless, whose caller supplies its environment deliberately.
 	skipLoginShellEnv            bool
 	cloneERun                    func(context.Context, string, string) error
 	contributeStatePath          string
@@ -132,12 +123,7 @@ type erunUIDeps struct {
 	relaunchApp                  func() error
 	quitApp                      func()
 	desktopControlMarkerPath     string
-	// runOrchestratorLabelCommand runs the GitHub CLI calls that provision an
-	// orchestrator's claim label. It is the shared host-command runner under a
-	// name of its own, so a test that drives provisioning says which host
-	// boundary it is stubbing instead of stubbing the sidebar's working-issue
-	// probe by accident -- and a test that drives the sidebar does not have to
-	// know a label is being minted somewhere behind it.
+	// runOrchestratorLabelCommand is a separately named seam so tests stub the right boundary.
 	runOrchestratorLabelCommand workingIssueCommandRunner
 }
 
@@ -145,73 +131,34 @@ type App struct {
 	ctx  context.Context
 	deps erunUIDeps
 
-	// identity is the desktop's persistent signing identity: it mints the per-env
-	// MCP bearer and supplies the public key deploy injects so each env's edge can
-	// verify those tokens. nil in unit tests.
+	// identity signs per-env MCP bearers; nil in unit tests.
 	identity *desktopIdentity
 
 	mu         sync.Mutex
 	nextSerial int
 	sessions   map[string]*managedTerminal
-	// sessionWG tracks every streamSession reader goroutine (spawned via
-	// spawnStreamSession) so shutdown can wait for all of them to actually
-	// exit after closing their sessions, rather than assuming a closed fd
-	// means the goroutine reading it is already gone.
+	// sessionWG lets shutdown wait for every stream reader goroutine to exit.
 	sessionWG        sync.WaitGroup
 	idleStops        map[string]struct{}
 	intentionalStops map[string]struct{}
-	// runtimeStops latches a per-env `erun stop` the desktop issued. Kept
-	// separate from intentionalStops (which is per cloud context) so the two
-	// stops cannot alias: they have different recoveries, and a runtime stop
-	// flagged as a cloud-context stop would name the wrong one.
+	// runtimeStops is separate from intentionalStops because their recoveries differ.
 	runtimeStops map[string]struct{}
-	// sessionHeartbeats holds the most recent pod observation per environment:
-	// which persistent sessions still have a live program behind them. It is
-	// what keeps a quiet-but-running AI tab from reading as finished, and what
-	// makes the rendered session count and the running state one observation
-	// rather than two guesses. See session_heartbeat.go.
+	// sessionHeartbeats is the latest pod observation of live sessions per environment.
 	sessionHeartbeats map[string]sessionHeartbeat
-	// aiSessionReadings holds the most recent structured AI-session status per
-	// environment, as the environment's own AI tool reported it. It is what
-	// keeps the sidebar badge from reading a session blocked on the human as
-	// working. See ai_session_status.go.
 	aiSessionReadings map[string]aiSessionReading
-	// envActivity is the last observation published per environment, so the
-	// sweep announces transitions rather than restating a quiet environment
-	// every tick. See environment_activity.go.
-	envActivity map[string]environmentActivityState
-	// envUsage is the last cached usage reading published per environment, kept
-	// so a hover card renders a cached figure with its age rather than
-	// triggering a probe of its own. See environment_usage.go.
-	envUsage map[string]environmentUsageReading
-	// forwardRepairs tracks, per environment, the bounded repair episode for a
-	// port-forward that holds its local port while its edge answers nothing.
-	// See environment_forward_repair.go.
-	forwardRepairs map[string]forwardRepairEpisode
-	// edgeOutages tracks, per environment, an "edge is not answering" entry
-	// logged when an orchestrator wired it, until the sweep sees that edge
-	// answer and logs the matching exit. See orchestrator_edge_recovery.go.
-	edgeOutages    map[string]orchestratorEdgeOutage
-	busyEnvs       map[string]int
-	workspaceSyncs map[string]*workspaceSyncWorker
-	orchestrators  map[string]*orchestratorSession
-	// unmanagedPacingReason is pacingLastReason's counterpart for a configured
-	// orchestrator this desktop holds no session for and therefore has no
-	// orchestratorSession to keep it on: the last pacing reason logged for it,
-	// so the reconciler's decision line covers the whole configured population
-	// without repeating itself every 15s tick. Guarded by a.mu, like the map it
-	// shadows. See orchestratorPacingUnmanagedRows.
+	envActivity       map[string]environmentActivityState
+	envUsage          map[string]environmentUsageReading
+	forwardRepairs    map[string]forwardRepairEpisode
+	edgeOutages       map[string]orchestratorEdgeOutage
+	busyEnvs          map[string]int
+	workspaceSyncs    map[string]*workspaceSyncWorker
+	orchestrators     map[string]*orchestratorSession
+	// unmanagedPacingReason dedups pacing log lines for orchestrators without a session. Guarded by a.mu.
 	unmanagedPacingReason map[string]orchestratorPacingReason
-	// investigations bounds how many failure reports become agents, for how
-	// long, and on what input. It holds its own lock; never call into it while
-	// holding a.mu, since it observes session liveness through this App.
+	// investigations has its own lock; never call into it while holding a.mu.
 	investigations *investigationRegistry
-	// skillsSourceReported latches the one warning a run posts when the shipped
-	// skills cannot be resolved. The condition is a property of this build, so
-	// restating it on every orchestrator launch would be noise.
-	skillsSourceReported bool
-	// agentsSourceReported is skillsSourceReported's counterpart for the
-	// reusable agents (erun-builder/erun-reviewer).
+	// skillsSourceReported warns once per run about unresolvable shipped skills.
+	skillsSourceReported      bool
 	agentsSourceReported      bool
 	credentialRefreshers      map[string]*cloudCredentialsRefresher
 	activityQueue             *activityQueueStore
@@ -226,68 +173,43 @@ type App struct {
 	envEnsureInflight         map[string]*envEnsureRun
 	envEnsureDone             map[string]time.Time
 	envEnsureFailNotified     map[string]struct{}
-	// initEmitted dedups the environment-initialized signal per env. `erun init`
-	// emits "==> Initialized" once, but on Windows a ConPTY repaint (triggered by
-	// writing the follow-up deploy command into the same Local shell) re-sends the
-	// buffered line as fresh output, so the trace scanner would re-fire the event —
-	// each re-fire composes another deploy, whose write repaints again: an endless
-	// create→deploy loop. Fire at most once per env; reset on init-failure/delete.
+	// initEmitted fires environment-initialized once per env: a Windows ConPTY repaint
+	// re-sends "==> Initialized", which would loop create→deploy.
 	initEmittedMu sync.Mutex
 	initEmitted   map[string]struct{}
 	configWatcher *configWatcher
-	// definitionWriteOrigin is the config watcher's origin filter: the env
-	// config writes this desktop made while transferring a definition, so the
-	// watcher stops firing on its own write. See hosted_definition_origin.go.
+	// definitionWriteOrigin keeps the config watcher from firing on this desktop's own writes.
 	definitionWriteOrigin definitionWriteOrigin
 	contribute            *contributeStore
 	contributeApps        *contributeAppForwards
 
-	// cloudContextStatuses caches the live AWS-observed power state per cloud
-	// context. The persisted config no longer carries Status (it is operational
-	// state, not configuration), so any code path that needs "is this context
-	// running right now?" must consult this map.
+	// cloudContextStatuses is the live power state; config no longer persists it.
 	cloudContextStatusesMu sync.RWMutex
 	cloudContextStatuses   map[string]cloudContextCacheEntry
 	cloudContextPollerStop chan struct{}
 
-	// envNodes is the last node reading published per environment, so the sweep
-	// announces transitions rather than restating an unchanged node every tick.
-	// See environment_node.go.
 	envNodesMu sync.Mutex
 	envNodes   map[string]uiEnvironmentNodeSnapshot
 
-	// closeConfirmed latches the operator's explicit "close anyway" choice from
-	// the running-work confirmation, so the second beforeClose pass that
-	// wailsruntime.Quit triggers proceeds instead of prompting again.
+	// closeConfirmed lets the second beforeClose pass from wailsruntime.Quit proceed without prompting.
 	closeConfirmed bool
 
-	// workingIssueCache memoizes the resolved working issue per env so the sidebar
-	// hover card doesn't re-run git + gh on every hover.
 	workingIssueMu    sync.Mutex
 	workingIssueCache map[string]workingIssueCacheEntry
 
-	// emitMu guards emitFn. Two independent reasons, both real: NewApp starts
-	// the activity queue's notify loop before a caller gets a chance to call
-	// SetEmitter, so emit() can race SetEmitter from that goroutine; and
-	// SetEmitter can be called after other background goroutines (session
-	// streamers among them) are already emitting through it.
+	// emitMu guards emitFn: the notify loop and session streamers may emit while SetEmitter runs.
 	emitMu sync.RWMutex
 	emitFn func(name string, args ...any)
 
-	// restartControlMarkerMu guards the control record against this process's
-	// own shutdown, so an adoption still waiting for a previous owner to exit
-	// cannot republish an endpoint after shutdown has removed it.
+	// restartControlMarkerMu keeps an adoption from republishing an endpoint after shutdown removed it.
 	restartControlMarkerMu       sync.Mutex
 	restartControlMarkerReleased bool
 
-	// restartControl is the loopback server a CLI-triggered restart talks
-	// to (see restart_control.go). nil when the bind failed or startup has not
-	// run yet (unit tests that construct an App directly).
+	// restartControl is nil when the bind failed or startup has not run.
 	restartControl *restartControlServer
 }
 
-// SetEmitter overrides how the App emits frontend events; the headless server
-// uses it to redirect events to SSE subscribers instead of the Wails runtime.
+// SetEmitter overrides event emission; headless uses it for SSE.
 func (a *App) SetEmitter(emit func(name string, args ...any)) {
 	a.emitMu.Lock()
 	a.emitFn = emit
@@ -352,8 +274,7 @@ func NewApp(deps erunUIDeps) *App {
 	return app
 }
 
-// mcpBearer returns "" on a nil identity (unit tests) or a signing failure; an
-// auth-enabled env then rejects the empty bearer with 401, which is correct.
+// mcpBearer returns "" without an identity; an auth-enabled env then answers 401.
 func (a *App) mcpBearer(tenant, environment string) string {
 	if a.identity == nil {
 		return ""
@@ -368,10 +289,8 @@ func (a *App) mcpBearer(tenant, environment string) string {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	// macOS GUI launches (Finder/Dock) inherit launchd's minimal env — no
-	// Homebrew PATH, no KUBECONFIG, no AWS_* — so pull a short allowlist from the
-	// user's login shell, and do it first so every later shell-out sees the same
-	// state the user's terminal does.
+	// GUI launches inherit launchd's minimal env, so import an allowlist from the
+	// login shell before any shell-out.
 	if !a.deps.skipLoginShellEnv {
 		importLoginShellEnv()
 	}
@@ -381,13 +300,8 @@ func (a *App) startup(ctx context.Context) {
 	a.startCloudContextStatusPoller()
 	a.startConfigWatcher()
 	a.startRestartControl()
-	// Migrate whatever changed while this desktop was closed. Off the startup
-	// path: it is per-environment config and network I/O, and nothing on screen
-	// waits for it. See hosted_definition_upload.go.
 	go a.catchUpHostedDefinitions()
-	// Populate and keep live every linked orchestrator mirror, not only envs
-	// opened this session. Off the startup path so config/network I/O per env
-	// does not delay first paint.
+	// Off the startup path so per-env I/O does not delay first paint.
 	go a.reconcileWorkspaceSyncForConfiguredEnvs()
 }
 
@@ -404,9 +318,7 @@ func (a *App) shutdown(context.Context) {
 	a.stopAllCloudCredentialsRefreshersLocked()
 	a.closeAllSessionsLocked()
 	a.mu.Unlock()
-	// Every closed session's reader goroutine takes a.mu itself (via
-	// currentSessionFor) on its way out, so this must wait outside the lock
-	// above or it would deadlock against them.
+	// Readers take a.mu on exit, so wait outside the lock.
 	a.sessionWG.Wait()
 }
 

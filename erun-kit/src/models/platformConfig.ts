@@ -1,26 +1,14 @@
-// Types and lenient parsers mirroring the wire shape of `GET /v1/config` on
-// erun-backend-api — the per-tenant erun read model. This is the
-// erun-backend-api contract itself, not a console-only concept, so it lives
-// here rather than in erun-console: any transport that talks to the hosted
-// platform API resolves the same model from the same bytes. See
-// erun-docs/docs/agent-reference/api-protocol.md § Endpoints.
+// Lenient types and parsers for erun-backend-api's `GET /v1/config` wire shape.
 
 export interface Tenant {
   tenantId: string;
   name: string;
-  // "COMPANY" | "OPERATIONS" on the backend; kept as a string so an unknown
-  // future type still renders rather than failing the parse.
+  // Kept as a string so an unknown future type still renders.
   type: string;
 }
 
-// The provisioning lifecycle of a hosted environment: `registered` (row exists,
-// nothing deployed) → `provisioning` → `running` | `failed`, plus the teardown
-// states a delete moves through: `deleting` while an attempt is in flight and
-// `deletion-blocked` when one finished without tearing the namespace down.
-// Parsed leniently so an unknown future state renders no badge rather than
-// failing the parse, which is why the teardown states are listed explicitly:
-// otherwise a deleting environment looks ordinary and the console offers
-// Deploy on it.
+// Unknown states parse leniently; the teardown states are explicit so a deleting
+// environment is not offered Deploy.
 export type EnvironmentStatus =
   | 'registered'
   | 'provisioning'
@@ -29,12 +17,9 @@ export type EnvironmentStatus =
   | 'deleting'
   | 'deletion-blocked';
 
-// The statuses for which a delete has been requested and is still outstanding.
-// A mutating lifecycle action on one of these is refused by the API with 409,
-// so callers must not offer it.
+// The API refuses mutating lifecycle actions on these with 409.
 export const TEARDOWN_STATUSES: readonly EnvironmentStatus[] = ['deleting', 'deletion-blocked'];
 
-// isTearingDown reports whether a delete is outstanding for this environment.
 export function isTearingDown(environment: { status?: EnvironmentStatus }): boolean {
   return environment.status !== undefined && TEARDOWN_STATUSES.includes(environment.status);
 }
@@ -42,51 +27,33 @@ export function isTearingDown(environment: { status?: EnvironmentStatus }): bool
 export interface Environment {
   environmentId: string;
   name: string;
-  // "runtime" | "remote-agent" | "local-agent"; kept as a string for the
-  // same forward-compatibility reason as Tenant.type.
   type: string;
-  // Always populated by the backend; optional here only for the same lenient-
-  // parse safety every field on this model gets. Distinct from Tenant.tenantId
-  // above: this is the row's own owning tenant, which can differ from the
-  // caller's when an OPERATIONS caller lists another tenant's environments.
+  // The row's owning tenant; differs from the caller's for an OPERATIONS caller.
   tenantId?: string;
   kubernetesContext?: string;
   contextId?: string;
   runtimeVersion?: string;
   status?: EnvironmentStatus;
   provisionError?: string;
-  // The version the last successful deploy actually installed, distinct from
-  // runtimeVersion (the declared pin) — a failed or in-flight deploy leaves
-  // this on whatever version is still running in the cluster.
+  // What the last successful deploy installed, unlike the declared runtimeVersion.
   deployedVersion?: string;
-  // Why a delete attempt did not tear the namespace down, when status is
-  // `deletion-blocked`: the namespace's own conditions, verbatim. Surfacing it
-  // is the whole point of showing the teardown state — it names the finalizer
-  // actually holding the namespace, which is what an operator needs.
+  // The namespace's conditions verbatim, naming the finalizer holding it.
   deleteError?: string;
-  // The environment's MCP edge hostname, present only once the deploy's own
-  // chained `erun expose mcp` call has actually succeeded at least once.
-  // Absent means not exposed — never attempted (no platform ingress IP
-  // configured) or every attempt so far has failed — never a separate
-  // "exposed, hostname unknown" state a caller has to guess at.
+  // Present only once `erun expose mcp` has succeeded; absent means not exposed.
   exposedHostname?: string;
 }
 
-// The provisioning lifecycle a context moves through: `provisioning` → `running`
-// | `failed`. A union of the known states, parsed leniently so an unknown future
-// state still renders.
 export type ContextStatus = 'provisioning' | 'running' | 'failed';
 
 export interface CloudContext {
   contextId: string;
   name: string;
-  // "aws" today; a string for forward compatibility.
   provider: string;
   region: string;
   kubernetesContext?: string;
   cloudProviderAlias?: string;
   instanceType?: string;
-  // Omitted by the read model for contexts registered before live provisioning existed.
+  // Omitted for contexts registered before live provisioning existed.
   status?: ContextStatus;
   provisionError?: string;
 }
@@ -95,19 +62,11 @@ export interface TenantConfigView {
   tenant: Tenant;
   environments: Environment[];
   contexts: CloudContext[];
-  // The platform-wide POST /v1/invite-requests admission window, changed
-  // only through PATCH /v1/config/invite-request-rate-limit — an
-  // operations-only write. Every tenant reads it (the console's
-  // rate-limit editor is gated on tenant type, not on this field being
-  // present), since a COMPANY tenant's requests panel still needs to show
-  // the current window even though it cannot change it.
+  // Operations-only to change, but every tenant reads it to show the current window.
   inviteRequestRateLimitWindowSeconds: number;
 }
 
-// The lenient parsers below turn untyped JSON into the shapes above without
-// throwing on an unrecognised field or enum value — an unknown status maps to
-// undefined (no badge) rather than a misleading one, and a forward-compatible
-// backend never breaks an older console build.
+// The parsers never throw on unknown fields; an unknown enum maps to undefined.
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -186,9 +145,7 @@ export function parseList<T>(value: unknown, parse: (raw: Record<string, unknown
   return value.filter(isRecord).map(parse);
 }
 
-// TenantConfigParseError distinguishes a malformed `GET /v1/config` body from
-// a transport-level failure, mirroring the desktop's WailsQueryError shape
-// closely enough that a caller can treat both the same way.
+// TenantConfigParseError separates a malformed body from a transport failure.
 export class TenantConfigParseError extends Error {
   constructor(message: string) {
     super(message);

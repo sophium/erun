@@ -23,8 +23,6 @@ describe('seedOpenRouterCatalog', () => {
   });
 
   it('never overwrites a catalog the operator already configured', () => {
-    // The defaults are a starting point, not a source of truth: a configured
-    // catalog is theirs and must survive.
     const configured: UIERunConfig = {
       ...base,
       openRouter: {
@@ -38,8 +36,6 @@ describe('seedOpenRouterCatalog', () => {
   });
 
   it('offers nothing when the host has no gateway', () => {
-    // A machine that has not configured one has nothing to offer, which is the
-    // ordinary case rather than a reason to seed an empty catalog.
     for (const config of [
       base,
       { ...base, openRouterDefaults: {} },
@@ -61,7 +57,6 @@ describe('seedOpenRouterCatalog', () => {
   });
 
   it('leaves an existing model list alone when the gateway is unset', () => {
-    // Only the base URL decides whether the catalog counts as configured.
     const got = seedOpenRouterCatalog({
       ...base,
       openRouter: { models: [{ id: 'vendor/kept', context: 100 }] },

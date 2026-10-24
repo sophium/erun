@@ -14,24 +14,15 @@ import (
 )
 
 type stubReviewRepository struct {
-	reviews   []model.Review
-	err       error
-	gotFilter apirepository.ReviewFilter
-	// gotCreated records the review Create was handed, so a test can pin which
-	// values a request body was able to put into a new review.
-	gotCreated model.Review
-	// gotMergeQueue* record what ListMergeQueue was addressed with, so a test
-	// can prove the repository query parameter reaches the repository rather
-	// than being dropped on the way through the route.
+	reviews                   []model.Review
+	err                       error
+	gotFilter                 apirepository.ReviewFilter
+	gotCreated                model.Review
 	gotMergeQueueRepository   string
 	gotMergeQueueTargetBranch string
 }
 
-// Create echoes the review it was handed, mirroring ReviewRepository.Create:
-// `created := review`, then `Returning("*")`, which fills the DB-backed columns
-// and leaves a field with no column (bun:"-") exactly as the caller left it. A
-// stub returning a zero review instead would hide that, and the issue
-// provenance the route tests below pin depends on seeing it.
+// Create echoes its input like Returning("*"): columns with bun:"-" keep the caller's value.
 func (s *stubReviewRepository) Create(_ context.Context, review model.Review) (model.Review, error) {
 	s.gotCreated = review
 	if s.err != nil {
@@ -46,9 +37,6 @@ func (s *stubReviewRepository) Get(context.Context, string) (model.Review, error
 	if s.err != nil {
 		return model.Review{}, s.err
 	}
-	// The stub has one review-or-none, the same way List does, so a test that
-	// exercises a single-review surface stubs the review rather than needing a
-	// second place to put it.
 	if len(s.reviews) > 0 {
 		return s.reviews[0], nil
 	}
@@ -93,10 +81,8 @@ func (s *stubReviewReviewerRepository) Delete(_ context.Context, reviewID, userI
 }
 
 type stubReviewService struct {
-	review model.Review
-	err    error
-	// override* and advance* record the service's call so a test can assert
-	// the request body actually reached it, repository included.
+	review               model.Review
+	err                  error
 	overrideReason       string
 	overrideTargetBranch string
 	overrideRepository   string
@@ -106,10 +92,7 @@ type stubReviewService struct {
 	prepareErr           error
 }
 
-// PrepareCreate mirrors ReviewService.PrepareCreate's own contract, the OPEN
-// default included: a test that pins whether a request body can reach the
-// status of a new review has to see the status the platform actually stores,
-// not the stub's indifference to it.
+// PrepareCreate mirrors the real OPEN default.
 func (s *stubReviewService) PrepareCreate(review model.Review) (model.Review, error) {
 	s.preparedReview = review
 	if s.prepareErr != nil {
@@ -147,11 +130,6 @@ func patchReviewStatus(t *testing.T, routes ReviewRoutes, body string) *httptest
 	return rec
 }
 
-// TestUpdateReviewStatusReturnsTheServiceResult: PATCH .../status is a thin
-// adapter over ReviewService.UpdateStatus, which is where MERGE/MERGED are
-// refused (service.TestUpdateStatusRefusesMergeAndMerged covers that
-// directly) — this only proves the route surfaces whatever the service
-// decides.
 func TestUpdateReviewStatusReturnsTheServiceResult(t *testing.T) {
 	routes := ReviewRoutes{service: &stubReviewService{review: model.Review{ReviewID: "review-1", Status: model.ReviewStatusReady}}}
 	rec := patchReviewStatus(t, routes, `{"status":"READY","buildId":"build-1"}`)
@@ -163,8 +141,6 @@ func TestUpdateReviewStatusReturnsTheServiceResult(t *testing.T) {
 	}
 }
 
-// TestAdvanceMergeQueuePromotesTheReview: the route surfaces exactly the
-// review AdvanceMergeQueue promoted.
 func TestAdvanceMergeQueuePromotesTheReview(t *testing.T) {
 	promoted := model.Review{ReviewID: "review-2", TargetBranch: "main", Status: model.ReviewStatusMerge}
 	routes := ReviewRoutes{service: &stubReviewService{review: promoted}}
@@ -181,11 +157,6 @@ func TestAdvanceMergeQueuePromotesTheReview(t *testing.T) {
 	}
 }
 
-// TestAdvanceMergeQueueBlockedReportsCountAndReview: a refusal that names
-// nothing an operator can act on is the dead end AGENTS.md's "Smooth,
-// Seamless, No Dead Ends" section refuses to accept — the body must carry the
-// unresolved count and the review id so a caller can route the operator
-// straight to the threads.
 func TestAdvanceMergeQueueBlockedReportsCountAndReview(t *testing.T) {
 	routes := ReviewRoutes{service: &stubReviewService{err: &service.UnresolvedThreadsError{ReviewID: "review-1", UnresolvedThreads: 3}}}
 	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance", bytes.NewBufferString(`{"targetBranch":"main"}`))
@@ -202,10 +173,6 @@ func TestAdvanceMergeQueueBlockedReportsCountAndReview(t *testing.T) {
 	}
 }
 
-// TestAdvanceMergeQueueOccupiedNamesTheBlocker: an occupied MERGE slot is a
-// conflict with the branch's current state, not a missing resource, and the
-// body has to carry the review holding it — that review is the operator's next
-// move (finish it, or requeue it back to READY).
 func TestAdvanceMergeQueueOccupiedNamesTheBlocker(t *testing.T) {
 	svc := &stubReviewService{err: &service.MergeQueueOccupiedError{
 		TargetBranch: "main",
@@ -233,9 +200,6 @@ func TestAdvanceMergeQueueOccupiedNamesTheBlocker(t *testing.T) {
 	}
 }
 
-// TestUpdateReviewStatusRequeueRefusalNamesTheStatus: requeue recovers only a
-// review at MERGE, so a refusal from any other status has to name the status
-// the review is actually in rather than reporting it as missing.
 func TestUpdateReviewStatusRequeueRefusalNamesTheStatus(t *testing.T) {
 	svc := &stubReviewService{err: &service.ReviewNotMergingError{ReviewID: "review-1", Status: model.ReviewStatusReady}}
 	routes := ReviewRoutes{service: svc}
@@ -251,9 +215,6 @@ func TestUpdateReviewStatusRequeueRefusalNamesTheStatus(t *testing.T) {
 	}
 }
 
-// TestOverrideAdvanceMergeQueuePassesTargetBranchAndReason: the route is a
-// thin adapter over the service, so its only job is getting both request
-// fields to OverrideAdvanceMergeQueue unchanged.
 func TestOverrideAdvanceMergeQueuePassesTargetBranchAndReason(t *testing.T) {
 	promoted := model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusMerge}
 	svc := &stubReviewService{review: promoted}
@@ -271,9 +232,6 @@ func TestOverrideAdvanceMergeQueuePassesTargetBranchAndReason(t *testing.T) {
 	}
 }
 
-// TestOverrideAdvanceMergeQueueRefusalReportsError: a refused override (blank
-// reason, no audit logger configured, ...) must report the failure, not a
-// promotion that never happened.
 func TestOverrideAdvanceMergeQueueRefusalReportsError(t *testing.T) {
 	svc := &stubReviewService{err: apirepository.ErrInvalidInput}
 	routes := ReviewRoutes{service: svc}
@@ -287,9 +245,6 @@ func TestOverrideAdvanceMergeQueueRefusalReportsError(t *testing.T) {
 	}
 }
 
-// TestGenericRepositoryErrorCarriesAStatusDerivedCode is the base case the
-// envelope exists for: a caller branching on `code` must never see it absent,
-// even on a route with no business-specific code of its own.
 func TestGenericRepositoryErrorCarriesAStatusDerivedCode(t *testing.T) {
 	reviewers := &stubReviewReviewerRepository{err: apirepository.ErrNotFound}
 	routes := ReviewRoutes{reviewers: reviewers}
@@ -305,9 +260,6 @@ func TestGenericRepositoryErrorCarriesAStatusDerivedCode(t *testing.T) {
 	}
 }
 
-// TestAdvanceMergeQueueEmptyQueueReportsEmptyQueueCode: the queue-empty case
-// must be distinguishable from every other 404 this route can return, so a
-// caller can tell "nothing to promote" from "another review is merging".
 func TestAdvanceMergeQueueEmptyQueueReportsEmptyQueueCode(t *testing.T) {
 	routes := ReviewRoutes{service: &stubReviewService{err: &service.EmptyMergeQueueError{TargetBranch: "main"}}}
 	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance", bytes.NewBufferString(`{"targetBranch":"main"}`))
@@ -323,9 +275,6 @@ func TestAdvanceMergeQueueEmptyQueueReportsEmptyQueueCode(t *testing.T) {
 	}
 }
 
-// TestAdvanceMergeQueueInvalidTargetBranchReportsItsCode: an empty
-// targetBranch must not be confused with OverrideAdvanceMergeQueue's own
-// ErrInvalidInput (a blank reason) — both are 400 but only one is this code.
 func TestAdvanceMergeQueueInvalidTargetBranchReportsItsCode(t *testing.T) {
 	routes := ReviewRoutes{service: &stubReviewService{err: service.ErrInvalidTargetBranch}}
 	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance", bytes.NewBufferString(`{"targetBranch":""}`))
@@ -341,9 +290,6 @@ func TestAdvanceMergeQueueInvalidTargetBranchReportsItsCode(t *testing.T) {
 	}
 }
 
-// TestUpdateReviewStatusInvalidTransitionReportsCodeAndDetails: a caller
-// asserting MERGE/MERGED directly must get INVALID_TRANSITION with the
-// documented details shape (from/to/validTargets), not a bare status text.
 func TestUpdateReviewStatusInvalidTransitionReportsCodeAndDetails(t *testing.T) {
 	routes := ReviewRoutes{service: &stubReviewService{err: &service.InvalidTransitionError{
 		From:         model.ReviewStatusOpen,
@@ -363,8 +309,6 @@ func TestUpdateReviewStatusInvalidTransitionReportsCodeAndDetails(t *testing.T) 
 	}
 }
 
-// TestUpdateReviewStatusMissingBuildIDReportsInvalidBody: READY/FAILED
-// without a buildId is a missing required field, not a bare 400.
 func TestUpdateReviewStatusMissingBuildIDReportsInvalidBody(t *testing.T) {
 	routes := ReviewRoutes{service: &stubReviewService{err: &service.MissingBuildIDError{Status: model.ReviewStatusFailed}}}
 	rec := patchReviewStatus(t, routes, `{"status":"FAILED"}`)
@@ -378,8 +322,6 @@ func TestUpdateReviewStatusMissingBuildIDReportsInvalidBody(t *testing.T) {
 	}
 }
 
-// TestUpdateReviewStatusMalformedJSONReportsInvalidBody: a decode failure is
-// the same INVALID_BODY code as a semantically missing field.
 func TestUpdateReviewStatusMalformedJSONReportsInvalidBody(t *testing.T) {
 	routes := ReviewRoutes{service: &stubReviewService{}}
 	rec := patchReviewStatus(t, routes, `{not json`)
@@ -392,9 +334,6 @@ func TestUpdateReviewStatusMalformedJSONReportsInvalidBody(t *testing.T) {
 	}
 }
 
-// TestAdvanceMergeQueueAmbiguousQueueReportsItsCode: a refusal whose whole job
-// is to get the caller to name a repository has to say so in a code a client
-// can act on, not fall through to the generic conflict sentence.
 func TestAdvanceMergeQueueAmbiguousQueueReportsItsCode(t *testing.T) {
 	svc := &stubReviewService{err: &service.AmbiguousMergeQueueError{
 		TargetBranch: "main",
@@ -415,18 +354,12 @@ func TestAdvanceMergeQueueAmbiguousQueueReportsItsCode(t *testing.T) {
 			t.Fatalf("body = %q, want it to carry %s", body, want)
 		}
 	}
-	// The field is present even with nothing to report. "None record no
-	// repository" and "the platform cannot say" are different answers, and a
-	// client iterating the field must not have to guard the empty case.
+	// The empty array must be present, not omitted.
 	if !strings.Contains(body, `"unrecordedRepositoryReviewIds":[]`) {
 		t.Fatalf("body = %q, want an empty unrecordedRepositoryReviewIds rather than an absent one", body)
 	}
 }
 
-// TestAdvanceMergeQueueAmbiguousQueueNamesUnattributableRows: the rows a
-// genuinely mixed queue cannot attribute are named in the refusal, by id, so
-// the caller is not left to infer which of the waiting reviews belongs to
-// neither repository.
 func TestAdvanceMergeQueueAmbiguousQueueNamesUnattributableRows(t *testing.T) {
 	svc := &stubReviewService{err: &service.AmbiguousMergeQueueError{
 		TargetBranch:        "main",

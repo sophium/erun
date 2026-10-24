@@ -1,15 +1,8 @@
 import { artifactPath } from '../../../fixtures/artifacts.js';
 import { test, expect } from '../../../fixtures/erunApp.js';
 
-// erun-common's resolveOpenTenant used to fail with a bare "tenant is
-// required" — four words with no operation, no subject, and no recovery,
-// rendered verbatim in the titlebar beside a Copy output button that had
-// nothing real to copy. It now names the operation ("open") and states the
-// recovery, and the surface no longer offers Copy output for a message with
-// no captured command output. This spec stubs the RPC layer to return that
-// exact enriched text (the same technique close-environment-failure.spec.ts
-// uses) so it exercises the rendering contract without depending on a real
-// call path that happens to reach it today.
+// Stubs the RPC to return the enriched error text, so the rendering contract is
+// exercised independently of any real call path.
 test.describe('open tenant-resolution error — actionable, no fake Copy action', () => {
   test('the titlebar names the operation and the recovery, with no Copy action', async ({
     app,

@@ -34,9 +34,7 @@ func TestActivityTraceLineHandlerFinalizesOnDeployedAndFailed(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerFinalizesOnReleaseNamedFailure(t *testing.T) {
-	// This matcher is coupled to the runtime CLI's failure-line wording; a
-	// wording change silently stops finalizing the entry unless the matcher is
-	// updated with it.
+	// Coupled to the CLI's failure-line wording.
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "team", Environment: "dev"}
 	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev"})
@@ -50,8 +48,7 @@ func TestActivityTraceLineHandlerFinalizesOnReleaseNamedFailure(t *testing.T) {
 }
 
 func TestSessionReadyFailedMatchesReleaseNamedFailure(t *testing.T) {
-	// The session-ready gate matcher must track the same wording so a
-	// failed deploy still releases the action runner.
+	// The session-ready gate must match the same wording.
 	if !sessionReadyFailedRe.MatchString("==> Deploy of team-devops failed after 2m0s") {
 		t.Fatal("sessionReadyFailedRe must match the release-named failure line")
 	}
@@ -61,8 +58,6 @@ func TestSessionReadyFailedMatchesReleaseNamedFailure(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerLabelsComponentDeployByRelease(t *testing.T) {
-	// A component deploy must be labeled by its own release and version so the
-	// drawer does not read like a full-env redeploy.
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
@@ -103,10 +98,7 @@ func TestActivityTraceLineHandlerRuntimeDeployFallsBackToRuntimeRelease(t *testi
 }
 
 func TestActivityTraceLineHandlerFinalizesUsingTenantEnvFromLine(t *testing.T) {
-	// Regression: an entry stayed running forever when `==> Deployed` landed in
-	// a selection-less tab (a generic Local shell running `erun open ...` by
-	// hand). Finalization must key off tenant/env parsed from the line, not the
-	// session selection.
+	// A selection-less tab must still finalize via the tenant/env parsed from the line.
 	app := newTestAppForActivityQueue(t)
 	app.activityQueue.start(activityQueueEntry{
 		Command:     "deploy",
@@ -128,9 +120,7 @@ func TestActivityTraceLineHandlerFinalizesUsingTenantEnvFromLine(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerFinalizesSkippingFromLine(t *testing.T) {
-	// `==> Skipping` is the deploy singleflight's dedup-skip outcome; like
-	// `==> Deployed`, it must finalize from tenant/env parsed off the line so a
-	// selection-less tab still closes the entry.
+	// `==> Skipping` must also finalize from the parsed tenant/env.
 	app := newTestAppForActivityQueue(t)
 	app.activityQueue.start(activityQueueEntry{
 		Command:     "deploy",
@@ -147,9 +137,7 @@ func TestActivityTraceLineHandlerFinalizesSkippingFromLine(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerStartsAndFinishesBuild(t *testing.T) {
-	// `erun build` traces carry no tenant/env (build has no deploy target), so
-	// the handler keys off the session selection — otherwise the sidebar shows
-	// no busy spinner for a build the user kicked off in a bound terminal.
+	// Build traces carry no tenant/env, so the handler keys off the selection.
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
@@ -190,19 +178,12 @@ func TestActivityTraceLineHandlerFinalizesBuildOnFailure(t *testing.T) {
 	}
 }
 
-// TestActivityTraceLineHandlerRecordsDetailWithoutAPTY locks down that
-// recordOutputLine's only caller used to be the PTY reader
-// (feedActivityTraceFromTerminal), so the desktop's subprocess-captured
-// build/push/deploy orchestration (deploy_orchestration.go, which has no PTY
-// and calls the trace handler directly) never populated entry.Detail. The
-// handler itself must record every line it sees, regardless of caller.
+// The handler must record Detail for subprocess callers with no PTY.
 func TestActivityTraceLineHandlerRecordsDetailWithoutAPTY(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 
-	// Call the handler directly, exactly as runErunCaptured's onLine callback
-	// does for the desktop's orchestrated build — no managedTerminal, no PTY.
 	handler("==> Building")
 	handler("./main.go:12:2: undefined: fmt.Sprintfff")
 	handler("==> Build failed after 3m12s")
@@ -219,13 +200,7 @@ func TestActivityTraceLineHandlerRecordsDetailWithoutAPTY(t *testing.T) {
 	}
 }
 
-// TestActivityTraceLineHandlerFinalizesCorrectCardWhenBuildAndDeployBothActive
-// locks down that the wrong card cannot fail: a bare deploy-failure line (no
-// tenant/env, e.g. "==> Deploy failed after 4s") must finalize the deploy
-// entry specifically, never a same-tenant/env build entry that is still
-// running. Before the fix this used findActive, whose plain map iteration
-// picks an arbitrary entry when both are active — this test is deterministic
-// under the fix (findActiveByCommand) regardless of Go's map iteration order.
+// A bare deploy-failure line must finalize the deploy, never a concurrent build.
 func TestActivityTraceLineHandlerFinalizesCorrectCardWhenBuildAndDeployBothActive(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}
@@ -262,10 +237,7 @@ func TestActivityTraceLineHandlerFinalizesCorrectCardWhenBuildAndDeployBothActiv
 }
 
 func TestActivityTraceLineHandlerSkipsBuildWithoutSelection(t *testing.T) {
-	// A generic Local shell at the repo root has no tenant/env bound to
-	// it. Build traces observed there must NOT register an entry — a
-	// stray (empty, empty) row would highlight every sidebar entry
-	// because the spinner selector walks all entries by tenant/env.
+	// An empty tenant/env entry would light up every sidebar row.
 	app := newTestAppForActivityQueue(t)
 	handler := newActivityTraceLineHandler(app, uiSelection{}, sessionKindLocal)
 	handler("==> Building")
@@ -275,9 +247,6 @@ func TestActivityTraceLineHandlerSkipsBuildWithoutSelection(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerStartsAndFinishesRelease(t *testing.T) {
-	// `erun release` traces carry no tenant/env (same as build), so the handler
-	// keys off the session selection — otherwise no spinner while a release runs
-	// in a bound terminal.
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindOpen)
@@ -356,11 +325,7 @@ func TestActivityTraceLineHandlerFinalizesPushOnFailure(t *testing.T) {
 }
 
 func TestActivityTraceLineHandlerRegistersForAllSessionKinds(t *testing.T) {
-	// The PTY trace handler is the universal early-detection signal
-	// for deploys, regardless of session kind. Host-side sessions
-	// (Local, Command) and in-pod sessions (Open, AI) all register an
-	// entry from `==> Deploying`; the helm poller converges onto the
-	// same record by ID, so duplicates can't drift.
+	// Every session kind registers from `==> Deploying`.
 	cases := []sessionKind{sessionKindLocal, sessionKindCommand, sessionKindOpen, sessionKindAI}
 	for _, kind := range cases {
 		app := newTestAppForActivityQueue(t)
@@ -380,17 +345,14 @@ func TestActivityTraceLineHandlerRegistersForAllSessionKinds(t *testing.T) {
 	}
 }
 
-// TestFeedActivityTraceCapturesFailureDetail locks the record-before-finalize
-// ordering: the failing PTY output must already be buffered when the
-// "==> Deploy failed" line finalizes the entry, so it lands in entry.Detail.
+// Output must be buffered before the failure line finalizes the entry.
 func TestFeedActivityTraceCapturesFailureDetail(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
 	managed := &managedTerminal{selection: selection, kind: sessionKindLocal, key: "local\x00team\x00dev", serial: 1}
 	app.sessions[managed.key] = managed
 
-	// Seed the entry directly rather than via the `==> Deploying` trace, whose
-	// start path needs env config on disk this test does not stage.
+	// Seeded directly: the trace start path needs env config this test does not stage.
 	app.activityQueue.start(activityQueueEntry{
 		Command:     "deploy",
 		Tenant:      "team",

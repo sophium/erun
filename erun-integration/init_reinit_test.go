@@ -28,11 +28,7 @@ func initReinitScenarios(t *testing.T) {
 }
 
 func testInitReinitRealRunUpdatesKubernetesContext(t *testing.T) {
-	// Re-init with a changed --kubernetes-context: the new context is
-	// persisted and its namespace ensured, the cloud-provider alias stays
-	// empty (no matching provider), and the unchanged registry is left
-	// alone. The kubectl stub reports the namespace NotFound so the create
-	// branch runs. The persisted env config must carry the new context.
+	// The kubectl stub reports the namespace NotFound so the create branch runs.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -62,11 +58,7 @@ func testInitReinitRealRunUpdatesKubernetesContext(t *testing.T) {
 }
 
 func testInitReinitRemoteRealRunUpdatesRuntimeSettings(t *testing.T) {
-	// Re-init of an existing remote env updates it in place: repopath
-	// converges on the in-pod worktree convention path, the runtime version
-	// moves to the new --version, and the pod limits are recorded — without
-	// recreating the env. The kubectl stub reports the clone already present,
-	// so the flow pulls instead of prompting for a URL.
+	// The kubectl stub reports the clone present, so the flow pulls instead of prompting.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -95,9 +87,6 @@ func testInitReinitRemoteRealRunUpdatesRuntimeSettings(t *testing.T) {
 }
 
 func testInitReinitRemoteRealRunUpdatesDindResourcesIndependentOfRuntimePod(t *testing.T) {
-	// --dind-cpu/--dind-memory on a re-init update the sidecar's own
-	// recorded resources without touching the runtime pod's separately
-	// recorded --runtime-cpu/--runtime-memory from an earlier init.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	appendEnvConfig(t, setup, "team", "dev", "runtimepod:\n  cpu: \"8\"\n  memory: 16Gi\n")
@@ -127,13 +116,8 @@ func testInitReinitRemoteRealRunUpdatesDindResourcesIndependentOfRuntimePod(t *t
 }
 
 func testInitReinitRemoteRealRunRedirectsTheRuntimeRegistry(t *testing.T) {
-	// The way out of the bootstrap deadlock: runtimeregistry is the only field
-	// that redirects chart resolution, and every other writer of it is a side
-	// effect of a deploy that already succeeded. --runtime-registry writes it
-	// before this run's own deploy resolves a chart, so the recovery is one
-	// command rather than a hand-edit of erun's config store. The probe seam
-	// publishes the platform chart only in the redirected registry, so the
-	// resolved chart reference is the proof the redirect took effect.
+	// --runtime-registry is written before this run's deploy resolves a chart; the probe publishes
+	// the chart only in the redirected registry.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -161,11 +145,7 @@ func testInitReinitRemoteRealRunRedirectsTheRuntimeRegistry(t *testing.T) {
 }
 
 func testInitReinitRecordsAnImagePullSecretWithoutRestatingTheType(t *testing.T) {
-	// A supplied setting lands on the env for having been supplied. The
-	// invocation names no --type, so it resolves to the local-agent default,
-	// and the setting still reaches an env stored as remote-agent — accepting
-	// the flag and dropping it is the failure this pins. The env keeps its
-	// type: a flag nobody passed must not retype anything.
+	// No --type resolves to local-agent, which must neither drop the setting nor retype the env.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -186,8 +166,6 @@ func testInitReinitRecordsAnImagePullSecretWithoutRestatingTheType(t *testing.T)
 }
 
 func testInitReinitSetsSavedDeployComponents(t *testing.T) {
-	// erun init gained --components so a saved deploy default can be
-	// set without hand-editing the env's config.yaml.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -208,11 +186,7 @@ func testInitReinitSetsSavedDeployComponents(t *testing.T) {
 }
 
 func testInitReinitClearsSavedDeployComponentsReturnsEnvToPlan(t *testing.T) {
-	// The way back: an env stuck on a saved selection that shadows the
-	// repo's k8s.deployments plan had no command to return to the plan short
-	// of hand-editing erun's config store. `--components ''` is that command:
-	// it clears the saved set outright rather than being read as "nothing
-	// passed, leave it alone".
+	// An empty --components clears the saved set rather than meaning "leave it alone".
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"erun-backend-postgres"})
 	stubs := setup.Cwd + "/stubs"
@@ -233,11 +207,7 @@ func testInitReinitClearsSavedDeployComponentsReturnsEnvToPlan(t *testing.T) {
 }
 
 func testInitReinitRuntimeEnvRecordsARegistryAndKeepsItsType(t *testing.T) {
-	// The documented escape from a chart-resolution deadlock, run the way an
-	// operator reaches for it: --runtime-registry alone. It has to land on an
-	// existing env whatever type that env is, and the runtime env has to still
-	// be a runtime env afterwards — the default an omitted --type resolves to
-	// is local-agent, and acting on it would silently retype the env.
+	// The omitted --type default (local-agent) must not retype the runtime env.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -258,12 +228,7 @@ func testInitReinitRuntimeEnvRecordsARegistryAndKeepsItsType(t *testing.T) {
 }
 
 func testInitReinitRetypesARuntimeEnvToRemoteAgent(t *testing.T) {
-	// Both env types keep their worktree off the laptop, so the old reconcile
-	// could never move between them and a runtime env could never become
-	// orchestratable. Named explicitly, the type moves, and the run does the
-	// remote-agent work — the runtime deploy and the checkout — a fresh
-	// --type=remote-agent init would. The kubectl stub reports the clone
-	// already present so the flow pulls instead of prompting for a URL.
+	// The kubectl stub reports the clone present, so the flow pulls instead of prompting.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -289,10 +254,7 @@ func testInitReinitRetypesARuntimeEnvToRemoteAgent(t *testing.T) {
 }
 
 func testInitReinitRetypesARemoteEnvToLocalAgent(t *testing.T) {
-	// The other direction, which needs more than the type field: a local-agent
-	// worktree is hostPath-mounted, and the path a remote env carries names an
-	// in-pod directory. The retype adopts the host project root supplied with
-	// it, so the env it writes is one that can actually mount.
+	// A local-agent worktree is hostPath-mounted, so the retype adopts the host project root.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -314,10 +276,7 @@ func testInitReinitRetypesARemoteEnvToLocalAgent(t *testing.T) {
 }
 
 func testInitReinitRefusesALocalAgentRetypeWithNoHostRepoPath(t *testing.T) {
-	// The refusal that keeps the flag honest: the run is not in a git repo and
-	// names no --project-root, so there is no host path to mount. Writing the
-	// type anyway would move the failure to a later deploy, and reporting
-	// success would drop the flag. It refuses, naming what to supply.
+	// With no git repo and no --project-root there is no host path to mount.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	args := []string{
@@ -336,11 +295,7 @@ func testInitReinitRefusesALocalAgentRetypeWithNoHostRepoPath(t *testing.T) {
 }
 
 func testInitReinitDryRunTracesWhatItKeepsAndWhatItChanges(t *testing.T) {
-	// The audit line for a re-init: every setting the run decided about shows
-	// up, whether it was supplied or deliberately left as found. The pod
-	// resources are the ones that matter most — they used to be reset to the
-	// defaults by any re-init that reached the reconcile at all, so an operator
-	// adding one flag lost limits they never mentioned.
+	// Pod resources not mentioned must be traced as kept, not reset to defaults.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	appendEnvConfig(t, setup, "team", "dev", "runtimepod:\n  cpu: \"8\"\n  memory: 16Gi\n")
@@ -357,16 +312,11 @@ func testInitReinitDryRunTracesWhatItKeepsAndWhatItChanges(t *testing.T) {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "init/reinit_dry_run_traces_what_it_keeps_and_what_it_changes", normalize.Apply(result.Combined))
-	// A dry run traces the write and performs none of it: the limits it said it
-	// would keep are untouched, and what it said it would set never landed.
 	assertEnvConfigContains(t, setup, "team", "dev", "cpu: \"8\"", "memory: 16Gi")
 	assertEnvConfigLacks(t, setup, "team", "dev", "imagepullsecrets", "runtimeimage")
 }
 
 func testInitReinitDryRunSetsDindResourcesIndependentOfRuntimePod(t *testing.T) {
-	// --dind-cpu/--dind-memory on a re-init trace as set while an
-	// untouched runtimepod (from an earlier init) traces as kept —
-	// applyEnvRuntimeDindPod and applyEnvRuntimePod act independently.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	appendEnvConfig(t, setup, "team", "dev", "runtimepod:\n  cpu: \"8\"\n  memory: 16Gi\n")

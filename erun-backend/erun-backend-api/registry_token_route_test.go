@@ -13,11 +13,8 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
 )
 
-// TestHostedRegistryTokenRouteRegistersWithDefaultResolvers builds the handler the
-// way a real deployment does — a database and an MCP signing key, and no injected
-// resolvers at all — and asserts GET /v2/token is served: defaultTo must fill the
-// tenant resolver too, or NewHandler's registration gate never fires and the
-// hosted registry's token service is absent from every deployment.
+// TestHostedRegistryTokenRouteRegistersWithDefaultResolvers: defaultTo must fill the tenant
+// resolver, or NewHandler never registers GET /v2/token.
 func TestHostedRegistryTokenRouteRegistersWithDefaultResolvers(t *testing.T) {
 	handler, err := NewHandler(HandlerOptions{
 		DB: undialedDatabase(t),

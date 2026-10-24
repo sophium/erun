@@ -10,9 +10,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// A registry that is neither ghcr nor Docker Hub must be queried directly, not
-// through the Docker Hub resolver, which would look up a repository named after
-// the registry host and report the tenant's own runtime image as unreachable.
+// Other registries must be queried directly; the Docker Hub resolver would
+// treat the registry host as a repository name.
 func TestResolveConfiguredRuntimeRegistryVersionsListsPrivateRegistry(t *testing.T) {
 	var gotPath, gotAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -55,9 +54,7 @@ func TestResolveConfiguredRuntimeRegistryVersionsListsPrivateRegistry(t *testing
 	}
 }
 
-// An ECR host with no docker credential falls back to the AWS CLI, mirroring the
-// gh fallback for ghcr, because an ECR token expires after twelve hours and the
-// docker credential is routinely absent or stale.
+// ECR tokens expire after 12 hours, so the AWS CLI mints a fresh one.
 func TestResolveOCIRegistryBasicAuthFallsBackToECRLogin(t *testing.T) {
 	restoreDir := DockerConfigDir
 	DockerConfigDir = func() string { return t.TempDir() }
@@ -86,13 +83,8 @@ func TestResolveOCIRegistryBasicAuthFallsBackToECRLogin(t *testing.T) {
 	}
 }
 
-// A namespace that names its own registry host must resolve against that host;
-// defaulting it to Docker Hub would make a private image look unreachable.
-//
-// The insecure rows: a cluster registry marked `insecure: true` serves plain
-// HTTP, so the probe must not force HTTPS against it. ghcr.io and Docker Hub
-// are never an insecure cluster registry, so Insecure must not affect those
-// two branches even if set.
+// A namespace naming its own host resolves against it. Insecure registries are
+// probed over HTTP; Insecure never affects ghcr.io or Docker Hub.
 func TestResolvedBaseURLFollowsTheRegistryHost(t *testing.T) {
 	for _, tc := range []struct {
 		namespace string
@@ -115,11 +107,7 @@ func TestResolvedBaseURLFollowsTheRegistryHost(t *testing.T) {
 	}
 }
 
-// TestResolveConfiguredRuntimeRegistryVersionsHonoursInsecure: an insecure
-// cluster registry serves plain HTTP with no TLS listener, so a probe that
-// always dials HTTPS cannot complete a handshake. httptest.NewServer speaks
-// HTTP only, proving the probe actually reaches the registry rather than
-// merely computing the right string.
+// httptest.NewServer speaks only HTTP, so this proves the probe reaches an insecure registry.
 func TestResolveConfiguredRuntimeRegistryVersionsHonoursInsecure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

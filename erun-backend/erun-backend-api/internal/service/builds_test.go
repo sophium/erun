@@ -27,8 +27,6 @@ func (fakeBuildReviewService) MarkBuildResult(context.Context, string, string, b
 
 const validCommitID = "abcdef0123456789abcdef0123456789abcdef01"
 
-// TestBuildCreateRefusesAMalformedCommitID: builds.md documents the same
-// 40-lowercase-hex-character grammar as comments.md, as INVALID_COMMIT_ID.
 func TestBuildCreateRefusesAMalformedCommitID(t *testing.T) {
 	svc := NewBuildService(&fakeBuildRepo{}, nil)
 	_, err := svc.Create(context.Background(), model.Build{CommitID: "short", Version: "1.0.0", Successful: true})
@@ -42,8 +40,6 @@ func TestBuildCreateRefusesAMalformedCommitID(t *testing.T) {
 	}
 }
 
-// TestBuildCreateRefusesAMalformedVersion: builds.md documents
-// INVALID_VERSION for a version failing the semver/snapshot grammar.
 func TestBuildCreateRefusesAMalformedVersion(t *testing.T) {
 	svc := NewBuildService(&fakeBuildRepo{}, nil)
 	_, err := svc.Create(context.Background(), model.Build{ReviewID: "review-1", CommitID: validCommitID, Version: "not-a-version", Successful: true})
@@ -57,9 +53,6 @@ func TestBuildCreateRefusesAMalformedVersion(t *testing.T) {
 	}
 }
 
-// TestBuildCreateAcceptsASnapshotVersion: the agent-env snapshot tag shape
-// (<semver>-snapshot-<UTC-timestamp>) is a documented valid version, not just
-// a plain semver.
 func TestBuildCreateAcceptsASnapshotVersion(t *testing.T) {
 	svc := NewBuildService(&fakeBuildRepo{}, fakeBuildReviewService{})
 	_, err := svc.Create(context.Background(), model.Build{
@@ -70,9 +63,6 @@ func TestBuildCreateAcceptsASnapshotVersion(t *testing.T) {
 	}
 }
 
-// TestBuildCreateRefusesTheRetiredGateKind: every build is written as
-// RECORDED with a version, including the merge queue's build of a prepared
-// merge commit, so a GATE build is refused before it reaches the repository.
 func TestBuildCreateRefusesTheRetiredGateKind(t *testing.T) {
 	repo := &fakeBuildRepo{}
 	svc := NewBuildService(repo, fakeBuildReviewService{})
@@ -92,9 +82,6 @@ func TestBuildCreateRefusesTheRetiredGateKind(t *testing.T) {
 	}
 }
 
-// TestBuildCreateRequiresAVersionOnAMergeQueueBuild: the build recorded on a
-// review at MERGE is an ordinary build, held to the same version grammar as
-// any other.
 func TestBuildCreateRequiresAVersionOnAMergeQueueBuild(t *testing.T) {
 	svc := NewBuildService(&fakeBuildRepo{}, fakeBuildReviewService{})
 	_, err := svc.Create(context.Background(), model.Build{
@@ -107,8 +94,6 @@ func TestBuildCreateRequiresAVersionOnAMergeQueueBuild(t *testing.T) {
 	}
 }
 
-// TestBuildCreatePersistsAFailureDetailOnAnyFailedBuild: failureDetail is an
-// optional reason on any failed build, not a field one kind owns.
 func TestBuildCreatePersistsAFailureDetailOnAnyFailedBuild(t *testing.T) {
 	repo := &fakeBuildRepo{}
 	svc := NewBuildService(repo, fakeBuildReviewService{})
@@ -124,8 +109,6 @@ func TestBuildCreatePersistsAFailureDetailOnAnyFailedBuild(t *testing.T) {
 	}
 }
 
-// TestBuildCreateRefusesNeitherReviewNorEnvironment: a build naming neither a
-// review nor an environment has no identity to persist against.
 func TestBuildCreateRefusesNeitherReviewNorEnvironment(t *testing.T) {
 	svc := NewBuildService(&fakeBuildRepo{}, fakeBuildReviewService{})
 	_, err := svc.Create(context.Background(), model.Build{
@@ -141,10 +124,6 @@ func TestBuildCreateRefusesNeitherReviewNorEnvironment(t *testing.T) {
 	}
 }
 
-// TestBuildCreateAcceptsAnUnattachedRecordedBuild: an ordinary `erun build`
-// reports a RECORDED build against its environment with no review at all,
-// and the review-status transition (which needs a review to transition) is
-// skipped rather than called with an empty id.
 func TestBuildCreateAcceptsAnUnattachedRecordedBuild(t *testing.T) {
 	repo := &fakeBuildRepo{}
 	reviews := &countingBuildReviewService{}

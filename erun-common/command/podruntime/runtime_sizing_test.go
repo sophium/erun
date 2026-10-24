@@ -15,8 +15,6 @@ const (
 	testGi = 1024 * testMi
 )
 
-// usageHistory builds a history with the aggregates a recommendation reads, plus
-// a sample count and window, without running the sampler.
 func usageHistory(window time.Duration, samples int, latest config.RuntimeUsage) deploy.RuntimeUsageHistory {
 	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	history := deploy.RuntimeUsageHistory{FirstObservedAt: start, LastObservedAt: start.Add(window)}
@@ -49,8 +47,6 @@ type memoryDirectionCase struct {
 	wantSuggested  string
 }
 
-// runMemoryDirectionCases asserts one verdict per case and, on every one, that
-// the recommendation names runtimepod and carries a reason.
 func runMemoryDirectionCases(t *testing.T, cases []memoryDirectionCase) {
 	t.Helper()
 	for _, testCase := range cases {
@@ -79,16 +75,12 @@ func runMemoryDirectionCases(t *testing.T, cases []memoryDirectionCase) {
 	}
 }
 
-// TestRecommendRuntimeSizingShrinksOrWithholdsMemory covers the directions that
-// rest on an absence of harm, and the window gates that must withhold them.
 func TestRecommendRuntimeSizingShrinksOrWithholdsMemory(t *testing.T) {
 	quietWindow := 26 * time.Hour
 	quietSamples := 200
 
 	runMemoryDirectionCases(t, []memoryDirectionCase{
 		{
-			// A day of wall time holding a handful of readings watched almost
-			// nothing. The span alone is not coverage.
 			name: "a long window with too few samples recommends nothing",
 			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, 4, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
@@ -128,8 +120,6 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 		wantSuggested string
 	}{
 		{
-			// The false-positive check the issue names: frs/local's measured
-			// 425/308631 throttled periods must not grow the environment.
 			name: "a 0.14 percent throttle ratio does not raise cpu",
 			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 1}, Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
@@ -177,10 +167,6 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 	}
 }
 
-// TestRecommendRuntimeSizingNeverShrinksBelowHeadroom is the asymmetry gate. A
-// recommender tested only on comfortable inputs is untested: the failure that
-// matters is a shrink that lands close enough to the observed peak to start
-// killing agents, so no input may produce one.
 func TestRecommendRuntimeSizingNeverShrinksBelowHeadroom(t *testing.T) {
 	limits := []int64{512 * testMi, 2 * testGi, 8704 * testMi, 23552 * testMi, 64 * testGi}
 	peakFractions := []float64{0.001, 0.01, 0.09, 0.17, 0.33, 0.4999, 0.5, 0.7, 0.89}
@@ -219,8 +205,6 @@ func TestRecommendRuntimeSizingNeverShrinksBelowHeadroom(t *testing.T) {
 	}
 }
 
-// TestRecommendRuntimeSizingAnyOOMKillRaises is the other half of the gate: a
-// single kill must be enough, whatever else the history says.
 func TestRecommendRuntimeSizingAnyOOMKillRaises(t *testing.T) {
 	for _, window := range []time.Duration{0, time.Minute, 500 * time.Hour} {
 		for _, samples := range []int{1, 240} {
@@ -248,10 +232,7 @@ func TestRecommendRuntimeSizingWithoutHistoryStaysSilent(t *testing.T) {
 	}
 }
 
-// TestAppendRuntimeUsageSampleRetainsPeakAcrossARestart is the retention
-// contract. memory.peak resets when the container restarts, so a history that
-// trusted the live counter would forget the pre-restart high-water — the exact
-// failure that would under-size an environment.
+// memory.peak resets when the container restarts.
 func TestAppendRuntimeUsageSampleRetainsPeakAcrossARestart(t *testing.T) {
 	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	history := deploy.RuntimeUsageHistory{}
@@ -259,8 +240,6 @@ func TestAppendRuntimeUsageSampleRetainsPeakAcrossARestart(t *testing.T) {
 		Memory: config.RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 6 * testGi, OOMKills: 1},
 		CPU:    config.RuntimeCPUUsage{UsageUsec: 1_000_000, Periods: 5000, ThrottledPeriods: 10},
 	}, base)
-	// A restart: every cumulative counter starts over, and the new peak is
-	// lower than the one already observed.
 	history = AppendRuntimeUsageSample(history, config.RuntimeUsage{
 		Memory: config.RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 1 * testGi},
 		CPU:    config.RuntimeCPUUsage{UsageUsec: 100, Periods: 3},
@@ -279,9 +258,7 @@ func TestAppendRuntimeUsageSampleRetainsPeakAcrossARestart(t *testing.T) {
 		t.Fatalf("periods = %d, want both lifetimes accumulated", history.ObservedPeriods)
 	}
 
-	// And the recommender must size from the retained peak, not the live one:
-	// 6Gi of 8Gi is within the raise margin, while the post-restart 1Gi would
-	// look like a shrink candidate.
+	// 6Gi of 8Gi is within the raise margin; the post-restart 1Gi would look like a shrink.
 	recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history})
 	if !ok {
 		t.Fatal("expected a recommendation")
@@ -291,12 +268,7 @@ func TestAppendRuntimeUsageSampleRetainsPeakAcrossARestart(t *testing.T) {
 	}
 }
 
-// TestAppendRuntimeUsageSampleBoundsTheWindow pins that a long-running
-// environment cannot grow the history without bound, and — the point of the
-// bound coexisting with the aggregates — that the high-water survives the
-// eviction of the sample that recorded it. Here the peak is set in the very
-// first sample, the container then restarts and runs quietly for long enough to
-// push that sample out of the window entirely.
+// The peak is set in the first sample, which is then pushed out of the window.
 func TestAppendRuntimeUsageSampleBoundsTheWindow(t *testing.T) {
 	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	history := AppendRuntimeUsageSample(deploy.RuntimeUsageHistory{}, config.RuntimeUsage{
@@ -354,9 +326,6 @@ func TestReadLocalRuntimeUsageReadsCgroupV2(t *testing.T) {
 	}
 }
 
-// TestReadLocalRuntimeUsageTreatsUnlimitedAsUnavailable pins the distinction
-// that matters to every consumer: "no limit configured" is not "a limit of
-// zero".
 func TestReadLocalRuntimeUsageTreatsUnlimitedAsUnavailable(t *testing.T) {
 	root := t.TempDir()
 	writeCgroupFixture(t, root, map[string]string{
@@ -376,9 +345,6 @@ func TestReadLocalRuntimeUsageTreatsUnlimitedAsUnavailable(t *testing.T) {
 	}
 }
 
-// TestReadLocalRuntimeUsageNeverFailsOnAbsentCounters covers cgroup v1 and any
-// host without the files. The reader runs on the monitor's tick, so it must
-// degrade rather than break the loop.
 func TestReadLocalRuntimeUsageNeverFailsOnAbsentCounters(t *testing.T) {
 	usage := config.ReadLocalRuntimeUsage(t.TempDir() + "/missing")
 	if usage.HasCounters() {

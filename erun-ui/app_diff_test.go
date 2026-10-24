@@ -109,9 +109,7 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 	if !errors.Is(err, errMCPUnreachable) {
 		t.Fatalf("expected errMCPUnreachable, got %v", err)
 	}
-	// A closed local port is the "nobody opened it" shape, not a stale
-	// forward — the review panel needs the two apart to stop presenting a
-	// stopped environment as a broken connection.
+	// A closed local port means not opened, not a stale forward.
 	if !strings.Contains(err.Error(), "ERUN_MCP_UNREACHABLE_NOT_OPEN: ") {
 		t.Fatalf("expected the not-open reachability marker, got %v", err)
 	}
@@ -120,11 +118,6 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 	}
 }
 
-// TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead is the sibling
-// case to the not-open one above: the local port is still held (a live
-// listener), but the edge behind it never answers, so the review panel must
-// treat this as an actual fault worth reconnecting rather than an
-// informational "not running" state.
 func TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -209,9 +202,7 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 	if !errors.Is(err, errMCPUnreachable) {
 		t.Fatalf("expected errMCPUnreachable, got %v", err)
 	}
-	// The port is still held here (canConnectLocalPort returns true) — the RPC
-	// dial failed mid-call, not the initial reachability probe — so this is
-	// the stale-forward shape, not not-open.
+	// The port is still held; the RPC dial failed mid-call, so this is stale.
 	if !strings.Contains(err.Error(), "ERUN_MCP_UNREACHABLE_STALE: ") {
 		t.Fatalf("expected the stale-forward reachability marker, got %v", err)
 	}

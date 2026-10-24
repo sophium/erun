@@ -15,27 +15,14 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-// runtimeOutputChunkBytes bounds how much payload one `kubectl exec` carries.
-// The exec stream does not break at a size — it breaks probabilistically as a
-// single transfer's volume and duration grow, so a whole-file stream fails more
-// and more often the bigger the file is and essentially never completes for a
-// real cross-built binary. Reading the payload as a series of bounded ranges
-// keeps every stream inside the band that transfers reliably, whatever the
-// file's size. 8 MiB of payload is at most ~11 MiB on the wire once base64
-// expands it, below the largest transfers measured as reliable, and it is the
-// worst case rather than the normal one because the pod compresses first.
+// runtimeOutputChunkBytes bounds one `kubectl exec` transfer: exec streams fail
+// more often as size grows, so payloads move as bounded ranges (~11 MiB base64 worst case).
 const runtimeOutputChunkBytes = 8 * 1024 * 1024
 
-// runtimeOutputChunkAttempts retries one range before the download gives up. A
-// broken stream is a transport fault, not a fact about the bytes, so re-reading
-// the same range is expected to succeed — and a range that keeps failing says
-// the connection is at fault rather than the file.
+// runtimeOutputChunkAttempts retries one range; a broken stream is a transport fault.
 const runtimeOutputChunkAttempts = 3
 
-// runtimeOutputSource is what the pod reports about a payload before the rest of
-// it moves: whether the entry was a directory (so the staged path is a throwaway
-// archive to clean up), the exact length to expect, and the digest that proves
-// the reassembled bytes are the pod's.
+// runtimeOutputSource is the pod's description of a payload before it moves.
 type runtimeOutputSource struct {
 	IsDir  bool
 	Path   string
@@ -43,11 +30,8 @@ type runtimeOutputSource struct {
 	SHA256 string
 }
 
-// DownloadRuntimeOutput fetches one entry from the env's runtime pod as bytes;
-// a directory arrives as a gzip tarball (IsArchive=true). The payload is read as
-// a series of bounded ranges rather than one stream, and the reassembled bytes
-// are checked against the pod's own digest. Dry-run returns a preview result
-// with no bytes and no transfer.
+// DownloadRuntimeOutput fetches one runtime-pod entry in bounded ranges and
+// checks it against the pod's digest; a directory arrives as a gzip tarball.
 func DownloadRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, params RuntimeOutputDownloadParams, run RuntimeOutputsRunner) (RuntimeOutputResult, error) {
 	dir, err := resolveOutputsDir(params.Dir)
 	if err != nil {
@@ -71,8 +55,6 @@ func DownloadRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, param
 	return fetchRuntimeOutput(ctx, req, name, probe, run)
 }
 
-// fetchRuntimeOutput asks the pod what it would send, reads it, and refuses a
-// payload the pod does not vouch for.
 func fetchRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, name, probe string, run RuntimeOutputsRunner) (RuntimeOutputResult, error) {
 	out, err := run(req, probe)
 	if err != nil {
@@ -96,10 +78,7 @@ func fetchRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, name, pr
 	return result, nil
 }
 
-// transferRuntimeOutput assembles the payload from the range the probe already
-// sent plus however many more it takes, and reports how far it got when a range
-// cannot be read: the size of the transfer is what makes it fail, so an operator
-// must never have to infer that from a bare stream error.
+// transferRuntimeOutput reports how far it got when a range fails.
 func transferRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, name string, source runtimeOutputSource, head []byte, run RuntimeOutputsRunner) ([]byte, error) {
 	if source.Size > MaxRuntimeOutputBytes {
 		return nil, fmt.Errorf("runtime output %q is too large (%d bytes); the limit is %d bytes", name, source.Size, MaxRuntimeOutputBytes)
@@ -126,9 +105,8 @@ func transferRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, name 
 	return data, nil
 }
 
-// readRuntimeOutputRange reads one range, retrying a failed or short read. A
-// range whose decoded length is not the requested one is treated as a failed
-// read, so a truncated stream can never be assembled into a plausible file.
+// readRuntimeOutputRange retries a failed or short read, so a truncated stream
+// is never assembled.
 func readRuntimeOutputRange(ctx core.Context, req config.ShellLaunchParams, sourcePath string, offset, length int64, run RuntimeOutputsRunner) ([]byte, error) {
 	script := runtimeOutputRangeScript(sourcePath, offset, length)
 	var last error
@@ -146,18 +124,14 @@ func readRuntimeOutputRange(ctx core.Context, req config.ShellLaunchParams, sour
 	return nil, last
 }
 
-// decodeRuntimeOutputChunk decodes one range response: an encoding marker line
-// followed by the base64 body. The marker is what lets the pod compress when it
-// can without the caller having to guess whether it did.
+// decodeRuntimeOutputChunk decodes an encoding marker line ("gzip"/"raw") and a base64 body.
 func decodeRuntimeOutputChunk(stdout string, length int64) ([]byte, error) {
 	marker, body, _ := strings.Cut(strings.TrimLeft(stdout, "\n"), "\n")
 	marker = strings.TrimSpace(marker)
 	if marker != "gzip" && marker != "raw" {
 		return nil, fmt.Errorf("the pod did not say how it encoded the range")
 	}
-	// base64(1) wraps at 76 columns, so the body arrives as thousands of lines.
-	// Stripping them in one pass matters at these sizes: splitting on whitespace
-	// and rejoining walks and reallocates the whole megabyte-scale range twice.
+	// One-pass strip: base64(1) wraps lines and ranges are megabytes.
 	data, err := base64.StdEncoding.DecodeString(strings.Map(dropBase64Whitespace, body))
 	if err != nil {
 		return nil, fmt.Errorf("decode the pod's response: %w", err)
@@ -194,10 +168,8 @@ func gunzipRuntimeOutputChunk(data []byte) ([]byte, error) {
 	return plain, nil
 }
 
-// discardRuntimeOutputStagedArchive removes the archive the probe staged for a
-// directory download. A leftover staging file is the pod's problem to carry, so
-// it is removed even when the transfer failed — and a failed removal is only
-// traced, because the bytes the caller asked for have already arrived.
+// discardRuntimeOutputStagedArchive removes a staged directory archive even after
+// a failed transfer; a failed removal is only traced.
 func discardRuntimeOutputStagedArchive(ctx core.Context, req config.ShellLaunchParams, stagedPath string, run RuntimeOutputsRunner) {
 	script := "rm -f " + core.ShellQuote(stagedPath)
 	ctx.TraceBlock("outputs discard staged archive", script)
@@ -206,11 +178,8 @@ func discardRuntimeOutputStagedArchive(ctx core.Context, req config.ShellLaunchP
 	}
 }
 
-// parseRuntimeOutputProbe reads the probe's answer: four metadata lines — the
-// entry kind, the payload length, the path to read it from, and its digest
-// (empty when the pod has no hashing tool) — followed by the payload's first
-// range, so a download that fits in one range costs one round trip. The kind
-// line anchors the parse so a login shell's own banner cannot shift it.
+// parseRuntimeOutputProbe reads kind, size, path, and digest lines, then the
+// first range. The kind line anchors the parse against login-shell banners.
 func parseRuntimeOutputProbe(name, stdout string) (runtimeOutputSource, []byte, error) {
 	lines := strings.Split(strings.ReplaceAll(stdout, "\r\n", "\n"), "\n")
 	for i, line := range lines {
@@ -243,10 +212,8 @@ func parseRuntimeOutputProbe(name, stdout string) (runtimeOutputSource, []byte, 
 	return runtimeOutputSource{}, nil, fmt.Errorf("download runtime output %q: the pod did not report what it would send", name)
 }
 
-// runtimeOutputProbeScript resolves the entry, stages a directory as a gzip
-// tarball so its bytes stay fixed while they are read range by range, reports
-// the length and digest of whatever will be sent, and sends the first range with
-// it. /dev, /proc, and /sys are excluded defensively from the archive.
+// runtimeOutputProbeScript stages a directory as a tarball so its bytes stay
+// fixed across range reads, then reports metadata and the first range.
 func runtimeOutputProbeScript(dir, name string) string {
 	quotedDir := core.ShellQuote(dir)
 	quotedName := core.ShellQuote(name)
@@ -287,16 +254,11 @@ func runtimeOutputProbeScript(dir, name string) string {
 	}, "\n")
 }
 
-// runtimeOutputRangeScript reads one byte range of the staged payload.
 func runtimeOutputRangeScript(sourcePath string, offset, length int64) string {
 	return runtimeOutputRangePipeline(core.ShellQuote(sourcePath), offset, length)
 }
 
-// runtimeOutputRangePipeline emits the range read itself, announcing whether it
-// compressed the bytes first. tail and head seek a regular file, so a late range
-// costs no more than an early one; gzip is what keeps a compressible payload's
-// stream far below the size where the stream itself becomes the risk, and its
-// absence has to stay survivable because a download must not depend on it.
+// runtimeOutputRangePipeline gzips when available and falls back to raw.
 func runtimeOutputRangePipeline(quotedSource string, offset, length int64) string {
 	read := fmt.Sprintf("tail -c +%d %s | head -c %d", offset+1, quotedSource, length)
 	return strings.Join([]string{

@@ -37,8 +37,6 @@ func testDoctorHelp(t *testing.T) {
 	golden.Equal(t, "doctor/help", normalize.Apply(result.Combined))
 }
 
-// seedRemoteInitMarker writes a bootstrap marker under the
-// per-tenant/per-environment path doctor's in-runtime inspection reads.
 func seedRemoteInitMarker(t *testing.T, setup env.Setup, tenant, environment, body string) {
 	t.Helper()
 	markerDir := filepath.Join(setup.Home, ".erun", tenant, environment)
@@ -50,10 +48,7 @@ func seedRemoteInitMarker(t *testing.T, setup env.Setup, tenant, environment, bo
 	}
 }
 
-// stubDoctorHelmStatus stubs `helm status` to report the runtime
-// release in the given state; every other helm invocation succeeds
-// silently. The status string is the decision input
-// RecommendedDeployRecovery branches on.
+// stubDoctorHelmStatus reports the runtime release in releaseStatus.
 func stubDoctorHelmStatus(t *testing.T, stubsDir, releaseStatus string) {
 	t.Helper()
 	script := strings.Join([]string{
@@ -65,21 +60,14 @@ func stubDoctorHelmStatus(t *testing.T, stubsDir, releaseStatus string) {
 	fixture.StubBinaryWithScript(t, stubsDir, "helm", script)
 }
 
-// stubDoctorKubectl stubs every kubectl surface the real-run doctor
-// cleanup path touches: the pod listing for the diagnosis, the
-// deployment wait (overridable via waitArm to simulate cluster
-// failures), the pending-helm lock delete, the namespace probe the
-// failure diagnostic runs, and the dind exec scripts for inspection and
-// the three prune actions (matched on their distinctive docker lines).
-// stubDoctorPodRequestsArm answers the reservation reading's `-o json` pod read
-// from the same list the usage scenarios use (stubUsagePodRequestsList), while
-// the table answer it precedes keeps serving the pod listing that parses a
-// table. Ordered first because both match " get pods ": the table arm must
-// never win the JSON read.
+// stubDoctorPodRequestsArm answers the `-o json` pod read. It comes first because
+// the table arm also matches " get pods ".
 func stubDoctorPodRequestsArm() string {
 	return `  *" get pods "*"-o json"*) printf '%s\n' '` + stubUsagePodRequestsList + `' ;;`
 }
 
+// stubDoctorKubectl stubs every kubectl surface doctor touches; waitArm overrides
+// the deployment wait to simulate cluster failures.
 func stubDoctorKubectl(t *testing.T, stubsDir, waitArm string) {
 	t.Helper()
 	if waitArm == "" {

@@ -18,10 +18,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Make the toolchain resolvable even from a shell with a stale in-memory PATH.
-# Dedup so appending does not compound an already-long inherited PATH: once PATH
-# passes cmd.exe's ~8 KB limit, yarn's spawned cmd child truncates it and drops
-# node ("'node' is not recognized"), silently skipping the desktop's frontend build.
+# Re-read the persisted PATH in case this shell's copy is stale. Dedup: past cmd.exe's
+# ~8 KB limit, yarn's cmd child truncates PATH and loses node.
 $persisted = ([Environment]::GetEnvironmentVariable('Path','Machine'), [Environment]::GetEnvironmentVariable('Path','User')) -join ';'
 $env:Path = (($persisted + ';' + $env:Path) -split ';' | Where-Object { $_ -ne '' } | Select-Object -Unique) -join ';'
 
@@ -33,7 +31,6 @@ $AppExe = Join-Path $Bin "erun-app.exe"
 $UiBuild = Join-Path $RepoRoot "erun-ui\build.ps1"
 New-Item -ItemType Directory -Force -Path $Bin | Out-Null
 
-# --- version stamp (mirror run.sh) ----------------------------------------
 $versionFile = Join-Path $RepoRoot "erun-devops\VERSION"
 $buildVersion = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { "dev" }
 $buildCommit = ""
@@ -43,11 +40,6 @@ if (git -C $ScriptDir rev-parse --is-inside-work-tree 2>$null) {
     $buildDate = (git -C $ScriptDir show -s --format=%cI HEAD).Trim()
 }
 
-# --- detect subcommand (first non-flag arg), help requests, quiet mode -----
-# The first non-flag argument names the subcommand, and -h/--help or the
-# help/completion commands mark a request for usage text. Both are read here,
-# before anything is built, because together they decide what has to be built:
-# a help request prints static text that does not depend on this checkout.
 $commandName = ""
 $helpRequest = $false
 foreach ($a in $CliArgs) {
@@ -59,17 +51,12 @@ foreach ($a in $CliArgs) {
 }
 $quiet = ($CliArgs -contains "--no-shell")
 
-# Help and completion are answered from the binary already built: the text is
-# static, and `app --help` in particular must not pay for the desktop build
-# below. With no binary yet there is nothing to answer with, so the request
-# still falls through to a CLI build -- never to the desktop one, which no help
-# request can reach.
+# Help text is static: answer it from an existing binary and never build the desktop for it.
 if ($helpRequest -and (Test-Path $CliExe)) {
     & $CliExe @CliArgs
     exit $LASTEXITCODE
 }
 
-# --- always rebuild the CLI (CGO disabled; fast) ---------------------------
 $ldflags = "-X github.com/sophium/erun/cmd/shared.buildVersion=$buildVersion " +
            "-X github.com/sophium/erun/cmd/shared.buildCommit=$buildCommit " +
            "-X github.com/sophium/erun/cmd/shared.buildDate=$buildDate"
@@ -83,9 +70,7 @@ try {
 } finally { Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue }
 if (-not $quiet) { [Console]::Error.WriteLine("ok -> $CliExe") }
 
-# --- for `erun app`, rebuild the desktop bundle into the same bin ----------
-# Non-fatal like run.sh: a missing wails/yarn/node/gcc toolchain warns but still
-# lets the CLI run (its `app` subcommand emits a clear not-found message).
+# Non-fatal: without the desktop toolchain, `erun app` still reaches its own diagnosis.
 if ($commandName -eq "app" -and -not $helpRequest) {
     try {
         & $UiBuild -Target $AppExe
@@ -95,10 +80,7 @@ if ($commandName -eq "app" -and -not $helpRequest) {
     }
 }
 
-# Prepend bin so the launched desktop app (and any PTY tab it spawns) resolves
-# the freshly-built plain erun.exe here, not the rebuilding shim on PATH. Dedup so
-# the app (and every PTY tab that inherits this) starts from a compact PATH rather
-# than compounding one that later overflows cmd.exe's limit (see the note above).
+# The desktop app and its PTY tabs must resolve this erun.exe, not the rebuilding shim.
 $env:Path = (("$Bin;$env:Path") -split ';' | Where-Object { $_ -ne '' } | Select-Object -Unique) -join ';'
 
 & $CliExe @CliArgs

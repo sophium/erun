@@ -7,20 +7,15 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// ObservedIngress is one Ingress's routed hosts and the TLS secret backing
-// each host group, matching `spec.rules[].host` / `spec.tls[]`.
+// ObservedIngress is one Ingress's routed hosts and TLS secrets.
 type ObservedIngress struct {
 	Name  string               `json:"name"`
 	Hosts []string             `json:"hosts,omitempty"`
 	TLS   []ObservedIngressTLS `json:"tls,omitempty"`
-	// Backends are the in-namespace Services this Ingress routes to. Without
-	// them an exposure can only be matched to a Service by re-deriving the
-	// naming convention that produced it, which is exactly the assumption a
-	// repo-native chart breaks.
+	// Backends avoids re-deriving Service names from a convention repo-native charts break.
 	Backends []ObservedIngressBackend `json:"backends,omitempty"`
 }
 
-// ObservedIngressBackend is one Service an Ingress rule routes to.
 type ObservedIngressBackend struct {
 	Service string `json:"service"`
 	Port    int    `json:"port,omitempty"`
@@ -31,8 +26,6 @@ type ObservedIngressTLS struct {
 	SecretName string   `json:"secretName,omitempty"`
 }
 
-// ingressList is a deliberately partial parse of `kubectl get ingress -o
-// json`, matching the podStatusList idiom in deploy_pod_watch.go.
 type ingressList struct {
 	Items []ingressItem `json:"items"`
 }
@@ -64,10 +57,7 @@ type ingressItem struct {
 	} `json:"spec"`
 }
 
-// FetchObservedIngresses names the read rather than the operation, for the
-// same reason fetchObservedServices does: the services listing reads Ingresses
-// too, so "observe:" here would name a command its caller never ran.
-// RunObservation prefixes its own name onto what it gets back.
+// FetchObservedIngresses errors name the read, not "observe:": callers other than observe use it.
 func FetchObservedIngresses(args []string) ([]ObservedIngress, error) {
 	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
@@ -101,9 +91,6 @@ func FetchObservedIngresses(args []string) ([]ObservedIngress, error) {
 	return ingresses, nil
 }
 
-// appendUniqueIngressBackend keeps one entry per (service, port): an Ingress
-// routing several paths to the same Service is the ordinary shape, and
-// repeating it would read as several backends.
 func appendUniqueIngressBackend(backends []ObservedIngressBackend, backend ObservedIngressBackend) []ObservedIngressBackend {
 	for _, existing := range backends {
 		if existing == backend {

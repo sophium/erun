@@ -11,10 +11,7 @@ import (
 	"testing"
 )
 
-// TestMain isolates this package's tests from the machine running them: a
-// runtime pod's identity in the invoking shell does not leak in, timing history
-// goes to a temporary directory rather than the operator's, no browser or file
-// opener can be reached, and no git child runs maintenance.
+// TestMain isolates tests from the host: pod identity, timing history, browser openers, git maintenance.
 func TestMain(m *testing.M) {
 	cleanup, err := isolateTestSuite()
 	if err != nil {
@@ -26,8 +23,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// timingRecordDirEnv is base/core's TimingRecordDirEnv, spelled out so that
-// a package below base/core can carry this suite too.
+// timingRecordDirEnv duplicates base/core's TimingRecordDirEnv for packages below base/core.
 const timingRecordDirEnv = "ERUN_TIMING_DIR"
 
 func isolateTestSuite() (func(), error) {
@@ -53,8 +49,6 @@ func isolateTestSuite() (func(), error) {
 	return cleanup, isolateSuiteGitMaintenance()
 }
 
-// isolateSuiteBrowserOpeners points every platform's opener seam at an inert
-// binary unless a test names its own.
 func isolateSuiteBrowserOpeners() error {
 	inert, err := exec.LookPath("true")
 	if err != nil {
@@ -71,9 +65,7 @@ func isolateSuiteBrowserOpeners() error {
 	return nil
 }
 
-// isolateSuiteGitMaintenance points every git child at a global config that
-// includes the user's own and turns maintenance off, unless GIT_CONFIG_GLOBAL
-// is already set.
+// isolateSuiteGitMaintenance disables git maintenance unless GIT_CONFIG_GLOBAL is already set.
 func isolateSuiteGitMaintenance() error {
 	if _, ok := os.LookupEnv("GIT_CONFIG_GLOBAL"); ok {
 		return nil
@@ -98,8 +90,7 @@ func isolateSuiteGitMaintenance() error {
 	return os.Setenv("GIT_CONFIG_GLOBAL", path)
 }
 
-// isolateSuiteGitConfigFile writes config to a file named by its content, so
-// every suite of every package shares one file per config.
+// isolateSuiteGitConfigFile names the file by content so all suites share one file per config.
 func isolateSuiteGitConfigFile(config string) (string, error) {
 	sum := sha256.Sum256([]byte(config))
 	path := filepath.Join(os.TempDir(), "erun-common-test-gitconfig-"+hex.EncodeToString(sum[:8]))

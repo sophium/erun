@@ -55,16 +55,11 @@ func JobAttachTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.C
 	}
 }
 
-// jobCommandPreviewChars bounds how much of a job's command a status or await
-// response echoes back. A command job's argv is a few words; an agent job's
-// argv carries its entire dispatch prompt, so returning it unbounded turns
-// every poll and every bounded await into a multi-KB echo of text the caller
-// itself supplied moments earlier.
+// jobCommandPreviewChars bounds the echoed command; an agent job's argv carries
+// its whole prompt.
 const jobCommandPreviewChars = 240
 
-// previewJobForStatus returns job unchanged, or a copy with its command
-// collapsed to an identifying prefix when it exceeds the preview bound. It
-// never mutates the record a caller reads back from job_output or job_cancel.
+// previewJobForStatus returns a truncated copy, never mutating job.
 func previewJobForStatus(job shared.EnvironmentJob) shared.EnvironmentJob {
 	if preview, truncated := previewCommand(job.Command); truncated {
 		job.Command = preview
@@ -88,11 +83,8 @@ type JobStatusInput struct {
 	ID          string `json:"id,omitempty" jsonschema:"job to report; omit to return every retained job, newest first"`
 }
 
-// JobStatusResult is always a definite answer. A job whose supervisor vanished
-// reports state unknown with a reason; it never reports an outcome nobody
-// recorded, and the list is never silently shortened. Jobs is empty when id
-// selected one job: Job already carries that record, and echoing it twice in
-// one payload buys nothing.
+// JobStatusResult never reports an unrecorded outcome; a vanished supervisor
+// reads as unknown. Jobs is empty when id selects one job.
 type JobStatusResult struct {
 	Tenant      string                  `json:"tenant"`
 	Environment string                  `json:"environment"`

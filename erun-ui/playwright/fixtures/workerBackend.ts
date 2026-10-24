@@ -14,39 +14,18 @@ import {
 
 const isWindows = process.platform === 'win32';
 
-// Shared with playwright.config.ts so an overridden ERUN_PLAYWRIGHT_PORT reaches
-// every layer; each worker then prefers its own port above this base.
+// Shared with playwright.config.ts; each worker prefers a port above this base.
 const BASE_PORT = Number(process.env.ERUN_PLAYWRIGHT_PORT) || 34123;
 
-// erun-ui dir, one level up from this playwright dir. Windows produces
-// bin/erun-app.exe; POSIX produces an extensionless bin/erun-app (see
-// playwright.config.ts's webServer command, kept in lockstep for the e2e-k3d
-// branch below).
+// Kept in lockstep with playwright.config.ts's webServer command.
 const ERUN_UI_DIR = path.join(__dirname, '..', '..');
 const BIN_PATH = path.join(ERUN_UI_DIR, isWindows ? 'bin/erun-app.exe' : 'bin/erun-app');
 
-// The port a worker asks its backend for is a preference, never an assumption.
-// The backend announces the address it actually bound, on startup, and this
-// fixture serves whatever it announced — so a port another process already
-// holds (a leftover backend from a run that died partway, or any host process
-// that reached it first) costs the worker a different port, not the whole run:
-//
-//   erun-app headless: listening on http://127.0.0.1:34126/
-//   listen tcp 127.0.0.1:34126: bind: address already in use
-//   Error: worker backend exited before becoming ready
-//
-// is what the worker used to die with. Probing for a port first cannot fix it:
-// the probe released the port before the backend ever bound it, and whatever
-// took it in between won. Only the backend's own bind can, so the address is
-// read back from the announcement (erun-ui/main.go listenHeadless) rather than
-// decided here.
+// The requested port is only a preference: probing first races other processes, so the
+// backend's own announcement (main.go listenHeadless) is the source of truth.
 const ANNOUNCED_ADDRESS = /erun-app headless: listening on http:\/\/127\.0\.0\.1:(\d+)\//;
 
-// awaitBackendReady waits for the backend to announce an address and then polls
-// that address' HTTP root the way Playwright's own webServer readiness check
-// does, failing fast if the child exits before ever answering — a
-// hang-until-timeout would otherwise hide a crash loop behind a generic "never
-// became ready" error.
+// awaitBackendReady fails fast if the child exits, so a crash loop is not hidden as a timeout.
 async function awaitBackendReady(
   child: ChildProcess,
   timeoutMs: number,
@@ -69,7 +48,7 @@ async function awaitBackendReady(
           return announcedURL;
         }
       } catch {
-        // Not accepting connections yet — keep polling.
+        // Not accepting connections yet.
       }
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -84,18 +63,12 @@ async function awaitBackendReady(
   );
 }
 
-// announcedBackendURL reads the address the backend says it is serving on, or
-// undefined while it has not said so yet. Anchored on the announced port rather
-// than a caller-supplied one on purpose: a caller that guesses here is the
-// defect this file exists to avoid.
 function announcedBackendURL(output: string): string | undefined {
   const announced = ANNOUNCED_ADDRESS.exec(output);
   return announced ? `http://127.0.0.1:${String(announced[1])}` : undefined;
 }
 
-// stopBackend sends a graceful shutdown (main.go's runHeadless turns SIGTERM
-// into an HTTP server Shutdown) and force-kills only if it does not exit in
-// time, so a worker teardown never hangs the whole run on a stuck child.
+// stopBackend sends SIGTERM and force-kills after a bound.
 async function stopBackend(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) {
     return;
@@ -117,18 +90,8 @@ type WorkerFixtures = {
   workerBaseURL: string;
 };
 
-// One headless backend per Playwright worker, replacing the single shared
-// singleton the old config's webServer block started. Each worker is a
-// separate OS process, so its own subdirectory + setWorkerRoot (seedRoot.ts)
-// can never collide with another worker's root or config, and the port is
-// offset by the worker's parallelIndex (stable across restarts, bounded by
-// `workers`).
-//
-// The opt-in e2e-k3d mode keeps the original single shared backend + single
-// real cluster instead: it is always workers: 1, and
-// playwright.config.ts still declares the webServer block and global-setup
-// still seeds the one root before this fixture ever runs, so this branch just
-// points at that already-running backend rather than spawning a second one.
+// One headless backend per worker, each with its own root. e2e-k3d mode (workers: 1) reuses
+// the shared backend playwright.config.ts starts.
 export const test = base.extend<object, WorkerFixtures>({
   workerBaseURL: [
     async ({}, use, workerInfo) => {
@@ -137,9 +100,7 @@ export const test = base.extend<object, WorkerFixtures>({
         return;
       }
 
-      // A stable per-worker port keeps a stray backend easy to find by hand.
-      // Nothing depends on getting it: awaitBackendReady serves the address the
-      // backend announces, whatever that turns out to be.
+      // A stable preferred port only eases finding a stray backend by hand.
       const preferredPort = BASE_PORT + workerInfo.parallelIndex;
       const root = path.join(isolatedRoot(), `worker-${workerInfo.parallelIndex}`);
       fs.mkdirSync(root, { recursive: true });
@@ -170,11 +131,7 @@ export const test = base.extend<object, WorkerFixtures>({
       await use(baseURL);
 
       await stopBackend(child);
-      // removeWorkerRoot reaps the stub processes the last spec in this worker
-      // opened: they are not children of the backend, so stopping it leaves them
-      // parked. After stopBackend, never before — a stub killed under a live
-      // backend can be respawned by the reconnect path and end up outside the
-      // sweep.
+      // Reap after stopBackend: a stub killed under a live backend can be respawned past the sweep.
       removeWorkerRoot(root);
     },
     { scope: 'worker' },

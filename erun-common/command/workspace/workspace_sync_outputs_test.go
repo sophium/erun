@@ -8,16 +8,8 @@ import (
 	"testing"
 )
 
-// These tests drive syncOutputsArtifacts against a stub `ssh` so the outputs
-// listing and the prune it feeds are exercised together: an inconclusive
-// listing (a dropped ssh connection, a `find` failure) must never be read as
-// "no deliverables" and must never reach the prune, while a genuinely absent
-// outputs dir and a genuinely empty one must still be no-ops, and a listing
-// that succeeds must still prune what the pod removed.
+// An inconclusive outputs listing must never reach the prune.
 
-// stubWorkspaceSyncSSHForOutputs points `ssh` at the TestMain stub with no
-// source-lane listings configured, since these tests only exercise the
-// outputs lane's own remote command.
 func stubWorkspaceSyncSSHForOutputs(t *testing.T) {
 	t.Helper()
 	stubWorkspaceSyncSSH(t, nil, nil)
@@ -41,8 +33,7 @@ func TestSyncOutputsArtifactsDoesNotPruneOnSSHConnectionFailure(t *testing.T) {
 
 func TestSyncOutputsArtifactsTreatsAbsentOutputsDirAsEmptyNoop(t *testing.T) {
 	stubWorkspaceSyncSSHForOutputs(t)
-	// No workspaceSyncStubOutputsEnv and no exit override: the stub's `cd`
-	// branch behaves as it would on a pod that has never written a deliverable.
+	// No outputs env and no exit override: the pod never wrote a deliverable.
 
 	artifactsLocal := filepath.Join(t.TempDir(), "artifacts-not-yet-created")
 
@@ -78,10 +69,6 @@ func TestSyncOutputsArtifactsStillPrunesRemovedArtifactOnSuccessfulListing(t *te
 	}
 }
 
-// TestRemoteOutputsFilesIncludesSSHStderrInsteadOfBareExitStatus: cmd.Output()
-// already captures ssh's own diagnostic onto exitErr.Stderr, so a failure must
-// surface it rather than the content-free "exit status 255" that %w alone
-// renders.
 func TestRemoteOutputsFilesIncludesSSHStderrInsteadOfBareExitStatus(t *testing.T) {
 	stubWorkspaceSyncSSHForOutputs(t)
 	t.Setenv(workspaceSyncStubOutputsExitEnv, "255")
@@ -96,9 +83,6 @@ func TestRemoteOutputsFilesIncludesSSHStderrInsteadOfBareExitStatus(t *testing.T
 	}
 }
 
-// TestRemoteOutputsFilesReportsExitStatusPlainlyWhenSSHWroteNoStderr covers the
-// case where ssh (or find) failed with nothing on stderr: the message must
-// still name the exit status rather than emit an empty, misleading fragment.
 func TestRemoteOutputsFilesReportsExitStatusPlainlyWhenSSHWroteNoStderr(t *testing.T) {
 	stubWorkspaceSyncSSHForOutputs(t)
 	t.Setenv(workspaceSyncStubOutputsExitEnv, "255")
@@ -112,12 +96,7 @@ func TestRemoteOutputsFilesReportsExitStatusPlainlyWhenSSHWroteNoStderr(t *testi
 	}
 }
 
-// TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode: when the pod's
-// copy hashes identically to what is already in the mirror, the artifact is
-// never made writable, never re-extracted, and never re-marked read-only, so
-// an operator invoking it from a shell never hits the 0644 window
-// `makeArtifactsWritable` opens. The tar archive stub below is only consulted
-// if the pass decides to transfer.
+// The archive stub is only consulted if the pass decides to transfer.
 func TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode(t *testing.T) {
 	stubWorkspaceSyncSSHForOutputs(t)
 
@@ -126,15 +105,10 @@ func TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode(t *testing.T) 
 	if err := os.WriteFile(artifact, []byte("already built"), 0o644); err != nil {
 		t.Fatalf("seed artifact: %v", err)
 	}
-	// A settled mirror always ends a pass read-only+executable; a real artifact
-	// between passes carries exactly this mode.
 	if err := os.Chmod(artifact, 0o555); err != nil {
 		t.Fatalf("chmod artifact read-only+executable: %v", err)
 	}
 
-	// The pod's copy hashes identically to the mirror's, so this pass has
-	// nothing to transfer -- and therefore nothing to make writable, extract, or
-	// re-mark.
 	archive := writeWorkspaceSyncArchive(t, map[string][]byte{"erun-darwin-arm64": []byte("already built")})
 	t.Setenv(workspaceSyncStubArchiveEnv, archive)
 	t.Setenv(workspaceSyncStubOutputsEnv, "erun-darwin-arm64")
@@ -154,12 +128,7 @@ func TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode(t *testing.T) 
 	}
 }
 
-// TestSyncOutputsArtifactsSkipsUnchangedContentOnSecondPass: the outputs lane
-// must not re-stage unchanged content. workspaceSyncStubFetchMarkerEnv marks
-// the moment the pod's archive is actually streamed (the real ssh/tar
-// transfer), so this test proves the transfer itself is skipped for unchanged
-// content -- not just that the reported count looks right -- and that a genuine
-// content change still triggers a real transfer.
+// workspaceSyncStubFetchMarkerEnv marks the actual transfer, not just the reported count.
 func TestSyncOutputsArtifactsSkipsUnchangedContentOnSecondPass(t *testing.T) {
 	stubWorkspaceSyncSSHForOutputs(t)
 	t.Setenv(workspaceSyncStubOutputsEnv, "bin/tool")
@@ -206,9 +175,7 @@ func TestSyncOutputsArtifactsSkipsUnchangedContentOnSecondPass(t *testing.T) {
 
 func TestSyncOutputsArtifactsTreatsNonConnectionFindFailureAsInconclusive(t *testing.T) {
 	stubWorkspaceSyncSSHForOutputs(t)
-	// Exit 1 simulates `find` itself failing once inside the outputs dir (e.g. a
-	// permission error) -- a real failure distinct from both success (0) and the
-	// script's own "confirmed absent" sentinel (remoteOutputsDirAbsentExitCode).
+	// Exit 1: find failed inside the dir, distinct from the absent sentinel.
 	t.Setenv(workspaceSyncStubOutputsExitEnv, "1")
 
 	artifactsLocal := t.TempDir()

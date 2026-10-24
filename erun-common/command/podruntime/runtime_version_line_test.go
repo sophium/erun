@@ -7,10 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// TestRuntimeImageLineMismatch pins that comparing the operative RuntimeImage
-// against the observed RuntimeRunningImage needs no live cluster read, because
-// an image name always names its release line even though a bare version number
-// cannot.
+// An image name always names its release line; a bare version number cannot.
 func TestRuntimeImageLineMismatch(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -78,10 +75,6 @@ func TestRuntimeImageLineMismatch(t *testing.T) {
 	}
 }
 
-// TestResolveErunVersion pins the environment hover card's second version
-// row: the erun version stated by RuntimeChart, distinct from a
-// RuntimeVersion that may belong to a tenant's own release line -- and never
-// guessed when config alone cannot say.
 func TestResolveErunVersion(t *testing.T) {
 	cases := []struct {
 		name        string

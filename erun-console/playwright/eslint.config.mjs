@@ -2,9 +2,7 @@ import playwright from 'eslint-plugin-playwright';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
-// Lint config for the console's Playwright e2e. Mirrors erun-ui/playwright's
-// config: the same type-aware bug-finding baseline, with eslint-plugin-playwright
-// catching the common flaky-test patterns (await on expect, no .only committed).
+// Mirrors erun-ui/playwright's config.
 
 export default tseslint.config(
   {
@@ -47,7 +45,6 @@ export default tseslint.config(
     ...playwright.configs['flat/recommended'],
     rules: {
       ...playwright.configs['flat/recommended'].rules,
-      // Nothing here is opt-in: the config serves the bundle every spec needs.
       'playwright/no-skipped-test': 'error',
     },
   },

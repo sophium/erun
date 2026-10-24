@@ -11,9 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// setTestHomeDir points os.UserHomeDir() at dir on the current OS. Windows reads
-// USERPROFILE, not HOME, so setting HOME alone leaves production writing under the
-// real profile while the test reads the temp dir.
+// setTestHomeDir sets USERPROFILE too, which os.UserHomeDir reads on Windows.
 func setTestHomeDir(t *testing.T, dir string) {
 	t.Helper()
 	t.Setenv("HOME", dir)
@@ -22,17 +20,13 @@ func setTestHomeDir(t *testing.T, dir string) {
 	}
 }
 
-// TestActivateEnvTrace owns the real-write branches, which the dry-run
-// integration harness cannot reach by design; the dry-run trace contract
-// itself is locked by the open goldens.
 func TestActivateEnvTrace(t *testing.T) {
 	t.Run("tee captures suppressed trace lines, stamped, with no opt-in", func(t *testing.T) {
 		home := t.TempDir()
 		setTestHomeDir(t, home)
 		ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, os.Stderr, os.Stderr)}
 		teeCtx, closeTee := ActivateEnvTrace(ctx, "team", "dev")
-		// TraceCommand is gated to -vv on the terminal; the sink must see it
-		// anyway — that is the "full trace without -vv" contract.
+		// The sink sees TraceCommand even without -vv.
 		teeCtx.TraceCommand("", "kubectl", "get", "pods")
 		teeCtx.Info("==> Deploying team/dev 1.0.0")
 		closeTee()

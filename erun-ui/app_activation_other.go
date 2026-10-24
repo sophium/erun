@@ -2,6 +2,5 @@
 
 package main
 
-// observeAppActivation is darwin-only; elsewhere there is no AppKit
-// frontmost-activation notification to observe.
+// observeAppActivation is a no-op off darwin.
 func observeAppActivation() {}

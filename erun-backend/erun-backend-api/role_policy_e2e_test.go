@@ -17,11 +17,6 @@ import (
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
-// This file drives the role model end to end against a real,
-// migrated PostgreSQL and the real handler's own registered route catalog —
-// the same "real database, real authorizer, real routes" standard
-// capabilities_e2e_test.go already holds the whoami capability contract to.
-
 func rolePolicyDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -31,9 +26,6 @@ func rolePolicyDatabase(t *testing.T) *sql.DB {
 	return db
 }
 
-// seedTenantWithIssuer registers a tenant and a single-tenant issuer pointing
-// at it, so IdentityRepository.ResolveIdentity can bootstrap the tenant's
-// first user the same way a real sign-in would.
 func seedTenantWithIssuer(t *testing.T, db *sql.DB, tenantType model.TenantType, namePrefix string) (tenantID string, issuer string) {
 	t.Helper()
 	stamp := time.Now().Format("20060102150405.000000")
@@ -63,10 +55,6 @@ func seedTenantWithIssuer(t *testing.T, db *sql.DB, tenantType model.TenantType,
 	return tenantID, issuer
 }
 
-// bootstrapTenantFirstUser drives the real per-tenant first-user sign-in path
-// (IdentityRepository.ResolveIdentity -> insertFirstTenantUser ->
-// insertTenantFirstUserAccess), the same code a real token verification
-// triggers on a tenant's first sign-in.
 func bootstrapTenantFirstUser(t *testing.T, db *sql.DB, issuer string, subject string) model.User {
 	t.Helper()
 	identities := repository.NewIdentityRepository(db, repository.DialectPostgres, "")
@@ -75,9 +63,6 @@ func bootstrapTenantFirstUser(t *testing.T, db *sql.DB, issuer string, subject s
 	return user
 }
 
-// enrollUser drives the real ordinary-enrollment path
-// (UserRepository.Create -> assignEnrollmentRoles), as an authenticated
-// caller already resolved to tenantID/tenantType would.
 func enrollUser(t *testing.T, txManager *repository.TxManager, tenantID string, tenantType model.TenantType, params repository.CreateUserParams) model.User {
 	t.Helper()
 	users := repository.NewUserRepository(txManager)
@@ -87,10 +72,7 @@ func enrollUser(t *testing.T, txManager *repository.TxManager, tenantID string, 
 	return user
 }
 
-// realProtectedRouteCatalog builds the handler's actual registered protected
-// route set the same way TestCapabilityCandidatesAreTheHandlersOwnRoutes
-// does: every RegisterXRoutes call this binary really wires, not a hand
-// -typed candidate list that could drift from it.
+// realProtectedRouteCatalog uses the routes this binary really wires, so it cannot drift.
 func realProtectedRouteCatalog(t *testing.T, db *sql.DB) []modelpkg.PlatformCapability {
 	t.Helper()
 	options := HandlerOptions{DB: db, DBDialect: repository.DialectPostgres}
@@ -109,11 +91,6 @@ func realProtectedRouteCatalog(t *testing.T, db *sql.DB) []modelpkg.PlatformCapa
 	return candidates
 }
 
-// assertEffectiveAccessMatches drives the real, database-backed authorizer
-// against every real registered route and fails when its decision disagrees
-// with expectAllowed(routeroles' classification of that route) -- proof
-// against the actual routes and the actual enforcement code, not by
-// inspecting routeroles.Routes' patterns.
 func assertEffectiveAccessMatches(t *testing.T, authorizer *repository.PermissionAuthorizer, ctx context.Context, candidates []modelpkg.PlatformCapability, expectAllowed func(routeroles.Roles) bool) {
 	t.Helper()
 	for _, route := range candidates {
@@ -137,12 +114,6 @@ func securityContextFor(tenantID string, tenantType model.TenantType, userID str
 	return security.Context{TenantID: tenantID, TenantType: string(tenantType), ErunUserID: userID}
 }
 
-// TestTenantUserCannotAdministerTheTenant: TenantUser cannot create or delete environments, register contexts,
-// or manage users, invites, roles or org settings -- driven through every
-// real registered route, not by inspecting routeroles' patterns. It also
-// pins the positive half: TenantUser really is permitted everything
-// routeroles classifies for it (reading the tenant, driving reviews/
-// comments/builds/the merge queue, operating existing environments).
 func TestTenantUserCannotAdministerTheTenant(t *testing.T) {
 	db := rolePolicyDatabase(t)
 	tenantID, issuer := seedTenantWithIssuer(t, db, model.TenantTypeCompany, "tenant-user")
@@ -161,20 +132,13 @@ func TestTenantUserCannotAdministerTheTenant(t *testing.T) {
 		return granted&routeroles.TenantUserRole != 0
 	})
 
-	// admin exists only to make member a non-first enrollment; silence unused warnings if reordered.
+	// admin only makes member a non-first enrollment.
 	_ = admin
 }
 
-// TestTenantAdminCannotReachOperationsRoutesEvenInsideOperationsTenant: TenantAdmin cannot reach any
-// operations-gated route, including from inside the OPERATIONS tenant. The
-// tenant's own first user still gets ReadAll/WriteAll (insertFirstTenantUser
-// keeps the platform-operator grant for an OPERATIONS tenant type, since
-// this instance's own root-resolution capabilities live only behind it and
-// no other user exists yet to grant them). TenantAdmin is what makes
-// "administers this tenant's own users and environments, but is not a
-// platform operator" expressible for every additional user, so this test grants it to a colleague the same way the operator actually
-// would (an explicit roleIds enrollment) and proves it stays a genuinely
-// lesser position.
+// TestTenantAdminCannotReachOperationsRoutesEvenInsideOperationsTenant: the OPERATIONS tenant's
+// first user keeps ReadAll/WriteAll; TenantAdmin granted to a colleague must stay below platform
+// operator.
 func TestTenantAdminCannotReachOperationsRoutesEvenInsideOperationsTenant(t *testing.T) {
 	db := rolePolicyDatabase(t)
 	tenantID, issuer := seedTenantWithIssuer(t, db, model.TenantTypeOperations, "tenant-admin-ops")
@@ -183,13 +147,8 @@ func TestTenantAdminCannotReachOperationsRoutesEvenInsideOperationsTenant(t *tes
 	txManager := repository.NewTxManager(db, repository.DialectPostgres)
 	operatorCtx := security.WithContext(context.Background(), securityContextFor(tenantID, model.TenantTypeOperations, operator.UserID))
 	roles := repository.NewRoleRepository(txManager)
-	// RoleRepository.List's query has no tenant_id filter of its own (relying
-	// on RLS, which erun_operations deliberately bypasses cross-tenant), so
-	// an operations-scoped caller's List sees every tenant's roles -- calling
-	// it here only to trigger ensureNarrowerRolesExist's lazy creation for
-	// this tenant. The role id itself is read back with an explicit
-	// tenant_id filter below so this test cannot accidentally borrow another
-	// tenant's TenantAdmin row.
+	// List has no tenant filter for erun_operations; it is called only to create the
+	// narrower roles, and the role id is read back with an explicit tenant_id filter.
 	_, err := roles.List(operatorCtx)
 	mustNoErr(t, err, "list roles (ensures TenantAdmin exists in this tenant)")
 	var tenantAdminRoleID string
@@ -208,16 +167,8 @@ func TestTenantAdminCannotReachOperationsRoutesEvenInsideOperationsTenant(t *tes
 	})
 }
 
-// TestTenantAgentDrivesTheMergeQueueAndNothingElse is the machine role's
-// mandatory test: a user holding exactly TenantAgent -- the role an
-// environment's own identity holds -- is permitted every route the
-// environment's build/merge/report flow performs and refused every other registered route, driven
-// through the real database-backed authorizer rather than by inspecting
-// routeroles' masks. The boundaries it crosses on both sides are the ones the
-// design turns on: the environment's own unattached `erun build` self-report
-// (POST /v1/builds) is permitted while the tenant-wide build history is not,
-// and reporting the merge is permitted while promoting or overriding the
-// merge queue is not.
+// TestTenantAgentDrivesTheMergeQueueAndNothingElse: TenantAgent may self-report POST /v1/builds and
+// report merges, but not read build history or promote/override the queue.
 func TestTenantAgentDrivesTheMergeQueueAndNothingElse(t *testing.T) {
 	db := rolePolicyDatabase(t)
 	tenantID, issuer := seedTenantWithIssuer(t, db, model.TenantTypeCompany, "tenant-agent")
@@ -226,9 +177,7 @@ func TestTenantAgentDrivesTheMergeQueueAndNothingElse(t *testing.T) {
 	txManager := repository.NewTxManager(db, repository.DialectPostgres)
 	roles := repository.NewRoleRepository(txManager)
 	adminCtx := security.WithContext(context.Background(), securityContextFor(tenantID, model.TenantTypeCompany, admin.UserID))
-	// RoleRepository.List's own ensureNarrowerRolesExist call is what creates
-	// TenantAgent for this tenant; the role id is read back with an explicit
-	// tenant_id filter so this test cannot borrow another tenant's row.
+	// List creates TenantAgent lazily; the id is read back with an explicit tenant_id filter.
 	_, err := roles.List(adminCtx)
 	mustNoErr(t, err, "list roles (ensures TenantAgent exists)")
 	var agentRoleID string
@@ -246,9 +195,7 @@ func TestTenantAgentDrivesTheMergeQueueAndNothingElse(t *testing.T) {
 		return granted&routeroles.TenantAgentRole != 0
 	})
 
-	// The property is only meaningful if the machine role is really narrower
-	// than TenantUser: assert one concrete refusal the derivation alone would
-	// not have caught had the two roles been conflated.
+	// Proves TenantAgent is narrower than TenantUser.
 	if err := authorizer.Authorize(ctx, "GET", "/v1/builds"); !errors.Is(err, repository.ErrForbidden) {
 		t.Fatalf("expected the machine role to be refused the tenant-wide build history, got %v", err)
 	}
@@ -257,13 +204,8 @@ func TestTenantAgentDrivesTheMergeQueueAndNothingElse(t *testing.T) {
 	}
 }
 
-// TestWriteAllHolderRetainsAccessAfterRolloutOfNarrowerRoles is the
-// migration-safety test: a user who already holds a legacy WriteAll grant
-// keeps full effective access after TenantUser/TenantAdmin exist -- both
-// immediately, and after something else (RoleRepository.List) triggers the
-// lazy ensureNarrowerRolesExist backfill for the same tenant. Nothing about
-// introducing the two narrower roles may revoke or shadow an existing
-// ReadAll/WriteAll grant.
+// TestWriteAllHolderRetainsAccessAfterRolloutOfNarrowerRoles: introducing the narrower roles must
+// not revoke or shadow a legacy ReadAll/WriteAll grant.
 func TestWriteAllHolderRetainsAccessAfterRolloutOfNarrowerRoles(t *testing.T) {
 	db := rolePolicyDatabase(t)
 	tenantID, _ := seedTenantWithIssuer(t, db, model.TenantTypeCompany, "writeall-holder")
@@ -292,10 +234,7 @@ func TestWriteAllHolderRetainsAccessAfterRolloutOfNarrowerRoles(t *testing.T) {
 
 	assertEffectiveAccessMatches(t, authorizer, ctx, candidates, allowEverything)
 
-	// Trigger the lazy TenantUser/TenantAdmin backfill for this same tenant
-	// (RoleRepository.List's own ensureNarrowerRolesExist call) and re-assert:
-	// creating and granting the two new roles must not touch this user's
-	// pre-existing ReadAll/WriteAll grants.
+	// List triggers the lazy role backfill for this tenant.
 	roles := repository.NewRoleRepository(repository.NewTxManager(db, repository.DialectPostgres))
 	_, err := roles.List(ctx)
 	mustNoErr(t, err, "list roles (triggers ensureNarrowerRolesExist)")
@@ -303,12 +242,8 @@ func TestWriteAllHolderRetainsAccessAfterRolloutOfNarrowerRoles(t *testing.T) {
 	assertEffectiveAccessMatches(t, authorizer, ctx, candidates, allowEverything)
 }
 
-// TestNewlyEnrolledUserDefaultsToTenantUserAndTenantStaysUsable: a newly
-// enrolled user (no caller-supplied roleIds) gets exactly TenantUser -- not
-// zero roles -- and the
-// tenant is still never left unable to grant roles (routes/users.go's
-// existing concern, ErrLastGrantCapableRole), even though TenantUser itself
-// is deliberately not grant-capable.
+// TestNewlyEnrolledUserDefaultsToTenantUserAndTenantStaysUsable: TenantUser is not grant-capable,
+// yet the tenant must never lose its last grant-capable holder (ErrLastGrantCapableRole).
 func TestNewlyEnrolledUserDefaultsToTenantUserAndTenantStaysUsable(t *testing.T) {
 	db := rolePolicyDatabase(t)
 	tenantID, issuer := seedTenantWithIssuer(t, db, model.TenantTypeCompany, "default-enrollment")
@@ -333,9 +268,6 @@ func TestNewlyEnrolledUserDefaultsToTenantUserAndTenantStaysUsable(t *testing.T)
 		return granted&routeroles.TenantUserRole != 0
 	})
 
-	// The tenant must still never be left unable to grant roles: admin is the
-	// only TenantAdmin (grant-capable) holder, and member's TenantUser is not
-	// grant-capable, so revoking admin's TenantAdmin must be refused.
 	adminCtx := security.WithContext(context.Background(), securityContextFor(tenantID, model.TenantTypeCompany, admin.UserID))
 	adminRoles, err := roles.ForUser(adminCtx, admin.UserID)
 	mustNoErr(t, err, "read admin's roles")

@@ -8,20 +8,14 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// CloudContextStopProtectionParams identifies the cloud context whose stop
-// protection to flip. Enabled=true makes the instance unstoppable by any
-// caller until it is cleared again.
+// CloudContextStopProtectionParams identifies the context whose stop protection to set.
 type CloudContextStopProtectionParams struct {
 	Name    string
 	Enabled bool
 }
 
-// SetCloudContextStopProtection is the recovery lever for keeping an env's
-// underlying EC2 up long enough to repair unhealthy in-pod components: with
-// Enabled=true every subsequent stop (idle monitor, desktop button, external
-// script) is refused until it is cleared. It works on running or stopped
-// instances, and the returned status reflects the new value so callers can
-// render it without a follow-up describe.
+// SetCloudContextStopProtection makes every stop be refused until cleared, to keep an
+// instance up while repairing it.
 func SetCloudContextStopProtection(ctx core.Context, store CloudContextStore, params CloudContextStopProtectionParams, deps CloudContextDependencies) (configpkg.CloudContextStatus, error) {
 	if store == nil {
 		return configpkg.CloudContextStatus{}, fmt.Errorf("store is required")
@@ -60,10 +54,8 @@ func SetCloudContextStopProtection(ctx core.Context, store CloudContextStore, pa
 	}, nil
 }
 
-// DescribeCloudContextStopProtection reads the live stop-protection state for
-// one context. It is kept out of the bulk refresh because it costs one AWS
-// call per instance; the desktop calls it lazily for the env whose detail
-// view is open.
+// DescribeCloudContextStopProtection reads one context's live stop protection; it costs
+// one AWS call, so it is kept out of the bulk refresh.
 func DescribeCloudContextStopProtection(ctx core.Context, store CloudContextStore, name string, deps CloudContextDependencies) (configpkg.CloudContextStatus, error) {
 	if store == nil {
 		return configpkg.CloudContextStatus{}, fmt.Errorf("store is required")
@@ -101,9 +93,7 @@ func DescribeCloudContextStopProtection(ctx core.Context, store CloudContextStor
 	}, nil
 }
 
-// parseCloudContextStopProtectionOutput treats anything but a recognized
-// "true" as disabled, so an unknown or empty response fails to the safer
-// side.
+// parseCloudContextStopProtectionOutput treats anything but "true" as disabled.
 func parseCloudContextStopProtectionOutput(out string) bool {
 	switch strings.ToLower(strings.TrimSpace(out)) {
 	case "true":

@@ -51,10 +51,7 @@ func (a *App) ListAgentOutputs(selection uiSelection) (jobs.RuntimeOutputsListRe
 	return a.deps.listAgentOutputs(result, jobs.RuntimeOutputsParams{})
 }
 
-// DownloadAgentOutput downloads one entry from the selected env's runtime pod
-// and saves it through a native Save dialog. It returns the saved local path,
-// or an empty string when the operator cancels the dialog. A folder downloads
-// as a <name>.tar.gz archive.
+// DownloadAgentOutput saves one runtime output via a Save dialog; "" means cancelled.
 func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("download agent output", selection.Tenant, selection.Environment); err != nil {
@@ -94,11 +91,7 @@ func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, e
 	return dest, nil
 }
 
-// reportHostArtifactSigning tells the operator what ad-hoc signing did to an
-// artifact that just landed here. Success is worth one line because the file was
-// modified on its way in; a failure is worth one because the alternative is the
-// silent SIGKILL macOS answers an unsigned binary with. Both go through the
-// notification surface so the message survives the dialog that started it.
+// reportHostArtifactSigning surfaces ad-hoc signing, since macOS SIGKILLs unsigned binaries silently.
 func (a *App) reportHostArtifactSigning(signing codesign.HostArtifactSigning) {
 	note := signing.Describe()
 	if note == "" {

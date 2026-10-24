@@ -9,10 +9,7 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// ExecReportCommitStatusInput reports a GitHub commit status for a merge
-// queue build result — the last step that turns a build's outcome into
-// something a required status check on the remote's branch protection can
-// point at.
+// ExecReportCommitStatusInput reports a merge queue build as a GitHub commit status.
 type ExecReportCommitStatusInput struct {
 	Commit      string `json:"commit" jsonschema:"full commit SHA the status attaches to — the review's source-branch tip, never the local prospective squash-merge commit exec_gate-merge produces"`
 	State       string `json:"state" jsonschema:"commit status state: success, failure, error, or pending"`

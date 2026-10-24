@@ -6,8 +6,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// ObservedPod is one pod's readiness as reported by the Ready condition, plus
-// the reason it is not ready when it isn't.
+// ObservedPod is one pod's readiness and, when not ready, the reason.
 type ObservedPod struct {
 	Name         string              `json:"name"`
 	Phase        string              `json:"phase"`
@@ -17,20 +16,15 @@ type ObservedPod struct {
 	Containers   []ObservedContainer `json:"containers,omitempty"`
 }
 
-// ObservedContainer names the image a pod's container is actually running —
-// the single most consequential fact an orchestrator cannot see without this,
-// since a hand-patched or out-of-band image looks identical to the recorded
-// one in every other erun surface — plus the resource limits it was started
-// with, read from the pod spec (status carries no limits of its own).
+// ObservedContainer is the image a container actually runs, plus its spec limits;
+// a hand-patched image is otherwise invisible.
 type ObservedContainer struct {
 	Name           string            `json:"name"`
 	Image          string            `json:"image"`
 	ResourceLimits map[string]string `json:"resourceLimits,omitempty"`
 }
 
-// fetchObservedPods reuses podStatusList/podStatusItem (deploy_pod_watch.go):
-// the same deliberately partial `kubectl get pods -o json` parse deploy's
-// watcher uses, tolerating kubectl version drift the same way.
+// fetchObservedPods reuses deploy's partial pod parse, tolerating kubectl version drift.
 func fetchObservedPods(args []string) ([]ObservedPod, error) {
 	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
@@ -80,10 +74,8 @@ func podStatusReady(item deploy.PodStatusItem) bool {
 	return false
 }
 
-// podStatusNotReadyReason prefers a container-level reason (the concrete
-// image-pull/crash cause) and falls back to the pod-level conditions —
-// PodScheduled is the only place a reason exists for a pod that never got
-// admitted to a node at all.
+// podStatusNotReadyReason prefers a container reason; PodScheduled is the only reason for an
+// unadmitted pod.
 func podStatusNotReadyReason(item deploy.PodStatusItem) string {
 	if reason := containerStatusReason(item.Status.ContainerStatuses); reason != "" {
 		return reason

@@ -14,9 +14,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// unschedulablePod builds a pod that never got past scheduling: no container
-// statuses at all, only the PodScheduled=False condition the real kubelet
-// would report.
 func unschedulablePod(name, message string) PodStatusItem {
 	pod := PodStatusItem{}
 	pod.Metadata.Name = name
@@ -40,9 +37,6 @@ func scheduledPod(name string) PodStatusItem {
 	return pod
 }
 
-// fakeClock lets a test move time forward in arbitrary jumps instead of
-// sleeping real wall-clock time, so the grace period's boundary is exercised
-// deterministically.
 type fakeClock struct{ t time.Time }
 
 func (c *fakeClock) now() time.Time { return c.t }
@@ -82,9 +76,7 @@ func TestClassifyTerminalFailureUnschedulablePod(t *testing.T) {
 }
 
 func TestClassifyTerminalFailureUnschedulablePodRecoversResetsGrace(t *testing.T) {
-	// A pod that gets scheduled before the grace elapses must not be treated as
-	// terminal later just because it was briefly unschedulable earlier — the
-	// timer resets rather than accumulating across a resolved gap.
+	// The grace timer resets once the pod schedules.
 	clock := &fakeClock{t: time.Unix(0, 0)}
 	params := podWatchParams{ReleaseName: "team-devops", Namespace: "team-dev", Now: clock.now}
 	unscheduledSince := map[string]time.Time{}
@@ -102,17 +94,12 @@ func TestClassifyTerminalFailureUnschedulablePodRecoversResetsGrace(t *testing.T
 		t.Fatalf("a resolved pod must clear its tracked unscheduled-since time")
 	}
 
-	// Unschedulable again later: the grace period must restart from now, not
-	// from the original observation over a minute ago.
 	if failure := classifyTerminalFailure([]PodStatusItem{unschedulablePod(name, "waiting again")}, params, unscheduledSince); failure != nil {
 		t.Fatalf("re-observing unschedulable must restart the grace period, got: %v", failure)
 	}
 }
 
 func TestClassifyTerminalFailurePrefersContainerFailureOverUnschedulable(t *testing.T) {
-	// A pod tracked as unschedulable that later reports a real container
-	// failure should surface the more specific container reason, not the
-	// scheduling one — and must stop being tracked as unschedulable.
 	clock := &fakeClock{t: time.Unix(0, 0)}
 	params := podWatchParams{ReleaseName: "team-devops", Namespace: "team-dev", Now: clock.now}
 	unscheduledSince := map[string]time.Time{"team-devops-0": clock.now()}
@@ -148,9 +135,6 @@ func TestPodUnschedulableMessage(t *testing.T) {
 	}
 }
 
-// podListFoundHandler serves a fixed pods List response at the exact path
-// client-go's List call hits, the same shape namespaceFoundHandler
-// (kubernetes_client_go_test.go) uses for a single-resource Get.
 func podListFoundHandler(namespace, body string) http.HandlerFunc {
 	path := "/api/v1/namespaces/" + namespace + "/pods"
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -163,10 +147,7 @@ func podListFoundHandler(namespace, body string) http.HandlerFunc {
 	}
 }
 
-// libraryPodWatchFixtureJSON is a PodList with one release-owned, cleanly
-// running pod -- the same shape deploy_test.go's cleanRolloutPodJSON pins for
-// the subprocess path, kept as its own copy here since the integration
-// module and this one are separate Go modules.
+// Duplicated from the integration module, a separate Go module.
 const libraryPodWatchFixtureJSON = `{
   "apiVersion": "v1",
   "kind": "PodList",
@@ -186,11 +167,6 @@ const libraryPodWatchFixtureJSON = `{
   ]
 }`
 
-// TestLibraryListReleasePodsMatchesSubprocessObservableResult pins the same
-// equivalence property kubernetes_client_go_test.go's other
-// Library*MatchesSubprocessObservableResult tests do: the typed List result,
-// re-marshaled and fed through the shared parse/filter/summarize pipeline,
-// produces the exact status line the subprocess path's raw kubectl JSON does.
 func TestLibraryListReleasePodsMatchesSubprocessObservableResult(t *testing.T) {
 	fakeKubernetesAPIServer(t, podListFoundHandler("team-dev", libraryPodWatchFixtureJSON))
 
@@ -221,9 +197,6 @@ func TestLibraryListReleasePodsPropagatesErrors(t *testing.T) {
 	}
 }
 
-// TestLibraryListReleasePodsHonorsContextOverride proves the context-name
-// field actually selects the kubeconfig context, the same way `kubectl
-// --context X` does, rather than always following current-context.
 func TestLibraryListReleasePodsHonorsContextOverride(t *testing.T) {
 	fakeKubernetesAPIServer(t, podListFoundHandler("team-dev", libraryPodWatchFixtureJSON))
 
@@ -254,16 +227,10 @@ func TestExecutionModeReportListsKubectlPodWatchOperation(t *testing.T) {
 	t.Fatalf("kubectl-pod-watch not found in report: %+v", report)
 }
 
-// pullingPod builds a pod whose container is still fetching its image, the way
-// a cold node reports a large one: kubelet alternates between ErrImagePull and
-// ImagePullBackOff while it retries.
 func pullingPod(name, container, reason, message string) PodStatusItem {
 	return pullingPodOfImage(name, container, "", reason, message)
 }
 
-// pullingPodOfImage is pullingPod with the image kubelet reports the container
-// is using, which `kubectl get pods -o json` carries in
-// status.containerStatuses[].image for a container still waiting on its pull.
 func pullingPodOfImage(name, container, image, reason, message string) PodStatusItem {
 	pod := PodStatusItem{}
 	pod.Metadata.Name = name
@@ -275,22 +242,7 @@ func pullingPodOfImage(name, container, image, reason, message string) PodStatus
 	return pod
 }
 
-// TestPullingContainersNamesTheContainersStillFetchingTheirImage covers the one
-// observation helm cannot make: its rollout deadline is a fixed duration and
-// expires identically whether the image finished downloading or not, so a
-// deploy that ran out its wait mid-pull reports "Progress deadline exceeded"
-// for a rollout that was working exactly as intended.
-//
-// The terminal image-pull rejection is the case that must NOT be reported as
-// progress: the watcher aborts on it and carries the registry's own message,
-// and describing a refused image as a slow one would misstate the failure.
-//
-// Each entry also names the image being pulled, because the two reasons a wait
-// can expire mid-pull need opposite answers and the container name alone does
-// not separate them: a legitimately slow cold pull is answered by a longer
-// deploy.timeout, an unpublished tag by deploying the right one. A container
-// status that carries no image keeps the bare locator rather than an empty
-// parenthesis.
+// A permanently rejected pull is terminal, not progress, so it is not listed.
 func TestPullingContainersNamesTheContainersStillFetchingTheirImage(t *testing.T) {
 	rejected := pullingPod("team-devops-ghi", "erun-devops", "ErrImagePull", "manifest unknown: manifest unknown")
 	pods := []PodStatusItem{
@@ -310,9 +262,6 @@ func TestPullingContainersNamesTheContainersStillFetchingTheirImage(t *testing.T
 	}
 }
 
-// TestClassifyHelmDeployResultLeavesAFailureWithNothingPullingAlone is the
-// negative case: a rollout that failed with nothing in flight keeps reporting
-// exactly what helm said, with no pull narrative attached to it.
 func TestClassifyHelmDeployResultLeavesAFailureWithNothingPullingAlone(t *testing.T) {
 	stderr := new(strings.Builder)
 	stderr.WriteString("Error: UPGRADE FAILED: values don't meet the specifications\n")
@@ -328,9 +277,6 @@ func TestClassifyHelmDeployResultLeavesAFailureWithNothingPullingAlone(t *testin
 	}
 }
 
-// pullingPodListJSON is a PodList with one release-owned pod whose container is
-// still fetching its image -- the observation a rollout that ran out its wait
-// mid-pull has to carry back to the deploy.
 const pullingPodListJSON = `{
   "apiVersion": "v1",
   "kind": "PodList",
@@ -352,22 +298,8 @@ const pullingPodListJSON = `{
   ]
 }`
 
-// TestWatchReleasePodsKeepsThePullStateAnUnreadFinalPollWouldErase reproduces
-// the intermittent half of the mid-pull report: the poll that would have
-// reported a download still in flight is the one the watcher's own cancellation
-// interrupts, because cancelling the context aborts the `get pods` in flight
-// and the loop returns on the next iteration. An unread poll reads nothing, so
-// letting it replace the previous poll's state blanks the observation at the
-// exact moment it is handed to the deploy -- which then falls back to helm's
-// "not ready", the outcome the whole watcher exists to prevent. It surfaced as
-// the deploy integration scenario failing only under the gate's load, where the
-// window between the last readable poll and the cancellation is wide enough to
-// land in.
-//
-// The overlap is forced rather than waited for: the first poll answers with a
-// pod still pulling, the second is held inside the fake API server until this
-// test cancels the context underneath it, so the unread final poll happens
-// every run instead of whenever the scheduler allows it.
+// The second poll is held until the context is cancelled, forcing the unread
+// final poll every run instead of only under load.
 func TestWatchReleasePodsKeepsThePullStateAnUnreadFinalPollWouldErase(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	if err := config.SaveERunConfig(config.ERunConfig{Execution: config.ExecutionConfig{Modes: map[string]string{
@@ -390,8 +322,6 @@ func TestWatchReleasePodsKeepsThePullStateAnUnreadFinalPollWouldErase(t *testing
 			_, _ = w.Write([]byte(pullingPodListJSON))
 			return
 		}
-		// Held until the watcher's cancellation aborts this request, so the
-		// poll that fails to read is the one in flight when the context ends.
 		secondOnce.Do(func() { close(secondPoll) })
 		select {
 		case <-r.Context().Done():

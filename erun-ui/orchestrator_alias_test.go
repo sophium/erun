@@ -10,10 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
-// orchestratorAliasTestApp is orchestratorTestApp with one erun-type cloud
-// alias configured, which is what every alias write is validated against, plus
-// one alias of another type, so a test can show the picker and the writer keep
-// to the erun ones.
+// orchestratorAliasTestApp configures one erun alias and one of another type.
 func orchestratorAliasTestApp(t *testing.T) *App {
 	t.Helper()
 	app := orchestratorTestApp(t)
@@ -25,19 +22,8 @@ func orchestratorAliasTestApp(t *testing.T) *App {
 	return app
 }
 
-// TestAnOrchestratorsAliasSurvivesAnUnrelatedEditMadeInTheDesktop is the
-// round-trip this field needs and a bare "the field exists" test would miss.
-//
-// The alias is writable from two surfaces: `erun orchestrator set-alias` and
-// the desktop dialog. Both save by replacing the orchestrator's whole config
-// entry, so a dialog that did not carry the alias back — because the read model
-// never showed it, or because the save omitted it — would erase a value the
-// operator set from the terminal on the next unrelated edit, silently.
-//
-// The edit here touches nothing but the name, through exactly the value the
-// dialog is handed (ListOrchestrators' own alias), which is why it reproduces
-// the erasure rather than merely exercising the writer: assert the read model
-// carries the alias and pass "" instead and the final assertion fails.
+// The dialog saves the whole entry, so an alias it does not carry back would erase
+// one set from the terminal.
 func TestAnOrchestratorsAliasSurvivesAnUnrelatedEditMadeInTheDesktop(t *testing.T) {
 	app := orchestratorAliasTestApp(t)
 	defer app.shutdown(context.Background())
@@ -49,10 +35,8 @@ func TestAnOrchestratorsAliasSurvivesAnUnrelatedEditMadeInTheDesktop(t *testing.
 		t.Fatalf("a new orchestrator declared an alias of its own: %q", created.Alias)
 	}
 
-	// The terminal writer, `erun orchestrator set-alias`, over the same store.
 	mustSetOrchestratorAlias(t, app, created.ID, alias)
 
-	// What the dialog is handed when it opens for this orchestrator.
 	listed := app.ListOrchestrators()
 	if len(listed) != 1 {
 		t.Fatalf("expected one orchestrator, got %+v", listed)
@@ -61,14 +45,11 @@ func TestAnOrchestratorsAliasSurvivesAnUnrelatedEditMadeInTheDesktop(t *testing.
 		t.Fatalf("the read model the dialog seeds from reported alias %q, want %q", listed[0].Alias, alias)
 	}
 
-	// An unrelated edit: the name changes, nothing else does. The alias is sent
-	// back exactly as the dialog was shown it.
 	updated := mustUpdateOrchestrator(t, app, created.ID, "renamed", devEnvs, listed[0].Alias)
 	if updated.Alias != alias || updated.Name == "agent" {
 		t.Fatalf("update returned %+v, want the new name and the kept alias", updated)
 	}
 
-	// And it is still on disk, not only in the returned snapshot.
 	config := mustLoadRootConfig(t, app)
 	if len(config.Orchestrators) != 1 || config.Orchestrators[0].Alias != alias {
 		t.Fatalf("the alias did not survive the edit: %+v", config.Orchestrators)
@@ -93,10 +74,6 @@ func mustUpdateOrchestrator(t *testing.T, app *App, id, name string, envs []orch
 	return info
 }
 
-// mustSetOrchestratorAlias writes the alias the way the terminal does, through
-// the shared writer rather than through the dialog's own path: the round trip
-// this covers is precisely a value set outside the desktop surviving an edit
-// made inside it.
 func mustSetOrchestratorAlias(t *testing.T, app *App, id, alias string) {
 	t.Helper()
 	if _, err := orchestrator.SetOrchestratorAlias(core.Context{}, app.deps.store, orchestrator.SetOrchestratorAliasParams{
@@ -116,11 +93,6 @@ func mustLoadRootConfig(t *testing.T, app *App) configpkg.ERunConfig {
 	return config
 }
 
-// TestARunningOrchestratorsAliasReachesTheDialogItIsEditedFrom covers the other
-// source the dialog is seeded from. A running orchestrator's row is built from
-// its live session, not from the persisted definition, so an alias the session
-// did not carry would read as none and be erased on the next save — the same
-// loss as the persisted path, reached through a different field.
 func TestARunningOrchestratorsAliasReachesTheDialogItIsEditedFrom(t *testing.T) {
 	app := orchestratorAliasTestApp(t)
 	defer app.shutdown(context.Background())
@@ -148,9 +120,6 @@ func TestARunningOrchestratorsAliasReachesTheDialogItIsEditedFrom(t *testing.T) 
 	}
 }
 
-// TestTheDesktopRefusesAnAliasThisHostCannotResolve mirrors the writer's own
-// gate: the dialog offers the resolved list, but a caller that bypasses the
-// picker must not be able to store a declaration nothing could honour.
 func TestTheDesktopRefusesAnAliasThisHostCannotResolve(t *testing.T) {
 	app := orchestratorAliasTestApp(t)
 	defer app.shutdown(context.Background())
@@ -172,8 +141,6 @@ func TestTheDesktopRefusesAnAliasThisHostCannotResolve(t *testing.T) {
 	}
 }
 
-// TestListOrchestratorAliasChoicesOffersOnlyERunAliases keeps the picker to what
-// the writer will actually accept.
 func TestListOrchestratorAliasChoicesOffersOnlyERunAliases(t *testing.T) {
 	app := orchestratorAliasTestApp(t)
 	defer app.shutdown(context.Background())

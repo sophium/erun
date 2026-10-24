@@ -6,12 +6,6 @@ import type { UIEnvironmentConfig } from '@/types';
 
 import { effectiveClaudeModelDefaults, workspaceSyncStatusTone } from './ManageDialog.helpers';
 
-// ManageDialog.fields.tsx's own StatusBadge used to only distinguish
-// 'running' (green) and 'stopped' (muted); every other workspaceSyncStatus
-// value -- including 'starting' and 'syncing', which are in-progress rather
-// than failed -- fell into its catch-all destructive (red) branch. The
-// canonical erun-kit StatusBadge this now renders through needs a tone for
-// every value workspace_sync.go actually sets.
 test('a sync in progress reads as in-progress, not destructive', () => {
   assert.equal(workspaceSyncStatusTone('starting'), 'in-progress');
   assert.equal(workspaceSyncStatusTone('syncing'), 'in-progress');
@@ -29,9 +23,7 @@ test('an unrecognized status falls back to warning rather than defaulting to des
   assert.equal(workspaceSyncStatusTone('mystery'), 'warning');
 });
 
-// The AI tab's model choices follow the draft's gateway choice: an environment
-// that leaves the gateway is offered its own models, not the catalog's ids its
-// own sign-in cannot launch, and one on the gateway is offered the catalog.
+// Model choices follow the draft's gateway choice.
 const gatewayDefaults = {
   models: ['opus', 'sonnet', 'haiku'],
   knownModels: ['opus', 'sonnet', 'haiku', 'fable'],

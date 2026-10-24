@@ -14,19 +14,14 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// The environment-scoped exclusive lease in release_claim_test.go passed
-// while two orchestrators driving different environments still raced the
-// same release, because its scope lived in each environment's own store.
-// These tests exercise the repository-global claim directly against a real
-// git remote, from two separate checkouts, so a scope mistake shows up the
-// same way it did in production instead of passing by construction.
+// The repository-global release claim, exercised from two checkouts of a real
+// remote so a scope mistake cannot pass by construction.
 
 func newTestClaimContext() core.Context {
 	return core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard)}
 }
 
-// cloneRepoForTest gives a second independent checkout of remote, standing in
-// for a second environment's own worktree of the same repository.
+// cloneRepoForTest stands in for a second environment's worktree of the same repository.
 func cloneRepoForTest(t *testing.T, remote string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -69,19 +64,13 @@ func TestReleaseRepoClaimRefusesASecondReleaseFromADifferentCheckoutAndNamesTheH
 		t.Errorf("refusal must name the losing caller's counterpart environment, got: %v", err)
 	}
 
-	// A release of a different version must not be affected: the claim is
-	// scoped to the version's own ref, not the whole repository.
+	// The claim is scoped to the version's ref, not the whole repository.
 	if _, err := shared.TakeReleaseRepoClaim(ctx, envB, "build-b", "1.0.214", holderB, now.Add(time.Second), nil); err != nil {
 		t.Fatalf("a release of a different version must not collide with an unrelated one in flight: %v", err)
 	}
 }
 
-// TestReleaseRepoClaimRefusalNamesTheEnvironmentWhenTheOrchestratorIDIsUnset
-// reproduces the shape a real release actually writes: ERUN_ORCHESTRATOR_ID is
-// unset in every in-pod release, so the holder carries only a tenant. Two
-// environments of that same tenant racing the same version must still be told
-// apart in the refusal — "tenant erun" alone does not say which environment to
-// go look at.
+// Without ERUN_ORCHESTRATOR_ID the refusal must still name the environment.
 func TestReleaseRepoClaimRefusalNamesTheEnvironmentWhenTheOrchestratorIDIsUnset(t *testing.T) {
 	envA := newAgentJobTestRepo(t)
 	remote := newBareRemoteForTest(t, envA)
@@ -119,10 +108,7 @@ func TestReleaseRepoClaimReclaimsAnAbandonedReleaseFromADifferentCheckout(t *tes
 		t.Fatalf("first environment's claim: %v", err)
 	}
 
-	// envA crashed (or its pod was replaced) and never renewed or deleted its
-	// claim. Nobody outside envA can remove the ref by hand, so the only way
-	// envB's release ever proceeds is if the claim reclaims itself once it
-	// lapses.
+	// envA's claim was never released; only lapsing can free it.
 	afterLapse := start.Add(shared.ReleaseVersionClaimTTL + time.Minute)
 	holderB := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
 	sha, err := shared.TakeReleaseRepoClaim(ctx, envB, "build-b", "1.0.213", holderB, afterLapse, nil)
@@ -142,10 +128,7 @@ func TestReleaseRepoClaimReclaimsAnAbandonedReleaseFromADifferentCheckout(t *tes
 	}
 }
 
-// exitedProcessPIDForTest returns the pid of a process that has already
-// exited, standing in for the release process a SIGTERM ended. It is a real
-// pid, just one no liveness probe can succeed on — which is the state a
-// cancelled release leaves its environment's local claim in.
+// exitedProcessPIDForTest returns a real pid whose process has exited.
 func exitedProcessPIDForTest(t *testing.T) int {
 	t.Helper()
 	cmd := core.Command("git", "--version")
@@ -159,12 +142,7 @@ func exitedProcessPIDForTest(t *testing.T) int {
 	return pid
 }
 
-// TestReleaseRepoClaimStillRefusesWhileThisEnvironmentsHolderIsAlive is the
-// half of the liveness rule that keeps it a safety net rather than a
-// formality: a claim naming this environment whose holder is still running
-// must keep refusing a second release here, and the local claim is what says
-// so. It is the same signal that reclaims a dead holder's claim, so this test
-// is what stops that signal from being read as "nobody here is releasing".
+// A live local holder must keep refusing a second release here.
 func TestReleaseRepoClaimStillRefusesWhileThisEnvironmentsHolderIsAlive(t *testing.T) {
 	isolateActivityCache(t)
 	repo := newAgentJobTestRepo(t)
@@ -205,9 +183,6 @@ func TestReleaseRepoClaimStillRefusesWhileThisEnvironmentsHolderIsAlive(t *testi
 	}
 }
 
-// TestReleaseRepoClaimFreshClaimSetsStartedAtToNow guards the baseline a
-// renewal must not disturb: a brand-new claim has nothing to inherit, so its
-// StartedAt is the moment it was taken.
 func TestReleaseRepoClaimFreshClaimSetsStartedAtToNow(t *testing.T) {
 	env := newAgentJobTestRepo(t)
 	newBareRemoteForTest(t, env)
@@ -230,9 +205,7 @@ func TestReleaseRepoClaimFreshClaimSetsStartedAtToNow(t *testing.T) {
 	}
 }
 
-// TestReleaseRepoClaimRenewalPreservesStartedAtAndAdvancesOnlyExpiresAt: a
-// renewal must not rewrite StartedAt, or a long release with periodic
-// renewals looks only minutes old in the claim blob.
+// Renewal must not rewrite StartedAt.
 func TestReleaseRepoClaimRenewalPreservesStartedAtAndAdvancesOnlyExpiresAt(t *testing.T) {
 	env := newAgentJobTestRepo(t)
 	newBareRemoteForTest(t, env)
@@ -266,12 +239,7 @@ func TestReleaseRepoClaimRenewalPreservesStartedAtAndAdvancesOnlyExpiresAt(t *te
 	}
 }
 
-// TestReleaseRepoClaimReclaimOfAnExpiredHolderSetsANewStartedAt is the test
-// that stops the fix above from over-correcting: a reclaim takes over from a
-// dead holder, so it must NOT carry that holder's StartedAt forward — it is
-// a different holder, and preserving the old value would make a genuinely
-// wedged-looking claim (the thing StartedAt exists to reveal) look however
-// old the abandoned holder happened to be.
+// A reclaim is a new holder and must not inherit StartedAt.
 func TestReleaseRepoClaimReclaimOfAnExpiredHolderSetsANewStartedAt(t *testing.T) {
 	envA := newAgentJobTestRepo(t)
 	remote := newBareRemoteForTest(t, envA)
@@ -302,11 +270,6 @@ func TestReleaseRepoClaimReclaimOfAnExpiredHolderSetsANewStartedAt(t *testing.T)
 	}
 }
 
-// TestReleaseRepoClaimRefusalReportsHowLongTheHolderHasBeenRunning guards the
-// refusal message added alongside the StartedAt fix: once the field means
-// what its name says, the refusal can tell an operator how long the holder
-// has actually been running, which is the number that says whether to wait
-// or go investigate.
 func TestReleaseRepoClaimRefusalReportsHowLongTheHolderHasBeenRunning(t *testing.T) {
 	envA := newAgentJobTestRepo(t)
 	remote := newBareRemoteForTest(t, envA)
@@ -331,18 +294,12 @@ func TestReleaseRepoClaimRefusalReportsHowLongTheHolderHasBeenRunning(t *testing
 	}
 }
 
-// TestReleaseBranchPushRebaseKeepsTheReleaseTagOnTheTargetBranch reproduces
-// the second defect from the same run: the branch push absorbs a moved base
-// branch by rebasing and retrying, but the release tag was already published
-// under the pre-rebase commit. Left unfixed, the tag names a commit reachable
-// from nothing once the rebase replays it under a new sha.
+// A rebased branch push must move the release tag onto the replayed commit.
 func TestReleaseBranchPushRebaseKeepsTheReleaseTagOnTheTargetBranch(t *testing.T) {
 	repo := newAgentJobTestRepo(t)
 	remote := newBareRemoteForTest(t, repo)
 	runGitForTest(t, repo, "push", "-q", "-u", "origin", "main")
 
-	// The release's own commit and its already-published tag, as they exist
-	// once ensureReleaseReadyToPublish has passed and push-release-tag has run.
 	if err := os.WriteFile(filepath.Join(repo, "VERSION"), []byte("1.0.213\n"), 0o644); err != nil {
 		t.Fatalf("write VERSION: %v", err)
 	}
@@ -351,12 +308,7 @@ func TestReleaseBranchPushRebaseKeepsTheReleaseTagOnTheTargetBranch(t *testing.T
 	runGitForTest(t, repo, "tag", "-a", "v1.0.213", "-m", "Release 1.0.213")
 	runGitForTest(t, repo, "push", "-q", "origin", "v1.0.213")
 
-	// An unrelated commit lands on origin/main while this release is still
-	// running, so this checkout's eventual push is rejected. It touches a
-	// different file than the release's own commits, the same way an
-	// unrelated mainline change would in production — the rebase this test
-	// exercises is about any base-branch move, not specifically a race
-	// between two releases of the same version.
+	// An unrelated commit moves origin/main so this push is rejected.
 	other := cloneRepoForTest(t, remote)
 	if err := os.WriteFile(filepath.Join(other, "OTHER.txt"), []byte("unrelated change\n"), 0o644); err != nil {
 		t.Fatalf("write unrelated file in the other checkout: %v", err)
@@ -365,8 +317,6 @@ func TestReleaseBranchPushRebaseKeepsTheReleaseTagOnTheTargetBranch(t *testing.T
 	runGitForTest(t, other, "commit", "-q", "-m", "unrelated mainline change")
 	runGitForTest(t, other, "push", "-q", "origin", "main")
 
-	// This checkout's own post-release-version-bump commit, made on top of
-	// the now-stale base before the push discovers the rejection.
 	if err := os.WriteFile(filepath.Join(repo, "VERSION"), []byte("1.0.214-next\n"), 0o644); err != nil {
 		t.Fatalf("write VERSION bump: %v", err)
 	}
@@ -392,16 +342,11 @@ func runGitCheckForTest(dir string, args ...string) error {
 	return cmd.Run()
 }
 
-// TestReleaseBranchPushRebaseIgnoresAnOlderCommitWithTheSameSubjectOutsideTheRebasedRange
-// guards the bound itself: an older commit sharing the release commit's exact
-// subject, already common history before this release ever started, must not
-// be mistaken for the commit the rebase just replayed.
+// An older commit with the same subject outside the rebased range must be ignored.
 func TestReleaseBranchPushRebaseIgnoresAnOlderCommitWithTheSameSubjectOutsideTheRebasedRange(t *testing.T) {
 	repo := newAgentJobTestRepo(t)
 
-	// A prior release of the same version, already part of history before
-	// this run starts. It carries the exact subject this run's own release
-	// commit will carry too, but it sits outside anything a rebase replays.
+	// A prior release with the same subject, already in history.
 	if err := os.WriteFile(filepath.Join(repo, "OLD.txt"), []byte("old\n"), 0o644); err != nil {
 		t.Fatalf("write old file: %v", err)
 	}
@@ -447,10 +392,7 @@ func TestReleaseBranchPushRebaseIgnoresAnOlderCommitWithTheSameSubjectOutsideThe
 	}
 }
 
-// TestReleaseBranchPushRebaseRefusesAnAmbiguousReplayedTagSubject guards the
-// refusal itself: two commits inside the range the rebase just replayed share
-// the tagged commit's exact subject, and the repoint must refuse rather than
-// silently retag onto whichever one it happened to see first.
+// Two replayed commits with the tagged subject must refuse, not guess.
 func TestReleaseBranchPushRebaseRefusesAnAmbiguousReplayedTagSubject(t *testing.T) {
 	repo := newAgentJobTestRepo(t)
 	remote := newBareRemoteForTest(t, repo)
@@ -464,8 +406,6 @@ func TestReleaseBranchPushRebaseRefusesAnAmbiguousReplayedTagSubject(t *testing.
 	runGitForTest(t, repo, "tag", "-a", "v1.0.213", "-m", "Release 1.0.213")
 	runGitForTest(t, repo, "push", "-q", "origin", "v1.0.213")
 
-	// A second commit that happens to carry the exact same subject as the
-	// tagged one, replayed by the same rebase alongside it.
 	if err := os.WriteFile(filepath.Join(repo, "DUPLICATE.txt"), []byte("duplicate\n"), 0o644); err != nil {
 		t.Fatalf("write duplicate-subject file: %v", err)
 	}

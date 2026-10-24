@@ -113,8 +113,7 @@ func TestStartSessionStartsConfiguredWorkspaceSync(t *testing.T) {
 }
 
 func TestSaveEnvironmentConfigPersistsWorkspaceSyncLocalPath(t *testing.T) {
-	// A plain (non-git) directory is a valid sync target: the mirror is a
-	// one-way copy the sync owns and needs no local git.
+	// A mirror needs no local git.
 	localRoot := t.TempDir()
 	store := workspaceSyncStore(true)
 	env := store.envs["frs/dev"]
@@ -238,10 +237,6 @@ func TestStartWorkspaceSyncForConfiguredEnvsStartsEnabledEnvs(t *testing.T) {
 	}
 }
 
-// Detaching a mirror is done the same way linking is — by editing config while
-// the app runs — so a worker whose env is no longer linked has to stop. Left
-// running it keeps writing into a directory the operator has stopped treating as
-// a mirror.
 func TestReconcileWorkspaceSyncForConfiguredEnvsStopsAnUnlinkedEnv(t *testing.T) {
 	store := workspaceSyncStore(true)
 	passed := make(chan struct{}, 8)
@@ -268,7 +263,6 @@ func TestReconcileWorkspaceSyncForConfiguredEnvsStopsAnUnlinkedEnv(t *testing.T)
 		t.Fatal("expected the linked env to start syncing")
 	}
 
-	// The operator unlinks it outside the app, which is where links are made.
 	env := store.envs["frs/dev"]
 	env.SSHD.WorkspaceSync.Enabled = false
 	store.envs["frs/dev"] = env
@@ -304,10 +298,6 @@ func TestStartWorkspaceSyncForConfiguredEnvsSkipsDisabledEnvs(t *testing.T) {
 	}
 }
 
-// TestStartWorkspaceSyncForSelectionEmitsWarningWithoutLocalPath locks the
-// reclassification of the "workspace sync has no local path" notice: it used
-// to go out on the unclassified emitAppStatus channel, and now goes out as a
-// classified, env-tagged warning.
 func TestStartWorkspaceSyncForSelectionEmitsWarningWithoutLocalPath(t *testing.T) {
 	store := workspaceSyncStore(true)
 	env := store.envs["frs/dev"]
@@ -318,9 +308,7 @@ func TestStartWorkspaceSyncForSelectionEmitsWarningWithoutLocalPath(t *testing.T
 		store:               store,
 		canConnectLocalPort: func(int) bool { return true },
 		canReachMCPEndpoint: func(int) bool { return true },
-		// Without this, the default findProjectRoot walks the real
-		// filesystem from the test binary's cwd and resolves a real project
-		// root, masking the "no local path" case this test exercises.
+		// Otherwise the real cwd resolves a project root and masks the case.
 		findProjectRoot: func() (string, string, error) { return "", "", errors.New("not found") },
 	})
 	app.emitFn = emits.fn()
@@ -350,9 +338,6 @@ func TestStartWorkspaceSyncForSelectionEmitsWarningWithoutLocalPath(t *testing.T
 	}
 }
 
-// TestSetWorkspaceSyncErrorEmitsClassifiedError locks the reclassification of
-// a workspace sync failure from the unclassified emitAppStatus channel to a
-// classified, env-tagged error.
 func TestSetWorkspaceSyncErrorEmitsClassifiedError(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{emitFn: emits.fn(), workspaceSyncs: map[string]*workspaceSyncWorker{

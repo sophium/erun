@@ -7,12 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
-// TestJobPresenceLeaseRecordsInitiator is the regression test for the defect.
-// A job's own plain activity lease — the one every started job holds for its
-// whole lifetime, not only the exclusive-scope claim an --exclusive job also
-// takes — recorded no holder at all, so a refusal fed by it could only ever
-// say "an unnamed holder" even though the orchestrator that started the job
-// was known throughout (ERUN_ORCHESTRATOR_ID, read by environmentJobHolder).
+// A job's plain presence lease must record its initiator, not an unnamed holder.
 func TestJobPresenceLeaseRecordsInitiator(t *testing.T) {
 	isolateActivityCache(t)
 	t.Setenv("ERUN_ORCHESTRATOR_ID", "erun-devops")
@@ -31,8 +26,6 @@ func TestJobPresenceLeaseRecordsInitiator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	// startEnvironmentJobHeartbeat takes the lease synchronously (refresh(true))
-	// before it returns, so the lease is on disk the moment this call comes back.
 	_, stop := startEnvironmentJobHeartbeat(tenant, environment, recorder, 15*time.Minute, nil, false)
 	defer stop()
 

@@ -36,25 +36,18 @@ func IsProcessAlive(pid int) bool {
 	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {
-		// Can't determine liveness. On Windows os.FindProcess calls OpenProcess,
-		// which an endpoint-security agent denies — returning "dead" here would
-		// make a LIVE concurrent deploy look finished and silently defeat the
-		// single-flight guard, so rapid/duplicate deploys stop being deduped.
-		// Assume alive instead; a genuinely-crashed marker is still reclaimed by
-		// the max-age fallback in reconcileExistingInflightMarker. (Unix
-		// FindProcess never errors, so this path is Windows-only in practice.)
+		// Unknown liveness: assume alive. Windows endpoint security can deny OpenProcess,
+		// and "dead" would defeat single-flight; stale markers age out.
 		return true
 	}
 	signalErr := proc.Signal(syscall.Signal(0))
 	if signalErr == nil {
 		return true
 	}
-	// On darwin (Go 1.23+) `(*os.Process).Signal` returns os.ErrProcessDone
-	// for a dead PID instead of surfacing the underlying ESRCH, so a check
-	// against ESRCH alone leaves the marker stuck until the max-age fallback.
+	// Darwin returns os.ErrProcessDone rather than ESRCH for a dead PID.
 	if errors.Is(signalErr, syscall.ESRCH) || errors.Is(signalErr, os.ErrProcessDone) {
 		return false
 	}
-	// EPERM and other errors imply the process exists but we can't signal it.
+	// EPERM: the process exists but cannot be signalled.
 	return true
 }

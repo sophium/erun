@@ -16,8 +16,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// seedableGitRemote resolves the checkout's git remote; a directory without a
-// resolvable one simply has nothing to seed.
 func seedableGitRemote(dir string) (host, user, repo string, ok bool) {
 	host, user, repo, err := resolveGitRemote(dir)
 	return host, user, repo, err == nil
@@ -35,9 +33,7 @@ func remoteShellGitSeedLines(req configpkg.ShellLaunchParams, workdir string) ([
 	if err != nil {
 		return nil, err
 	}
-	// The private key is never written by this script — it streams to the pod
-	// on stdin via seedRemoteSSHKey (see ExecShell) so it stays out of the
-	// kubectl exec argv. known_hosts and the ssh config are public and inline.
+	// The private key goes over stdin (seedRemoteSSHKey), never this script.
 	return RemoteShellGitSeedScriptLines(workdir, gitHost, core.ShellQuote(gitUser), core.ShellQuote(gitRepo), strings.Join(knownHostsLines, "\n")), nil
 }
 
@@ -63,17 +59,8 @@ func RemoteShellGitSeedScriptLines(workdir, gitHost, gitUser, gitRepo, knownHost
 		"chmod 600 \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/config\"",
 		fmt.Sprintf("mkdir -p %s", workdir),
 		fmt.Sprintf("cd %s", workdir),
-		// `git config --global` writes through a `~/.gitconfig.lock`
-		// created with O_CREAT|O_EXCL. When two erun open invocations
-		// (typically the OPEN tab and the AI tab) hit `kubectl exec`
-		// against the same pod within a few hundred milliseconds, both
-		// run this script in parallel and one fails with "could not
-		// lock config file: File exists", aborting the whole setup
-		// under `set -eu`. Guard the write on the current value so the
-		// loser of the race sees the setting already present and
-		// skips entirely; tolerate a leftover lock or a tight race
-		// past the guard with `|| true` because the racing process is
-		// performing the same work. End state is the same.
+		// Concurrent opens race on ~/.gitconfig.lock; the guard and `|| true`
+		// keep the loser from aborting under `set -eu`.
 		fmt.Sprintf("if command -v git >/dev/null 2>&1; then if [ ! -d .git ]; then git clone git@%s:%s/%s.git .; fi; if ! git config --global --get-all safe.directory 2>/dev/null | grep -qFx '*'; then git config --global --add safe.directory '*' 2>/dev/null || true; fi; fi", gitHost, gitUser, gitRepo),
 	}
 }
@@ -157,9 +144,7 @@ func loadKnownHostsLines(host string) ([]string, error) {
 	return lines, nil
 }
 
-// loadPrivateKeyMaterial has no redaction mode on purpose: the material only
-// ever reaches the pod on stdin (seedRemoteSSHKey), never a script, command
-// line, or trace.
+// loadPrivateKeyMaterial needs no redaction: the material only travels on stdin.
 func loadPrivateKeyMaterial(entries []sshConfigEntry) ([]string, error) {
 	keyPaths := privateKeyPaths(entries)
 
@@ -198,17 +183,12 @@ func remoteShellPrivateKeyMaterial(req configpkg.ShellLaunchParams) (string, err
 	return strings.Join(keyLines, "\n"), nil
 }
 
-// RemoteSSHKeySeedArgs streams the private key to the pod on stdin: -i (not
-// -it) keeps stdin a pipe for the key bytes, and the key is never in these
-// args.
+// RemoteSSHKeySeedArgs uses -i (not -it) so stdin stays a pipe for the key.
 func RemoteSSHKeySeedArgs(req configpkg.ShellLaunchParams) []string {
 	args := configpkg.KubectlTargetArgs(req)
 	return append(args, "exec", "-i", "deployment/"+configpkg.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-c", remoteSSHKeySeedScript)
 }
 
-// seedRemoteSSHKey pipes the env's SSH private key to the pod on stdin so it
-// never touches a command line. Runs after the deployment is Available and
-// before the interactive shell exec.
 func seedRemoteSSHKey(req configpkg.ShellLaunchParams) error {
 	keyMaterial, err := remoteShellPrivateKeyMaterial(req)
 	if err != nil {

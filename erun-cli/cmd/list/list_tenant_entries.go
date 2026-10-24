@@ -121,13 +121,8 @@ func environmentSSHDetailLines(tenantName, environmentName string, ssh lifecycle
 	}
 }
 
-// sshHostAliasLabel reports the alias `erun list` derives for an env, plus the
-// fix when the alias is only a naming convention: SSHHostAlias is computed
-// from tenant/environment alone, so it prints the same whether or not
-// ~/.ssh/config actually has a matching Host block. Reporting it bare reads as
-// "this alias works" when nothing wrote the block or authorized a key for it.
-// A check that cannot run (home dir unresolvable) reports the alias bare
-// rather than a false alarm.
+// sshHostAliasLabel adds the fix when ~/.ssh/config has no matching Host block,
+// since the alias is derived by convention alone.
 func sshHostAliasLabel(tenantName, environmentName, alias string) string {
 	alias = strings.TrimSpace(alias)
 	if alias == "" {
@@ -140,13 +135,8 @@ func sshHostAliasLabel(tenantName, environmentName, alias string) string {
 	return fmt.Sprintf("%s (not in ~/.ssh/config — run `erun sshd init %s %s` to fix)", alias, tenantName, environmentName)
 }
 
-// runtimeVersionLabel names the release line beside the bare runtime-version
-// number: a number alone reads as an erun version even when it rides a tenant's
-// own devops line, and two environments in the same tenant can ride different
-// lines from each other. An environment that has never deployed still reads
-// "none", unchanged; one that has deployed but recorded no resolved image reads
-// distinctly as "line undetermined" rather than guessing a line from the tenant
-// name.
+// runtimeVersionLabel names the release line beside the version, since envs in one
+// tenant can ride different lines.
 func runtimeVersionLabel(tenantName string, env lifecycle.ListEnvironmentResult) string {
 	version := shared.ValueOrNone(env.RuntimeVersion)
 	if env.RuntimeVersionLine == nil {
@@ -247,8 +237,6 @@ func writeCloudProviders(ctx core.Context, providers []cloud.CloudProviderStatus
 	return nil
 }
 
-// containerRegistriesLabel renders the marked registry list as
-// "<registry>[role,role] <registry>[role]", or "none" when unset.
 func containerRegistriesLabel(registries config.ContainerRegistries) string {
 	if registries.IsZero() {
 		return "none"
@@ -271,11 +259,7 @@ func configuredCurrentTenantOrNone(tenant string) string {
 	return tenant
 }
 
-// hostedEnvironmentLabel renders the hosted marker beside managed-cloud, which
-// is where an operator already looks to learn whether the platform has any
-// relationship with this environment. The two answer different questions --
-// managed-cloud is lifecycle, hosted is definition -- so both are shown rather
-// than one standing in for the other.
+// hostedEnvironmentLabel shows hosted (definition) beside managed-cloud (lifecycle).
 func hostedEnvironmentLabel(hosted *config.HostedEnvironment) string {
 	if hosted == nil {
 		return "no"

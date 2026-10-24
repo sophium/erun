@@ -8,9 +8,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
-// lastMinuteOfDay is the highest minute-of-day parseClockMinute can produce
-// (23:59). HH:MM has no way to spell midnight/24:00, so a window declared
-// 00:00-23:59 is the only literal all-day span an operator can write.
+// HH:MM cannot spell 24:00, so 00:00-23:59 is how an operator writes an all-day window.
 const lastMinuteOfDay = 23*60 + 59
 
 func applyWorkingHoursTimezone(now time.Time, timezone string) (time.Time, error) {
@@ -41,8 +39,7 @@ func WorkingHoursStatus(value string, timezone string, now time.Time) (bool, int
 func evaluateWorkingHoursWindow(start, end int, now time.Time) (bool, int64) {
 	minute := now.Hour()*60 + now.Minute()
 	if start == 0 && end == lastMinuteOfDay {
-		// The all-day span is always inside rather than excluding the day's
-		// last minute under the ordinary end-exclusive rule below.
+		// The all-day span includes the last minute despite the end-exclusive rule.
 		return false, int64((24*60-minute)*60 - now.Second())
 	}
 	if start < end {

@@ -2,9 +2,7 @@ import { buildPlatformConfigEndpoints } from 'erun-kit';
 
 import { platformApi } from './platformApi';
 
-// The one shared endpoint definition from erun-kit — see
-// erun-kit/src/api/platformConfigEndpoints.ts and its "same model over both
-// transports" proof in erun-kit's and erun-ui/frontend's own test suites.
+// The shared endpoint definition from erun-kit/src/api/platformConfigEndpoints.ts.
 export const configApi = platformApi.injectEndpoints({
   endpoints: (builder) => buildPlatformConfigEndpoints(builder),
 });

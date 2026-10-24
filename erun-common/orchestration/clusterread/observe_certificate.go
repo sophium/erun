@@ -10,10 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// ObservedCertificate is a cert-manager Certificate's readiness. Orders is
-// populated only when Ready is false: that is the failure-chain walk this
-// command exists for, so a caller never issues three more calls to reach the
-// reason a stuck issuance is stuck.
+// ObservedCertificate is a Certificate's readiness; Orders is populated only when Ready is false.
 type ObservedCertificate struct {
 	Name       string                     `json:"name"`
 	Ready      bool                       `json:"ready"`
@@ -39,8 +36,6 @@ type ObservedCertificateChallenge struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
-// certificateList/certificateItem is a deliberately partial parse of
-// `kubectl get certificates.cert-manager.io -o json`.
 type certificateList struct {
 	Items []CertificateItem `json:"items"`
 }
@@ -65,10 +60,7 @@ type CertManagerCondition struct {
 	Message string `json:"message"`
 }
 
-// ownedResourceItem is shared across CertificateRequest, Order, and
-// Challenge: each has metadata/ownerReferences, and Order/Challenge share the
-// same state/reason status shape and a spec.type/dnsName (only Challenge sets
-// them). Fields the current kind does not have simply stay zero-valued.
+// ownedResourceItem is shared across CertificateRequest, Order and Challenge; absent fields stay zero.
 type ownedResourceList struct {
 	Items []OwnedResourceItem `json:"items"`
 }
@@ -120,11 +112,8 @@ func ownerReferenceName(item OwnedResourceItem, kind string) (string, bool) {
 	return "", false
 }
 
-// LatestCertificateRequestName returns the most recently created
-// CertificateRequest cert-manager made for the named Certificate — the label
-// cert-manager.io/certificate-name is how cert-manager itself links them,
-// since a Certificate's status carries no direct pointer to it. RFC3339
-// creation timestamps sort correctly as plain strings.
+// LatestCertificateRequestName returns the newest CertificateRequest labeled with the
+// Certificate's name; RFC3339 timestamps sort as strings.
 func LatestCertificateRequestName(requests []OwnedResourceItem, certificateName string) (string, bool) {
 	var latest OwnedResourceItem
 	found := false
@@ -218,11 +207,7 @@ func fetchOwnedResourceList(args []string, kind string) ([]OwnedResourceItem, er
 	return parseOwnedResourceList(raw)
 }
 
-// FetchObservedCertificates reads Certificates and, only for ones that are not
-// Ready, walks CertificateRequest -> Order -> Challenge for the failure
-// reason. ctx/req are needed here (unlike the other observe fetchers) because
-// that walk is itself conditional on what the first read finds, so its
-// kubectl calls are traced only when they actually run.
+// FetchObservedCertificates reads Certificates and walks the failure chain only for unready ones.
 func FetchObservedCertificates(ctx core.Context, req config.ShellLaunchParams, certArgs []string) ([]ObservedCertificate, error) {
 	raw, stderr, err := deploy.RunObserveKubectl(certArgs)
 	if err != nil {

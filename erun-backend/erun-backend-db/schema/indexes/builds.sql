@@ -4,9 +4,7 @@ CREATE INDEX builds_tenant_review_created_at_idx
 CREATE INDEX builds_tenant_commit_idx
   ON builds (tenant_id, commit_id);
 
--- Serves GET /v1/builds' unfiltered and environment-filtered pages -- the
--- tenant-wide, paginated list an ordinary `erun build` report feeds, unlike
--- the review-scoped index above.
+-- Tenant-wide paginated list for GET /v1/builds.
 CREATE INDEX builds_tenant_created_at_idx
   ON builds (tenant_id, created_at DESC);
 

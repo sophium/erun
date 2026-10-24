@@ -2,29 +2,17 @@ import AxeBuilder from '@axe-core/playwright';
 
 import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 
-// The terminal host had no aria-label/role and xterm's screenReaderMode
-// was never turned on, so the AccessibilityManager live region that carries
-// output to a screen reader was never created -- every `erun` command, and
-// every AI agent turn, was silent. These specs lock the observable proof of
-// both fixes: the accessibility tree only exists when screenReaderMode is on,
-// and the host div is reachable/named for a user who lands on it.
-
 test.describe('terminal accessibility', () => {
   test('the terminal host is a named, reachable group', async ({ app }) => {
     const host = app.terminalPane.host();
-    // waitFor (not expect) converges the pane's render against the enclosing
-    // test's own budget rather than expect's fixed one.
     await host.waitFor({ state: 'visible' });
     await expect(host).toBeVisible();
     await expect(host).toHaveAttribute('role', 'group');
     await expect(host).toHaveAccessibleName('Terminal');
   });
 
-  // screenReaderMode must be OFF unless asked for. xterm's
-  // AccessibilityManager rewrites the same hidden helper textarea that captures
-  // keystrokes, so with it on a focus transition mid-line makes the next input
-  // event re-emit the whole accumulated buffer. The absence of the tree by
-  // default IS the guard against a hardcoded `screenReaderMode: true`.
+  // With screenReaderMode on, a focus change mid-line makes the next input re-emit
+  // the whole buffer, so it must be off by default.
   test('the screen-reader accessibility tree is absent by default', async ({ app }) => {
     await expect(app.terminalPane.accessibilityTree()).toHaveCount(0);
   });
@@ -34,12 +22,6 @@ test.describe('terminal accessibility', () => {
       window.localStorage.setItem('erun.terminal.screenReaderMode', 'true');
     });
     await page.reload();
-    // Only present when `screenReaderMode: true` reached `new Terminal(...)`
-    // -- xterm's AccessibilityManager is not instantiated otherwise, so this
-    // element's mere existence is the guard for the option.
-    //
-    // The tree is built after the reload's own boot, so both counts converge
-    // on the budget this test declared rather than expect's 10s default.
     await expect(app.terminalPane.accessibilityTree()).toHaveCount(1, withTestBudget());
     await expect(app.terminalPane.accessibilityTree().locator('[role="list"]')).toHaveCount(
       1,
@@ -47,9 +29,7 @@ test.describe('terminal accessibility', () => {
     );
   });
 
-  // Scoped to the host div itself, not a whole-page scan: axe can't observe
-  // xterm's screen-reader wiring (checked directly above), but it can catch a
-  // structurally broken landmark/name on the surface we changed.
+  // Scoped to the host div; axe can't observe xterm's screen-reader wiring.
   test('axe reports no violations for the terminal host', async ({ app, page }) => {
     await app.terminalPane.host().waitFor({ state: 'visible' });
     await expect(app.terminalPane.host()).toBeVisible();

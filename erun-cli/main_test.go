@@ -13,10 +13,7 @@ import (
 	"github.com/sophium/erun/internal"
 )
 
-// The three outcomes a script that discards stderr has to tell apart: the run
-// failed (1), the run cannot resolve a platform alias (127), and the run needed
-// a choice only its caller can make (128). Collapsing any two of them is the
-// ambiguity this contract exists to prevent.
+// Exit codes 1, 127, and 128 must stay distinct.
 func TestExitCodeForKeepsTheOutcomesDistinct(t *testing.T) {
 	if got := exitCodeFor(errors.New("boom")); got != 1 {
 		t.Fatalf("ordinary failure exit %d, want 1", got)

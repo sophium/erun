@@ -33,9 +33,8 @@ export function isIdeDisabled(selected: UISelection | null, tenants: AppState['t
   return environmentTypeIsRemoteWorktree(env.type) && env.sshdEnabled !== true;
 }
 
-// isEnvOpenedAndRunning gates titlebar remote operations. A remote env
-// with no managed cloud context stays enabled because the desktop has no
-// signal to gate on and the operator owns provisioning.
+// isEnvOpenedAndRunning gates titlebar remote operations; an env without a
+// managed cloud context stays enabled.
 export function isEnvOpenedAndRunning(
   selected: UISelection | null,
   idleStatus: IdleStatus | null,
@@ -58,14 +57,10 @@ export function idleCloudDisplayName(idleStatus: IdleStatus, fallback: string): 
   return trimmedLabel !== '' ? trimmedLabel : fallback;
 }
 
-// idleStopPending reports whether an auto-stop grace-period warning is
-// currently armed for the env.
 export function idleStopPending(idleStatus: IdleStatus): boolean {
   return Boolean((idleStatus.stopPendingSince ?? '').trim());
 }
 
-// formatGraceCountdown renders the grace-period countdown as a short,
-// glanceable string.
 export function formatGraceCountdown(seconds: number): string {
   const remaining = Math.max(0, Math.floor(seconds));
   if (remaining < 60) {
@@ -79,19 +74,9 @@ export function formatGraceCountdown(seconds: number): string {
   return `in ${String(minutes)}m ${String(rem)}s`;
 }
 
-// idleCloudAction is the titlebar's power control for the selected
-// environment's cloud node. inFlight is the operation this desktop is running
-// against THAT node — cloudNodeOperationFor over the idle slice — and null when
-// there is none.
-//
-// The two verbs come from two different facts, and that separation is the whole
-// point. The idle verb is derived from the node's current state: a running
-// node's button offers to stop it. The progressive verb is derived from the
-// operation actually in flight, never from that state — state and operation
-// disagree precisely while an operation is running, which is the only time the
-// progressive label is shown, and deriving it from `running` is what made a
-// start announce "Stopping <node>" mid-start and claim a teardown that was not
-// happening.
+// idleCloudAction is the power control for the selected env's node. The idle
+// verb comes from node state; the progressive verb comes from inFlight, never
+// state, since the two disagree while an operation runs.
 export function idleCloudAction(
   idleStatus: IdleStatus,
   inFlight: CloudNodeOperation | null,
@@ -165,9 +150,7 @@ export function idleStatusTooltipLines(idleStatus: IdleStatus): string[] {
   return lines;
 }
 
-// Leads the tooltip, ahead of the countdown itself, because a reading the
-// pod never confirmed is the caveat that changes how the rest of the tooltip
-// should be read — not a footnote after it.
+// Leads the tooltip: an unconfirmed reading changes how the rest reads.
 function appendIdleProvenanceLine(lines: string[], idleStatus: IdleStatus): void {
   if (idleStatus.fromPod) {
     return;
@@ -226,9 +209,7 @@ function idleStatusActiveMarkerLine(marker: NonNullable<IdleStatus['markers']>[n
   return `- ${marker.name}${marker.reason ? `: ${marker.reason}` : ''}${remaining}`;
 }
 
-// The two leading spaces nest each per-peer line under its parent marker
-// line; the Titlebar tooltip JSX applies its `pl-2` indent only to lines
-// beginning with "- ", so deeper nesting must be baked into the prefix.
+// The tooltip indents only "- " lines, so deeper nesting is baked into the prefix.
 function idleStatusActiveMarkerClientLines(
   marker: NonNullable<IdleStatus['markers']>[number],
 ): string[] {

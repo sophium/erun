@@ -9,10 +9,8 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// ExecClosePRInput closes branch's open pull request on GitHub, once `erun
-// review_report-merged` has already succeeded, and records landingCommit on
-// it — gate-merge's squash commit is never the branch head GitHub tracks, so
-// GitHub never reconciles a queued merge with its pull request on its own.
+// ExecClosePRInput closes branch's PR after review_report-merged; GitHub never
+// reconciles gate-merge's squash commit with the PR itself.
 type ExecClosePRInput struct {
 	Branch        string `json:"branch" jsonschema:"source branch whose open pull request should close — the review's sourceBranch"`
 	TargetBranch  string `json:"targetBranch" jsonschema:"the pull request's base branch — the review's targetBranch"`

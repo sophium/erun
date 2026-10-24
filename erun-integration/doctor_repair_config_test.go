@@ -32,21 +32,10 @@ func doctorRepairConfigScenarios(t *testing.T) {
 }
 
 func testDoctorRepairOrphanedAliasRealRunViaAwsConfigProfile(t *testing.T) {
-	// Real-run --repair-config with a confirmed prompt: covers
-	// buildOrphanRepairParams → common.LookupAWSSSOProfileByAccountID
-	// (parseAWSSharedConfig, findAWSSSOProfileForAccount, and the
-	// sso_session indirection through buildAWSSSOSessionIndex) plus
-	// the follow-up InitAWSCloudProvider re-init through the
-	// argv-branching aws stub. Dry-run cannot reach the lookup:
-	// offerOrphanedAliasRepair short-circuits to runOrphanRepairDryRun
-	// before buildOrphanRepairParams runs, so the ~/.aws/config scan
-	// only happens in a confirmed real run.
+	// Dry-run never reaches the ~/.aws/config lookup: it short-circuits first.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
-	// The tenant references an alias the root config does not list →
-	// orphan. The alias matches the identity the aws stub returns
-	// (user test-user, account 123456789012) so the re-init heals
-	// exactly this alias.
+	// The alias matches the aws stub's identity, so the re-init heals it.
 	alias := "test-user+123456789012@aws"
 	tenantPath := filepath.Join(setup.ConfigHome, "erun", "team", "config.yaml")
 	tenantBody := "projectroot: " + setup.Cwd + "\n" +
@@ -69,10 +58,6 @@ func testDoctorRepairOrphanedAliasRealRunViaAwsConfigProfile(t *testing.T) {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "doctor/repair_orphaned_alias_real_run_via_aws_config_profile", normalize.Apply(result.Combined))
-	// Persistence is a side effect outside the captured streams: the
-	// re-initialized provider must carry the SSO settings discovered
-	// from ~/.aws/config plus the issuer extracted from the stubbed
-	// web-identity token.
 	raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
 	if err != nil {
 		t.Fatalf("read root config: %v", err)
@@ -89,10 +74,6 @@ func testDoctorRepairOrphanedAliasRealRunViaAwsConfigProfile(t *testing.T) {
 }
 
 func testDoctorRestoreConfigFromBackupDryRun(t *testing.T) {
-	// Seed a 0-byte root config plus a healthy backup for
-	// 2026-05-19. Doctor with --restore-config-from-backup
-	// 2026-05-19 --dry-run must trace the planned restore and
-	// stop without actually replacing the file.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	rootPath := filepath.Join(setup.ConfigHome, "erun", "config.yaml")
@@ -117,10 +98,7 @@ func testDoctorRestoreConfigFromBackupDryRun(t *testing.T) {
 }
 
 func testDoctorRepairOrphanedAliasRealRunDeclined(t *testing.T) {
-	// Real-run --repair-config where the user answers "n" to the
-	// re-init confirm: the repair must stop without touching the
-	// root config (covers the declined arm of
-	// offerOrphanedAliasRepair, which dry-run short-circuits past).
+	// Answering "n" leaves the root config untouched; dry-run never reaches this prompt.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	alias := "test-user+123456789012@aws"
@@ -150,12 +128,6 @@ func testDoctorRepairOrphanedAliasRealRunDeclined(t *testing.T) {
 }
 
 func testDoctorRestoreConfigFromBackupRealRun(t *testing.T) {
-	// Non-interactive restore by date without --dry-run: covers
-	// runRootConfigRestore's real arm (RestoreRootConfigFromBackup
-	// validating + atomically replacing the live file) and the
-	// re-inspection + refreshed report runRootConfigRestoreSelector
-	// prints once the restore lands. The roundtrip is asserted on
-	// disk: the live config must equal the backup bytes.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	rootPath := filepath.Join(setup.ConfigHome, "erun", "config.yaml")
@@ -183,9 +155,6 @@ func testDoctorRestoreConfigFromBackupRealRun(t *testing.T) {
 }
 
 func testDoctorRestoreConfigFromBackupInvalidDateError(t *testing.T) {
-	// A selector that is neither a path nor a YYYY-MM-DD date must
-	// fail fast with the explicit format error instead of silently
-	// matching nothing.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"doctor", "--restore-config-from-backup", "not-a-date"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -196,8 +165,6 @@ func testDoctorRestoreConfigFromBackupInvalidDateError(t *testing.T) {
 }
 
 func testDoctorRestoreConfigFromBackupNoMatchError(t *testing.T) {
-	// A well-formed date with no backup on disk must name the
-	// unmatched selector so the user can pick from the listed dates.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"doctor", "--restore-config-from-backup", "2026-01-01"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -208,10 +175,6 @@ func testDoctorRestoreConfigFromBackupNoMatchError(t *testing.T) {
 }
 
 func testDoctorRestoreEnvConfigFromBackupDryRun(t *testing.T) {
-	// Per-env restore: a dated backup sits next to the
-	// env's config.yaml. Doctor team dev --restore-env-config-from-backup
-	// 2026-05-19 --dry-run must trace the planned cp and stop without
-	// touching the live file.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envBackup := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml.2026-05-19.bak")
@@ -227,9 +190,6 @@ func testDoctorRestoreEnvConfigFromBackupDryRun(t *testing.T) {
 }
 
 func testDoctorRestoreEnvConfigFromBackupRealRun(t *testing.T) {
-	// Real-run per-env restore: covers RestoreEnvConfigFromBackup
-	// validating the bytes deserialize into an EnvConfig and atomically
-	// replacing the live file. The roundtrip is asserted on disk.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -249,10 +209,6 @@ func testDoctorRestoreEnvConfigFromBackupRealRun(t *testing.T) {
 }
 
 func testDoctorRestoreEnvConfigFromBackupNoMatchError(t *testing.T) {
-	// A well-formed date with no matching env backup must name the
-	// unmatched selector and the target env, and list the dates that
-	// ARE available (recognition over recall) — here a 2026-05-19 backup
-	// exists but 2026-01-01 was requested.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envBackup := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml.2026-05-19.bak")
@@ -267,8 +223,6 @@ func testDoctorRestoreEnvConfigFromBackupNoMatchError(t *testing.T) {
 }
 
 func testDoctorRestoreEnvConfigFromBackupRequiresTargetError(t *testing.T) {
-	// Without an explicit tenant and environment there is no env to
-	// restore; the flag must fail fast rather than guess a default.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"doctor", "--restore-env-config-from-backup", "2026-05-19"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -279,13 +233,7 @@ func testDoctorRestoreEnvConfigFromBackupRequiresTargetError(t *testing.T) {
 }
 
 func testDoctorRepairConfigRestoresBackupViaPrompt(t *testing.T) {
-	// Real-run --repair-config on a corrupted root config with a
-	// backup available: the repair flow's first move is the restore
-	// confirm (offerRootConfigBackupRestore — the one interactive
-	// prompt of this subprocess), then the restore, re-inspection,
-	// and the restored-and-complete early return. Dry-run cannot
-	// reach this: shouldOfferRootConfigRepair prints the suggestion
-	// and exits before any prompt.
+	// Dry-run prints the suggestion and exits before the restore prompt.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	rootPath := filepath.Join(setup.ConfigHome, "erun", "config.yaml")
@@ -312,14 +260,8 @@ func testDoctorRepairConfigRestoresBackupViaPrompt(t *testing.T) {
 }
 
 func testDoctorRepairOrphanedAliasRotatesDailyBackups(t *testing.T) {
-	// Same confirmed alias re-init as the scenario above, but with
-	// six dated backups already on disk: the SaveERunConfig inside
-	// the repair must snapshot today's pre-save config
-	// (writeRootConfigBackupIfDue) and evict the two oldest files to
-	// hold the count-based retention at five
-	// (pruneOldRootConfigBackups). The rotation only happens on a
-	// real save, which dry-run never performs. The inspection report
-	// also locks the backups-listed-while-status-ok rendering arm.
+	// With six backups, the save snapshots today and prunes to five. Only a real
+	// save rotates.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	alias := "test-user+123456789012@aws"
@@ -351,9 +293,6 @@ func testDoctorRepairOrphanedAliasRotatesDailyBackups(t *testing.T) {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "doctor/repair_orphaned_alias_rotates_daily_backups", normalize.Apply(result.Combined))
-	// Rotation is a side effect outside the captured streams: the
-	// save writes today's snapshot, and retention keeps the five
-	// newest dated files — today plus 2026-01-03..06.
 	today := time.Now().UTC().Format("2006-01-02")
 	for _, date := range []string{today, "2026-01-03", "2026-01-04", "2026-01-05", "2026-01-06"} {
 		path := filepath.Join(setup.ConfigHome, "erun", "config.yaml."+date+".bak")
@@ -370,14 +309,7 @@ func testDoctorRepairOrphanedAliasRotatesDailyBackups(t *testing.T) {
 }
 
 func testDoctorRepairConfigRecoversCloudContextRealRun(t *testing.T) {
-	// Real-run recovery of an orphaned cloud context: the confirm
-	// (the single prompt of this subprocess) accepts, then
-	// RecoverCloudContextFromAWS parses real describe-instances /
-	// describe-volumes JSON from the aws stub, restores the admin
-	// token from a seeded ~/.kube/config (the "kubeconfig" arm of
-	// the recovery summary), and persists the rebuilt context. The
-	// dry-run sibling scenario stops at placeholder values, so the
-	// JSON parsing, token lookup, and save only run here.
+	// Only a real run parses the aws stub's JSON and restores the kubeconfig token.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "petios", "rihards-review")
 	alias := "alice+020362606330@aws"
@@ -408,9 +340,6 @@ func testDoctorRepairConfigRecoversCloudContextRealRun(t *testing.T) {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "doctor/repair_config_recovers_cloud_context_real_run", normalize.Apply(result.Combined))
-	// Persistence is a side effect outside the captured streams: the
-	// recovered context must land in the root config with the
-	// coordinates parsed from AWS plus the kubeconfig token.
 	raw := readFileForTest(t, filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
 	for _, want := range []string{
 		"kubernetescontext: erun-001-020362606330-eu-west-2",
@@ -427,12 +356,7 @@ func testDoctorRepairConfigRecoversCloudContextRealRun(t *testing.T) {
 }
 
 func testDoctorRepairConfigCloudContextRecoveryFailure(t *testing.T) {
-	// Same orphaned context, but AWS reports no instance with the
-	// expected Name tag: the recovery must print the failure with
-	// its cause and continue (exit 0) rather than aborting the
-	// repair walk — covering the non-fatal failure arm of
-	// offerOrphanedCloudContextRecovery and the zero-match arm of
-	// describeCloudContextInstanceByName.
+	// No matching instance: the recovery reports the failure and the walk continues.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "petios", "rihards-review")
 	alias := "alice+020362606330@aws"
@@ -455,11 +379,8 @@ func testDoctorRepairConfigCloudContextRecoveryFailure(t *testing.T) {
 	}
 }
 
-// stubAWSDescribeForContextRecovery stubs the two AWS reads
-// RecoverCloudContextFromAWS performs on a real run: describe-instances
-// (the caller-supplied JSON — the decision input for the match/no-match
-// arms) and describe-volumes (a fixed gp3/100G answer). Everything else
-// exits 0 silently.
+// stubAWSDescribeForContextRecovery answers describe-instances with the given JSON
+// and describe-volumes with a fixed volume.
 func stubAWSDescribeForContextRecovery(t *testing.T, stubsDir, describeInstancesJSON string) {
 	t.Helper()
 	script := strings.Join([]string{
@@ -472,9 +393,8 @@ func stubAWSDescribeForContextRecovery(t *testing.T, stubsDir, describeInstances
 	fixture.StubBinaryWithScript(t, stubsDir, "aws", script)
 }
 
-// seedOrphanedCloudContextEnv shapes the orphaned-context inspection input: the
-// env names a cloud-managed kubernetes context the root config does not list,
-// while the root still registers the provider so only the context orphan surfaces.
+// seedOrphanedCloudContextEnv names an unlisted cloud context while keeping the
+// provider registered, so only the context orphan surfaces.
 func seedOrphanedCloudContextEnv(t *testing.T, setup env.Setup, tenant, environment, alias string) {
 	t.Helper()
 	tenantPath := filepath.Join(setup.ConfigHome, "erun", tenant, "config.yaml")

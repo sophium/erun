@@ -8,11 +8,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestEnsureMCPAvailableEmitsClassifiedWarning locks the reclassification of
-// the local-MCP-unreachable notice: it used to go out on the unclassified
-// emitAppStatus busy channel, and now goes out as a classified, env-tagged
-// warning so the message centre can count and review it like any other
-// notification.
 func TestEnsureMCPAvailableEmitsClassifiedWarning(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{
@@ -57,8 +52,6 @@ func TestEnsureMCPAvailableEmitsClassifiedWarning(t *testing.T) {
 	}
 }
 
-// TestEnsureMCPAvailableEmitsNothingWhenReachable locks the flip side: a
-// reachable endpoint must not post the warning at all.
 func TestEnsureMCPAvailableEmitsNothingWhenReachable(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{
@@ -83,9 +76,6 @@ func TestEnsureMCPAvailableEmitsNothingWhenReachable(t *testing.T) {
 	}
 }
 
-// TestSurfaceCredentialRefreshFailureEmitsClassifiedError locks the
-// reclassification of the host-credential-refresh failure notice from the
-// unclassified emitAppStatus channel to a classified, env-tagged error.
 func TestSurfaceCredentialRefreshFailureEmitsClassifiedError(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{emitFn: emits.fn()}
@@ -115,8 +105,6 @@ func TestSurfaceCredentialRefreshFailureEmitsClassifiedError(t *testing.T) {
 	}
 }
 
-// TestSurfaceCredentialRefreshFailureNotifiesOnlyOnce locks the existing
-// dedup contract (the *notified flag) surviving the reclassification.
 func TestSurfaceCredentialRefreshFailureNotifiesOnlyOnce(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{emitFn: emits.fn()}

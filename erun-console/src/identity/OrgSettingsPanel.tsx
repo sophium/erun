@@ -53,9 +53,6 @@ function PolicyCheckbox({
   );
 }
 
-// usePasswordComplexityFields holds the four boolean password-complexity
-// toggles as one unit, so SettingsForm only has one hook call (and one
-// destructure) to account for instead of four repeated triples.
 function usePasswordComplexityFields(settings: OrgSettings): {
   uppercase: boolean;
   lowercase: boolean;
@@ -210,10 +207,7 @@ function OrgSettingsBody({
   );
 }
 
-// OrgSettingsPanel is the console's view of the platform IdP org settings an
-// operator actually changes: MFA requirement, password
-// complexity, and the org's verified domains (read-only). Only rendered for
-// an OPERATIONS tenant — see App.tsx.
+// Rendered only for an OPERATIONS tenant.
 export function OrgSettingsPanel({ token }: { token: string }): React.ReactElement {
   const { state, save } = useOrgSettingsController(token);
   return (

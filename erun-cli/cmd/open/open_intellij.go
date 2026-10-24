@@ -296,8 +296,6 @@ func resolveInstalledIntelliJAttempt(hostOS core.HostOS) (jetbrainsBootstrapAtte
 	return jetbrainsBootstrapAttempt{}, false
 }
 
-// resolvableIntelliJOptionsDir reports false when this host has no IntelliJ
-// options directory to read or register projects in.
 func resolvableIntelliJOptionsDir(hostOS core.HostOS) (string, bool) {
 	optionsDir, err := shared.ResolveIntelliJOptionsDir(hostOS)
 	return optionsDir, err == nil
@@ -307,7 +305,7 @@ func resolveInstalledIntelliJContentsDir(hostOS core.HostOS) (string, error) {
 	if hostOS != core.HostOSDarwin {
 		return "", fmt.Errorf("IntelliJ IDEA app discovery is unsupported on %s", hostOS)
 	}
-	// macOS convention: a user's ~/Applications install shadows the system-wide /Applications one.
+	// ~/Applications shadows /Applications.
 	homeDir, _ := shared.IdeUserHomeDir()
 	patterns := make([]string, 0, 2)
 	if strings.TrimSpace(homeDir) != "" {

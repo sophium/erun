@@ -3,17 +3,8 @@ import type { Page, Request, Route } from '@playwright/test';
 import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// The gateway is rendered into each runtime at deploy time, so switching it in
-// ERun settings changes no running pod by itself — the operator's report was
-// that switching it off "does not have the desired effect". The contract here:
-// after a save the desktop names the environments still routed the old way and
-// redeploys them on request, and an environment's Manage dialog says its pod is
-// behind its saved configuration.
-//
-// What a running pod routes to is read from the cluster, which the inert suite
-// has none of, so the routing reads are answered here. Reading a real
-// Deployment is covered by erun-common TestReadGatewayRouting* and the
-// per-environment selection by erun-ui TestLoadGatewayRoutingDrift*.
+// The gateway is rendered at deploy time, so a settings change needs a
+// redeploy. The suite has no cluster, so routing reads are stubbed.
 
 const OLD_GATEWAY = 'https://openrouter.ai/api';
 
@@ -45,8 +36,7 @@ function stubGatewayRouting(page: Page, drifted: boolean): RoutingStubs {
         });
         return;
       case 'StartDeploySession':
-        // Recorded rather than run: the inert suite has no cluster to deploy to,
-        // and what matters is which environment the confirmation redeploys.
+        // Recorded rather than run: there is no cluster to deploy to.
         stubs.deploys.push((body.args ?? [])[0]);
         await route.fulfill({ json: { data: { sessionId: 'gateway-redeploy-stub', slot: 0 } } });
         return;
@@ -84,8 +74,7 @@ test.describe('applying a gateway switch to running environments', () => {
     await app.globalConfigDialog.save();
     await app.globalConfigDialog.waitForClosed();
 
-    // Converge on the read having been answered before asserting the absence,
-    // or the assertion passes merely because the check had not finished.
+    // Otherwise the absence passes merely because the check had not finished.
     await expect.poll(() => stubs.driftReads, withTestBudget()).toBeGreaterThan(0);
     await expect(app.gatewayRedeployDialog.locator()).toHaveCount(0);
     expect(stubs.deploys).toEqual([]);
@@ -108,8 +97,6 @@ test.describe('applying a gateway switch to running environments', () => {
     stubGatewayRouting(page, true);
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    // Raised without a save in this dialog: the switch was made elsewhere, and
-    // the pod is what is behind.
     await app.manageDialog.waitForRedeployBanner();
     await expect(app.manageDialog.redeployNowButton()).toBeVisible();
   });

@@ -28,10 +28,7 @@ func fakeRestartDeps(t *testing.T, marker DesktopControlMarker, markerErr error,
 	}
 }
 
-// fakeDryRunDeps is a resolved, live target whose plan call is plan, with the
-// restart call counted. Whatever the plan answers — a plan, a refusal, a
-// transport error — a dry run must never reach the restart, so every case below
-// reads that counter rather than trusting the branch it is exercising.
+// fakeDryRunDeps counts restart calls: a dry run must never reach one.
 func fakeDryRunDeps(t *testing.T, plan func(context.Context, int, string) (DesktopRestartResponse, error)) (DesktopRestartDeps, *int) {
 	t.Helper()
 	restarts := 0
@@ -44,8 +41,6 @@ func fakeDryRunDeps(t *testing.T, plan func(context.Context, int, string) (Deskt
 	return deps, &restarts
 }
 
-// A desktop that answers but cannot produce the plan is the same report from
-// the other side of the wire, and the same refusal to fall back on a restart.
 func TestRestartDesktopApp_DryRunReportsAPlanTheDesktopCouldNotAnswer(t *testing.T) {
 	deps, restarts := fakeDryRunDeps(t, func(context.Context, int, string) (DesktopRestartResponse, error) {
 		return DesktopRestartResponse{OK: false, Error: "the open set could not be read"}, nil
@@ -120,10 +115,7 @@ func TestDesktopProcessAlive(t *testing.T) {
 		t.Fatal("a non-positive pid must never read as alive")
 	}
 
-	// Re-run this test binary with no test selected: it exits immediately, so
-	// its pid is a real process that is really gone, without depending on a
-	// host utility that not every platform ships (a skip here would have left
-	// the exited-pid half of this check unrun wherever it was missing).
+	// Re-running this binary with no tests yields a real exited pid on every platform.
 	cmd := exec.Command(os.Args[0], "-test.run=^$")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("spawn %s to get an exited pid: %v", os.Args[0], err)
@@ -133,9 +125,8 @@ func TestDesktopProcessAlive(t *testing.T) {
 	}
 }
 
-// TestPostDesktopRestart_RoundTrips exercises the real HTTP client against a
-// real loopback server, since erun-ui's own control handler cannot be
-// exercised from this module without an import cycle.
+// TestPostDesktopRestart_RoundTrips uses a real loopback server; erun-ui's
+// handler would be an import cycle.
 func TestPostDesktopRestart_RoundTrips(t *testing.T) {
 	var gotBody DesktopRestartRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -163,9 +154,6 @@ func TestPostDesktopRestart_RoundTrips(t *testing.T) {
 	}
 }
 
-// The path a plan is sent to is not the path a restart is performed by, and
-// that is the whole defence: a desktop that serves only the restart path cannot
-// be asked a question, so it must answer "not served" rather than act.
 func TestPostDesktopRestartPlan_IsNotTheRestartPath(t *testing.T) {
 	if DesktopControlPlanPath == DesktopControlPath {
 		t.Fatal("the plan and the restart share a path, so an older desktop would read the question as the command")
@@ -173,9 +161,6 @@ func TestPostDesktopRestartPlan_IsNotTheRestartPath(t *testing.T) {
 }
 
 func TestPostDesktopRestart_TransportErrorWhenUnreachable(t *testing.T) {
-	// Bind and immediately close a listener to obtain a port nothing is
-	// listening on, so the POST fails at the transport layer rather than
-	// receiving any response.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("net.Listen: %v", err)

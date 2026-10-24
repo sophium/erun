@@ -12,13 +12,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// The set-alias half. `erun orchestrator set-alias` is the CLI writer for
-// OrchestratorConfig.Alias, the field that names which erun platform alias
-// an orchestrator declares as its own -- the piece erun-common's
-// operator-settable-field registry exists to keep from shipping with a
-// reader and no writer. Every scenario that expects a write to land seeds a
-// configured erun-type alias first, because the writer validates against
-// this host's own cloudproviders and refuses one it cannot resolve.
+// Writes that should land seed an erun-type alias: the writer refuses ones this host cannot resolve.
 func testOrchestratorSetAliasHelp(t *testing.T) {
 	setup := env.New(t)
 	result := erun.Run(t, []string{"orchestrator", "set-alias", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -61,9 +55,6 @@ func testOrchestratorSetAliasRealRunPersistsAndIsVisibleInList(t *testing.T) {
 		t.Fatalf("expected the alias to be persisted, got:\n%s", block)
 	}
 
-	// The reader half: the alias reaches `erun list`, which is what makes
-	// this a reader and a writer rather than a field written into a file
-	// nothing shows.
 	listResult := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if listResult.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", listResult.ExitCode, listResult.Combined)
@@ -88,12 +79,7 @@ func testOrchestratorSetAliasRealRunCanClearBackToNone(t *testing.T) {
 	}
 }
 
-// set_alias_refuses_an_alias_this_host_has_not_configured is the writer's
-// whole reason for validating rather than storing the string: an alias
-// nothing resolves is indistinguishable from one that was never set, so the
-// operator would have declared an attribution that silently does not exist.
-// The refusal names the command that configures one, so it is a next action
-// rather than a wall.
+// An unresolvable alias is indistinguishable from an unset one, so it is refused.
 func testOrchestratorSetAliasRefusesAnAliasThisHostHasNotConfigured(t *testing.T) {
 	setup := env.New(t)
 	seedERunCloudProviderAlias(t, setup, "erun+api.example.test@erun", "https://api.example.test", "cli-test-client")
@@ -111,10 +97,6 @@ func testOrchestratorSetAliasRefusesAnAliasThisHostHasNotConfigured(t *testing.T
 	}
 }
 
-// set_alias_refuses_a_non_erun_alias keeps the field to the one provider
-// type it describes. An orchestrator's platform attribution has no meaning
-// against an AWS or Cloudflare alias, and storing one would promise a
-// resolution that can never happen.
 func testOrchestratorSetAliasRefusesANonErunAlias(t *testing.T) {
 	setup := env.New(t)
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -163,10 +145,7 @@ func testOrchestratorSetAliasUnknownOrchestratorFails(t *testing.T) {
 	golden.Equal(t, "orchestrator/set_alias_unknown_orchestrator_fails", normalize.Apply(result.Combined))
 }
 
-// set_alias_is_not_an_alias_creator locks the boundary the command's own
-// help states: it selects among aliases this host already has and never
-// creates or signs in to one. A host with no erun alias at all is the case
-// that would otherwise be indistinguishable from a typo.
+// set-alias never creates or signs in to an alias.
 func testOrchestratorSetAliasRefusesWhenThisHostHasNoErunAlias(t *testing.T) {
 	setup := env.New(t)
 	seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{

@@ -11,10 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// withTimingHome points the timing history at a fresh temp dir for the duration
-// of the test, which is this test's to own rather than the binary-wide tree
-// TestMain installs. It names the destination directly instead of moving HOME,
-// so the kubeconfig and cloud config these tests still read keep resolving.
+// Names the timing dir directly instead of moving HOME, so kubeconfig and cloud config still resolve.
 func withTimingHome(t *testing.T) {
 	t.Helper()
 	t.Setenv(core.TimingRecordDirEnv, t.TempDir())
@@ -53,7 +50,6 @@ func TestListTimingRecordsReturnsNewestFirst(t *testing.T) {
 	writeFakeTimingRecord(t, dir, "build", base, false)
 	writeFakeTimingRecord(t, dir, "build", base.Add(time.Hour), false)
 	writeFakeTimingRecord(t, dir, "build", base.Add(2*time.Hour), true)
-	// A different command must not appear in "build"'s listing.
 	writeFakeTimingRecord(t, dir, "push", base.Add(3*time.Hour), false)
 
 	summaries, err := ListTimingRecords("build", 0)
@@ -173,7 +169,6 @@ func TestLoadTimingRecordByExplicitID(t *testing.T) {
 		t.Errorf("expected the build record, got %+v", record)
 	}
 
-	// Also resolves with the .json suffix already attached.
 	if _, err := LoadTimingRecord("build", name); err != nil {
 		t.Fatalf("LoadTimingRecord with .json suffix: %v", err)
 	}

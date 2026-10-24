@@ -53,9 +53,7 @@ func TestStartInitSessionPipesCommandToLocal(t *testing.T) {
 		t.Fatalf("expected 1 spawned session (Local), got %d", len(sessions))
 	}
 	written := sessions[0].WrittenString()
-	// init owns the env's single deploy, so the desktop appends
-	// --mcp-auth-public-key after --no-git; assert up to --no-git without pinning
-	// the trailing newline (or the following flag).
+	// Init appends --mcp-auth-public-key after --no-git.
 	wantSubstr := "/tmp/erun init erun remote --type=remote-agent --version 1.0.19 --kubernetes-context orbstack --container-registry erunpaas --set-default-tenant=true --confirm-environment=true --no-git"
 	if !strings.Contains(written, wantSubstr) {
 		t.Fatalf("expected Local pty to receive %q, got %q", wantSubstr, written)
@@ -178,9 +176,7 @@ func TestStartSSHDInitSessionPipesCommandToLocal(t *testing.T) {
 		t.Fatalf("expected local kind, got %q", result.Kind)
 	}
 	written := sessions[0].WrittenString()
-	// The piped command carries the platform's shell prefix and line ending
-	// (PowerShell "& …\r" on Windows), so derive the expectation from the same
-	// production builder rather than a POSIX literal.
+	// Use the production builder: the shell prefix and line ending are per platform.
 	want := buildLocalErunCommand("/tmp/erun", []string{"sshd", "init", "erun", "remote"})
 	if !strings.Contains(written, want) {
 		t.Fatalf("expected sshd-init command %q in Local pty, got %q", want, written)
@@ -266,9 +262,6 @@ func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 	}
 }
 
-// TestStartDeploySessionInjectsMCPAuthPublicKey covers the auth-injecting deploy
-// path: with a signing identity, the in-shell deploy requires the same
-// desktop-signed bearer the desktop sends to its MCP edge.
 func TestStartDeploySessionInjectsMCPAuthPublicKey(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -300,9 +293,7 @@ func TestStartDeploySessionInjectsMCPAuthPublicKey(t *testing.T) {
 	}
 	wantPath := mcpauth.DesktopIdentityPublicKeyPath(identityDir)
 	written := sessions[0].WrittenString()
-	// Derive the expectation from the production builder so the platform's shell
-	// prefix, per-arg quoting (the temp path needs it on Windows), and line ending
-	// all match rather than a fixed POSIX literal.
+	// Use the production builder: prefix, quoting and line ending are per platform.
 	want := buildLocalErunCommand("/tmp/erun", []string{"deploy", "erun", "remote", "--version", "1.0.19", "--mcp-auth-public-key", wantPath})
 	if !strings.Contains(written, want) {
 		t.Fatalf("expected deploy command to carry %q, got %q", want, written)
@@ -312,9 +303,6 @@ func TestStartDeploySessionInjectsMCPAuthPublicKey(t *testing.T) {
 	}
 }
 
-// TestStartInitSessionInjectsMCPAuthPublicKey covers that init — which now owns
-// the env's single runtime deploy — carries the desktop's MCP-auth key, so no
-// post-init redeploy (which would roll the just-created pod) is needed.
 func TestStartInitSessionInjectsMCPAuthPublicKey(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{

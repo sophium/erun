@@ -12,38 +12,21 @@ func KnownClaudeModels() []string {
 type EnvironmentClaudeConfig struct {
 	UseMantle  *bool `yaml:"usemantle,omitempty" json:"useMantle,omitempty"`
 	UseBedrock *bool `yaml:"usebedrock,omitempty" json:"useBedrock,omitempty"`
-	// UseGateway tri-states this environment's use of the erun-level gateway
-	// catalog, the same way UseMantle and UseBedrock do: unset inherits the
-	// catalog, so an environment follows the operator's erun-level decision;
-	// true and false override it for this environment alone. A catalog is one
-	// erun-level list, so without this an environment could only be moved onto
-	// the gateway by moving every environment onto it.
+	// UseGateway overrides the erun-level gateway catalog for this environment; nil inherits it.
 	UseGateway *bool `yaml:"usegateway,omitempty" json:"useGateway,omitempty"`
-	// There is deliberately no credential field here. The gateway credential is
-	// one erun-level value in the operator's secret store, delivered by deploy
-	// into this environment's namespace — so a per-environment reference would
-	// be a second way to say the same thing, and the wrong one when the catalog
-	// is global.
+	// No credential field: the gateway credential is one erun-level secret deploy delivers.
 	Models          []string `yaml:"models,omitempty" json:"models,omitempty"`
 	MaxOutputTokens *int     `yaml:"maxoutputtokens,omitempty" json:"maxOutputTokens,omitempty"`
-	// Effort is the per-env Claude Code session effort level, one of
-	// low|medium|high|xhigh|max|ultracode. ultracode is not an --effort value:
-	// it enables xhigh effort plus standing workflow orchestration. Unset means
-	// the default, ultracode.
+	// Effort is low|medium|high|xhigh|max|ultracode; ultracode (the default) is xhigh plus workflow orchestration.
 	Effort *string `yaml:"effort,omitempty" json:"effort,omitempty"`
-	// DefaultModel is the model the env's AI session starts on when it is one of
-	// the env's available models; unset or no-longer-available falls back to the
-	// first available model, not the agent's own default. It does not touch the
-	// chart's claude.model pod slot.
+	// DefaultModel is the starting model when still available; otherwise the first available model.
 	DefaultModel *string `yaml:"defaultmodel,omitempty" json:"defaultModel,omitempty"`
 	// VerboseDebug streams Claude's own verbose diagnostics into the AI tab.
 	VerboseDebug bool `yaml:"verbosedebug,omitempty" json:"verboseDebug,omitempty"`
 }
 
 func (c EnvironmentClaudeConfig) IsZero() bool {
-	// UseGateway counts: an environment whose only claude setting is opting out
-	// of the erun-level gateway has a configuration, and reporting it as zero
-	// would drop that override on the next normalize.
+	// An explicit gateway opt-out alone still counts as configuration.
 	return c.UseMantle == nil && c.UseBedrock == nil && c.UseGateway == nil && len(c.Models) == 0 &&
 		c.MaxOutputTokens == nil && c.Effort == nil && c.DefaultModel == nil && !c.VerboseDebug
 }
@@ -82,13 +65,8 @@ func claudeModelOrder(name string) int {
 const (
 	DefaultClaudeUseMantle  = false
 	DefaultClaudeUseBedrock = false
-	// DefaultClaudeMaxOutputTokens is the shipped default for an agent's output
-	// cap. 4096 (roughly a 200-line source file) made agent mode unable to write
-	// the files it exists to write — a job died mid-turn the moment it authored
-	// anything non-trivial. 32000 clears a large source file with headroom while
-	// staying well under the ceiling below. The runtime chart's own default
-	// (erun-devops/k8s/erun-devops/templates/service.yaml, `$claudeMaxOutputTokens`)
-	// mirrors this value; a change here must move there too.
+	// DefaultClaudeMaxOutputTokens is mirrored by the runtime chart's
+	// $claudeMaxOutputTokens in erun-devops/templates/service.yaml; change both.
 	DefaultClaudeMaxOutputTokens = 32000
 	defaultClaudeAvailableModels = "opus,sonnet,haiku"
 	claudeMaxOutputTokensCeiling = 200000

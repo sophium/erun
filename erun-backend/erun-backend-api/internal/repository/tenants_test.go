@@ -8,8 +8,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// TestClassifyTenantCreateErrorMapsNameUniqueViolation locks that a tenant name that already exists must be distinguished from
-// every other insert failure, not surfaced as a generic 500.
 func TestClassifyTenantCreateErrorMapsNameUniqueViolation(t *testing.T) {
 	err := classifyTenantCreateError(&pgconn.PgError{Code: pgerrcode.UniqueViolation, ConstraintName: "tenants_name_key"})
 
@@ -18,10 +16,6 @@ func TestClassifyTenantCreateErrorMapsNameUniqueViolation(t *testing.T) {
 	}
 }
 
-// TestClassifyTenantCreateErrorLeavesOtherViolationsAlone proves the mapping
-// is scoped to the name's own constraint: a unique violation on a different
-// constraint (or no constraint name at all) must not be misclassified as a
-// resolvable name race.
 func TestClassifyTenantCreateErrorLeavesOtherViolationsAlone(t *testing.T) {
 	err := classifyTenantCreateError(&pgconn.PgError{Code: pgerrcode.UniqueViolation, ConstraintName: "tenants_pkey"})
 

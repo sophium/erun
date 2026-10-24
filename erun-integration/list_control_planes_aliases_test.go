@@ -156,9 +156,7 @@ func testListControlPlanesFailOnDriftForeignAdvertisedAPIURLExitsNonZero(t *test
 	registry := controlPlaneRegistryStub(t, "1.0.247")
 	seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
 
-	// The plane is at the published version, so nothing else in this
-	// report is drift -- a foreign advertised apiUrl has to fail the run
-	// on its own.
+	// The plane is current, so the foreign apiUrl alone must fail the run.
 	result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode == 0 {
 		t.Fatalf("expected a non-zero exit for a foreign advertised apiUrl, got 0:\n%s", result.Combined)
@@ -189,8 +187,6 @@ func testListControlPlanesRealRunJSONOutputReportsTheAdvertisedAPIURLMismatch(t 
 func testListControlPlanesRealRunJSONOutputOmitsTheAdvertisedAPIURLMismatchWhenThePlaneAgrees(t *testing.T) {
 	t.Parallel()
 	setup := env.New(t)
-	// controlPlaneStub advertises its own listener address, the same one
-	// erun dialed -- so the field has to be a signal, not a constant.
 	plane := controlPlaneStub(t, "1.0.247")
 	registry := controlPlaneRegistryStub(t, "1.0.247")
 	seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)

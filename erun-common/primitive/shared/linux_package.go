@@ -8,8 +8,7 @@ import (
 	"strings"
 )
 
-// LinuxPackageContextAtDir reports the linux package component at dir: a
-// Dockerfile in a directory whose parent is named linux.
+// LinuxPackageContextAtDir reports the linux package component at dir (a Dockerfile under linux/<name>).
 func LinuxPackageContextAtDir(dir string) (LinuxPackageContext, bool, error) {
 	dir = filepath.Clean(strings.TrimSpace(dir))
 	if dir == "" || filepath.Base(filepath.Dir(dir)) != "linux" {
@@ -64,8 +63,7 @@ func ResolveLinuxPackageContextsAtDir(dir string) ([]LinuxPackageContext, error)
 	return contexts, nil
 }
 
-// IsLinuxPackageDockerfile reports whether a Dockerfile is a linux package
-// component's, which no image path may build, tag or push.
+// IsLinuxPackageDockerfile reports whether a Dockerfile is a linux package component's, which is never an image.
 func IsLinuxPackageDockerfile(dockerfilePath string) bool {
 	dockerfilePath = strings.TrimSpace(dockerfilePath)
 	if dockerfilePath == "" {
@@ -75,9 +73,7 @@ func IsLinuxPackageDockerfile(dockerfilePath string) bool {
 	return err == nil && ok
 }
 
-// checkNotLinuxPackageDockerfile refuses to resolve a linux package component
-// as an image. Discovery never offers one -- it walks docker/ directories --
-// so this guards the explicit-context paths that hand a Dockerfile in directly.
+// checkNotLinuxPackageDockerfile guards explicit-context paths; discovery never offers one.
 func checkNotLinuxPackageDockerfile(dockerfilePath string) error {
 	if !IsLinuxPackageDockerfile(dockerfilePath) {
 		return nil

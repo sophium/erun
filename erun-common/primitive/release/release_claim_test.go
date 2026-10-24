@@ -10,17 +10,10 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// A test covering only "the first release claims it and nothing else races"
-// would pass while the bug this claim exists for still ships: two
-// orchestrators releasing the same version concurrently, discovered only by
-// a tag collision at the end. These two cover the refusal and the reclaim.
-
 func TestReleaseVersionClaimRefusesASecondReleaseAndNamesTheHolder(t *testing.T) {
 	isolateActivityCache(t)
 	now := time.Date(2026, 8, 29, 17, 0, 53, 0, time.UTC)
 
-	// Two distinct pids stand in for two distinct orchestrator processes
-	// releasing the same version concurrently.
 	firstPID, secondPID := os.Getpid(), os.Getpid()+1
 
 	firstHolder := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a"}
@@ -41,14 +34,11 @@ func TestReleaseVersionClaimRefusesASecondReleaseAndNamesTheHolder(t *testing.T)
 		t.Errorf("refusal must name the holder so a second orchestrator knows who to wait on, got: %v", refusal)
 	}
 
-	// A release of a different version in the same environment must not be
-	// affected: the claim is version-scoped, not worktree-wide.
+	// The claim is version-scoped, not worktree-wide.
 	if _, err := shared.TakeReleaseVersionClaim("erun", "build", "1.0.212", secondHolder, secondPID, now.Add(time.Second)); err != nil {
 		t.Fatalf("a release of a different version must not collide with an unrelated one in flight: %v", err)
 	}
 
-	// The same process renewing its own claim (same pid, hence same id) must
-	// keep succeeding rather than fighting its own lease.
 	if _, err := shared.TakeReleaseVersionClaim("erun", "build", "1.0.211", firstHolder, firstPID, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("the original holder renewing its own claim must succeed: %v", err)
 	}
@@ -63,10 +53,7 @@ func TestReleaseVersionClaimReclaimsAnAbandonedRelease(t *testing.T) {
 		t.Fatalf("first release's claim: %v", err)
 	}
 
-	// The first holder crashed (or its pod was replaced) and stopped
-	// renewing. Nobody can delete its claim by hand from outside that
-	// environment, so the only way a second release ever proceeds is if the
-	// lease reclaims itself once it lapses.
+	// A crashed holder's claim cannot be deleted from outside; it must lapse.
 	afterLapse := start.Add(shared.ReleaseVersionClaimTTL + time.Minute)
 	secondHolder := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b"}
 	claim, err := shared.TakeReleaseVersionClaim("erun", "build", "1.0.211", secondHolder, os.Getpid()+1, afterLapse)

@@ -83,8 +83,6 @@ func testDeleteDryRunWithSeededEnv(t *testing.T) {
 }
 
 func testDeleteDryRunWithRuntimeTypeTracesNamespaceDelete(t *testing.T) {
-	// A runtime-type env counts as remote for delete: it must trace the
-	// kubectl namespace delete like a remote=true env.
 	setup := env.New(t)
 	seedExplicitTypeEnv(t, setup, "team", "prod", "runtime")
 	result := erun.Run(t, []string{"delete", "team", "prod", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -95,8 +93,6 @@ func testDeleteDryRunWithRuntimeTypeTracesNamespaceDelete(t *testing.T) {
 }
 
 func testDeleteDryRunWithRemoteEnvTracesNamespaceDelete(t *testing.T) {
-	// A remote env's dry-run traces the kubectl namespace delete
-	// alongside the local config removal, without touching the cluster.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"delete", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -107,9 +103,7 @@ func testDeleteDryRunWithRemoteEnvTracesNamespaceDelete(t *testing.T) {
 }
 
 func testDeleteRejectsRemoteEnvWithoutKubernetesContext(t *testing.T) {
-	// Regression: a remote env missing its kubernetescontext field used
-	// to silently delete the namespace from the host's current kubectl
-	// context (e.g. a developer's orbstack). Delete now errors up front.
+	// Without kubernetescontext the delete would hit the host's current kubectl context.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	envCfgPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -121,8 +115,6 @@ func testDeleteRejectsRemoteEnvWithoutKubernetesContext(t *testing.T) {
 		t.Fatalf("rewrite env config without kubernetescontext: %v", err)
 	}
 	stubs := setup.Cwd + "/stubs"
-	// kubectl stub still emits success if invoked; the test asserts
-	// erun never gets there.
 	fixture.StubBinary(t, stubs, "kubectl", "")
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
 	result := erun.Run(t, []string{"delete", "team", "dev", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -133,18 +125,12 @@ func testDeleteRejectsRemoteEnvWithoutKubernetesContext(t *testing.T) {
 	if !strings.Contains(out, "kubernetes context is required") {
 		t.Fatalf("expected RequireKubernetesContext error, got:\n%s", out)
 	}
-	// The local config tree must remain on disk: erun must not delete
-	// local state when the remote-side delete cannot proceed safely.
 	if _, err := os.Stat(filepath.Join(setup.ConfigHome, "erun", "team", "dev")); err != nil {
 		t.Errorf("env config tree should remain on disk when delete aborts, stat err: %v", err)
 	}
 }
 
 func testDeleteRealRunConfirmationPromptAcceptsMatchingInput(t *testing.T) {
-	// Happy path without --yes: the prompt requires the literal
-	// "<tenant>-<environment>" string to proceed. Deleting the tenant's
-	// last (local) env cascades to clearing the tenant config and the
-	// root default tenant.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envDir := filepath.Join(setup.ConfigHome, "erun", "team", "dev")
@@ -163,8 +149,6 @@ func testDeleteRealRunConfirmationPromptAcceptsMatchingInput(t *testing.T) {
 }
 
 func testDeleteRealRunConfirmationMismatchAborts(t *testing.T) {
-	// A mismatched confirmation (anything but "<tenant>-<environment>")
-	// must abort before any state is touched — config tree stays intact.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envDir := filepath.Join(setup.ConfigHome, "erun", "team", "dev")
@@ -183,9 +167,6 @@ func testDeleteRealRunConfirmationMismatchAborts(t *testing.T) {
 }
 
 func testDeleteRealRunDefaultEnvReassignedWhenOtherEnvsRemain(t *testing.T) {
-	// Deleting the tenant's default env while another env remains must
-	// keep the tenant and promote the next env to default, not leave a
-	// dangling default reference.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stagingDir := filepath.Join(setup.ConfigHome, "erun", "team", "staging")
@@ -214,11 +195,7 @@ func testDeleteRealRunDefaultEnvReassignedWhenOtherEnvsRemain(t *testing.T) {
 }
 
 func testDeleteRealRunRemovesTheDeletedEnvsSSHConfigBlock(t *testing.T) {
-	// The block `erun sshd init` writes names the env's local ssh port, and
-	// the env's port range is freed for whichever env is created next. A
-	// block outliving its env therefore does not fail — it connects to a
-	// different, live environment. Deleting must remove exactly its own
-	// block and leave a sibling env's block and hand-maintained entries.
+	// Freed ports are reissued, so a stale ssh block would reach another live env.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedTenantEnv(t, setup, "team", "keep")
@@ -259,9 +236,6 @@ func testDeleteRealRunRemovesTheDeletedEnvsSSHConfigBlock(t *testing.T) {
 }
 
 func testDeleteRealRunLastEnvOfNonDefaultTenantKeepsRootDefault(t *testing.T) {
-	// Removing the last env of a secondary (non-default) tenant deletes
-	// that tenant's config but must leave the root default tenant
-	// untouched.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedSecondaryTenantEnv(t, setup, "other", "staging", 0)
@@ -283,8 +257,6 @@ func testDeleteRealRunLastEnvOfNonDefaultTenantKeepsRootDefault(t *testing.T) {
 }
 
 func testDeleteRealRunWithYesFlagSkipsConfirmationAndRemovesConfig(t *testing.T) {
-	// --yes bypasses the confirmation prompt and really removes the env
-	// config tree.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	envDir := filepath.Join(setup.ConfigHome, "erun", "team", "dev")
@@ -298,8 +270,6 @@ func testDeleteRealRunWithYesFlagSkipsConfirmationAndRemovesConfig(t *testing.T)
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// Filesystem state — golden cannot assert this; keep the os.Stat
-	// check.
 	if _, err := os.Stat(envDir); !os.IsNotExist(err) {
 		t.Errorf("expected env config tree to be removed at %s, stat err: %v", envDir, err)
 	}
@@ -307,11 +277,7 @@ func testDeleteRealRunWithYesFlagSkipsConfirmationAndRemovesConfig(t *testing.T)
 }
 
 func testDeleteRealRunRemovesTheEnvironmentsPortForwardState(t *testing.T) {
-	// A port-forward state file names a local port, and that port range is
-	// freed and reissued to whichever environment is created next. Leaving
-	// the file behind after delete lets it resolve to a live forward that
-	// now belongs to somebody else, so delete must clear it the same way it
-	// clears the rest of the environment's footprint.
+	// Freed ports are reissued, so a stale port-forward file would reach another env's forward.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	seedMCPPortForwardState(t, setup, "team", "dev", 26100)
@@ -327,8 +293,6 @@ func testDeleteRealRunRemovesTheEnvironmentsPortForwardState(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// Filesystem state — golden cannot assert this; keep the os.Stat check
-	// (mirrors real_run_with_yes_flag_skips_confirmation_and_removes_config).
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Errorf("expected the port-forward state file to be removed at %s, stat err: %v", statePath, err)
 	}
@@ -353,9 +317,7 @@ func testDeleteDryRunTracesThePortForwardStateRemovalWithoutDeletingIt(t *testin
 }
 
 func testDeleteDryRunListsARecordLeftAtTheUserConfigDirLayout(t *testing.T) {
-	// A record nothing reopened since the upgrade is still at the layout
-	// os.UserConfigDir named. The plan must name it, its log and the log's
-	// rotated generation as removals, and remove none of them.
+	// The plan must list the legacy-layout record, log and rotated log without removing them.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	legacyState := seedLegacyPortForwardRecord(t, setup, "mcp", "team", "dev", 26100)
@@ -372,9 +334,7 @@ func testDeleteDryRunListsARecordLeftAtTheUserConfigDirLayout(t *testing.T) {
 }
 
 func testDeleteRealRunRemovesARecordLeftAtTheUserConfigDirLayout(t *testing.T) {
-	// Left in place, that record would be migrated by the next open into
-	// an environment of the same name created later, resolving to a local
-	// port this delete frees for somebody else.
+	// Left in place, the next open would migrate it into a same-named future env.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	legacyState := seedLegacyPortForwardRecord(t, setup, "mcp", "team", "dev", 26100)

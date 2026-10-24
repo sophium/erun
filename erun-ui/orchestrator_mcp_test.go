@@ -14,9 +14,6 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
-// orchestratorTestPort is the port stub the config builder is driven with;
-// extracted from the test body so its own branching stays under the cyclop
-// threshold.
 func orchestratorTestPort(tenant, _ string) int {
 	switch tenant {
 	case "petios":
@@ -37,25 +34,15 @@ func orchestratorTestEnvs() []configpkg.OrchestratorEnvConfig {
 	}
 }
 
-// orchestratorTestAlwaysReachable stands in for a.deps.canReachMCPEndpoint in
-// tests that are not themselves about reachability, so every wired env probes
-// as reachable rather than depending on a real port-forward.
+// orchestratorTestAlwaysReachable makes every wired env probe as reachable.
 func orchestratorTestAlwaysReachable(int) bool { return true }
 
-// orchestratorTestNoHostEnvType is the env-type stub for the tests that are
-// not themselves about a host environment. It answers "local-agent" for every
-// linked env, which is both realistic for orchestratorTestEnvs' fixture and
-// the important half of the assertion: no env takes the host skip path, so
-// those tests' skip counts stay exactly what they were before a host env
-// could be linked at all.
+// orchestratorTestNoHostEnvType reports every env as local-agent, so none takes the host skip path.
 func orchestratorTestNoHostEnvType(string, string) configpkg.EnvironmentType {
 	return configpkg.EnvironmentTypeLocalAgent
 }
 
-// orchestratorTestEnvTypeHosts marks hostTenant's environments as host and
-// every other tenant's as local-agent, so one fixture exercises the host skip
-// and the ordinary wiring path side by side -- the case that matters, since
-// the defect was a host env being wired as an edge that can never answer.
+// orchestratorTestEnvTypeHosts marks hostTenant's environments as host and the rest as local-agent.
 func orchestratorTestEnvTypeHosts(hostTenant string) mcpEnvTypeResolver {
 	return func(tenant, _ string) configpkg.EnvironmentType {
 		if tenant == hostTenant {
@@ -92,9 +79,7 @@ func TestBuildOrchestratorMCPConfig(t *testing.T) {
 	}
 }
 
-// The written file is what a launched orchestrator reads, and it must never be a
-// place a bearer can leak from: an MCP client cannot refresh a header it was
-// configured with, so none is written at all.
+// An MCP client cannot refresh a configured header, so none is written.
 func TestBuildOrchestratorMCPConfigCarriesNoCredential(t *testing.T) {
 	config, _, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, orchestratorTestNoHostEnvType, orchestratorTestAlwaysReachable)
 	data, err := json.MarshalIndent(config, "", "  ")
@@ -108,9 +93,6 @@ func TestBuildOrchestratorMCPConfigCarriesNoCredential(t *testing.T) {
 	}
 }
 
-// Without an erun binary there is no proxy to launch, so the whole map is empty
-// and the caller skips --mcp-config rather than writing entries that fail on
-// first use.
 func TestBuildOrchestratorMCPConfigSkipsEveryEnvWithoutAnExecutable(t *testing.T) {
 	config, _, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "  ", orchestratorTestPort, orchestratorTestNoHostEnvType, orchestratorTestAlwaysReachable)
 	if len(config.MCPServers) != 0 {
@@ -130,16 +112,11 @@ func TestBuildOrchestratorLaunchInjectsMCPConfig(t *testing.T) {
 	}
 }
 
-// bundledDesktopOutputEnvVar marks the re-exec'd child of
-// TestWriteOrchestratorMCPConfigFromBundledDesktop and tells it where to leave
-// the config it wrote, so the parent can assert on real written bytes.
+// bundledDesktopOutputEnvVar tells the re-exec'd child where to write its config.
 const bundledDesktopOutputEnvVar = "ERUN_TEST_BUNDLED_DESKTOP_OUTPUT"
 
-// The shipped desktop runs from <root>/bin/ERun.app/Contents/MacOS/erun-app and
-// launches its proxies with the erun beside the bundle at <root>/bin/erun. Only
-// a process actually running from that path exercises the resolution, so this
-// re-execs itself from a copy there — with an empty PATH and no ERUN_ERUN_BIN,
-// so the sibling binary is the only thing that can resolve.
+// Re-execs from <root>/bin/ERun.app/Contents/MacOS with an empty PATH and no
+// ERUN_ERUN_BIN, so only the sibling <root>/bin/erun can resolve.
 func TestWriteOrchestratorMCPConfigFromBundledDesktop(t *testing.T) {
 	if output := strings.TrimSpace(os.Getenv(bundledDesktopOutputEnvVar)); output != "" {
 		writeBundledDesktopMCPConfig(t, output)
@@ -174,8 +151,6 @@ func TestWriteOrchestratorMCPConfigFromBundledDesktop(t *testing.T) {
 	assertBundledDesktopMCPConfig(t, data, sibling)
 }
 
-// writeBundledDesktopMCPConfig is the child half: it runs the real wiring from
-// inside the bundle and hands the bytes back through output.
 func writeBundledDesktopMCPConfig(t *testing.T, output string) {
 	t.Helper()
 	app := orchestratorTestApp(t)
@@ -243,10 +218,7 @@ func copyTestFile(t *testing.T, source, destination string) string {
 	return destination
 }
 
-// An orchestrator whose linked environments produced no MCP server has to say
-// so: the session launches and looks healthy, and the operator would otherwise
-// only find out one missing tool call at a time. No linked environments is the
-// ordinary case and stays quiet.
+// No linked environments is the ordinary case and stays quiet.
 func TestSpawnOrchestratorSignalsUnwiredEnvironments(t *testing.T) {
 	for _, testCase := range []struct {
 		name     string
@@ -267,8 +239,6 @@ func TestSpawnOrchestratorSignalsUnwiredEnvironments(t *testing.T) {
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			// The override keeps the erun binary resolvable regardless of what sits
-			// beside the test binary, so the port is the only variable under test.
 			t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
 			app := orchestratorTestApp(t)
 			defer app.shutdown(context.Background())
@@ -307,8 +277,7 @@ func assertUnwiredNotice(t *testing.T, events []any, wantNote string) {
 	}
 }
 
-// The two causes need different fixes, so the notice must not collapse them into
-// one "could not be wired".
+// The two causes need different fixes, so the notice must not collapse them.
 func TestOrchestratorMCPUnwiredNoticeNamesTheCause(t *testing.T) {
 	executable := orchestratorMCPUnwiredNotice("Petios", errors.Join(errOrchestratorMCPExecutable, errors.New("not on PATH")))
 	if !strings.Contains(executable, errOrchestratorMCPExecutable.Error()) || !strings.Contains(executable, "Install the erun command line tool") {
@@ -323,10 +292,6 @@ func TestOrchestratorMCPUnwiredNoticeNamesTheCause(t *testing.T) {
 	}
 }
 
-// TestOrchestratorMCPUnwiredActionNamesTheControl: "Install the erun command
-// line tool, then restart the orchestrator" names nothing the desktop can
-// perform by itself, so the action a caller attaches to the notice must let the
-// frontend link the install docs and drive the restart directly.
 func TestOrchestratorMCPUnwiredActionNamesTheControl(t *testing.T) {
 	if got := orchestratorMCPUnwiredAction(errors.Join(errOrchestratorMCPExecutable, errors.New("not on PATH"))); got != notificationActionInstallAndRestartOrchestrator {
 		t.Fatalf("executable-missing action = %q, want %q", got, notificationActionInstallAndRestartOrchestrator)
@@ -350,14 +315,7 @@ func TestSanitizeOrchestratorFileID(t *testing.T) {
 	}
 }
 
-// TestBuildOrchestratorMCPConfigReportsEverySkip: an environment whose MCP port
-// does not resolve is skipped, and even a PARTIAL skip must be reported. An
-// orchestrator is told by its own contract to know which environments are its
-// own, and an absent tool reads as "not linked" rather than "failed to wire" --
-// so it cannot detect this from the inside.
-//
-// The pre-existing test above asserted the skip happened and said nothing about
-// it being reported, which is exactly why nothing caught this.
+// A partial skip must be reported: an orchestrator reads an absent tool as "not linked".
 func TestBuildOrchestratorMCPConfigReportsEverySkip(t *testing.T) {
 	config, skipped, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, orchestratorTestNoHostEnvType, orchestratorTestAlwaysReachable)
 
@@ -379,9 +337,7 @@ func TestBuildOrchestratorMCPConfigReportsEverySkip(t *testing.T) {
 	if !strings.Contains(reason, "MCP port") {
 		t.Errorf("skip reason %q does not name the cause", reason)
 	}
-	// The fixture's malformed entry names an environment but no tenant, so it
-	// labels as "?/z" -- the placeholder marks which half is missing rather than
-	// hiding the entry entirely.
+	// A missing tenant labels as "?/z".
 	if reason, ok := byLabel["?/z"]; !ok {
 		t.Errorf("a malformed linked entry must still be reported, not silently dropped: %+v", skipped)
 	} else if !strings.Contains(reason, "no tenant or environment") {
@@ -389,9 +345,8 @@ func TestBuildOrchestratorMCPConfigReportsEverySkip(t *testing.T) {
 	}
 }
 
-// TestBuildOrchestratorMCPConfigStillWiresAnUnreachableEdge: infra/mcp's proxy
-// already recovers a transient edge outage per call, so an env whose edge does not answer a probe at launch is wired anyway, and
-// reported as unreachable, never as skipped.
+// The proxy recovers transient edge outages per call, so an unreachable edge is
+// wired anyway and reported as unreachable, not skipped.
 func TestBuildOrchestratorMCPConfigStillWiresAnUnreachableEdge(t *testing.T) {
 	unreachableAlways := func(int) bool { return false }
 	config, skipped, unreachable := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, orchestratorTestNoHostEnvType, unreachableAlways)
@@ -405,8 +360,6 @@ func TestBuildOrchestratorMCPConfigStillWiresAnUnreachableEdge(t *testing.T) {
 	if _, ok := config.MCPServers["petios-rihards-win-develop"]; !ok {
 		t.Fatalf("expected petios still wired even though its edge is unreachable: %v", config.MCPServers)
 	}
-	// The pre-existing skip count (unresolved port, blank tenant) must be
-	// unaffected by reachability -- those two never had a port to probe.
 	if len(skipped) != 2 {
 		t.Fatalf("expected the pre-existing skip count unaffected by reachability, got %d: %+v", len(skipped), skipped)
 	}
@@ -415,8 +368,6 @@ func TestBuildOrchestratorMCPConfigStillWiresAnUnreachableEdge(t *testing.T) {
 	}
 }
 
-// A reachable edge must not be reported as unreachable -- otherwise every
-// orchestrator launch would carry a spurious warning.
 func TestBuildOrchestratorMCPConfigReportsNoUnreachableEdgeWhenAllAnswer(t *testing.T) {
 	_, _, unreachable := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, orchestratorTestNoHostEnvType, orchestratorTestAlwaysReachable)
 	if len(unreachable) != 0 {
@@ -424,10 +375,6 @@ func TestBuildOrchestratorMCPConfigReportsNoUnreachableEdgeWhenAllAnswer(t *test
 	}
 }
 
-// TestOrchestratorMCPPartialNoticeNamesWhatIsMissing: the notice is the only
-// thing that tells an operator a usable-looking session is missing an
-// environment, so it has to name which one and why -- "some tools are missing"
-// is not actionable.
 func TestOrchestratorMCPPartialNoticeNamesWhatIsMissing(t *testing.T) {
 	notice := orchestratorMCPPartialNotice("erun-issues", 1, 2, nil, []orchestratorMCPSkip{
 		{Label: "petios/rihards-review", Reason: "it resolved no MCP port"},
@@ -438,52 +385,32 @@ func TestOrchestratorMCPPartialNoticeNamesWhatIsMissing(t *testing.T) {
 			t.Errorf("notice does not mention %q:\n%s", want, notice)
 		}
 	}
-	// No host env linked means no host aside: this is the message an
-	// orchestrator without one has always shown.
 	if strings.Contains(notice, "no MCP edge is expected") {
 		t.Errorf("notice mentions a host env when none is linked:\n%s", notice)
 	}
 }
 
-// TestOrchestratorMCPPartialNoticeCountsHostEnvsInItsDenominator: a host env
-// has no MCP edge to wire, so it must not appear among the problems -- but it
-// IS one of the linked environments, so the denominator must count it or the
-// notice's arithmetic will not add up for an operator counting their entries.
+// A host env is not a problem but still counts in the denominator.
 func TestOrchestratorMCPPartialNoticeCountsHostEnvsInItsDenominator(t *testing.T) {
 	notice := orchestratorMCPPartialNotice("erun-issues", 1, 3,
 		[]orchestratorMCPSkip{{Label: "frs/host", Reason: "it is a host environment, which has no pod and so no MCP edge to reach", HostEnv: true}},
 		[]orchestratorMCPSkip{{Label: "petios/rihards-review", Reason: "it resolved no MCP port"}},
 	)
 
-	// Three linked, one wired: the count must say so.
 	for _, want := range []string{"1 of 3", "frs/host", "no MCP edge is expected"} {
 		if !strings.Contains(notice, want) {
 			t.Errorf("notice does not mention %q:\n%s", want, notice)
 		}
 	}
-	// The host env is named as the reason for the shortfall, never as a problem:
-	// the remedy beside this notice is a restart, which a host env does not need.
+	// The host env is the reason for the shortfall, not a problem needing a restart.
 	if strings.Contains(notice, "frs/host (") {
 		t.Errorf("notice lists the host env among the missing problems:\n%s", notice)
 	}
 }
 
-// TestWriteOrchestratorMCPConfigCarriesSkipsEvenWhenNothingWired: the total
-// failure already had a signal (errOrchestratorMCPNoPort), but it could not say
-// WHICH environments failed or why. Returning the skips alongside the error
-// means the unwired notice can name them too, not just the partial one.
-//
-// Deterministic on purpose: a test app's store resolves no ports, so every
-// environment is skipped. Asserting the partial case at this level would depend
-// on ambient store state and be flaky, which is worse than not testing it here
-// -- the builder tests above cover the partial split with an injected resolver.
+// A test app's store resolves no ports, so every environment is skipped deterministically.
 func TestWriteOrchestratorMCPConfigCarriesSkipsEvenWhenNothingWired(t *testing.T) {
-	// Pin the executable seam. Without it this test only passes where an erun
-	// binary happens to sit on PATH: writeOrchestratorMCPConfig resolves the
-	// executable BEFORE it reaches the no-port path, so on a host without one it
-	// returns errOrchestratorMCPExecutable and the assertion below never sees the
-	// skips it exists to check. The build's own test stage has no erun on PATH,
-	// which is where that surfaced.
+	// The executable is resolved before the no-port path, so pin it.
 	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
 
 	app := orchestratorTestApp(t)

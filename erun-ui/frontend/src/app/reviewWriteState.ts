@@ -1,17 +1,9 @@
 import type { UIAccessRemedy } from '@/types';
 
-// State for the desktop's review write surface: the Merge Queue
-// panel's "Advance queue" action and the "Open a review" dialog. Split out
-// of state.ts to keep that file under eslint's 500-line max-lines cap, the
-// same pattern diffTypes.ts/reviewTypes.ts use for types.ts.
+// Review write surface state, split out of state.ts for the max-lines cap.
 
-// MergeQueueActionState backs the Merge Queue panel's "Advance queue"
-// action: an inline confirm step, then busy/error like every other
-// side-effecting dashboard write. blocked/blockedReviewId/unresolvedThreads
-// describe a refused advance (the queue head still has open comment
-// threads) as a distinct, named state rather than a bare error string — see
-// mergeQueueThunks.ts. overriding/overrideReason/overrideBusy/overrideError
-// back the reason-required override affordance offered from that state.
+// MergeQueueActionState backs the Merge Queue "Advance queue" action, including
+// a refused advance (blocked) and its reason-required override.
 export interface MergeQueueActionState {
   confirming: boolean;
   busy: boolean;
@@ -38,11 +30,7 @@ export const defaultMergeQueueAction = (): MergeQueueActionState => ({
   overrideError: '',
 });
 
-// CreateReviewDialogState backs the "Open a review" dialog: pushing the
-// selected environment's branch (commit, then push) and, once pushed,
-// creating the review itself. Each write has its own busy/error pair so the
-// dialog can show which step is in flight or failed rather than one shared
-// status the operator has to guess the meaning of.
+// CreateReviewDialogState backs the "Open a review" dialog's push and create steps.
 export interface CreateReviewDialogState {
   open: boolean;
   tenant: string;
@@ -60,16 +48,9 @@ export interface CreateReviewDialogState {
   pushError: string;
   creating: boolean;
   createError: string;
-  // capabilityLoading/capabilityRestricted resolve independently of the
-  // pushed-environment lookup above: they answer "may this caller open a
-  // review at all", which the diff panel's own entry point cannot assume the
-  // way the Reviews tab can (its New review button only renders once the
-  // tenant dashboard has already loaded that answer). capabilityError is a
-  // failed probe, not a known restriction, so it never blocks Create.
+  // A failed capability probe (capabilityError) never blocks Create; only a known restriction does.
   capabilityLoading: boolean;
   capabilityRestricted: string;
-  // capabilityRemedy is the copyable grant behind capabilityRestricted, when
-  // one was resolved: the same hand-over the not-enrolled screen makes.
   capabilityRemedy?: UIAccessRemedy;
   capabilityError: string;
 }

@@ -153,9 +153,6 @@ func TestListUserRolesUsesPathUserID(t *testing.T) {
 	}
 }
 
-// postGrant drives the route with the security context the authentication
-// middleware always stamps, since the route now resolves the target tenant
-// from it.
 func postGrant(t *testing.T, roles *stubRoleRepository, tenantType, tenantID, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/users/user-1/roles", bytes.NewBufferString(body))
@@ -184,15 +181,11 @@ func TestGrantUserRoleSucceeds(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
-	// No tenant override for the ordinary case: the column default keeps the
-	// grant in the caller's own tenant.
 	if roles.gotGrant.userID != "user-1" || roles.gotGrant.roleID != "role-1" || roles.gotGrant.tenantID != "" {
 		t.Fatalf("Grant called with %+v, want user-1/role-1 and no tenant override", roles.gotGrant)
 	}
 }
 
-// TestGrantUserRoleForbidsCrossTenantWithoutOperations is the guard: naming
-// another tenant must not be a way for an ordinary tenant to write into it.
 func TestGrantUserRoleForbidsCrossTenantWithoutOperations(t *testing.T) {
 	roles := &stubRoleRepository{}
 	rec := postGrant(t, roles, string(model.TenantTypeCompany), "tenant-a", `{"roleId":"role-1","tenantId":"tenant-b"}`)
@@ -201,9 +194,6 @@ func TestGrantUserRoleForbidsCrossTenantWithoutOperations(t *testing.T) {
 	}
 }
 
-// TestGrantUserRoleFromOperationsTargetsNamedTenant is the recovery path: an
-// operations caller elevates a user in another tenant, and the grant must be
-// filed under that tenant rather than under operations.
 func TestGrantUserRoleFromOperationsTargetsNamedTenant(t *testing.T) {
 	roles := &stubRoleRepository{granted: model.UserRole{UserID: "user-1", RoleID: "role-1", TenantID: "tenant-b"}}
 	rec := postGrant(t, roles, string(model.TenantTypeOperations), "tenant-ops", `{"roleId":"role-1","tenantId":"tenant-b"}`)
@@ -215,9 +205,6 @@ func TestGrantUserRoleFromOperationsTargetsNamedTenant(t *testing.T) {
 	}
 }
 
-// TestGrantUserRoleFromOperationsOwnTenantPassesNoOverride keeps the override
-// strictly for the cross-tenant case: an operations caller naming its own
-// tenant still relies on the column default.
 func TestGrantUserRoleFromOperationsOwnTenantPassesNoOverride(t *testing.T) {
 	roles := &stubRoleRepository{granted: model.UserRole{UserID: "user-1", RoleID: "role-1"}}
 	rec := postGrant(t, roles, string(model.TenantTypeOperations), "tenant-ops", `{"roleId":"role-1","tenantId":"tenant-ops"}`)
@@ -245,8 +232,6 @@ func TestGrantUserRoleMapsNotFoundToStatusNotFound(t *testing.T) {
 	}
 }
 
-// deleteGrant drives the revoke route with the security context the
-// authentication middleware always stamps, and an optional ?tenantId=.
 func deleteGrant(t *testing.T, roles *stubRoleRepository, tenantType, tenantID, query string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodDelete, "/v1/users/user-1/roles/role-1"+query, nil)
@@ -273,9 +258,6 @@ func TestRevokeUserRoleSucceeds(t *testing.T) {
 	}
 }
 
-// TestRevokeUserRoleForbidsCrossTenantWithoutOperations is the same guard the
-// grant route has: naming another tenant must not be a way in for an ordinary
-// tenant.
 func TestRevokeUserRoleForbidsCrossTenantWithoutOperations(t *testing.T) {
 	roles := &stubRoleRepository{}
 	rec := deleteGrant(t, roles, string(model.TenantTypeCompany), "tenant-a", "?tenantId=tenant-b")
@@ -284,9 +266,6 @@ func TestRevokeUserRoleForbidsCrossTenantWithoutOperations(t *testing.T) {
 	}
 }
 
-// TestRevokeUserRoleFromOperationsTargetsNamedTenant keeps grant and revoke
-// symmetrical: an operations caller that can create a cross-tenant grant must be
-// able to undo it, or the fix trades one unrecoverable state for another.
 func TestRevokeUserRoleFromOperationsTargetsNamedTenant(t *testing.T) {
 	roles := &stubRoleRepository{}
 	rec := deleteGrant(t, roles, string(model.TenantTypeOperations), "tenant-ops", "?tenantId=tenant-b")
@@ -309,9 +288,6 @@ func TestRevokeUserRoleFromOperationsOwnTenantPassesNoOverride(t *testing.T) {
 	}
 }
 
-// TestRevokeUserRoleRefusesLastGrantCapableRole is the route-level half of the
-// lockout guard: the repository's refusal must reach the caller as a 409 with
-// an actionable message, not a generic 500.
 func TestRevokeUserRoleRefusesLastGrantCapableRole(t *testing.T) {
 	roles := &stubRoleRepository{revokeErr: apirepository.ErrLastGrantCapableRole}
 	rec := deleteGrant(t, roles, string(model.TenantTypeCompany), "tenant-a", "")

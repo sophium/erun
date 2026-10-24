@@ -11,13 +11,7 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// jobs.go mirrors review.go's platform-call shape for the jobs surface:
-// the platform's record of work in flight, so an in-pod agent records what it
-// is doing without shelling out, and a second agent asking for the same scope
-// is told who already holds it.
-
-// PlatformJobResult is one platform job's tool result. It is named apart
-// from job.go's JobResult, which is an environment-scoped in-pod job.
+// PlatformJobResult is a platform job, unlike the in-pod JobResult.
 type PlatformJobResult struct {
 	Preview bool                       `json:"preview"`
 	Job     platformclient.PlatformJob `json:"job,omitempty"`
@@ -90,8 +84,7 @@ type JobsStartInput struct {
 	IssueRef    string `json:"issueRef,omitempty" jsonschema:"the issue this work belongs to, in owner/repo#number form"`
 	Scope       string `json:"scope,omitempty" jsonschema:"what this job claims, so a second actor asking for the same scope is told who holds it"`
 	LocalJobID  string `json:"localJobId,omitempty" jsonschema:"the in-pod job id this mirrors, when there is one"`
-	// Status is optional: empty is RUNNING, the default every caller before
-	// PLANNED meant.
+	// Empty Status means RUNNING.
 	Status string `json:"status,omitempty" jsonschema:"PLANNED records work that has not started, RUNNING (the default) records work already underway"`
 }
 
@@ -99,8 +92,6 @@ func JobsStartTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.Call
 	return func(_ context.Context, _ *mcp.CallToolRequest, input JobsStartInput) (*mcp.CallToolResult, PlatformJobResult, error) {
 		actorKind := input.ActorKind
 		if strings.TrimSpace(actorKind) == "" {
-			// The overwhelming majority of callers are agents recording their
-			// own work; an orchestrator or a human says so explicitly.
 			actorKind = "agent"
 		}
 		traceOutput := strings.Builder{}

@@ -12,14 +12,7 @@ import type { UITenantDashboard } from '@/types';
 import { RegistrationPanel } from './TenantDashboardPanels.Registration';
 import { RegistrationEnvironmentsSection } from './TenantDashboardPanels.RegistrationEnvironments';
 
-// The Registration tab hides a write capability by not rendering its control.
-// Two things can then go wrong, and both are silent: the absence goes
-// unexplained, and the empty state keeps naming the control that is gone. These
-// pin the rendered text on both sides -- the notice that names the missing
-// access, and the copy that may only promise a form the caller is actually
-// given. The capable-caller cases are the positive control: without them an
-// assertion that a phrase is absent would also pass on a panel that renders
-// nothing at all.
+// Capable-caller cases are the positive control for the absence assertions.
 
 function dashboard(overrides: Partial<UITenantDashboard> = {}): UITenantDashboard {
   return {

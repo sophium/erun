@@ -7,10 +7,6 @@ import (
 	"testing"
 )
 
-// writeKubectlStub points ERUN_KUBECTL_BIN at a script that prints stderr and
-// exits non-zero (or exits 0 with no output when stderr is empty), so a test
-// can drive checkKubernetesDeploymentWithContext's classification without a
-// real cluster.
 func writeKubectlStub(t *testing.T, stderr string, exitCode int) {
 	t.Helper()
 	dir := t.TempDir()
@@ -26,8 +22,6 @@ func writeKubectlStub(t *testing.T, stderr string, exitCode int) {
 	t.Setenv("ERUN_KUBECTL_BIN", path)
 }
 
-// TestCheckKubernetesDeploymentWithContextPresent locks the healthy case: no
-// error, deployed.
 func TestCheckKubernetesDeploymentWithContextPresent(t *testing.T) {
 	writeKubectlStub(t, "", 0)
 	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")
@@ -39,9 +33,6 @@ func TestCheckKubernetesDeploymentWithContextPresent(t *testing.T) {
 	}
 }
 
-// TestCheckKubernetesDeploymentWithContextMissingContext: a deployment that is
-// running but whose kube context could not be resolved must not be reported as absent, and the returned error
-// must name the context problem, reusing isKubernetesContextMissingMessage.
 func TestCheckKubernetesDeploymentWithContextMissingContext(t *testing.T) {
 	writeKubectlStub(t, `error: context "frs-prod" does not exist`, 1)
 	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"}, "frs-prod")
@@ -62,9 +53,6 @@ func TestCheckKubernetesDeploymentWithContextMissingContext(t *testing.T) {
 	}
 }
 
-// TestCheckKubernetesDeploymentWithContextReportsExitStatusPlainlyWhenKubectlWroteNothing
-// covers the empty-output case: a failure with nothing captured must still
-// name the exit status rather than an empty sanitized fragment.
 func TestCheckKubernetesDeploymentWithContextReportsExitStatusPlainlyWhenKubectlWroteNothing(t *testing.T) {
 	writeKubectlStub(t, "", 1)
 	_, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")
@@ -90,9 +78,6 @@ func TestSanitizeKubectlFailureOutputReturnsEmptyForBlankInput(t *testing.T) {
 	}
 }
 
-// TestDeploymentMatchesExpectedSettingsIncludesKubectlOutput: the
-// settings-match inspection must surface kubectl's captured combined output,
-// not just the content-free "exit status N" a bare "%w" wrap renders.
 func TestDeploymentMatchesExpectedSettingsIncludesKubectlOutput(t *testing.T) {
 	writeKubectlStub(t, `Error from server (NotFound): deployments.apps "frs-devops" not found`, 1)
 	_, err := deploymentMatchesExpectedSettings(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"})
@@ -104,8 +89,6 @@ func TestDeploymentMatchesExpectedSettingsIncludesKubectlOutput(t *testing.T) {
 	}
 }
 
-// TestCheckKubernetesDeploymentWithContextRBACDenied locks the other "could
-// not ask" case: a request the cluster refused.
 func TestCheckKubernetesDeploymentWithContextRBACDenied(t *testing.T) {
 	writeKubectlStub(t, `Error from server (Forbidden): deployments.apps "frs-devops" is forbidden: User "jane" cannot get resource "deployments" in API group "apps"`, 1)
 	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")
@@ -123,9 +106,6 @@ func TestCheckKubernetesDeploymentWithContextRBACDenied(t *testing.T) {
 	}
 }
 
-// TestCheckKubernetesDeploymentWithContextUnclassified locks the closing
-// The closing principle: an error erun does not recognize must still read as
-// unknown, carrying the raw kubectl output, and never as absence.
 func TestCheckKubernetesDeploymentWithContextUnclassified(t *testing.T) {
 	writeKubectlStub(t, `Error from server: etcdserver: request timed out`, 1)
 	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")

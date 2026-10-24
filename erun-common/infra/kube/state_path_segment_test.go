@@ -10,11 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// displayShapedStateNames are the strings a tenant and an environment take on
-// when they are rendered for a human instead of joined into a path: the pair,
-// and the pair with the port an operator sees beside it. Directories named this
-// way accumulated under the state root, empty, one per pair somebody had seen
-// displayed.
+// displayShapedStateNames are tenant/environment pairs as rendered for humans.
 var displayShapedStateNames = []string{
 	"erun ux",
 	"erun build",
@@ -25,9 +21,6 @@ var displayShapedStateNames = []string{
 	"petios rihards-review",
 }
 
-// unusableStatePathNames are the shapes a path builder must never accept: a
-// display label with whitespace of any kind, a value that walks out of the
-// state tree, and a value that names no directory at all.
 var unusableStatePathNames = []string{
 	"frs\tlocal",
 	"frs\nlocal",
@@ -40,12 +33,7 @@ var unusableStatePathNames = []string{
 	"a\x00b",
 }
 
-// TestStatePathsRefuseDisplayShapedTenantAndEnvironmentNames is the invariant
-// behind the stray state directories: a tenant or environment is one path
-// segment, so a display-shaped string is refused where the path is built rather
-// than joined into one -- nothing is resolved, and nothing is created. Asserting
-// only "no directory appeared" would pass without exercising the builder; these
-// cases call the builders themselves.
+// Call the builders directly; "no directory appeared" alone would pass without exercising them.
 func TestStatePathsRefuseDisplayShapedTenantAndEnvironmentNames(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	root := configHomeForTest(t)
@@ -66,18 +54,12 @@ func TestStatePathsRefuseDisplayShapedTenantAndEnvironmentNames(t *testing.T) {
 	}
 }
 
-// refusedStatePathNames is every name the store must turn away: the
-// display-shaped ones this invariant is about, plus the shapes that would name
-// no directory or walk out of the tree.
 func refusedStatePathNames() []string {
 	names := make([]string, 0, len(displayShapedStateNames)+len(unusableStatePathNames))
 	names = append(names, displayShapedStateNames...)
 	return append(names, unusableStatePathNames...)
 }
 
-// assertStatePathBuildersRefuseName puts one unusable name through every
-// builder, in the tenant slot and in the environment slot, and through the
-// writers and readers that resolve the same segments.
 func assertStatePathBuildersRefuse(t *testing.T, name string) {
 	t.Helper()
 	for _, slot := range []struct {
@@ -110,9 +92,7 @@ func assertStatePathBuildersRefuse(t *testing.T, name string) {
 		}
 	}
 
-	// A read answers "not configured", the way an environment that was never
-	// created does, so listing the tree skips a name it cannot hold instead of
-	// failing on it or resolving outside the tree.
+	// A read reports not configured, so listing skips an unusable name.
 	if _, _, err := config.LoadEnvConfig(name, "local"); !errors.Is(err, config.ErrNotInitialized) {
 		t.Errorf("LoadEnvConfig(%q, ...) = %v, want ErrNotInitialized", name, err)
 	}
@@ -121,10 +101,6 @@ func assertStatePathBuildersRefuse(t *testing.T, name string) {
 	}
 }
 
-// TestStatePathsAcceptAnOrdinaryTenantAndEnvironment is the other half of the
-// invariant: the refusal is about the shape of a name, not about the store
-// having become unwilling to write. An ordinary pair resolves to the nested
-// layout, with no component carrying whitespace.
 func TestStatePathsAcceptAnOrdinaryTenantAndEnvironment(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	root := configHomeForTest(t)
@@ -149,8 +125,6 @@ func TestStatePathsAcceptAnOrdinaryTenantAndEnvironment(t *testing.T) {
 	assertNoStatePathComponentCarriesWhitespace(t, root)
 }
 
-// TestStatePathSegmentValidatesTheShapeOfAName pins the validator itself, so a
-// future caller can rely on what "unusable" means without re-reading the store.
 func TestStatePathSegmentValidatesTheShapeOfAName(t *testing.T) {
 	for _, value := range []string{"frs", "frs-local", "frs_local", "frs123", "FRS"} {
 		if err := config.ValidateStatePathSegment("tenant", value); err != nil {
@@ -172,10 +146,7 @@ func TestStatePathSegmentValidatesTheShapeOfAName(t *testing.T) {
 	}
 }
 
-// TestSaveTenantConfigNormalizesWhitespaceAroundANameThatIsOtherwiseUsable
-// records the one shape that is normalized rather than refused: the tenant
-// store has always trimmed the name it writes, and it writes that same trimmed
-// name, so the directory and the recorded name still agree.
+// The tenant store trims surrounding whitespace rather than refusing the name.
 func TestSaveTenantConfigNormalizesWhitespaceAroundANameThatIsOtherwiseUsable(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	root := configHomeForTest(t)
@@ -198,10 +169,7 @@ func configHomeForTest(t *testing.T) string {
 	return root
 }
 
-// assertNoStatePathComponentCarriesWhitespace walks the state tree and fails on
-// any component with whitespace in it, whatever created it. A directory that
-// merely came to exist is the residue being guarded against, so this checks
-// directories as well as files.
+// assertNoStatePathComponentCarriesWhitespace checks directories too, since empty ones are the residue.
 func assertNoStatePathComponentCarriesWhitespace(t *testing.T, root string) {
 	t.Helper()
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {

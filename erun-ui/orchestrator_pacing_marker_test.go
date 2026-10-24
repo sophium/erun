@@ -8,9 +8,6 @@ import (
 	"time"
 )
 
-// TestOrchestratorPacingMarkerReportsMeasuredStaleness: a report aged ~20
-// minutes must render the measured gap, not the orchestratorPacingStaleAfter
-// constant ("10m0s"), which would read as the contract being honoured.
 func TestOrchestratorPacingMarkerReportsMeasuredStaleness(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -40,9 +37,6 @@ func TestOrchestratorPacingMarkerReportsMeasuredStaleness(t *testing.T) {
 	}
 }
 
-// TestOrchestratorPacingMarkerDistinguishesADiedTurnFromAQuietOne: a session
-// whose last report said "busy" reads differently from one that finished its
-// turn and went quiet, and differently again from one that never reported.
 func TestOrchestratorPacingMarkerDistinguishesADiedTurnFromAQuietOne(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -86,9 +80,6 @@ func TestOrchestratorPacingMarkerDistinguishesADiedTurnFromAQuietOne(t *testing.
 	}
 }
 
-// TestOrchestratorPacingLogsEachDecisionReasonOnTransition: every branch
-// decideOrchestratorPacing can reach, not just a nudge, logs its reason, and a
-// second tick with nothing changed repeats no line.
 func TestOrchestratorPacingLogsEachDecisionReasonOnTransition(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -115,8 +106,6 @@ func TestOrchestratorPacingLogsEachDecisionReasonOnTransition(t *testing.T) {
 		pacingCapped: true,
 	}
 
-	// id != name: the log names the id first and carries the display name
-	// beside it.
 	nudgedSession := newCallRecordingSession()
 	nudgedKey := orchestratorSessionKey("petios")
 	app.sessions[nudgedKey] = &managedTerminal{session: nudgedSession, key: nudgedKey, serial: 4, kind: sessionKindOrchestrator}
@@ -125,9 +114,6 @@ func TestOrchestratorPacingLogsEachDecisionReasonOnTransition(t *testing.T) {
 	app.reconcileOrchestratorPacing()
 
 	logged := logs.String()
-	// The id leads because it is the key the state files use; the display name
-	// follows parenthetically only when it differs, so a redundant
-	// "fresh (fresh)" cannot creep in.
 	for _, want := range []string{
 		"orchestrator fresh pacing decision=fresh",
 		"orchestrator gone pacing decision=not-alive",
@@ -139,7 +125,6 @@ func TestOrchestratorPacingLogsEachDecisionReasonOnTransition(t *testing.T) {
 		}
 	}
 
-	// A second tick with none of these reasons changed must not repeat any line.
 	logs.Reset()
 	app.reconcileOrchestratorPacing()
 	if logs.Len() != 0 {
@@ -147,10 +132,7 @@ func TestOrchestratorPacingLogsEachDecisionReasonOnTransition(t *testing.T) {
 	}
 }
 
-// TestOrchestratorPacingLogLineJoinsItsNudgeHistoryRecord pins that a pacing
-// log line and a nudge history record about the same orchestrator are matchable
-// without reading config.yaml, even when the orchestrator's id and name
-// differ (orchestrator-nudge-history.json keys by id).
+// The nudge history file keys by id, so the log line must carry the id.
 func TestOrchestratorPacingLogLineJoinsItsNudgeHistoryRecord(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())

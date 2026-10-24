@@ -11,14 +11,12 @@ import (
 	"unicode"
 )
 
-// edit replaces src[start:end] of one file.
 type edit struct {
 	start, end int
 	text       string
 }
 
-// fragment is the part of one source file that ends up in one package: the
-// whole file when nothing in it moves apart.
+// fragment is the part of one source file that ends up in one package.
 type fragment struct {
 	dir     string
 	ranges  [][2]int
@@ -26,15 +24,12 @@ type fragment struct {
 	dup     bool
 	needs   map[string]bool
 	edits   []edit
-	// resident marks the whole of an unchanged file that moved code is
-	// appended to: it keeps every import it had, module ones included.
+	// resident marks an unchanged file moved code is appended to; it keeps all its imports.
 	resident bool
-	// out is the fragment's text in order: source ranges, with literal glue
-	// where a grouped declaration is split and reopened in another package.
+	// out interleaves source ranges with glue that reopens a split group.
 	out []piece
 }
 
-// piece is a source range of a fragment, or literal text between ranges.
 type piece struct {
 	rg  [2]int
 	lit string
@@ -82,8 +77,7 @@ type rewriter struct {
 	frags map[string][]*fragment
 }
 
-// pkgName is the package name of a directory: the name its files already
-// declare, or the directory's base name for a package the map creates.
+// pkgName is the name a directory's files declare, or its base name for a new package.
 func (r *rewriter) pkgName(dir string) string {
 	for _, sf := range r.w.files {
 		if sf.inModule && path.Dir(sf.rel) == dir && !strings.HasSuffix(sf.ast.Name.Name, "_test") {
@@ -100,7 +94,6 @@ func (r *rewriter) importPath(dir string) string {
 	return r.w.module + "/" + dir
 }
 
-// planFragments splits every module file by where its declarations go.
 func (r *rewriter) planFragments() {
 	for name, sf := range r.w.files {
 		if !sf.inModule {
@@ -115,9 +108,8 @@ func (r *rewriter) planFragments() {
 
 func (r *rewriter) fileFragments(sf *sourceFile) []*fragment {
 	home := r.m.fileDir(sf.rel)
-	// One fragment per package: a declaration that moves there and a test
-	// helper copied there end up in the same file, never two that overwrite
-	// each other.
+	// One fragment per package, so a moved declaration and a copied helper never
+	// overwrite each other.
 	p := &fragmentPlan{byDir: map[string]*fragment{}}
 	prev := r.bodyStart(sf)
 	entries := r.d.decls[sf.path]
@@ -152,8 +144,6 @@ func (r *rewriter) fileFragments(sf *sourceFile) []*fragment {
 	return p.order
 }
 
-// fragmentPlan collects one file's fragments, one per package directory, in
-// the order their first text appears.
 type fragmentPlan struct {
 	byDir map[string]*fragment
 	order []*fragment
@@ -170,10 +160,6 @@ func (p *fragmentPlan) get(dir string, dup bool) *fragment {
 	return f
 }
 
-// place puts one declaration's text in its package and in every package a
-// copy of it goes to.
-// allDropped says whether every declaration of a file is dropped, so the file
-// goes away instead of being left with nothing but its package clause.
 func allDropped(entries []declTarget) bool {
 	for _, e := range entries {
 		if !e.drop {
@@ -192,10 +178,8 @@ func (p *fragmentPlan) place(e declTarget, rg [2]int) {
 	}
 }
 
-// placeGroup places a grouped declaration whose specs may go to different
-// packages: the package of its first spec keeps the group's own opening and
-// doc comment, every other package reopens the group around its specs. It
-// returns where the group's text ends.
+// placeGroup splits a grouped declaration: its first spec's package keeps the
+// opening and doc comment, others reopen the group.
 func (p *fragmentPlan) placeGroup(sf *sourceFile, specs []declTarget, prev int) int {
 	group := genDeclAt(sf, specs[0].group)
 	end := sf.fset.Position(group.End()).Offset
@@ -230,8 +214,6 @@ func specsIn(specs []declTarget, dir string) bool {
 	return false
 }
 
-// groupDirs are the packages a group's specs and their copies go to, in the
-// order they first appear.
 func anyDropped(specs []declTarget) bool {
 	for _, spec := range specs {
 		if spec.drop {
@@ -270,8 +252,6 @@ func genDeclAt(sf *sourceFile, offset int) *ast.GenDecl {
 	return nil
 }
 
-// bodyStart is where a file's declarations begin: after its imports, or
-// after its package clause when it has none.
 func (r *rewriter) bodyStart(sf *sourceFile) int {
 	end := sf.fset.Position(sf.ast.Name.End()).Offset
 	for _, decl := range sf.ast.Decls {
@@ -282,8 +262,7 @@ func (r *rewriter) bodyStart(sf *sourceFile) int {
 	return end
 }
 
-// fragmentsAt are the fragments holding offset: the code's own, and every
-// copy of a duplicated test helper.
+// fragmentsAt includes every copy of a duplicated test helper.
 func (r *rewriter) fragmentsAt(file string, offset int) []*fragment {
 	var out []*fragment
 	for _, f := range r.frags[file] {
@@ -296,8 +275,6 @@ func (r *rewriter) fragmentsAt(file string, offset int) []*fragment {
 	return out
 }
 
-// planEdits turns every site into the text it must read in its new home, and
-// records the module packages each fragment now imports.
 func (r *rewriter) planEdits() {
 	for _, s := range r.w.sites {
 		o := r.w.objects[s.objKey]
@@ -332,8 +309,7 @@ func (r *rewriter) planSite(s site, o *object, name string, frag *fragment) {
 	}
 }
 
-// qualifier is the name a fragment refers to a module package by: the
-// package's own name, unless something in the file already uses that name.
+// qualifier is the package's name unless the file already uses that name.
 func (r *rewriter) qualifier(file string, frag *fragment, dir string) string {
 	name := r.pkgName(dir)
 	sf := r.w.files[file]
@@ -379,8 +355,7 @@ func (r *rewriter) otherImport(sf *sourceFile, name string) bool {
 	return false
 }
 
-// renameDoc renames the identifier a renamed declaration's doc comment leads
-// with, so the comment keeps describing the declaration by its name.
+// renameDoc renames the identifier a doc comment leads with.
 func (r *rewriter) renameDoc(s site, o *object, name string, frag *fragment) {
 	sf := r.w.files[s.file]
 	doc, ok := sf.docs[s.start]

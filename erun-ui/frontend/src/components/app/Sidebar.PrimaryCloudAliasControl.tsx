@@ -38,10 +38,8 @@ interface CloudAliasRowView {
   bearerBusy: boolean;
 }
 
-// PrimaryCloudAliasControl renders a login/status row per cloud alias the active
-// tenant uses. AWS aliases authenticate via OIDC and can mint a bearer token to
-// authenticate the runtime; Cloudflare aliases use a scoped API token with no
-// OIDC, so the bearer action is hidden and "Log in" becomes "Verify token".
+// PrimaryCloudAliasControl renders a login row per cloud alias the active tenant
+// uses. Cloudflare aliases have no OIDC, so they verify a token instead.
 export function PrimaryCloudAliasControl(): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const tenants = useAppSelector((s) => s.tenants.tenants);

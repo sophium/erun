@@ -6,8 +6,7 @@ import (
 	"strings"
 )
 
-// RootConfigStatus is the doctor's first gate: a non-OK status means the
-// root config file must be restored before alias-level repair makes sense.
+// RootConfigStatus gates doctor: non-OK means restore before alias repair.
 type RootConfigStatus string
 
 const (
@@ -16,17 +15,14 @@ const (
 	RootConfigStatusCorrupted RootConfigStatus = "corrupted"
 )
 
-// OrphanedAliasContextRef names a cloud-context entry referencing a missing
-// provider alias; Region is captured because it is the only context-side
-// state a repair flow can reuse to seed provider init.
+// OrphanedAliasContextRef is a cloud context referencing a missing provider alias;
+// Region seeds provider re-init.
 type OrphanedAliasContextRef struct {
 	Name   string `json:"name"`
 	Region string `json:"region"`
 }
 
-// OrphanedAlias collects every back-reference to a missing alias; when the
-// alias cannot be decoded Parsed is false and the repair flow cannot
-// auto-seed an init call.
+// OrphanedAlias collects every reference to a missing alias.
 type OrphanedAlias struct {
 	Alias                     string                    `json:"alias"`
 	Username                  string                    `json:"username,omitempty"`
@@ -37,8 +33,7 @@ type OrphanedAlias struct {
 	ReferencedByCloudContexts []OrphanedAliasContextRef `json:"referencedByCloudContexts,omitempty"`
 }
 
-// RootConfigInspection is the read-only view of root-config state shared by
-// the CLI and MCP doctors; nothing here performs side effects.
+// RootConfigInspection is the read-only root-config view shared by CLI and MCP doctors.
 type RootConfigInspection struct {
 	ConfigPath       string                 `json:"configPath"`
 	ConfigStatus     RootConfigStatus       `json:"configStatus"`
@@ -51,17 +46,13 @@ type RootConfigInspection struct {
 	TenantHits       int                    `json:"tenantCount"`
 }
 
-// OrphanedCloudContextEnvRef records a (tenant, env) pair referencing a
-// missing cloud context, so doctor can map a broken context back to the
-// env it affects.
+// OrphanedCloudContextEnvRef is an env referencing a missing cloud context.
 type OrphanedCloudContextEnvRef struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 }
 
-// OrphanedCloudContext aggregates every env reference to a missing cloud
-// context; the coordinates decoded from its name let a recovery flow
-// describe the missing instance without the user retyping anything.
+// OrphanedCloudContext aggregates env references to a missing cloud context.
 type OrphanedCloudContext struct {
 	KubernetesContext  string                       `json:"kubernetesContext"`
 	AccountID          string                       `json:"accountId,omitempty"`
@@ -70,8 +61,6 @@ type OrphanedCloudContext struct {
 	ReferencedByEnvs   []OrphanedCloudContextEnvRef `json:"referencedByEnvs,omitempty"`
 }
 
-// Complete reports whether the root config is in a state the rest of erun
-// can rely on.
 func (r RootConfigInspection) Complete() bool {
 	if r.ConfigStatus != RootConfigStatusOK {
 		return false
@@ -82,18 +71,16 @@ func (r RootConfigInspection) Complete() bool {
 	return len(r.OrphanedContexts) == 0
 }
 
-// RootConfigInspectionStore is the read-only surface InspectRootConfig needs;
-// it stays narrow so inspection still works when the central root config is
-// unloadable, leaning on tenant/env files that load independently.
+// RootConfigInspectionStore stays narrow so inspection works when the root
+// config is unloadable.
 type RootConfigInspectionStore interface {
 	LoadERunConfig() (ERunConfig, string, error)
 	ListTenantConfigs() ([]TenantConfig, error)
 	ListEnvConfigs(tenant string) ([]EnvConfig, error)
 }
 
-// InspectRootConfig walks the root and tenant configs to surface dangling
-// cloud-provider-alias references without mutating anything; it also lists
-// available backups so doctor can offer rollback even on a healthy install.
+// InspectRootConfig reports dangling cloud-provider-alias references and backups
+// without mutating anything.
 func InspectRootConfig(store RootConfigInspectionStore) (RootConfigInspection, error) {
 	if store == nil {
 		return RootConfigInspection{}, errors.New("store is required")
@@ -119,9 +106,7 @@ func InspectRootConfig(store RootConfigInspectionStore) (RootConfigInspection, e
 		inspection.Backups = backups
 	}
 
-	// Without a cleanly loaded root there is no CloudProviders list to compare
-	// against, so every alias would look orphaned; restore-from-backup is the
-	// real fix in that state, surfaced via Backups.
+	// Without a loaded root every alias looks orphaned; restore is the fix.
 	if inspection.ConfigStatus != RootConfigStatusOK {
 		return inspection, nil
 	}
@@ -328,10 +313,7 @@ func recordOrphanedCloudContext(orphans map[string]*OrphanedCloudContext, known 
 	entry.ReferencedByEnvs = append(entry.ReferencedByEnvs, ref)
 }
 
-// envExpectsCloudContext gates orphan detection to erun-managed cloud envs;
-// without it, every env pointing at a local kube target (orbstack, kind, ...)
-// would look like an orphan whenever its context name is absent from
-// CloudContexts.
+// envExpectsCloudContext limits orphan detection to erun-managed cloud envs.
 func envExpectsCloudContext(env EnvConfig) bool {
 	if strings.TrimSpace(env.CloudProviderAlias) != "" {
 		return true
@@ -339,10 +321,8 @@ func envExpectsCloudContext(env EnvConfig) bool {
 	return env.ManagedCloud
 }
 
-// parseErunCloudContextName decodes erun's managed-context name
-// "erun-<seq>-<accountid>-<region>", where region may contain hyphens
-// (e.g. "eu-west-2"); a non-matching name yields ("", "") and is still
-// recorded as an orphan, just without decoded coordinates.
+// parseErunCloudContextName decodes "erun-<seq>-<accountid>-<region>"; a
+// non-matching name yields ("", "").
 func parseErunCloudContextName(name string) (string, string) {
 	name = strings.TrimSpace(name)
 	if !strings.HasPrefix(name, "erun-") {

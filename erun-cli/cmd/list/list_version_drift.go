@@ -47,14 +47,7 @@ func runListControlPlanes(ctx core.Context, result lifecycle.ListResult, erunAli
 	return controlPlaneVersionDriftExitError(drift)
 }
 
-// versionDriftExitError makes tenant version drift a non-zero exit when
-// --fail-on-drift asks for it, after the full report has already printed:
-// any environment behind the tenant's own max, any environment excluded from
-// that computation because its version could not be determined at all (a
-// gap in the check is itself something to fail on, not something to pass
-// silently), or a gate environment whose own behind verdict is unresolved or
-// true -- see erun-cli/AGENTS.md § "Exit-Code Contract: Reporting Commands
-// Vs Gating Checks" for why this is opt-in rather than the command's default.
+// versionDriftExitError fails --fail-on-drift for behind, undeterminable, or unresolved/behind gate envs.
 func versionDriftExitError(drift lifecycle.TenantVersionDrift) error {
 	var problems []string
 	var behind []string
@@ -87,11 +80,7 @@ func versionDriftExitError(drift lifecycle.TenantVersionDrift) error {
 	return fmt.Errorf("version drift for tenant %s: %s", drift.Tenant, strings.Join(problems, "; "))
 }
 
-// controlPlaneVersionDriftExitError makes control-plane version drift a
-// non-zero exit when --fail-on-drift asks for it: any plane behind or ahead
-// of the published version, any plane erun could not reach, any plane
-// advertising a foreign apiUrl, or a baseline erun could not even resolve --
-// none of those confirm a plane is running what erun actually published.
+// controlPlaneVersionDriftExitError fails for any plane not confirmed to run the published version.
 func controlPlaneVersionDriftExitError(drift lifecycle.ControlPlaneVersionDrift) error {
 	var problems []string
 	if drift.PublishedVersionError != "" {
@@ -116,11 +105,7 @@ func controlPlaneVersionDriftExitError(drift lifecycle.ControlPlaneVersionDrift)
 	return fmt.Errorf("control plane version drift: %s", strings.Join(problems, "; "))
 }
 
-// controlPlaneAPIURLMismatches names every plane whose own discovery document
-// advertised an apiUrl resolving to a different backend than the one erun
-// actually reached -- the one condition here that is never routine drift, so
-// --fail-on-drift reports it alongside behind/ahead rather than folding it
-// into either.
+// controlPlaneAPIURLMismatches is never routine drift, so it is reported separately.
 func controlPlaneAPIURLMismatches(planes []lifecycle.ControlPlaneVersionStatus) []string {
 	var mismatched []string
 	for _, plane := range planes {
@@ -131,12 +116,7 @@ func controlPlaneAPIURLMismatches(planes []lifecycle.ControlPlaneVersionStatus) 
 	return mismatched
 }
 
-// classifyControlPlaneVersionDrift buckets every plane, and each surface it
-// links to when one was checked, into unreachable/behind/ahead -- a surface's
-// own label gets a " (<surface>)" suffix so the plane and its console and docs
-// site stay distinguishable in the --fail-on-drift summary. A surface the
-// plane never advertised contributes nothing: an absent docs site is not a
-// drift finding, it is an absence.
+// classifyControlPlaneVersionDrift ignores surfaces a plane never advertised.
 func classifyControlPlaneVersionDrift(planes []lifecycle.ControlPlaneVersionStatus) (unreachable, behind, ahead []string) {
 	for _, plane := range planes {
 		unreachable, behind, ahead = appendControlPlaneVersionVerdict(unreachable, behind, ahead, plane.Alias, plane.Reachable, plane.Behind, plane.Ahead)
@@ -197,11 +177,7 @@ func writeVersionDriftEnvironments(ctx core.Context, environments []lifecycle.En
 	return nil
 }
 
-// versionDriftVersionValue renders one environment's resolved version,
-// distinguishing "none" (a confirmed absence -- nothing is deployed) from
-// "undetermined" (VersionUnresolved -- neither its cached config nor a live
-// check of its cluster could tell) rather than collapsing both into the same
-// bare token.
+// versionDriftVersionValue distinguishes "none" (nothing deployed) from "undetermined".
 func versionDriftVersionValue(env lifecycle.EnvironmentVersionStatus) string {
 	if env.VersionUnresolved {
 		return "undetermined"
@@ -232,10 +208,6 @@ func writeVersionDriftGate(ctx core.Context, drift lifecycle.TenantVersionDrift)
 	}
 }
 
-// gateVersionUnresolvedMessage names why the gate's own version could not be
-// resolved. A reason from a live check (or a confirmed absence) is reported
-// verbatim; the older config-only case (a gate version that parsed but not as
-// plain semver) has no reason to attach, so it keeps its original wording.
 func gateVersionUnresolvedMessage(reason string) string {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
@@ -273,11 +245,7 @@ func writeControlPlaneVersionReport(ctx core.Context, drift lifecycle.ControlPla
 	return nil
 }
 
-// controlPlanesSectionHeader names both the number of distinct backends
-// found and the number of configured aliases that reach them -- when the two
-// differ, that gap is exactly the signal that two or more aliases were
-// collapsed into one plane, and a bare "Control planes:" header
-// would hide it.
+// controlPlanesSectionHeader shows both backend and alias counts; a gap means collapsed aliases.
 func controlPlanesSectionHeader(planes []lifecycle.ControlPlaneVersionStatus) string {
 	if len(planes) == 0 {
 		return "Control planes:"
@@ -321,12 +289,7 @@ func writeControlPlaneVersionEntry(ctx core.Context, plane lifecycle.ControlPlan
 	return writeControlPlaneLinkedSurfaces(ctx, plane)
 }
 
-// writeControlPlaneLinkedSurfaces renders the plane's own advertised-apiUrl
-// note and every surface it named, nested beneath the plane they were
-// discovered from.
 func writeControlPlaneLinkedSurfaces(ctx core.Context, plane lifecycle.ControlPlaneVersionStatus) error {
-	// Above the nested surfaces: this is a property of the plane itself, so it
-	// reads with the plane's own line rather than under one of them.
 	if plane.AdvertisedAPIURLMismatch != "" {
 		if _, err := fmt.Fprintln(ctx.Stdout, "    [advertised apiUrl mismatch: "+plane.AdvertisedAPIURLMismatch+"]"); err != nil {
 			return err
@@ -340,19 +303,12 @@ func writeControlPlaneLinkedSurfaces(ctx core.Context, plane lifecycle.ControlPl
 	return nil
 }
 
-// linkedVersionSurface is one surface a plane's own discovery document names,
-// paired with the label it is reported and classified under.
 type linkedVersionSurface struct {
 	label  string
 	status *lifecycle.VersionSurfaceStatus
 }
 
-// linkedVersionSurfaces lists the surfaces a plane advertises, in the order
-// its discovery document names them, skipping the ones it never named at all.
-// One list serves both the report and the --fail-on-drift classifier, so the
-// two cannot disagree about which surfaces a plane has or what they are
-// called -- an absent surface is absent from both, never defaulted into
-// either.
+// linkedVersionSurfaces feeds both the report and the classifier so they cannot disagree.
 func linkedVersionSurfaces(plane lifecycle.ControlPlaneVersionStatus) []linkedVersionSurface {
 	surfaces := make([]linkedVersionSurface, 0, 2)
 	for _, candidate := range []linkedVersionSurface{
@@ -366,9 +322,6 @@ func linkedVersionSurfaces(plane lifecycle.ControlPlaneVersionStatus) []linkedVe
 	return surfaces
 }
 
-// writeControlPlaneAdditionalAliases names every other configured alias that
-// resolved to this same backend, so collapsing duplicate aliases into one
-// plane never hides which aliases are actually configured.
 func writeControlPlaneAdditionalAliases(ctx core.Context, aliases []lifecycle.ControlPlaneAliasRef) error {
 	for _, alias := range aliases {
 		if _, err := fmt.Fprintf(ctx.Stdout, "      also reachable as: %s api-url=%s\n", alias.Alias, shared.QuotedValueOrNone(alias.APIURL)); err != nil {
@@ -378,10 +331,6 @@ func writeControlPlaneAdditionalAliases(ctx core.Context, aliases []lifecycle.Co
 	return nil
 }
 
-// writeControlPlaneVersionSurfaceEntry renders one linked surface -- a plane's
-// console or its docs site -- under the plane that advertised it. The two are
-// the same shape deliberately: they answer the same question the same way, and
-// an operator reading the report should not have to learn two of them.
 func writeControlPlaneVersionSurfaceEntry(ctx core.Context, label string, surface lifecycle.VersionSurfaceStatus) error {
 	line := "    " + label + ": url=" + shared.QuotedValueOrNone(surface.URL)
 	if !surface.Reachable {

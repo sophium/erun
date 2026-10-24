@@ -15,10 +15,7 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// servicesKubectlStub points ERUN_KUBECTL_BIN at a script answering the two
-// reads the listing makes from fixed JSON, so the tool's own behaviour runs
-// end to end without a cluster. Anything but the two expected reads fails the
-// call, so a test cannot pass by having the tool skip a read it owes.
+// servicesKubectlStub answers only the two expected reads; any other call fails.
 func servicesKubectlStub(t *testing.T, servicesJSON, ingressesJSON string) {
 	t.Helper()
 	if strings.ContainsAny(servicesJSON, "'") || strings.ContainsAny(ingressesJSON, "'") {
@@ -54,19 +51,8 @@ func servicesTestRuntime(t *testing.T, tenant, environment string) shared.Runtim
 	}
 }
 
-// TestServicesToolReportsWhatTheNamespaceRunsAndWhatIsExposed is the MCP half
-// of the reported gap: expose's SERVICE argument was a derived label with
-// nothing on either agent-facing surface able to report a real one, so an
-// agent could act without being able to orient.
-//
-// The listing is the answer to "what is this environment running", and the
-// matching is on the Ingress's own backend -- a repo-native chart names its
-// Service something the <tenant>-<service> convention would not produce.
-//
-// This runs the tool's real path, against the two kubectl reads it actually
-// makes, so a handler that resolves its target and then discards the listing
-// (returning an empty EnvironmentServiceList) cannot pass: the empty result is
-// what the caller would act on.
+// Exposures match on the Ingress backend, since a repo-native chart's Service
+// need not follow <tenant>-<service>.
 func TestServicesToolReportsWhatTheNamespaceRunsAndWhatIsExposed(t *testing.T) {
 	servicesKubectlStub(t,
 		`{"items":[`+
@@ -87,9 +73,6 @@ func TestServicesToolReportsWhatTheNamespaceRunsAndWhatIsExposed(t *testing.T) {
 		t.Fatalf("listing does not name the environment it read: %+v", output)
 	}
 
-	// pw-api is matched to the Ingress by the backend it routes to, not by the
-	// derived name -- the exposure's label is "validator", which no
-	// <tenant>-<service> derivation would produce from it.
 	want := []expose.EnvironmentService{
 		{Name: "frs-web", Type: "ClusterIP", Ports: []clusterread.ObservedServicePort{{Port: 80, Protocol: "TCP"}}},
 		{
@@ -103,10 +86,7 @@ func TestServicesToolReportsWhatTheNamespaceRunsAndWhatIsExposed(t *testing.T) {
 	}
 }
 
-// The preview contract the docs state: a preview resolves the calls a real run
-// would make and executes none of them, so the listing comes back with the
-// environment it resolved and no Services -- null, not a stale or fabricated
-// list a caller might mistake for cluster state.
+// A preview executes nothing, so Services is null rather than a fabricated list.
 func TestServicesToolPreviewExecutesNothingAndReportsNoServices(t *testing.T) {
 	kubectl := filepath.Join(t.TempDir(), "kubectl")
 	if err := os.WriteFile(kubectl, []byte("#!/bin/sh\necho 'kubectl must not run in a preview' >&2\nexit 1\n"), 0o755); err != nil {

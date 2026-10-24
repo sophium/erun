@@ -1,7 +1,4 @@
-// Package erun owns the integration suite's compiled erun binary and runs it
-// as a subprocess. It builds the binary once per `go test` run with coverage
-// instrumentation so the production paths the suite exercises merge into one
-// coverage profile.
+// Package erun builds the coverage-instrumented erun binary once per test run and runs it as a subprocess.
 package erun
 
 import (
@@ -24,28 +21,18 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
-// CoverDirEnv names where instrumented binaries write coverage counters; the
-// harness sets it on every invocation so all subtests merge into one profile.
+// CoverDirEnv names where instrumented binaries write coverage counters.
 const CoverDirEnv = "GOCOVERDIR"
 
-// CoverPkgs selects which packages count toward the integration coverage gate.
-// It covers erun-cli and erun-common only: erun-mcp/erun-backend/erun-ui carry
-// runtime code that --dry-run scenarios cannot exercise without substantial
-// harness work, so including them would drag the gate down for code unrelated
-// to what this suite verifies.
+// CoverPkgs limits the coverage gate to erun-cli and erun-common; other modules' runtime code
+// is unreachable from --dry-run scenarios.
 const CoverPkgs = "github.com/sophium/erun," +
 	"github.com/sophium/erun/cmd," +
 	"github.com/sophium/erun/internal/...," +
 	"github.com/sophium/erun/erun-common"
 
-// waitDelay bounds how long Run waits on a finished child's output pipes after
-// the child itself has exited (exec.Cmd.WaitDelay). The child's exit is the
-// event a scenario is about; the pipes closing is only how os/exec usually
-// learns of it, and a process the child spawned can hold them open long after
-// the child is gone. Keeping this far below the harness's own per-run timeout
-// is the point: a run that reaches it has already concluded, and a scenario
-// that leaves a descendant behind must fail as a timeout rather than wait out
-// the test binary's own deadline and panic the package.
+// waitDelay bounds the wait on a child's pipes after it exits, since a descendant can hold them open.
+// It stays far below the per-run timeout so a leaked descendant fails as a timeout, not a package panic.
 const waitDelay = 10 * time.Second
 
 var (
@@ -56,8 +43,7 @@ var (
 	procCounter int64
 )
 
-// BinaryPath returns the path to the coverage-instrumented erun binary,
-// compiling it once on first call.
+// BinaryPath returns the instrumented erun binary, compiling it on first call.
 func BinaryPath(t testing.TB) string {
 	t.Helper()
 	buildOnce.Do(func() {
@@ -69,31 +55,16 @@ func BinaryPath(t testing.TB) string {
 	return binaryPath
 }
 
-// CoverDir returns the directory where the instrumented binary writes coverage
-// counter files.
+// CoverDir returns the shared coverage counter directory.
 func CoverDir(t testing.TB) string {
 	t.Helper()
 	BinaryPath(t)
 	return coverDir
 }
 
-// PrivateCoverDir allocates a fresh subdirectory of the suite's shared
-// coverage root, exclusively owned by whichever process is about to be
-// spawned, and returns its path. Go's coverage runtime emits its meta-data
-// file at process init (before main even runs), naming a temp file with only
-// a nanosecond timestamp for uniqueness -- no PID. Every process running the
-// same instrumented binary computes the same final meta-data filename, so two
-// such processes racing to create-and-rename their own temp file into that
-// name in one shared directory can have the loser's rename fail outright
-// (the source temp file is gone by the time it runs, already renamed away by
-// the winner), silently dropping that process's coverage from the merged
-// profile without failing anything on its own. Giving every process its own
-// directory makes that race structurally impossible instead of merely rare.
-//
-// Run calls this for every subprocess it starts. A caller that spawns the
-// instrumented binary (or something that itself spawns it, like erun-mcp)
-// without going through Run must call this directly and set GOCOVERDIR in
-// that process's own environment.
+// PrivateCoverDir allocates a coverage directory owned by one process. Go's coverage runtime names
+// its meta-data temp file without a PID, so processes sharing a directory can silently lose coverage
+// in a rename race. Callers spawning the binary outside Run must use it and set GOCOVERDIR.
 func PrivateCoverDir(t testing.TB) string {
 	t.Helper()
 	CoverDir(t) // ensures the shared coverage root is built and initialized
@@ -166,7 +137,6 @@ func repoRoot() (string, error) {
 	}
 }
 
-// Result captures everything an integration test wants to assert about a run.
 type Result struct {
 	Stdout   string
 	Stderr   string
@@ -174,29 +144,18 @@ type Result struct {
 	ExitCode int
 }
 
-// RunOptions configures a single subprocess invocation.
 type RunOptions struct {
 	Cwd string
-	// Env is the full environment for the subprocess (it replaces the parent
-	// environment except for GOCOVERDIR which the harness always injects).
-	// Build it from env.Setup.Env(), which carries the scrubbed PATH; a
-	// scenario that needs an external binary appends its own stub routing.
+	// Env replaces the parent environment except GOCOVERDIR; build it from env.Setup.Env().
 	Env     []string
 	Stdin   string
 	Timeout time.Duration
-	// StdinFromDevNull binds the subprocess's stdin directly to the OS null
-	// device instead of the default in-memory pipe. A piped Stdin buffer is
-	// never a character device, so it cannot exercise a stat-based TTY check
-	// the same way the null device does — the null device is a character
-	// device but not a terminal, which is exactly the input a stat-based
-	// check confuses for one. Mutually exclusive with Stdin.
+	// StdinFromDevNull binds stdin to the null device, a character device that is not a terminal,
+	// which a pipe cannot emulate for stat-based TTY checks. Mutually exclusive with Stdin.
 	StdinFromDevNull bool
 }
 
-// requireIsolatedEnv guards the harness boundary: a scenario that runs the
-// binary without an isolated HOME/XDG_CONFIG_HOME would silently read — or
-// worse, write — the developer's real erun config, and its golden would
-// capture machine state.
+// requireIsolatedEnv refuses a run that could read or write the developer's real erun config.
 func requireIsolatedEnv(t testing.TB, env []string) {
 	t.Helper()
 	home := ""
@@ -217,7 +176,6 @@ func requireIsolatedEnv(t testing.TB, env []string) {
 	}
 }
 
-// Run invokes the compiled binary with the given args and returns its output.
 func Run(t testing.TB, args []string, opts RunOptions) Result {
 	t.Helper()
 	requireIsolatedEnv(t, opts.Env)
@@ -225,33 +183,13 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 
 	timeout := opts.Timeout
 	if timeout == 0 {
-		// This cap is a hang-net, not a latency SLA: a --dry-run command is
-		// normally sub-second, but a real command can wall-clock for tens of
-		// seconds on transient host name-service latency (a cold macOS resolver
-		// stalls a name lookup ~15-30s) without the command being wrong. Keep
-		// the cap well above that environmental variance so it fails only a
-		// genuine deadlock, not a slow-but-correct run. If it ever fires, the
-		// goroutine dump below names the blocked call.
-		//
-		// Firing is not proof of a deadlock, though, and this harness has to
-		// stay usable when it is wrong: under contention -- this suite runs
-		// beside a browser suite against one CPU budget -- a command can be
-		// simply slow past this cap, and the run that follows a timeout must
-		// still conclude within it. That is what waitDelay guarantees: the
-		// timeout path's own wait is bounded, so the worst case for one
-		// scenario is this cap plus waitDelay, never the test binary's whole
-		// deadline.
+		// A hang-net, not a latency SLA: real commands can stall ~15-30s on a cold resolver or under
+		// CPU contention. The worst case per scenario is this cap plus waitDelay.
 		timeout = 120 * time.Second
 	}
 
-	// The context is what covers the one state the harness's drain bound
-	// cannot. harnessexec arms Cmd.WaitDelay on every child it builds, which
-	// bounds a wait on a child that has *exited*; a child that does not exit --
-	// a command wedged past the timeout under the gate's CPU contention -- is
-	// never reaped, so Process.Wait never returns, the post-exit path that
-	// consults WaitDelay is never reached, and Wait blocks forever however
-	// large the delay is. Cancelling this context is what turns that timeout
-	// into a bounded run, and supervise does it below.
+	// WaitDelay only bounds a wait on a child that exited; cancelling this context is what bounds a
+	// child wedged past the timeout. supervise cancels it.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -262,17 +200,11 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 	env := make([]string, 0, len(opts.Env)+2)
 	env = append(env, opts.Env...)
 	env = append(env, CoverDirEnv+"="+PrivateCoverDir(t))
-	// So a SIGQUIT on timeout dumps every goroutine's stack, not just the
-	// current one — turning an opaque hang into a report of where it stuck.
+	// SIGQUIT on timeout dumps every goroutine's stack.
 	env = append(env, "GOTRACEBACK=all")
 	cmd.Env = env
-	// Always feed stdin from a buffer (empty when the scenario passes no
-	// Stdin) so the subprocess never inherits the developer's terminal. This
-	// keeps stdin a non-terminal pipe locally, so stdin-TTY-gated branches
-	// (e.g. the interactive-gh-auth gate) behave the same everywhere.
-	// Scenarios that need the interactive branch opt in explicitly via the
-	// ERUN_FORCE_TTY seam. A scenario that needs stdin bound to the real null
-	// device (StdinFromDevNull) gets that instead — see the field doc.
+	// Never inherit the developer's terminal: stdin is a non-terminal pipe unless the scenario opts
+	// into ERUN_FORCE_TTY or StdinFromDevNull.
 	if opts.StdinFromDevNull {
 		devNull, err := os.Open(os.DevNull)
 		if err != nil {
@@ -296,11 +228,7 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 	if errors.Is(err, errTimeout) {
 		t.Fatalf("erun timed out after %s; args=%v\n--- subprocess goroutine dump (stderr) ---\n%s", timeout, args, stderr.String())
 	}
-	// supervise reports a run it could observe as nil or the child's own exit
-	// error, having ruled out a timeout above; anything else is a command that
-	// could not be run at all. The status lives on ProcessState either way --
-	// a run whose wait was rescued by the delay reads its exit code there
-	// rather than from an error that no longer describes the child.
+	// After a WaitDelay rescue the exit status lives on ProcessState, not the error.
 	var exitErr *exec.ExitError
 	if err != nil && !errors.As(err, &exitErr) {
 		t.Fatalf("erun exec error: %v", err)
@@ -315,43 +243,12 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 	return result
 }
 
-// errTimeout reports a child that did not finish within its own timeout and
-// was killed. It is a sentinel rather than an *exec.ExitError because the
-// caller's message is about the harness's cap, not the signal the child died
-// of.
+// errTimeout is a sentinel because the failure is the harness's cap, not the child's signal.
 var errTimeout = errors.New("erun: child exceeded its timeout")
 
-// supervise waits for an already-started child, killing it if it outlives
-// timeout. An exit it could observe comes back as the child's own result --
-// nil, or an *exec.ExitError carrying its status -- with a wait rescued by
-// delay reported as the completed run it is rather than as the trouble the
-// wait itself ran into. errTimeout means the cap was what ended the run, and
-// any other error means the child could not be run or observed at all.
-//
-// It arms delay on the child itself, rather than leaving that to its caller,
-// because that is the bound this whole function exists around: a child leaves
-// its stdout/stderr pipes open for as long as any process it started still
-// holds them, and os/exec's own documentation names exactly that case as the
-// reason WaitDelay exists. Without it, Wait -- and therefore this harness --
-// waits for the *pipe* rather than the child, and no kill rescues it: the
-// copier goroutines blocked on those pipes never look at signals at all, and a
-// kill only ends the wait if the child was still running to receive it.
-//
-// Arming the delay is not on its own enough, which is why cancel is a
-// parameter. WaitDelay bounds a wait only after the child exits or after the
-// command's context is cancelled, and os/exec runs the goroutine that enforces
-// the second clause only for a Cmd that has such a context. The cancellation
-// on the timeout path below is therefore what makes the delay apply to the
-// case that actually wedged this suite: a child that has *not* exited, so that
-// Process.Wait never returns and the post-exit path -- which consults the
-// delay independently -- is never reached. Cancelling also kills the child if
-// it survived the signal below. With the context cancelled the wait becomes a
-// deadline this harness enforces itself: the child is killed, the pipes it
-// left open are closed, and the run concludes as the timeout it is rather than
-// wedging the whole package past the test binary's own deadline.
-//
-// cancel, timeout and delay are parameters rather than the fixed values their
-// caller passes so that wait can be driven directly at test speed.
+// supervise waits for a started child, killing it past timeout. A wait rescued by delay reports the
+// completed run; errTimeout means the cap ended it. cancel is required: os/exec enforces WaitDelay for
+// a child that never exits only once its context is cancelled. Parameters allow testing at speed.
 func supervise(cmd *exec.Cmd, cancel context.CancelFunc, timeout, delay time.Duration) error {
 	cmd.WaitDelay = delay
 	done := make(chan error, 1)
@@ -359,21 +256,13 @@ func supervise(cmd *exec.Cmd, cancel context.CancelFunc, timeout, delay time.Dur
 
 	select {
 	case err := <-done:
-		// A WaitDelay expiry is not a failure to observe the child: its status
-		// was recorded on ProcessState before Wait began waiting on the pipes
-		// a descendant of the child was still holding open. The caller reads
-		// that status, so an expiry is reported as the completed run it is.
+		// ProcessState was recorded before Wait blocked on pipes a descendant held open.
 		if errors.Is(err, exec.ErrWaitDelay) {
 			return nil
 		}
 		return err
 	case <-time.After(timeout):
-		// Give the signal a moment to flush the goroutine dump so the failure
-		// names the blocked call, then cancel: cancellation is what arms the
-		// delay, and os/exec's own watcher kills the child if it outlives the
-		// signal. Waiting on done afterwards is bounded by delay for every
-		// state the child can be in -- running, already reaped, or reaped with
-		// a descendant holding its pipes -- so a timeout always concludes.
+		// Let the goroutine dump flush, then cancel, which arms delay and kills a surviving child.
 		_ = cmd.Process.Signal(syscall.SIGQUIT)
 		select {
 		case <-done:
@@ -385,15 +274,10 @@ func supervise(cmd *exec.Cmd, cancel context.CancelFunc, timeout, delay time.Dur
 	}
 }
 
-// missingBinary matches the exec error Go reports when a command resolves no
-// executable, in either platform's spelling.
+// missingBinary matches Go's exec error for an unresolved command on either platform.
 var missingBinary = regexp.MustCompile(`exec: "([^"]+)": executable file not found in [$%]PATH%?`)
 
-// reportUndeclaredBinaries turns a scenario's reliance on an ambient binary into
-// an immediate failure. The suite's PATH is scrubbed, so this message means the
-// command reached for an external binary the scenario never declared: on a host
-// that happens to have it installed the scenario would instead capture that
-// host's answer, and the golden would only reproduce where it was recorded.
+// reportUndeclaredBinaries fails a scenario that reached for an ambient binary it never stubbed.
 func reportUndeclaredBinaries(t testing.TB, combined string) {
 	t.Helper()
 	seen := map[string]bool{}

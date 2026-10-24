@@ -10,10 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// writeDockerLoginCaptureStub points ERUN_DOCKER_BIN at a script that records
-// the argv it was invoked with and whatever it received on stdin, so a test
-// can assert exactly what `docker login` was told without a real docker
-// daemon or a live registry.
+// writeDockerLoginCaptureStub records the stub docker's argv and stdin.
 func writeDockerLoginCaptureStub(t *testing.T, argsPath, stdinPath string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -27,11 +24,6 @@ func writeDockerLoginCaptureStub(t *testing.T, argsPath, stdinPath string) {
 	t.Setenv("ERUN_DOCKER_BIN", path)
 }
 
-// TestHostedRegistryDockerLoginFailsClearlyWithoutConfiguredAlias asserts the
-// negative case this issue is about: with no erun cloud provider alias
-// configured, no credential can be obtained at all, and the failure must be a
-// clear, immediate error rather than an interactive `docker login` left
-// waiting on a password nobody can supply.
 func TestHostedRegistryDockerLoginFailsClearlyWithoutConfiguredAlias(t *testing.T) {
 	t.Setenv("ERUN_DOCKER_BIN", failingBinaryPath(t))
 	store := erunTestCloudStore{}
@@ -45,11 +37,6 @@ func TestHostedRegistryDockerLoginFailsClearlyWithoutConfiguredAlias(t *testing.
 	}
 }
 
-// TestHostedRegistryDockerLoginUsesBearerTokenAsPassword asserts the positive
-// case: the intended caller — one with a configured, authenticated erun cloud
-// provider alias — succeeds, and the credential erun's own docs say to use
-// (the tenant's erun-api bearer token) is what actually reaches `docker
-// login`'s password, over stdin rather than argv.
 func TestHostedRegistryDockerLoginUsesBearerTokenAsPassword(t *testing.T) {
 	dir := t.TempDir()
 	argsPath := dir + "/args.txt"
@@ -86,10 +73,6 @@ func TestHostedRegistryDockerLoginUsesBearerTokenAsPassword(t *testing.T) {
 	}
 }
 
-// TestDockerRegistryLoginWithHostedRegistryFallsThroughForOtherRegistries
-// proves the hosted-registry branch is scoped to registry.erunpaas.com only:
-// a login for any other registry must never touch the erun cloud provider
-// store — it falls through to DockerRegistryLogin exactly as before.
 func TestDockerRegistryLoginWithHostedRegistryFallsThroughForOtherRegistries(t *testing.T) {
 	dir := t.TempDir()
 	argsPath := dir + "/args.txt"
@@ -98,8 +81,7 @@ func TestDockerRegistryLoginWithHostedRegistryFallsThroughForOtherRegistries(t *
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
 
-	// An empty store would fail ResolveERunPlatformAlias immediately, so a
-	// nil error here proves the hosted branch was never taken.
+	// An empty store fails ResolveERunPlatformAlias, so nil proves the hosted branch was skipped.
 	store := erunTestCloudStore{}
 	login := DockerRegistryLoginWithHostedRegistry(&store, cloud.CloudDependencies{})
 	if err := login("some-other-registry.example.com", strings.NewReader("whatever-password"), os.Stdout, os.Stderr); err != nil {

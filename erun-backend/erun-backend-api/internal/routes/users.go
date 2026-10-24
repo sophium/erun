@@ -21,14 +21,8 @@ type UserRoutes struct {
 	users UserEnrollmentRepository
 }
 
-// enrollUserRequest is the enrollment body. Issuer/Subject link the external
-// identity the enrollee signs in with; omitting them enrolls a username with
-// no external identity yet (it cannot sign in until one is linked, which this
-// API does not yet support outside creation). TenantID targets another
-// tenant explicitly and is honored only for an operations-scoped caller.
-// RoleIDs grants those roles at enrollment instead of the zero-role default;
-// omit it to enroll with no roles (the tenant's first user still gets
-// ReadAll/WriteAll regardless, so a new tenant is never unusable).
+// enrollUserRequest: omitting Issuer/Subject enrolls a username that cannot sign in yet; TenantID is honored
+// only for an operations-scoped caller; a tenant's first user gets ReadAll/WriteAll regardless of RoleIDs.
 type enrollUserRequest struct {
 	Username string   `json:"username"`
 	Issuer   string   `json:"issuer,omitempty"`
@@ -37,12 +31,7 @@ type enrollUserRequest struct {
 	RoleIDs  []string `json:"roleIds,omitempty"`
 }
 
-// enrollUserResponse is createUser's response body: the enrolled (or
-// already-enrolled) user's model shape plus AlreadyEnrolled, which is true
-// only for the no-op re-enrollment case (see UserRepository.Create's doc) —
-// so a caller can tell "brand new, exactly as requested" apart from
-// "already existed, here is what's actually on file" instead of inferring it
-// from the HTTP status alone.
+// enrollUserResponse.AlreadyEnrolled is true only for a no-op re-enrollment.
 type enrollUserResponse struct {
 	model.User
 	AlreadyEnrolled bool `json:"alreadyEnrolled,omitempty"`
@@ -54,15 +43,9 @@ func RegisterUserRoutes(register ProtectedRouteRegistrar, users UserEnrollmentRe
 	register(http.MethodGet, "/v1/users", http.HandlerFunc(routes.listUsers))
 }
 
-// errCrossTenantScopeForbidden is shared across every resolveTargetTenant
-// caller (users, invites, tenant-issuers, environments, ...) rather than
-// restated per resource, so a client sees the same 403 shape everywhere this
-// boundary applies.
 var errCrossTenantScopeForbidden = errors.New("targeting another tenant requires an operations tenant")
 
-// resolveTargetTenant is the operations-scoped cross-tenant precedent from
-// tenants.go/tenant_quotas.go: a caller acts on their own resolved tenant by
-// default, and only an operations tenant may explicitly name a different one.
+// resolveTargetTenant defaults to the caller's tenant; only an operations tenant may name another.
 func resolveTargetTenant(securityContext security.Context, requested string) (string, error) {
 	requested = strings.TrimSpace(requested)
 	if requested == "" || requested == securityContext.TenantID {
@@ -77,9 +60,6 @@ func resolveTargetTenant(securityContext security.Context, requested string) (st
 func (r UserRoutes) createUser(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		// Protected routes always run behind authentication middleware that stamps
-		// the security context, so a missing context is an internal wiring error,
-		// not a client fault.
 		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
@@ -100,9 +80,7 @@ func (r UserRoutes) createUser(w http.ResponseWriter, req *http.Request) {
 		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
-	// TenantID is only passed through when it differs from the caller's own
-	// session tenant; the common case relies on the tenant_id column default,
-	// matching every other tenant-owned Create in this codebase.
+	// Empty for the caller's own tenant, which the tenant_id column default covers.
 	overrideTenantID := ""
 	if targetTenantID != securityContext.TenantID {
 		overrideTenantID = targetTenantID
@@ -119,10 +97,7 @@ func (r UserRoutes) createUser(w http.ResponseWriter, req *http.Request) {
 		writeCreateUserError(w, req, err)
 		return
 	}
-	// Re-enrolling an identity already enrolled in the target tenant is a
-	// no-op success (200, the existing user), not a 201 — see
-	// UserRepository.Create's doc for why this is treated as satisfied
-	// intent rather than a conflict.
+	// Re-enrolling an already-enrolled identity is a 200 no-op, not a conflict.
 	status := http.StatusCreated
 	if alreadyEnrolled {
 		status = http.StatusOK
@@ -130,9 +105,6 @@ func (r UserRoutes) createUser(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, status, enrollUserResponse{User: created, AlreadyEnrolled: alreadyEnrolled})
 }
 
-// writeCreateUserError maps Create's discriminated conflicts to their
-// documented codes/messages instead of letting the route fall through to the
-// generic conflict response for a cause it actually knows.
 func writeCreateUserError(w http.ResponseWriter, req *http.Request, err error) {
 	switch {
 	case errors.Is(err, repository.ErrUsernameConflict):

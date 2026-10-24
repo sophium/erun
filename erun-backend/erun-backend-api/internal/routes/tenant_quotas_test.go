@@ -96,11 +96,6 @@ func TestSetTenantQuotaRejectsInvalid(t *testing.T) {
 	}
 }
 
-// stubTenantQuotaReader is a pointer type so a test can inspect what Get saw
-// after the route runs: lastGetTenantID captures the security context's
-// TenantID Get saw (proving resolveTargetTenant/scopedContextForTenant
-// substituted the right tenant), and getCalls proves a refused cross-tenant
-// request never reached the reader at all.
 type stubTenantQuotaReader struct {
 	quota           model.TenantQuota
 	err             error
@@ -116,8 +111,6 @@ func (r *stubTenantQuotaReader) Get(ctx context.Context) (model.TenantQuota, err
 	return r.quota, r.err
 }
 
-// getQuotaAs issues GET /v1/quota (with an optional ?tenantId) under an
-// explicit caller identity.
 func getQuotaAs(t *testing.T, tenantType model.TenantType, tenantID string, reader *stubTenantQuotaReader, requestedTenantID string) *httptest.ResponseRecorder {
 	t.Helper()
 	url := "/v1/quota"
@@ -135,9 +128,6 @@ func getQuotaAs(t *testing.T, tenantType model.TenantType, tenantID string, read
 	return rec
 }
 
-// TestGetQuotaReturnsTheCallersOwnRow: an Operator can see their own tenant's
-// quota — the same read admission itself uses — without an operations-scoped
-// token.
 func TestGetQuotaReturnsTheCallersOwnRow(t *testing.T) {
 	want := model.TenantQuota{
 		MaxEnvironments: 10, MaxCPUMillicores: 8000, MaxMemoryMB: 17832, MaxStorageGB: 72,
@@ -172,8 +162,6 @@ func TestGetQuotaRejectsTenantScopeForNonOperationsCaller(t *testing.T) {
 	}
 }
 
-// TestGetQuotaTreatsCallersOwnTenantIDAsANoOp mirrors the same case in the
-// environments listing tests: naming your own tenant explicitly is not a 403.
 func TestGetQuotaTreatsCallersOwnTenantIDAsANoOp(t *testing.T) {
 	reader := &stubTenantQuotaReader{}
 	rec := getQuotaAs(t, model.TenantTypeCompany, "tenant-x", reader, "tenant-x")

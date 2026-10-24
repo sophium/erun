@@ -67,29 +67,21 @@ func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpe
 		DescribeError: func(err error) string { return shared.McpEdgeError(target, err).Error() },
 		LocalTools: []mcp.MCPLocalTool{
 			sshdSyncLocalTool(resolveOpen, params),
-			// Deprecated alias for one release, so an upgrade does not break a
-			// client pinned to the old name.
+			// Deprecated alias for one release.
 			deprecatedAlias(sshdSyncLocalTool(resolveOpen, params), "workspace_sync", "sshd_sync"),
 			inputsUploadLocalTool(resolveOpen, params),
 		},
 	})
 }
 
-// deprecatedAlias returns tool under a retired name, with a description that
-// says so. The rule on this surface is that a tool's name equals its CLI path
-// with "_" for spaces, and this one drifted from `erun sshd sync`; the alias
-// keeps the retired name callable for one release.
+// deprecatedAlias keeps a retired tool name callable, saying so in its description.
 func deprecatedAlias(tool mcp.MCPLocalTool, retired, replacement string) mcp.MCPLocalTool {
 	tool.Name = retired
 	tool.Description = "Deprecated: use " + replacement + ". Retained for one release; this name will be removed."
 	return tool
 }
 
-// inputsUploadLocalTool exposes erun inputs upload over the same MCP an
-// orchestrator already drives the environment through, mirroring
-// workspaceSyncLocalTool: it is served here rather than by the edge because
-// the source file is on this host, and the edge runs in the pod with no path
-// back to it.
+// inputsUploadLocalTool is host-served: the source file is on this host, out of the edge's reach.
 func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params sharedpkg.OpenParams) mcp.MCPLocalTool {
 	return mcp.MCPLocalTool{
 		Name: "inputs_upload",
@@ -130,11 +122,8 @@ func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params sharedpkg.Ope
 	}
 }
 
-// sshdSyncLocalTool exposes the host mirror's refresh over the same MCP an
-// orchestrator already drives the environment through. It is served here rather
-// than by the edge because the mirror is on this host: the edge runs in the pod
-// and has nothing to write to. The environment is resolved per call, so a mirror
-// enabled mid-session is picked up without restarting the session.
+// sshdSyncLocalTool is host-served because the mirror is on this host; the env
+// resolves per call so a mid-session enable is picked up.
 func sshdSyncLocalTool(resolveOpen shared.OpenResolver, params sharedpkg.OpenParams) mcp.MCPLocalTool {
 	return mcp.MCPLocalTool{
 		Name: "sshd_sync",

@@ -19,11 +19,7 @@ type fakeRawOutput struct {
 	Stderr string `json:"stderr"`
 }
 
-// TestLoadAPILogFromMCPTargetsAPIDeployment pins the MCP `raw` fallback (used
-// when the desktop has no local Kubernetes context) to the erun-backend-api
-// chart's own Deployment/Service name, not the runtime
-// "${ERUN_TENANT:-erun}-devops" Deployment, which never runs an
-// erun-backend-api container.
+// The MCP fallback must target the erun-backend-api Deployment, not the runtime's.
 func TestLoadAPILogFromMCPTargetsAPIDeployment(t *testing.T) {
 	var capturedCommand []string
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {

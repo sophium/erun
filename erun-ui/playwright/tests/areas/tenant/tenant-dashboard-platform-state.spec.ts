@@ -9,14 +9,8 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// tenant-dashboard-platform-state.spec.ts covers the dashboard's
-// platform-readiness states (not-connected, choose-alias, not-signed-in,
-// not-enrolled, no-permission), each rendering its own distinct next action
-// instead of one generic "sign in again" sentence. See
-// tenant-dashboard-refresh.spec.ts for why this stages a throwaway env and
-// stubs the RPC layer rather than using the seeded baseline or a real
-// backend — the seeded baseline's only cloud alias is AWS-typed, which the
-// dashboard must never use for the platform.
+// Each platform-readiness state renders its own next action. The seeded alias
+// is AWS-typed, which the platform must never use, so the RPC is stubbed.
 
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
@@ -29,10 +23,7 @@ interface StubbedResponse {
   error?: string;
 }
 
-// stubRPC intercepts every named method on /__erun_invoke, returning
-// whatever the caller's map holds for it at call time — a mutable holder so
-// a test can change what a later call returns (e.g. after a stubbed sign-in
-// "succeeds").
+// stubRPC answers each method from a mutable map read at call time.
 function stubRPC(
   page: import('@playwright/test').Page,
   responses: Record<string, StubbedResponse>,
@@ -75,14 +66,12 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
       await app.sidebar.openTenantDashboard(SEED_TENANT);
       await expect(app.tenantDashboard.notConnectedHeading()).toBeVisible();
       await expect(app.tenantDashboard.connectApiUrlInput()).toBeVisible();
-      // The default must be the platform's own apex host regardless of
-      // tenant name, never a host interpolated from SEED_TENANT ('pw').
+      // The default is the platform apex host, never derived from the tenant name.
       await expect(app.tenantDashboard.connectApiUrlInput()).toHaveValue(
         'https://api.erunpaas.com',
       );
       await expect(app.tenantDashboard.tabs()).toHaveCount(0);
-      // Every tab is replaced, so the body may not name some of them as the
-      // ones that fail -- the tabs it left out read as still working.
+      // Every tab is replaced, so the body must not single out some as failing.
       await expect(app.tenantDashboard.notConnectedBody()).toHaveText(
         "This tenant isn't connected to a hosted erun platform yet, so none of this dashboard's tabs can load.",
       );
@@ -116,9 +105,7 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
       await expect(app.tenantDashboard.connectErrorAlert()).toContainText(
         'https://api.erunpaas.com',
       );
-      // The failure stays on the panel with the field still editable — no
-      // dead end, and the recovery (retype the named default) is still one
-      // click away.
+      // The field stays editable after a failure, so retrying is one click away.
       await expect(app.tenantDashboard.connectApiUrlInput()).toBeEditable();
       await expect(app.tenantDashboard.notConnectedHeading()).toBeVisible();
     } finally {
@@ -176,8 +163,7 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
       );
       await expect(app.tenantDashboard.tabs()).toHaveCount(0);
 
-      // A successful sign-in must recover the dashboard on its own — no
-      // Refresh click needed ("Smooth, no dead ends").
+      // A successful sign-in must recover the dashboard without a Refresh click.
       stub.respondWith('LoginCloudProvider', {
         data: {
           alias: 'erun+api.frs-prod.services.erunpaas.com@erun',
@@ -236,11 +222,8 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
     }
   });
 
-  // A not-yet-enrolled caller's self-enroll
-  // attempt is refused by the platform's own auth middleware -- the
-  // expected outcome EnrollERunPlatformUser documents -- and must render as
-  // the administrator hand-off already sitting on this card, not the raw
-  // wire error.
+  // The platform refuses self-enroll for a non-enrolled caller; that must render
+  // as the administrator hand-off, not the raw error.
   test('the self-enroll refusal renders the administrator hand-off, not the raw error', async ({
     app,
     page,
@@ -276,8 +259,6 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
       for (const leak of ['http 401', 'http 403', '/v1/users', 'NOT_ENROLLED']) {
         await expect(app.tenantDashboard.enrollErrorAlert()).not.toContainText(leak);
       }
-      // The message names an action, and the two actions it names are
-      // still on the card -- no dead end.
       await expect(app.tenantDashboard.enrollAdminCommand()).toBeVisible();
       await expect(page.getByRole('button', { name: 'Request an invitation' })).toBeVisible();
     } finally {
@@ -309,22 +290,8 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
     }
   });
 
-  // A local tenant whose
-  // erun-type alias reaches a *different* platform tenant. Resolution
-  // succeeds, whoami answers — for another tenant — and every panel under the
-  // heading would be that tenant's reviews, merge queue, users and audit,
-  // with this local tenant's name on the heading above them and live write
-  // controls (create a review, advance the merge queue, approve an
-  // invitation) acting on them. Nothing in either config links the two
-  // namespaces, so the platform's own name for the tenant behind the bearer
-  // is the only thing that can say whether the rows are this tenant's.
-  //
-  // The stub carries rows on purpose — a reviews/tabs payload alongside
-  // platformState is the disagreement the report describes, and the surface
-  // must render none of it. Rendering the rows *and* naming the platform
-  // tenant is the neighbouring state that already has coverage
-  // (tenant-dashboard-platform-tenant.spec.ts) and is not what makes the
-  // other tenant's work invisible to the operator who opened this dashboard.
+  // Only the platform's own tenant name can tell whether the rows are this
+  // tenant's; on mismatch none of the stubbed rows may render.
   test('tenant-mismatch names whose rows these are and renders none of them', async ({
     app,
     page,
@@ -353,20 +320,12 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
       await app.sidebar.openTenantDashboard(SEED_TENANT);
 
       await expect(app.tenantDashboard.tenantMismatchHeading()).toBeVisible();
-      // Both names, so the operator can tell which tenant they are actually
-      // looking at and which one they meant.
       await expect(app.tenantDashboard.tenantMismatchBody()).toContainText('erun');
       await expect(app.tenantDashboard.tenantMismatchBody()).toContainText(SEED_TENANT);
-      // None of the other tenant's rows: the tab strip and every panel are
-      // replaced, exactly as for the other readiness states, so the refusal
-      // is not a disclosure sitting over a live table.
+      // The tab strip and panels are replaced, so no other tenant's rows show.
       await expect(app.tenantDashboard.tabs()).toHaveCount(0);
       await expect(page.getByText('another tenant review')).toHaveCount(0);
-      // The header above still names the platform tenant, so the mismatch is
-      // stated whichever state the body is in.
       await expect(app.tenantDashboard.platformTenantLine()).toContainText('erun');
-      // Not a dead end: the card offers the route to the platform that
-      // serves this local tenant.
       await expect(app.tenantDashboard.connectApiUrlInput()).toBeVisible();
       await expect(app.tenantDashboard.connectButton()).toBeVisible();
     } finally {
@@ -374,10 +333,6 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
     }
   });
 
-  // The sidebar's own cloud-alias "Log in" control
-  // (Sidebar.PrimaryCloudAliasControl.tsx, dispatching loginPrimaryCloudProvider
-  // directly, no dashboard recovery attached) is unaffected by the dashboard's
-  // platform resolution for the seeded baseline's AWS alias.
   test("the sidebar's own cloud-alias login button is unchanged", async ({ app }) => {
     await app.sidebar.openCloudAliasPopover('pw-aws');
     await expect(app.sidebar.cloudAliasPopoverButton('Log in')).toBeVisible();

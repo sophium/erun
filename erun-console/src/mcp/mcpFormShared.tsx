@@ -2,8 +2,7 @@ import * as React from 'react';
 
 import type { McpToolCallState } from './controller';
 
-// Shared between DriveToolForm (MCPAccessPanel.tsx) and OperateToolForm --
-// split out to avoid those two forms importing from each other.
+// Split out so DriveToolForm and OperateToolForm need not import each other.
 export function DriveToolResult({ state }: { state: McpToolCallState }): React.ReactElement | null {
   if (state.status === 'ready') {
     return (

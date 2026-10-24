@@ -15,10 +15,8 @@ type diffTreeBuildNode struct {
 	Children  []diffTreeBuildNode
 }
 
-// reorderFilesByTree aligns Files to the tree's file-leaf order so the
-// desktop's two panels agree: its changed-files list is driven by Tree and its
-// diff panel by Files, which otherwise diverge for untracked files (parsing
-// appends them last, out of tree order).
+// reorderFilesByTree aligns Files to the tree's leaf order; parsing appends untracked files last,
+// which would make the desktop's file list and diff panel disagree.
 func reorderFilesByTree(files []DiffFile, tree []DiffTreeNode) []DiffFile {
 	if len(files) <= 1 {
 		return files

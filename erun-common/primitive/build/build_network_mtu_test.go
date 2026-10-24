@@ -18,8 +18,7 @@ func stubNetRoots(t *testing.T, iface string, mtu string) (procRoot, sysRoot str
 	if err := os.MkdirAll(filepath.Join(sysRoot, "class", "net", iface), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// A decoy non-default route first, so a reader that took the first row
-	// rather than the default one would be caught.
+	// A decoy non-default route first catches a reader that takes the first row.
 	table := "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n" +
 		"decoy0\t000011AC\t00000000\t0001\t0\t0\t0\t0000FFFF\t0\t0\t0\n" +
 		iface + "\t00000000\t0128000A\t0003\t0\t0\t0\t00000000\t0\t0\t0\n"
@@ -69,9 +68,7 @@ func TestParsePositiveMTURejectsImplausibleValues(t *testing.T) {
 	}
 }
 
-// The mismatch is only claimed when both numbers were genuinely read and the
-// bridge is the larger. Every other combination has to stay silent, because a
-// wrong confident diagnosis is worse than none (root AGENTS.md).
+// A wrong confident diagnosis is worse than none: only a measured larger bridge MTU fires.
 func TestDockerBridgeMTUMismatchOnlyFiresOnAMeasuredMismatch(t *testing.T) {
 	inPod := func(string) string { return "10.43.0.1" }
 	offPod := func(string) string { return "" }
@@ -134,9 +131,7 @@ func TestBridgeMTUDiagnosisFallsBackWhenTheEnvironmentIsUnknown(t *testing.T) {
 	}
 }
 
-// A stall is necessary but not sufficient, and so is the mismatch. Only their
-// coincidence is evidence, so the marker set must not drag in a server's own
-// answer -- a 404 on a pinned URL is a real defect in the build.
+// A 404 on a pinned URL is a real build defect, not a network stall marker.
 func TestDockerBuildOutputShowsNetworkStall(t *testing.T) {
 	stalls := []string{
 		"curl: (35) Recv failure: Connection reset by peer",

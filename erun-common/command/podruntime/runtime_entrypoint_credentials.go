@@ -25,11 +25,8 @@ func describeRuntimeRegistryCredential(boot runtimeBoot) string {
 	return "add the registries " + boot.registryCredentialPath + " carries to " + boot.dockerConfigPath() + " where it has none"
 }
 
-// syncRuntimeRegistryCredential merges the docker config `erun init` minted into
-// a Secret (mounted by the chart) into ~/.docker/config.json, adding only the
-// registry hosts the pod does not already carry: the pod's own `docker login`, or
-// a gh-driven push recovery, is more current than what erun resolved on the
-// operator's host at init time.
+// syncRuntimeRegistryCredential adds only registry hosts the pod lacks: the pod's own
+// login is more current than what init resolved on the host.
 func syncRuntimeRegistryCredential(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	provisioned, err := readRuntimeJSONObject(boot.registryCredentialPath)
 	if err != nil {
@@ -67,8 +64,7 @@ func syncRuntimeRegistryCredential(_ core.Context, boot runtimeBoot, _ *runtimeS
 	return writeRuntimeJSON(dest, existing)
 }
 
-// readRuntimeJSONObject reads a JSON object; a file that is not one reads as
-// empty, so a corrupt config is replaced rather than blocking the merge.
+// A file that is not a JSON object reads as empty so a corrupt config is replaced.
 func readRuntimeJSONObject(path string) (map[string]json.RawMessage, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -116,13 +112,8 @@ func describeRuntimePlatformAlias(boot runtimeBoot) string {
 	return "add the platform alias in " + boot.platformAliasDir + " to " + config.RuntimeRootConfigPath(boot.configHome()) + " unless it already carries it"
 }
 
-// syncRuntimePlatformAlias seeds the pod's own erun cloud config from the Secret
-// `erun init` minted for the environment's platform identity, so an unattended
-// environment can call the platform API without an interactive login it could
-// never complete. The alias joins the root config's cloudproviders list through
-// the config model, so it can never open a second cloudproviders key beside the
-// infrastructure provider's. An alias, or a token file, the pod already carries
-// is kept.
+// syncRuntimePlatformAlias seeds the platform alias `erun init` minted so an unattended
+// pod can call the platform API. Existing aliases and token files are kept.
 func syncRuntimePlatformAlias(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	providers, err := readRuntimePlatformAliasEntry(boot.platformAliasEntryPath())
 	if err != nil {
@@ -161,10 +152,7 @@ func readRuntimePlatformAliasEntry(path string) ([]config.CloudProviderConfig, e
 	return providers, nil
 }
 
-// seedRuntimePlatformAliasToken writes the alias's refresh token where the file
-// secret store resolves its ref. The file name was computed by `erun init` with
-// the store's own function and ships beside the token, so nothing here re-derives
-// it.
+// The token file name ships from `erun init`, so nothing here re-derives it.
 func seedRuntimePlatformAliasToken(boot runtimeBoot, configHome string) error {
 	nameData, nameOK := readFileIfReadable(filepath.Join(boot.platformAliasDir, deploy.PlatformAliasSecretFileKey))
 	token, tokenOK := readFileIfReadable(filepath.Join(boot.platformAliasDir, deploy.PlatformAliasSecretTokenKey))

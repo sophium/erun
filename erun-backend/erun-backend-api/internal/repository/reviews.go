@@ -18,13 +18,8 @@ const (
 	qualifiedReviewColumns = `r.review_id, r.tenant_id, r.author_user_id, r.repository, r.name, r.target_branch, r.source_branch, r.issue_ref, r.status, r.last_failed_build_id, r.last_ready_build_id, r.last_merged_build_id, r.created_at, r.updated_at`
 )
 
-// ReviewFilter composes GET /v1/reviews discovery filters. Every field is
-// optional and AND-ed together; ReviewerUserID is the only one that needs a
-// join, since reviewers live in a separate table.
+// ReviewFilter composes GET /v1/reviews discovery filters, AND-ed together.
 type ReviewFilter struct {
-	// Repository narrows discovery to one repository's reviews. It is not
-	// defaulted anywhere: a listing is how a caller finds work across every
-	// repository their tenant serves.
 	Repository     string
 	TargetBranch   string
 	SourceBranch   string
@@ -33,12 +28,8 @@ type ReviewFilter struct {
 	ReviewerUserID string
 }
 
-// scopedToRepository appends "this query is about repository X" to a condition
-// list, or leaves it alone for an empty repository: a caller that named none
-// is asking about every repository's queue, which is what a target branch
-// alone has always meant. Reviews created before the platform recorded a
-// repository hold NULL and so appear only in that unfiltered answer, rather
-// than being guessed at as belonging to one.
+// scopedToRepository filters by repository unless it is empty. Reviews with a
+// NULL repository appear only in unfiltered results.
 func scopedToRepository(conditions []string, args []any, column, repository string) ([]string, []any) {
 	if strings.TrimSpace(repository) == "" {
 		return conditions, args
@@ -58,10 +49,7 @@ func (r *ReviewRepository) Create(ctx context.Context, review model.Review) (mod
 			Column("repository", "name", "target_branch", "source_branch", "issue_ref", "status").
 			Returning("*").
 			Scan(ctx)
-		// Catches both the tenant/name uniqueness contract and the one-live-
-		// review-per-source/target-branch partial unique index: a second live
-		// proposal of the same change is a conflict with the review already
-		// live, not a server error.
+		// Covers both the name index and the one-live-review-per-branch index.
 		if isUniqueViolation(err) {
 			return ErrConflict
 		}
@@ -83,10 +71,8 @@ func (r *ReviewRepository) Get(ctx context.Context, reviewID string) (model.Revi
 	return review, err
 }
 
-// List returns the caller's tenant's reviews matching filter. Scoped
-// explicitly by tenant_id from the security context rather than left to RLS:
-// erun_operations' policy is unconditional, so an OPERATIONS caller's empty
-// filter would otherwise read every tenant's reviews.
+// List returns the caller's tenant's reviews, scoped explicitly by tenant_id
+// because erun_operations' RLS policy is unconditional.
 func (r *ReviewRepository) List(ctx context.Context, filter ReviewFilter) ([]model.Review, error) {
 	var reviews []model.Review
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -130,16 +116,9 @@ func (r *ReviewRepository) List(ctx context.Context, filter ReviewFilter) ([]mod
 	return reviews, err
 }
 
-// ListMergeQueue returns the caller's tenant's merge queue, optionally
-// narrowed to one repository and one target branch. Scoped explicitly by
-// tenant_id from the security context rather than left to RLS:
-// erun_operations' policy is unconditional, so an OPERATIONS caller's empty
-// targetBranch would otherwise read every tenant's merge queue.
-//
-// An empty repository narrows nothing, so the queue it answers spans every
-// repository the tenant serves; a caller that names one gets that
-// repository's queue, which is what separates two repositories that both
-// propose into main.
+// ListMergeQueue returns the caller's tenant's merge queue, scoped explicitly
+// by tenant_id because erun_operations' RLS policy is unconditional. An empty
+// repository spans every repository.
 func (r *ReviewRepository) ListMergeQueue(ctx context.Context, repository, targetBranch string) ([]model.Review, error) {
 	var reviews []model.Review
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -186,11 +165,8 @@ func (r *ReviewRepository) Update(ctx context.Context, review model.Review) (mod
 	return updated, err
 }
 
-// FindNextMergeQueueReview returns the head of the queue waiting to merge
-// into targetBranch in repository — the one a promotion would take. It is
-// scoped by repository because two repositories a tenant serves may each have
-// a queue for the same target branch, and promoting the wrong one's head is
-// what gates a branch that does not exist in the checkout the gate runs in.
+// FindNextMergeQueueReview returns the head of repository's queue into
+// targetBranch; two repositories may queue into the same branch name.
 func (r *ReviewRepository) FindNextMergeQueueReview(ctx context.Context, repository, targetBranch string) (model.Review, error) {
 	var review model.Review
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -213,10 +189,7 @@ func (r *ReviewRepository) FindNextMergeQueueReview(ctx context.Context, reposit
 	return review, err
 }
 
-// FindActiveMergeReview returns the review currently holding MERGE on
-// repository's targetBranch. Scoped by repository for the same reason the
-// queue is: one repository's merge in flight says nothing about whether
-// another's may start.
+// FindActiveMergeReview returns the review holding MERGE on repository's targetBranch.
 func (r *ReviewRepository) FindActiveMergeReview(ctx context.Context, repository, targetBranch string) (model.Review, error) {
 	var review model.Review
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -234,18 +207,9 @@ func (r *ReviewRepository) FindActiveMergeReview(ctx context.Context, repository
 	return review, err
 }
 
-// FindLastMergedReview returns the most recently merged review for
-// targetBranch in repository — the platform's own record of what the branch's
-// tip was the last time a queue-driven merge landed on it. Scoped by
-// repository so one repository's landing is not read as another's, which
-// would refuse every merge whose history never passed through it. ErrNotFound
-// means no review has ever merged onto this branch through the queue yet.
-//
-// A MERGED review with no last_merged_build_id is skipped: that is a review
-// reconciled against the branch's history rather than merged through the
-// queue, so it records no commit this could anchor on, and returning it would
-// make gatedTargetTip resolve an empty build id — failing every subsequent
-// queue-driven merge on the branch.
+// FindLastMergedReview returns the latest queue-merged review for targetBranch
+// in repository. Reviews with no last_merged_build_id were reconciled, not
+// merged, and are skipped since they anchor no commit.
 func (r *ReviewRepository) FindLastMergedReview(ctx context.Context, repository, targetBranch string) (model.Review, error) {
 	var review model.Review
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -264,32 +228,17 @@ func (r *ReviewRepository) FindLastMergedReview(ctx context.Context, repository,
 	return review, err
 }
 
-// MergeQueueRepositories is what a target branch's waiting queue is made of,
-// read before an unfiltered promotion. Named is the distinct repositories its
-// READY reviews record; Unrecorded is the reviews that record none — created
-// before the platform recorded a repository — in queue order.
-//
-// The two are reported apart because a review with no repository recorded is
-// not a repository of its own: it is the absence of an answer, and a queue
-// holding one named repository beside several of them is one repository's
-// queue, not several (see AGENTS.md "Merge Queue"). They are still named
-// individually, though, because a queue that is genuinely several repositories'
-// has no place to put them and an operator has to be told which rows they are.
+// MergeQueueRepositories splits a waiting queue into named repositories and
+// reviews with no recorded repository, which do not count as a repository.
 type MergeQueueRepositories struct {
 	Named []string
-	// Unrecorded holds the review ids, in queue order, of the waiting reviews
-	// that record no repository.
+	// Unrecorded holds those reviews' ids in queue order.
 	Unrecorded []string
 }
 
-// QueuedRepositories describes what targetBranch's queue is made of, in queue
-// order for the unrecorded rows. An unfiltered queue holding more than one
-// named repository is not one queue, and promoting its head would gate a branch
-// in a repository the caller never named; the service reads this before such a
-// promotion.
-//
-// It is scoped to the caller's tenant explicitly, like ListMergeQueue and for
-// the same reason: erun_operations' policy is unconditional.
+// QueuedRepositories describes targetBranch's queue so the service can refuse
+// an unfiltered promotion spanning several repositories. Tenant-scoped
+// explicitly, like ListMergeQueue.
 func (r *ReviewRepository) QueuedRepositories(ctx context.Context, targetBranch string) (MergeQueueRepositories, error) {
 	var rows []struct {
 		Repository string `bun:"repository"`

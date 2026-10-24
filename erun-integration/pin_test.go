@@ -16,13 +16,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// One erun version is recorded in several places and they only work when they
-// agree. These scenarios pin the contract of the motion that realigns them:
-// which references it recognises, which it leaves alone, and that it never
-// writes on a dry run.
-
-// seedDriftedPins writes the shape a real tenant repo has, deliberately pinned
-// to three different versions — the reported drift this command exists for.
+// seedDriftedPins pins a tenant repo to three different versions.
 func seedDriftedPins(t *testing.T, root, rootConfigDir string) {
 	t.Helper()
 	write := func(relative, body string) {
@@ -39,10 +33,8 @@ func seedDriftedPins(t *testing.T, root, rootConfigDir string) {
 	write("team-api/Chart.yaml", "apiVersion: v2\nname: team-api\nversion: 0.1.0\ndependencies:\n  - name: erun-backend-api\n    repository: oci://ghcr.io/sophium/charts\n    version: 1.0.106\n  - name: team-internal\n    repository: oci://ghcr.io/team/charts\n    version: 3.2.1\n")
 }
 
-// seedUnreachableRuntimeRegistry points the root config's registry lookup at a
-// closed port, so version discovery is deterministic and offline. An
-// unreachable registry means "could not verify", which is what lets an
-// explicit target still pin.
+// seedUnreachableRuntimeRegistry makes discovery offline; "could not verify" still lets
+// an explicit target pin.
 func seedUnreachableRuntimeRegistry(t *testing.T, rootConfigDir string) {
 	t.Helper()
 	rootConfigFile := filepath.Join(rootConfigDir, "config.yaml")
@@ -55,10 +47,7 @@ func seedUnreachableRuntimeRegistry(t *testing.T, rootConfigDir string) {
 	}
 }
 
-// seedDns01WebhookImageDrift writes the shape the reported issue hit: a
-// tenant's own terraform variables set the cluster-edge module's
-// dns01_webhook_image directly, pinned to an old erun release — the one
-// reference a repin left behind because nothing recognised it.
+// seedDns01WebhookImageDrift sets dns01_webhook_image directly in tenant terraform variables.
 func seedDns01WebhookImageDrift(t *testing.T, root, rootConfigDir string) {
 	t.Helper()
 	seedUnreachableRuntimeRegistry(t, rootConfigDir)
@@ -73,11 +62,7 @@ func seedDns01WebhookImageDrift(t *testing.T, root, rootConfigDir string) {
 	}
 }
 
-// A registry's tag list is not a release list: scratch tags live beside real
-// versions, and every entry `pin --list` enumerates is offered to an operator as
-// a pinnable version. The desktop picker maps this same list straight into its
-// select with no filter of its own, so a stray offered here is offered there
-// too. Asserting only that real versions are present cannot catch one.
+// Registry tags include scratch tags, and the desktop picker shows this list unfiltered.
 func assertNoStrayTagOffered(t *testing.T, combined string) {
 	t.Helper()
 	for _, line := range strings.Split(combined, "\n") {
@@ -141,11 +126,8 @@ func testPinHelp(t *testing.T) {
 }
 
 func testPinRefusesHostEnvironment(t *testing.T) {
-	// A host env has no pod and no runtime version at all, so pin must
-	// refuse it by name instead of resolving a plan with nothing to pin.
-	// The host env has a repopath, so resolvePinTarget runs before the
-	// host check and would otherwise reach the real registry for an
-	// explicit --version.
+	// The host check runs after resolvePinTarget, which would otherwise reach the real
+	// registry for an explicit --version.
 	setup := env.New(t)
 	fixture.SeedHostTenantEnv(t, setup, "team", "dev")
 	seedUnreachableRuntimeRegistry(t, filepath.Join(setup.ConfigHome, "erun"))
@@ -153,10 +135,6 @@ func testPinRefusesHostEnvironment(t *testing.T) {
 	golden.Equal(t, "pin/refuses_host_environment", normalize.Apply(result.Combined))
 }
 
-// A dry run resolves the whole plan — every site, old and new — and leaves
-// the tree exactly as it found it. A re-pin edits files across a repo, so
-// being able to see it first is the difference between a safe motion and a
-// leap.
 func testPinDryRunReportsEverySiteAndWritesNothing(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -174,10 +152,7 @@ func testPinDryRunReportsEverySiteAndWritesNothing(t *testing.T) {
 		"terraform-ref",
 		"helm-dependency",
 		"1.0.175",
-		// The environment's own runtime coordinate is not erun's to move
-		// here: team/dev records no runtimeimage, so a deploy of it installs
-		// the tenant's own team-devops image, and the plan says so rather
-		// than listing a runtime-version site the caller did not ask about.
+		// team/dev has no runtimeimage, so its runtime rides the tenant's own image.
 		"skipped: runtimeversion team/dev rides team-devops",
 	} {
 		if !strings.Contains(result.Combined, want) {
@@ -193,12 +168,7 @@ func testPinDryRunReportsEverySiteAndWritesNothing(t *testing.T) {
 	}
 }
 
-// The reported bug, half one: a sourceless runtime env (no
-// MountSource, no repopath at all — the shape the backend's provisioning
-// Jobs seed) has no local checkout of its own, and with no sibling
-// environment of the tenant checked out here either, pin must refuse
-// cleanly by naming the environment and the tenant rather than falling
-// back to guessing at the caller's unrelated working directory.
+// A sourceless runtime env with no tenant checkout here must refuse rather than use the cwd.
 func testPinRefusesASourcelessRuntimeEnvWithNoTenantCheckout(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "prod")
@@ -214,11 +184,7 @@ func testPinRefusesASourcelessRuntimeEnvWithNoTenantCheckout(t *testing.T) {
 	}
 }
 
-// The reported bug, half one continued: every environment of a
-// tenant shares one repo, so when a sibling environment ("dev", a
-// local-agent env) does have a checkout on this machine, the sourceless
-// runtime env's re-pin resolves to it — deliberately, not by falling back
-// to whatever the caller's cwd happens to be.
+// Every env of a tenant shares one repo, so a sibling's checkout is used.
 func testPinResolvesASourcelessRuntimeEnvsRootFromASiblingCheckout(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "frs", "dev")
@@ -239,11 +205,7 @@ func testPinResolvesASourcelessRuntimeEnvsRootFromASiblingCheckout(t *testing.T)
 	}
 }
 
-// The reported bug, half two: when no known checkout exists at all
-// and pin falls back to the caller's own working directory, the plan must
-// say so, name that tree's HEAD, and warn when the tree's own pins disagree
-// with what the environment has deployed — so the plan is never mistaken
-// for a statement about the environment's real drift.
+// The cwd fallback must name HEAD and warn when its pins disagree with what is deployed.
 func testPinCwdFallbackNamesTheHeadAndWarnsWhenStale(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "prod")
@@ -273,13 +235,8 @@ func testPinCwdFallbackNamesTheHeadAndWarnsWhenStale(t *testing.T) {
 	}
 }
 
-// The reported defect: pin resolved a checkout sitting behind its remote and
-// printed a plan that was internally consistent -- every site reading the
-// old version, the counts right, no warning anywhere -- so a plan computed
-// from a stale base was indistinguishable from a current one, and applying
-// it would have moved the listed sites while silently reverting anything the
-// missing commits changed elsewhere in the tree. The plan must name both the
-// divergence and the ref it is measured against.
+// A plan from a checkout behind its remote looks consistent but would revert missing
+// commits, so it must name the divergence and the ref.
 func testPinNamesABaseThatIsBehindItsRemote(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "frs", "prod")
@@ -298,17 +255,12 @@ func testPinNamesABaseThatIsBehindItsRemote(t *testing.T) {
 			t.Fatalf("expected %q in the plan:\n%s", want, result.Combined)
 		}
 	}
-	// The warning annotates the plan; it must not replace it. The sites a
-	// stale tree still lists are exactly the ones an operator needs to see.
+	// The warning annotates the plan; it must not replace it.
 	if !strings.Contains(result.Combined, "change terraform-ref terraform-team/dev/main.tf") {
 		t.Fatalf("expected the plan's sites to survive the warning:\n%s", result.Combined)
 	}
 }
 
-// The reported gap: dns01_webhook_image, set directly in a tenant's own
-// terraform variables, is an erun-published image reference just like the
-// module ref above it, and pin's dry-run must name it as a site to move
-// rather than reporting a plan that looks complete while leaving it behind.
 func testPinDryRunReportsAStaleDNS01WebhookImageReference(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -321,7 +273,6 @@ func testPinDryRunReportsAStaleDNS01WebhookImageReference(t *testing.T) {
 	golden.Equal(t, "pin/dry_run_reports_a_stale_dns01_webhook_image_reference", normalize.Apply(result.Combined))
 }
 
-// The real run must actually move it, not just name it.
 func testPinRealRunPinsTheDNS01WebhookImageReference(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -340,9 +291,7 @@ func testPinRealRunPinsTheDNS01WebhookImageReference(t *testing.T) {
 	}
 }
 
-// Discovery answers "what can I pin to" from the registry, so choosing a
-// version is recognition rather than recall. Served locally: a scenario that
-// asks a real registry measures the host.
+// Served locally: a real registry would measure the host.
 func testPinListReportsThePublishedVersions(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -369,10 +318,7 @@ func testPinListReportsThePublishedVersions(t *testing.T) {
 	assertNoStrayTagOffered(t, result.Combined)
 }
 
-// The reported nit: `erun pin --list` is the literal example in this
-// command's own --help, and it reads erun's own published registry, which
-// is the same for every tenant — it must work on a host with no default
-// tenant configured at all, not just when a tenant happens to be seeded.
+// `pin --list` reads erun's own registry, so it needs no default tenant.
 func testPinListWorksWithoutADefaultTenantConfigured(t *testing.T) {
 	setup := env.New(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -401,9 +347,7 @@ func testPinListWorksWithoutADefaultTenantConfigured(t *testing.T) {
 	assertNoStrayTagOffered(t, result.Combined)
 }
 
-// Pinning to a version the registry does not carry produces a tree that only
-// fails much later, at a terraform init or a chart pull. It is refused here,
-// where the cause is still visible.
+// An unpublished version would fail only later at terraform init or chart pull.
 func testPinRefusesAVersionTheRegistryDoesNotCarry(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -424,9 +368,6 @@ func testPinRefusesAVersionTheRegistryDoesNotCarry(t *testing.T) {
 	}
 }
 
-// The whole motion, for real: every reference moves, the env's own runtime
-// version moves with them, re-running is a no-op, and the version left behind
-// is recoverable in one step.
 func testPinRealRunPinsEveryReferenceThenReverts(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -452,7 +393,6 @@ func testPinRealRunPinsEveryReferenceThenReverts(t *testing.T) {
 		t.Fatalf("chart dependencies wrong:\n%s", chart)
 	}
 
-	// Idempotent: the second run has nothing left to do.
 	again := erun.Run(t, []string{"pin", "team", "dev", "--version", "1.0.174"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if again.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", again.ExitCode, again.Combined)
@@ -461,7 +401,6 @@ func testPinRealRunPinsEveryReferenceThenReverts(t *testing.T) {
 		t.Fatalf("a re-run must report the no-op:\n%s", again.Combined)
 	}
 
-	// And the version left behind is one motion away.
 	revert := erun.Run(t, []string{"pin", "team", "dev", "--revert"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if revert.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", revert.ExitCode, revert.Combined)
@@ -472,8 +411,6 @@ func testPinRealRunPinsEveryReferenceThenReverts(t *testing.T) {
 	}
 }
 
-// Reverting needs somewhere to go. Asking for one before any re-pin has
-// happened must say so rather than silently doing nothing.
 func testPinRevertWithoutARecordedPinSaysSo(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")

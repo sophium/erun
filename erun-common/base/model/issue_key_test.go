@@ -4,9 +4,6 @@ import (
 	"testing"
 )
 
-// TestRepositorySlugReducesAForgeIdentityToItsOwnerAndRepository covers the
-// identities RepositoryIdentity actually produces for a GitHub-style forge,
-// plus the spellings that name no owner/repo pair at all.
 func TestRepositorySlugReducesAForgeIdentityToItsOwnerAndRepository(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -18,12 +15,9 @@ func TestRepositorySlugReducesAForgeIdentityToItsOwnerAndRepository(t *testing.T
 		{name: "https remote with a port", identity: "https://github.example.com:8443/sophium/erun", want: "sophium/erun", wantOK: true},
 		{name: "git scheme", identity: "git://github.com/sophium/erun", want: "sophium/erun", wantOK: true},
 		{name: "an ssh remote on a port keeps its own spelling", identity: "ssh://git@github.com:2222/sophium/erun", want: "sophium/erun", wantOK: true},
-		// A file remote and a bare local path name no forge, so there is no
-		// owner/repo to read out of them.
 		{name: "file remote", identity: "file:///tmp/erun"},
 		{name: "bare local path", identity: "/tmp/erun"},
-		// A deeper path leaves it ambiguous which segments are the owner and
-		// the repository; guessing is the failure this refuses.
+		// Nested paths are ambiguous about the owner.
 		{name: "nested path", identity: "https://gitlab.com/group/sub/repo"},
 		{name: "host only", identity: "https://github.com"},
 		{name: "empty", identity: ""},
@@ -41,10 +35,6 @@ func TestRepositorySlugReducesAForgeIdentityToItsOwnerAndRepository(t *testing.T
 	}
 }
 
-// TestCanonicalIssueKeyJoinsARecordedRepositoryToABareNumber is the union's
-// whole join: a review's inferred link is a bare number, and the key a job
-// can be matched against is that number addressed to the review's own
-// repository.
 func TestCanonicalIssueKeyJoinsARecordedRepositoryToABareNumber(t *testing.T) {
 	key, ok := CanonicalIssueKey("2683", "https://github.com/sophium/erun")
 	if !ok {
@@ -55,10 +45,6 @@ func TestCanonicalIssueKeyJoinsARecordedRepositoryToABareNumber(t *testing.T) {
 	}
 }
 
-// TestCanonicalIssueKeyLeavesAnAlreadyCanonicalReferenceAlone: a reference
-// that names its own repository is not re-derived from the work item's own,
-// because the two disagreeing is a deliberate reassignment the platform has
-// no business overruling.
 func TestCanonicalIssueKeyLeavesAnAlreadyCanonicalReferenceAlone(t *testing.T) {
 	key, ok := CanonicalIssueKey("sophium/erun#2683", "https://github.com/other/repo")
 	if !ok {
@@ -69,9 +55,6 @@ func TestCanonicalIssueKeyLeavesAnAlreadyCanonicalReferenceAlone(t *testing.T) {
 	}
 }
 
-// TestCanonicalIssueKeyReportsNoKeyRatherThanGuessing: every shape with no
-// honest key answers false, which the view renders as work that names no
-// issue.
 func TestCanonicalIssueKeyReportsNoKeyRatherThanGuessing(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -95,9 +78,6 @@ func TestCanonicalIssueKeyReportsNoKeyRatherThanGuessing(t *testing.T) {
 	}
 }
 
-// TestNormalizeIssueRefCanonicalizesWhatAReviewRecords pins the two accepted
-// spellings and the refusals, since this is the trust boundary a declared
-// reference arrives through.
 func TestNormalizeIssueRefCanonicalizesWhatAReviewRecords(t *testing.T) {
 	cases := []struct {
 		name       string

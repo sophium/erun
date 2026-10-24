@@ -6,11 +6,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// incrementalCacheDecision derives the same hit/reason a build's fingerprint
-// decision already gives the trace (traceIncrementalDecision), so the timing
-// report's cache tag never disagrees with it. applicable is false when the
-// build has no fingerprint at all (incremental caching disabled or not
-// computed for it), which is not a cache miss and should carry no tag.
+// incrementalCacheDecision mirrors traceIncrementalDecision so the timing cache tag never disagrees.
+// applicable is false when the build has no fingerprint, which is not a miss.
 func incrementalCacheDecision(buildInput shared.DockerBuildSpec) (hit, applicable bool, missReason string) {
 	if buildInput.Fingerprint == "" {
 		return false, false, ""
@@ -28,9 +25,6 @@ func incrementalCacheDecision(buildInput shared.DockerBuildSpec) (hit, applicabl
 	}
 }
 
-// dockerBuildStepName is the timing tree's label for one image build — the
-// short image name when known, so a table row reads "erun-console" rather
-// than the full registry tag.
 func dockerBuildStepName(buildInput shared.DockerBuildSpec) string {
 	if name := strings.TrimSpace(buildInput.Image.ImageName); name != "" {
 		return name

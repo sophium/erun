@@ -10,9 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// renderImagePullSecret wraps dockerConfigJSON in a standard dockerconfigjson
-// Secret manifest, the same shape `kubectl create secret docker-registry`
-// produces.
 func renderImagePullSecret(name, namespace, dockerConfigJSON string) string {
 	return fmt.Sprintf(`apiVersion: v1
 kind: Secret
@@ -27,34 +24,9 @@ stringData:
 `, name, namespace, config.DockerConfigJSONSecretKey, dockerConfigJSON)
 }
 
-// refreshImagePullSecrets re-mints every dockerconfigjson Secret named in
-// deployInput.ImagePullSecrets, from credentials resolved host-side for every
-// registry the deploy is about to pull an image from. An ECR authorization
-// token expires after twelve hours, so a pull secret named once via
-// `--image-pull-secret` would otherwise rot. This runs before every rollout,
-// so the pod a redeploy creates always starts with a fresh credential.
-//
-// The registry a component's imageOverrides names can differ from
-// containerRegistry (a runtime image built into a BUILD-role registry while
-// the chart itself is pulled from a DEPLOY-role one) — the pull secret must
-// cover both, or the pod pulls from a registry the refreshed Secret carries no
-// credential for at all. imagePullSecretRegistryHosts names every host in
-// play; each is resolved independently so one registry's credential is not
-// held hostage by another's.
-//
-// Skips entirely when the env names no pull secret at all -- nothing to
-// refresh, so a public-image env stays byte-for-byte unchanged -- or when
-// none of the registries in play name a host of their own (a bare Docker Hub
-// namespace), or when no host resolved a credential at all, in which case
-// nothing is read or applied and every named Secret is left exactly as it
-// was. When at least one host resolves, each named Secret is read back (real
-// runs only -- see applyImagePullSecrets for the dry-run trace) and only the
-// resolved hosts' entries are overlaid onto it (mergeImagePullSecretAuths): a
-// host that is known but did not resolve this run (no aws/docker session on
-// the machine running the deploy) keeps its existing coverage in the Secret
-// exactly as it was, the same fallback provisionRegistryCredentialSecret uses
-// for the ghcr registry-credential secret; the other hosts' credentials still
-// refresh.
+// refreshImagePullSecrets re-mints the named pull Secrets before every rollout,
+// since ECR tokens expire after twelve hours. Only resolved hosts are overlaid;
+// an unresolved host keeps its existing entry.
 func refreshImagePullSecrets(ctx core.Context, deployInput HelmDeploySpec) error {
 	if len(deployInput.ImagePullSecrets) == 0 {
 		return nil
@@ -66,9 +38,6 @@ func refreshImagePullSecrets(ctx core.Context, deployInput HelmDeploySpec) error
 	return applyImagePullSecrets(ctx, deployInput, credentials)
 }
 
-// resolveImagePullSecretCredentials resolves a credential for every registry
-// host the deploy's images actually pull from, tracing (and skipping) any
-// host none resolves for rather than failing the whole refresh over it.
 func resolveImagePullSecretCredentials(ctx core.Context, deployInput HelmDeploySpec) map[string]registry.RegistryBasicAuth {
 	hosts := imagePullSecretRegistryHosts(deployInput)
 	credentials := make(map[string]registry.RegistryBasicAuth, len(hosts))
@@ -86,10 +55,6 @@ func resolveImagePullSecretCredentials(ctx core.Context, deployInput HelmDeployS
 	return credentials
 }
 
-// mergeImagePullSecretAuths overlays this run's resolved credentials onto a
-// Secret's existing auths, leaving every host neither side names untouched.
-// A host with no existing entry and no resolved credential simply stays
-// absent -- this never invents an empty or placeholder entry.
 func mergeImagePullSecretAuths(existing map[string]config.DockerConfigJSONAuthEntry, credentials map[string]registry.RegistryBasicAuth) map[string]config.DockerConfigJSONAuthEntry {
 	merged := make(map[string]config.DockerConfigJSONAuthEntry, len(existing)+len(credentials))
 	for host, entry := range existing {
@@ -101,13 +66,6 @@ func mergeImagePullSecretAuths(existing map[string]config.DockerConfigJSONAuthEn
 	return merged
 }
 
-// applyImagePullSecrets re-applies every named dockerconfigjson Secret,
-// merging this run's resolved credentials into whatever the Secret already
-// covers (see existingImagePullSecretAuths / mergeImagePullSecretAuths)
-// instead of replacing the whole auths document. Real mode reads the Secret
-// back and applies the merged result; dry-run traces both commands it would
-// run but executes neither, stating the merge as conditional on what the get
-// above would find (see existingImagePullSecretAuths for why).
 func applyImagePullSecrets(ctx core.Context, deployInput HelmDeploySpec, credentials map[string]registry.RegistryBasicAuth) error {
 	applyArgs := kube.KubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
 	for _, name := range deployInput.ImagePullSecrets {
@@ -139,14 +97,8 @@ func applyImagePullSecrets(ctx core.Context, deployInput HelmDeploySpec, credent
 	return nil
 }
 
-// imagePullSecretRegistryHosts names every registry host a deploy's images
-// actually pull from: containerRegistry (what the chart itself resolves
-// against) plus each imageOverrides entry's own registry when it names one.
-// A component's image override is a full reference (host/name:tag), so its
-// registry is read the same way resolveDeployRuntimeImage builds one, then
-// reduced to the bare host the credential resolvers key on. Order is
-// deterministic (sortedStringMapKeys) so the trace and the rendered
-// dockerconfigjson auths are stable across runs.
+// imagePullSecretRegistryHosts includes imageOverrides' registries, which can
+// differ from containerRegistry.
 func imagePullSecretRegistryHosts(deployInput HelmDeploySpec) []string {
 	seen := make(map[string]struct{}, 2)
 	hosts := make([]string, 0, 2)

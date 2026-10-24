@@ -7,9 +7,7 @@ import (
 	"strings"
 )
 
-// ContributeClonePath returns the canonical clone target for ERun
-// contribute mode ($HOME/git/erun), resolved inside the current env —
-// the host for local-agent, the pod for remote-agent.
+// ContributeClonePath returns $HOME/git/erun, resolved in the current env (host or pod).
 func ContributeClonePath(homeDir string) (string, error) {
 	resolved, err := ResolveContributeHomeDir(homeDir)
 	if err != nil {

@@ -61,14 +61,8 @@ func GitResolvedRef(ctx core.Context, projectRoot, ref string) (string, bool, er
 	return "", false, err
 }
 
-// GitBranchExists reports whether branch exists locally or as an
-// origin-tracking ref. release's sync-develop/push stages run `git checkout
-// <branch>`, which git resolves to a new local branch tracking
-// refs/remotes/origin/<branch> when no local ref exists — a checkout that
-// only ever cloned main and never fetched develop as a local branch still
-// runs those stages successfully. Checking refs/heads alone treated that
-// checkout the same as "no develop branch at all" and dropped both stages
-// from the resolved plan with no trace and no refusal.
+// GitBranchExists checks local and origin-tracking refs: `git checkout <branch>` creates a
+// local branch from origin when needed.
 func GitBranchExists(ctx core.Context, projectRoot, branch string) (bool, error) {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
@@ -96,10 +90,7 @@ func gitRefExists(ctx core.Context, projectRoot, ref string) (bool, error) {
 }
 
 func GitWorktreeClean(ctx core.Context, projectRoot string) (bool, error) {
-	// Only tracked-file changes gate the release: release publishes HEAD,
-	// not the working tree, so untracked files (e.g. IDE state under
-	// .idea/, generator output) cannot affect what would be released and
-	// must not block the flow.
+	// Only tracked changes gate the release, which publishes HEAD.
 	ctx.TraceCommand("", "git", "-C", projectRoot, "status", "--porcelain", "--untracked-files=no")
 	output, err := core.Command("git", "-C", projectRoot, "status", "--porcelain", "--untracked-files=no").CombinedOutput()
 	if err != nil {

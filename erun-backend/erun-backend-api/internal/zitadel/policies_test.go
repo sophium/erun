@@ -8,15 +8,10 @@ import (
 	"testing"
 )
 
-// jsonRoute is one canned response in a routedTestServer, keyed by method and
-// exact path. Keeping the routing table data (rather than a per-test
-// if/switch chain) is what keeps each test's own cyclomatic complexity low.
 type jsonRoute struct {
 	method string
 	path   string
 	body   map[string]any
-	// record, when set, is called with the decoded request body before the
-	// canned response (if any) is written; used to capture and count writes.
 	record func(body map[string]any)
 }
 
@@ -98,12 +93,7 @@ func assertOrgSettingsEqual(t *testing.T, got OrgSettings, want OrgSettings) {
 	}
 }
 
-// TestUpdateOrgSettingsForceMFAPreservesOtherLoginFields locks the
-// read-modify-write contract: changing forceMfa must not clobber the other
-// login-policy fields Zitadel already has, must not touch the password
-// policy at all, and must use PUT for an org that already overrode the
-// instance default (isDefault absent/false) — see loginPolicyResponse.IsDefault
-// for why POST would fail here.
+// An overridden org (isDefault absent) must be written with PUT.
 func TestUpdateOrgSettingsForceMFAPreservesOtherLoginFields(t *testing.T) {
 	var loginPutBody map[string]any
 	loginPuts, passwordPuts := 0, 0
@@ -132,9 +122,6 @@ func TestUpdateOrgSettingsForceMFAPreservesOtherLoginFields(t *testing.T) {
 	}
 }
 
-// TestUpdateOrgSettingsAllowRegisterPreservesOtherLoginFields is the
-// registration-control half of the same read-modify-write contract: closing self-registration must not touch forceMfa or any other
-// login-policy field already set on the org.
 func TestUpdateOrgSettingsAllowRegisterPreservesOtherLoginFields(t *testing.T) {
 	var loginPutBody map[string]any
 	loginPuts, passwordPuts := 0, 0
@@ -163,9 +150,6 @@ func TestUpdateOrgSettingsAllowRegisterPreservesOtherLoginFields(t *testing.T) {
 	}
 }
 
-// TestGetOrgSettingsReportsRegistrationOpenAndClosed locks the per-state
-// read: GetOrgSettings must report whichever value the org's login policy
-// actually carries, not a hardcoded default.
 func TestGetOrgSettingsReportsRegistrationOpenAndClosed(t *testing.T) {
 	for _, allowRegister := range []bool{true, false} {
 		client := routedTestClient(t, []jsonRoute{
@@ -185,8 +169,6 @@ func TestGetOrgSettingsReportsRegistrationOpenAndClosed(t *testing.T) {
 	}
 }
 
-// TestUpdateOrgSettingsMinPasswordLengthPreservesOtherPasswordFields is the
-// password-policy half of the same read-modify-write contract.
 func TestUpdateOrgSettingsMinPasswordLengthPreservesOtherPasswordFields(t *testing.T) {
 	var passwordPutBody map[string]any
 	loginPuts, passwordPuts := 0, 0
@@ -215,9 +197,7 @@ func TestUpdateOrgSettingsMinPasswordLengthPreservesOtherPasswordFields(t *testi
 	}
 }
 
-// TestUpdateOrgSettingsSkipsAnUnchangedValue locks the convergence
-// discipline: Zitadel answers 400 "NotChanged" for a write that carries no
-// real diff, so a caller re-asserting the current value must not issue one.
+// Zitadel answers 400 "NotChanged" for a write with no real diff.
 func TestUpdateOrgSettingsSkipsAnUnchangedValue(t *testing.T) {
 	writes := 0
 	client := routedTestClient(t, []jsonRoute{
@@ -236,10 +216,7 @@ func TestUpdateOrgSettingsSkipsAnUnchangedValue(t *testing.T) {
 	}
 }
 
-// TestUpdateOrgSettingsPostsWhenStillOnTheInstanceDefault locks the other
-// half of the POST/PUT split: an org that has never overridden the instance
-// default (isDefault present and true) must be written with POST, since PUT
-// against it fails with "not found".
+// PUT against a still-default org fails with "not found".
 func TestUpdateOrgSettingsPostsWhenStillOnTheInstanceDefault(t *testing.T) {
 	posts, puts := 0, 0
 	client := routedTestClient(t, []jsonRoute{

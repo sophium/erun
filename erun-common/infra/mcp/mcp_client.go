@@ -15,24 +15,17 @@ import (
 	"time"
 )
 
-// Client side of the per-environment MCP edge. The JSON-RPC round-trip is
-// implemented over net/http rather than the MCP SDK so this stays usable as a
-// standalone library, and so any caller — CLI, script, agent — reaches an
-// environment through erun instead of re-deriving the token and framing rules.
+// Client side of the per-environment MCP edge, over net/http rather than the MCP SDK so it
+// stays a standalone library.
 
 const (
-	// MCPServerPath is the HTTP path the per-env erun-mcp edge serves MCP on.
+	// MCPServerPath is the HTTP path the edge serves MCP on.
 	MCPServerPath = "/mcp"
 
-	// MCPIdleProbeHeader marks a request as a diagnostic read that must not reset
-	// the environment's idle timer. The erun-mcp edge's activity middleware skips
-	// activity recording for any request carrying it (set to "true"); every other
-	// client of this header (this package, erun-mcp, erun-ui) shares the same
-	// name so the two sides of the contract cannot drift apart.
+	// MCPIdleProbeHeader ("true") exempts a request from the edge's idle-timer activity recording.
 	MCPIdleProbeHeader = "X-Erun-Idle-Probe"
 
-	// The edge rejects a POST naming a protocol revision it does not support, so
-	// this is pinned rather than negotiated downward.
+	// The edge rejects unsupported protocol revisions, so this is pinned rather than negotiated.
 	mcpClientProtocolVersion = "2025-06-18"
 	mcpClientName            = "erun"
 
@@ -41,43 +34,26 @@ const (
 )
 
 var (
-	// ErrMCPEndpointUnreachable means nothing answered on the local MCP port,
-	// which normally means the port-forward is not up rather than that the
-	// environment is broken.
+	// ErrMCPEndpointUnreachable usually means the port-forward is down, not that the environment is broken.
 	ErrMCPEndpointUnreachable = errors.New("MCP endpoint is not reachable")
 
-	// ErrMCPTargetNotAnswering narrows ErrMCPEndpointUnreachable to the shape
-	// where the local forward is up and the environment behind it did not take
-	// the call — a target still coming up, not a dead tunnel. The distinction
-	// is what keeps a caller from answering it with a re-open, which replaces
-	// nothing and leaves the same wait ahead.
+	// ErrMCPTargetNotAnswering means the forward is up but the target is still starting; re-opening won't help.
 	ErrMCPTargetNotAnswering = errors.New("the local port-forward is up but the environment behind it did not answer")
 
 	// ErrMCPUnauthorized means the edge refused the bearer.
 	ErrMCPUnauthorized = errors.New("MCP endpoint rejected the bearer token")
 
-	// ErrMCPSessionLost means the edge answered, but without a session it
-	// recognizes for this client — an edge that restarted inside a still-running
-	// pod, a session that aged out, or a caller carrying no session id at all.
-	//
-	// It is exported because it is the one transport failure that is evidence
-	// about the *environment*: the edge being up enough to answer is what
-	// separates "the environment is unreachable" from "this client cannot hold a
-	// session with a live edge". The two have opposite remedies, and a caller
-	// that can only see ErrMCPEndpointUnreachable collapses them — which is how
-	// a dispatchable environment gets read as one that is down.
+	// ErrMCPSessionLost means the edge answered without recognizing this client's session. It proves
+	// the environment is reachable, unlike ErrMCPEndpointUnreachable.
 	ErrMCPSessionLost = errors.New("the MCP edge answered, but without a session it recognizes for this client")
 )
 
-// MCPLocalEndpoint is the loopback URL a port-forwarded environment edge answers
-// on.
+// MCPLocalEndpoint is the loopback URL of a port-forwarded edge.
 func MCPLocalEndpoint(port int) string {
 	return fmt.Sprintf("http://127.0.0.1:%d%s", port, MCPServerPath)
 }
 
-// MCPTokenMinter returns a freshly signed bearer. It is invoked immediately
-// before every request so a tool call that runs for minutes cannot fail because
-// the token aged out while the call was in flight.
+// MCPTokenMinter runs before every request so long calls never carry an expired token.
 type MCPTokenMinter func() (string, error)
 
 type MCPToolCallParams struct {
@@ -86,10 +62,7 @@ type MCPToolCallParams struct {
 	ClientVersion string
 	Tool          string
 	Arguments     map[string]any
-	// IdleProbe marks this call as a diagnostic read that must not reset the
-	// environment's idle timer. Set it only when the caller knows the tool is
-	// read-only; a tool that can mutate the environment must never be probed,
-	// since the probe header exempts the whole request from activity recording.
+	// IdleProbe skips idle-timer activity for the whole request; never set it for a mutating tool.
 	IdleProbe bool
 }
 
@@ -104,23 +77,17 @@ type MCPToolListParams struct {
 	Endpoint      string
 	MintToken     MCPTokenMinter
 	ClientVersion string
-	// IdleProbe marks this call as a diagnostic read that must not reset the
-	// environment's idle timer. Listing tools is always read-only, so callers
-	// should normally set this.
+	// IdleProbe skips idle-timer activity; listing tools is read-only.
 	IdleProbe bool
 }
 
-// MCPTool is one tool descriptor as the edge returns it. It keeps the wire JSON
-// it was decoded from, so the structured surface (`erun mcp tools --output
-// json`) re-emits the protocol's own shape -- annotations, _meta, outputSchema,
-// title, and any field the protocol gains later -- instead of a narrowed copy.
-// The typed fields exist for the text renderer, which is free to summarize.
+// MCPTool keeps the descriptor's wire JSON so structured output re-emits the protocol's own
+// shape; the typed fields serve the text renderer.
 type MCPTool struct {
 	Name        string
 	Description string
 	InputSchema json.RawMessage
-	// raw is the descriptor exactly as the edge sent it. Empty only for a tool
-	// this package constructed rather than decoded.
+	// raw is empty only for a tool constructed locally.
 	raw json.RawMessage
 }
 
@@ -140,10 +107,7 @@ func (t *MCPTool) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// MarshalJSON re-emits the decoded descriptor verbatim. A tool the edge
-// annotated must reach a structured caller with those annotations intact, so
-// this must never rebuild the payload from the typed fields: any field this
-// build does not know about would be lost.
+// MarshalJSON re-emits the decoded descriptor verbatim so unknown fields survive.
 func (t MCPTool) MarshalJSON() ([]byte, error) {
 	if len(t.raw) > 0 {
 		return t.raw, nil
@@ -160,9 +124,7 @@ type MCPToolListResult struct {
 	Tools []MCPTool `json:"tools"`
 }
 
-// CallMCPTool performs one tool call against an environment's MCP edge. A tool
-// that reports its own failure comes back as a populated result plus an error, so
-// a caller can surface the tool's own message and still render the payload.
+// CallMCPTool performs one tool call. A tool-reported failure returns both the result and an error.
 func CallMCPTool(ctx context.Context, params MCPToolCallParams) (MCPToolCallResult, error) {
 	tool := strings.TrimSpace(params.Tool)
 	if tool == "" {
@@ -200,8 +162,7 @@ func CallMCPTool(ctx context.Context, params MCPToolCallParams) (MCPToolCallResu
 	return result, nil
 }
 
-// ListMCPTools returns the tools an environment's MCP edge exposes, with their
-// input schemas.
+// ListMCPTools returns the tools an environment's MCP edge exposes.
 func ListMCPTools(ctx context.Context, params MCPToolListParams) (MCPToolListResult, error) {
 	session, err := openMCPSession(ctx, params.Endpoint, params.MintToken, params.ClientVersion, params.IdleProbe)
 	if err != nil {
@@ -225,42 +186,23 @@ type mcpSession struct {
 	client        *http.Client
 	sessionID     string
 	nextID        int
-	// idleProbe marks every request this session sends as a diagnostic read that
-	// must not reset the environment's idle timer.
-	idleProbe bool
-	// localPort is the loopback port the endpoint names, or 0 when the endpoint
-	// is not a local port-forward (e.g. a hosted platform edge). Only a local
-	// port-forward can go stale in the way ensureTunnelLive checks for.
+	idleProbe     bool
+	// localPort is 0 unless the endpoint is a local port-forward, the only kind that goes stale.
 	localPort int
-	// recovering suppresses a nested re-handshake or tunnel retry so one bad
-	// request costs at most one retry.
+	// recovering limits one bad request to a single retry.
 	recovering bool
-	// awaitStartup opts this session into postOnce's bounded first-request wait
-	// (see postOnce). Only the stdio proxy sets it: a relayed client's own
-	// initialize is the one call it will never repeat later in the session if
-	// refused, unlike the typed CLI/desktop callers (CallMCPTool/ListMCPTools),
-	// which already have their own active recovery -- reattaching the
-	// port-forward and retrying -- so a passive wait there would only make an
-	// ordinary "not open" call slower without fixing anything the active
-	// recovery does not already fix.
+	// awaitStartup gives the first request a bounded wait. Only the stdio proxy sets it: a client's
+	// initialize is never repeated, while typed callers already reattach and retry.
 	awaitStartup bool
-	// startupWaited marks whether postOnce has already given this session's
-	// first request its bounded wait for the local port to come up. Set on the
-	// first attempt regardless of outcome, so only that one request ever waits.
+	// startupWaited is set on the first attempt regardless of outcome.
 	startupWaited bool
-	// startupWait overrides mcpStartupReachabilityWait for tests that need a
-	// bound short enough to run quickly; zero means use the production bound.
+	// startupWait overrides mcpStartupReachabilityWait in tests; zero means the production bound.
 	startupWait time.Duration
-	// notice reports a recovery the caller would otherwise never see; nil when
-	// the caller has nowhere to put diagnostics.
+	// notice reports otherwise invisible recoveries; nil when there is nowhere to report.
 	notice func(string)
 }
 
-// newMCPSession prepares the transport without performing the handshake, so a
-// relay that forwards a client's own initialize can share the header, session,
-// and framing rules with the typed callers. awaitStartup is passed straight
-// through to the session -- see mcpSession.awaitStartup for who should (and
-// should not) set it.
+// newMCPSession skips the handshake so a relay forwarding the client's own initialize shares framing.
 func newMCPSession(endpoint string, mintToken MCPTokenMinter, clientVersion string, idleProbe, awaitStartup bool) (*mcpSession, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
@@ -272,8 +214,7 @@ func newMCPSession(endpoint string, mintToken MCPTokenMinter, clientVersion stri
 	if strings.TrimSpace(clientVersion) == "" {
 		clientVersion = "unknown"
 	}
-	// Deliberately no client timeout: a tool call may legitimately run for many
-	// minutes, so the deadline belongs to the caller's context.
+	// No client timeout: tool calls can run for minutes, so the caller's context owns the deadline.
 	return &mcpSession{
 		endpoint:      endpoint,
 		mintToken:     mintToken,
@@ -285,9 +226,7 @@ func newMCPSession(endpoint string, mintToken MCPTokenMinter, clientVersion stri
 	}, nil
 }
 
-// localMCPEndpointPort extracts the loopback port an endpoint names, or 0 for
-// any endpoint that is not a plain http://127.0.0.1:<port> or
-// http://localhost:<port> URL — the shape only a local port-forward has.
+// localMCPEndpointPort returns the port of an http://127.0.0.1 or localhost URL, else 0.
 func localMCPEndpointPort(endpoint string) int {
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
@@ -304,12 +243,7 @@ func localMCPEndpointPort(endpoint string) int {
 	return port
 }
 
-// openMCPSession backs the typed CLI/desktop callers (CallMCPTool,
-// ListMCPTools), which already reattach the port-forward and retry on
-// ErrMCPEndpointUnreachable (see callMCPToolWithReattach in erun-cli), so it
-// does not opt into postOnce's passive startup wait -- doing so would only
-// make an ordinary "not open yet" call slower, not fix anything the active
-// reattach does not already fix.
+// openMCPSession serves typed callers, which reattach and retry on their own, so no startup wait.
 func openMCPSession(ctx context.Context, endpoint string, mintToken MCPTokenMinter, clientVersion string, idleProbe bool) (*mcpSession, error) {
 	session, err := newMCPSession(endpoint, mintToken, clientVersion, idleProbe, false)
 	if err != nil {
@@ -321,8 +255,7 @@ func openMCPSession(ctx context.Context, endpoint string, mintToken MCPTokenMint
 	return session, nil
 }
 
-// handshake claims a session on the edge. It is also the recovery path, so the
-// two cannot drift apart on what a live session requires.
+// handshake is also the recovery path, so both agree on what a live session requires.
 func (s *mcpSession) handshake(ctx context.Context) error {
 	if _, err := s.call(ctx, "initialize", map[string]any{
 		"protocolVersion": mcpClientProtocolVersion,
@@ -349,7 +282,6 @@ func (s *mcpSession) call(ctx context.Context, method string, params any) (json.
 	return response.Result, nil
 }
 
-// A notification carries no id, so the edge answers 202 with no body.
 func (s *mcpSession) notify(ctx context.Context, method string) error {
 	_, err := s.post(ctx, mcpJSONRPCRequest{JSONRPC: "2.0", Method: method})
 	return err
@@ -371,31 +303,10 @@ func (s *mcpSession) post(ctx context.Context, payload mcpJSONRPCRequest) (*mcpJ
 	return &decoded, nil
 }
 
-// postRaw sends one already-encoded JSON-RPC message and returns the raw reply,
-// or nil when the edge answered without a body — the 202 a notification gets.
-// Bearer minting and session-id capture live here so a raw relay and a typed
-// call cannot drift apart on either.
-//
-// Two failures are recovered rather than surfaced on the first attempt, each at
-// most once per request so a bad edge cannot turn into a retry loop:
-//
-// A session the edge has forgotten is re-handshaked: a long-lived relay pins
-// one session id for its whole lifetime, so treating the edge's 404 as
-// terminal would kill every request for the environment until the relay
-// itself was restarted. The edge says the same thing a second way -- HTTP 200
-// with a JSON-RPC error that the method is invalid during session
-// initialization, which is what a request on a session the edge no longer
-// holds initialized gets -- and postOnce reports that as the same loss, so
-// neither shape is the final word.
-//
-// A local port-forward that drops mid-request — kubectl logs "lost connection
-// to pod" and reconnects on its own — is retried on the same session, with no
-// re-handshake: the remote MCP server process never restarted, only the local
-// tunnel blipped, so a plain resend is enough once the tunnel answers again.
-// This is what turns a stale tunnel from a hang into a fast, actionable
-// failure (or, when it self-corrects fast enough, into nothing the caller
-// notices at all) — see issue reports of a bound-but-dead forward silently
-// swallowing long-held calls.
+// postRaw sends one encoded JSON-RPC message and returns the reply, or nil for a 202.
+// Each request recovers at most once from: a forgotten session (404, or 200 with the
+// session-initialization error), by re-handshaking; and a dropped local tunnel, by resending
+// on the same session.
 func (s *mcpSession) postRaw(ctx context.Context, body []byte) ([]byte, error) {
 	raw, err := s.postOnce(ctx, body)
 	if err == nil || s.recovering {
@@ -435,19 +346,9 @@ func (s *mcpSession) report(message string) {
 	s.notice(message)
 }
 
-// postOnce fails fast when the local port a session targets is bound but not
-// answering, rather than handing a request to a tunnel already known to be
-// dead: the caller's context deadline (or, with none, no bound at all) would
-// otherwise be the only thing that ever ends the wait. A port nothing holds at
-// all is a different, ordinary case (no port-forward was ever established) and
-// is left to the real request's own dial failure -- except on a session with
-// awaitStartup set, whose very first attempt gets a bounded wait first (see
-// awaitLocalMCPEndpointReachable): a relayed client that spawned this session
-// moments before its own `erun open` finished establishing the forward
-// otherwise fails its one and only initialize call, and most MCP clients never
-// repeat that call later in the session -- unlike every subsequent request,
-// which postRaw's own tunnel-recovery retry above already covers once a
-// session is live.
+// postOnce fails fast on a bound but dead local port instead of waiting on the caller's deadline.
+// An unbound port is left to the dial, except an awaitStartup session's first request, which
+// waits briefly for the forward to come up.
 func (s *mcpSession) postOnce(ctx context.Context, body []byte) ([]byte, error) {
 	s.awaitStartupOnce(ctx)
 	if s.localPort > 0 && !CanReachLocalMCPEndpoint(s.localPort) && LocalPortIsBound(s.localPort) {
@@ -479,10 +380,7 @@ func (s *mcpSession) postOnce(ctx context.Context, body []byte) ([]byte, error) 
 	return s.decodePostReply(resp)
 }
 
-// decodePostReply reads the reply's own framing and then asks what it says
-// about the session: a 200 whose JSON-RPC error is the edge's
-// session-initialization guard is a lost session wearing the status code of a
-// successful request.
+// decodePostReply treats a 200 carrying the session-initialization error as a lost session.
 func (s *mcpSession) decodePostReply(resp *http.Response) ([]byte, error) {
 	reply, err := decodeMCPReply(resp)
 	if err != nil {
@@ -494,28 +392,11 @@ func (s *mcpSession) decodePostReply(resp *http.Response) ([]byte, error) {
 	return reply, nil
 }
 
-// mcpSessionInitializationGuard is the tail of the server-side error an MCP
-// edge answers with when a request reaches it on a session that is not
-// initialized -- because the caller's session id is not the edge's any more,
-// or because the request carried none. It is matched on the message rather
-// than on the JSON-RPC code: the SDK raises it as an ordinary internal error,
-// so the code alone cannot tell it apart from an unrelated failure.
+// Matched on the message: the SDK raises it as a generic internal error code.
 const mcpSessionInitializationGuard = "is invalid during session initialization"
 
-// mcpUninitializedSessionError recognises a call the edge refused because it
-// had no initialized session for this caller, and reports it as the same
-// recoverable loss an HTTP 404 is.
-//
-// This is the second shape of a lost session, and the one a client that only
-// checked for the first missed: the edge answers HTTP 200 with a JSON-RPC
-// error object, so nothing at the status-code layer says the session is gone,
-// and a caller that treats the error as the final word reports a tool failure
-// that a re-handshake would have fixed. Both the typed callers and the stdio
-// relay go through here, so both recover from either shape alike.
-//
-// Answering at all is the fact worth keeping: the edge that raises this guard
-// is up and serving, so the failure is this client's session rather than the
-// environment being out of reach (see ErrMCPSessionLost).
+// mcpUninitializedSessionError reports a 200 session-initialization refusal as the same
+// recoverable loss as a 404.
 func mcpUninitializedSessionError(endpoint string, status int, reply []byte) error {
 	if len(reply) == 0 {
 		return nil
@@ -530,9 +411,6 @@ func mcpUninitializedSessionError(endpoint string, status int, reply []byte) err
 	return fmt.Errorf("%w: %s (HTTP %d) answered %s", ErrMCPSessionLost, endpoint, status, decoded.Error.detail())
 }
 
-// startupReachabilityWait is the bound postOnce's first-attempt wait uses:
-// startupWait when a test has overridden it, otherwise the production
-// default.
 func (s *mcpSession) startupReachabilityWait() time.Duration {
 	if s.startupWait > 0 {
 		return s.startupWait
@@ -540,9 +418,7 @@ func (s *mcpSession) startupReachabilityWait() time.Duration {
 	return mcpStartupReachabilityWait
 }
 
-// awaitStartupOnce gives this session's first request a bounded wait for the
-// local port to come up (see postOnce's own comment for why only the first
-// request gets it), and marks the session so no later request waits again.
+// awaitStartupOnce waits for the local port once per session.
 func (s *mcpSession) awaitStartupOnce(ctx context.Context) {
 	if !s.awaitStartup || s.localPort <= 0 || s.startupWaited {
 		return
@@ -570,13 +446,8 @@ func (s *mcpSession) newRequest(ctx context.Context, body []byte, token string) 
 	return req, nil
 }
 
-// unreachableTunnelError names a local port that is held but not answering —
-// the preflight failure postOnce refuses to spend a request on, and the shape a
-// caller sees when the tunnel was already dead before this request started.
-// Which of the two held-port faults it is decides what the caller is told to
-// do: a connection that was accepted and then closed without a reply is a
-// target that has not come up behind a working forward, and re-opening the
-// environment is no help for it.
+// unreachableTunnelError reports a held but unanswering port; an accept-then-close means the
+// target is still starting, so re-opening won't help.
 func (s *mcpSession) unreachableTunnelError() error {
 	if ClassifyLocalMCPUnreachable(s.localPort) == LocalMCPTargetNotAnswering {
 		return fmt.Errorf("%w: %w: %s (127.0.0.1:%d is held and took the connection, but the environment behind it closed it without answering — it is most likely still starting, so retry shortly)", ErrMCPEndpointUnreachable, ErrMCPTargetNotAnswering, s.endpoint, s.localPort)
@@ -584,20 +455,12 @@ func (s *mcpSession) unreachableTunnelError() error {
 	return fmt.Errorf("%w: %s (127.0.0.1:%d is held but the edge never answers — a stale port-forward)", ErrMCPEndpointUnreachable, s.endpoint, s.localPort)
 }
 
-// transportError covers every way client.Do can fail without an HTTP status to
-// classify: a refused dial, and — the shape a flapping local port-forward
-// leaves an in-flight request in — a connection that was accepted and then
-// dropped. Both get the operator the same fix (the port-forward is not
-// carrying traffic), so both are reported as unreachable rather than as a
-// generic error; postRaw is what tells a dial failure and a mid-request drop
-// apart when deciding whether a retry is worth attempting.
+// transportError reports refused dials and mid-request drops alike as unreachable.
 func (s *mcpSession) transportError(err error) error {
 	return fmt.Errorf("%w: %s (%w)", ErrMCPEndpointUnreachable, s.endpoint, err)
 }
 
-// sessionPinned says the request carried a session id, which is what separates
-// the edge having dropped that session from the endpoint path simply not
-// existing — only the former is worth re-handshaking for.
+// Only a request that carried a session id can mean the edge dropped the session.
 func mcpStatusError(endpoint string, resp *http.Response, sessionPinned bool) error {
 	if resp.StatusCode < 400 {
 		return nil
@@ -617,9 +480,7 @@ func mcpStatusError(endpoint string, resp *http.Response, sessionPinned bool) er
 	return fmt.Errorf("MCP endpoint %s returned HTTP %d%s", endpoint, resp.StatusCode, detail)
 }
 
-// The edge answers either a plain JSON body or an SSE-framed stream depending on
-// how it was configured, so both framings are accepted. The reply is returned as
-// the raw JSON-RPC object so a relay can forward it verbatim.
+// decodeMCPReply accepts plain JSON or SSE framing and returns the raw JSON-RPC object.
 func decodeMCPReply(resp *http.Response) ([]byte, error) {
 	if resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusNoContent {
 		return nil, nil
@@ -637,9 +498,7 @@ func decodeMCPReply(resp *http.Response) ([]byte, error) {
 	return body, nil
 }
 
-// Only the first event carrying a JSON-RPC result or error is consumed; progress
-// notifications on the same stream are skipped. Each event's payload is one line,
-// which is how the edge frames it.
+// decodeMCPEventStream returns the first result or error event, skipping progress notifications.
 func decodeMCPEventStream(body io.Reader) ([]byte, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)

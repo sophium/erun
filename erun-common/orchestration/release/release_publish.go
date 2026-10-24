@@ -35,12 +35,8 @@ func NewReleasePublisher(execution shared.BuildExecutionSpec, deploySpecs []depl
 	}
 }
 
-// verifyPublishedReleaseArtifacts closes the release's definition of done by
-// resolving what it just pushed, so "the release completed" means "deploy
-// --version <v> can pull this". Charts are already read back as they publish
-// (publishComponentCharts), so only the image half needs a check here — nothing
-// else proves a version's multi-arch manifest exists, and assuming it does is
-// how a tag gets announced for an image no deploy can pull.
+// verifyPublishedReleaseArtifacts confirms each pushed image manifest resolves; charts
+// are already read back as they publish.
 func verifyPublishedReleaseArtifacts(ctx core.Context, execution shared.BuildExecutionSpec) error {
 	for _, pushInput := range execution.DockerPushes {
 		if err := pushpkg.VerifyPublishedDockerImage(ctx, pushInput.Image.Tag, pushInput.Image.Insecure); err != nil {

@@ -8,11 +8,7 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// assertNamesMissingAndRecovery insists a target-resolution error names the
-// missing subject and a concrete recovery ("pass ... explicitly"), not just
-// that an error occurred -- a bare "tenant and environment are required"
-// would pass a plain err != nil check but is exactly the dead end this
-// guards against.
+// assertNamesMissingAndRecovery requires the error to name the missing subject and a recovery.
 func assertNamesMissingAndRecovery(t *testing.T, err error, wantSubject string) {
 	t.Helper()
 	if err.Error() == "tenant and environment are required" || err.Error() == "tenant is required" || err.Error() == "environment is required" {
@@ -26,10 +22,6 @@ func assertNamesMissingAndRecovery(t *testing.T, err error, wantSubject string) 
 	}
 }
 
-// delete's own tenant/environment resolution (scopedTenantEnv, not
-// resolveLocalTarget) hit the identical bare "tenant and environment are
-// required" dead end when neither the server nor the caller named a target.
-// It carries the same fix and deserves the same regression coverage.
 func TestDeleteRefusesWithNamedRecoveryWhenNeitherSideNamesATarget(t *testing.T) {
 	runtime := shared.RuntimeConfig{}
 	_, _, err := DeleteTool(runtime)(context.Background(), nil, DeleteInput{Preview: true})

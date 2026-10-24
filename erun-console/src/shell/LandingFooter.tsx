@@ -2,10 +2,7 @@ import type * as React from 'react';
 
 import { PUBLIC_DOCS_URL } from './landingContent';
 
-// The docs link is the one exit every visitor can reach regardless of
-// sign-in state: falling back to the public docs site when an instance sets
-// no docsUrl keeps this the footer's one unconditional affordance, rather
-// than a link that silently disappears on an unconfigured instance.
+// Falls back to the public docs site so the footer always has a docs link.
 export function LandingFooter({
   brandLabel,
   docsUrl,

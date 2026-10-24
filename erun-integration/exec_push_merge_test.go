@@ -56,9 +56,6 @@ func testExecPushRefusesBranchMismatch(t *testing.T) {
 }
 
 func testExecPushRealRunLandsTheBranchOnTheRemote(t *testing.T) {
-	// A real bare remote, not a stubbed git call, so "the branch actually
-	// landed on the remote" is an observable fact — the whole point of a
-	// typed push primitive over `raw` running `git push`.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	remote := seedBareOrigin(t, setup)
@@ -84,8 +81,6 @@ func testExecPushRealRunLandsTheBranchOnTheRemote(t *testing.T) {
 }
 
 func testExecPushDryRunMustNotReachTheNetwork(t *testing.T) {
-	// A dry run against a branch with no remote at all must still succeed:
-	// the whole point of --dry-run is that it never actually pushes.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	result := erun.Run(t, []string{"exec", "push", "main", "--remote", "nonexistent", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -107,9 +102,6 @@ func testExecMergeHelp(t *testing.T) {
 }
 
 func testExecMergeDryRunMustNotReachTheNetwork(t *testing.T) {
-	// A dry run against a branch with no real remote must still succeed:
-	// --dry-run never fetches or merges, mirroring push's own network-free
-	// dry-run contract.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	result := erun.Run(t, []string{"exec", "merge", "main", "--remote", "nonexistent", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -120,8 +112,6 @@ func testExecMergeDryRunMustNotReachTheNetwork(t *testing.T) {
 }
 
 func testExecMergeRealRunMergesTheTargetBranch(t *testing.T) {
-	// A real bare remote and a real divergent target branch, so "the merge
-	// actually landed" is an observable fact rather than a stubbed git call.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedBareOrigin(t, setup)
@@ -185,11 +175,7 @@ func testExecMergeConflictRealRunLeavesTheWorktreeMidMerge(t *testing.T) {
 }
 
 func testExecMergeRealRunRegeneratesConflictingAtlasSum(t *testing.T) {
-	// The ordinary `erun exec merge` path (an author syncing a feature branch
-	// with main before opening a PR) hits the identical by-construction
-	// atlas.sum conflict whenever both branches add a migration. This proves
-	// the regeneration applies there too, not just to the
-	// gate-merge batch path.
+	// The atlas.sum regeneration applies to plain exec merge, not only gate-merge.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	seedBareOrigin(t, setup)

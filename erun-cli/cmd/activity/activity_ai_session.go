@@ -15,11 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The ai-session verbs are the CLI half of the structured AI-session status
-// model: a tool's own turn-boundary hooks report what state they are in
-// (turn-start/tool-use/turn-end/notify/exit), replacing a guess made from PTY
-// output volume. report is the write side a hook command invokes; status is
-// the read side that resolves the current state from the last report.
+// Tool turn-boundary hooks report AI-session state, replacing guesses from PTY output.
 
 func newActivityAISessionCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -32,12 +28,8 @@ func newActivityAISessionCmd() *cobra.Command {
 	return cmd
 }
 
-// newActivityAISessionHookCmd is the entry point an installed hook invokes: the
-// AI tool runs it at a turn boundary with its own event payload on stdin, and
-// the command records the model event the settings bound it to. It exists
-// separately from `report` because a hook is never given a session id as an
-// argv token -- the tool tells it, on stdin, which conversation it is -- while
-// `report` addresses a session the caller already knows.
+// newActivityAISessionHookCmd exists apart from report because a hook learns its session
+// id from the tool's stdin payload, not argv.
 func newActivityAISessionHookCmd() *cobra.Command {
 	var tenant string
 	var environment string
@@ -92,11 +84,7 @@ func runActivityAISessionHook(cmd *cobra.Command, tenant, environment, tool, eve
 	})
 }
 
-// resolveAISessionHookTarget resolves the environment a hook reports against:
-// the flags when a caller passed them, and otherwise the environment the
-// session is already running in. A runtime pod exports both, which is what lets
-// an installed hook be a bare command with no per-environment arguments baked
-// into a settings file every environment shares.
+// Falls back to the ambient environment so one shared settings file needs no per-env arguments.
 func resolveAISessionHookTarget(cmd *cobra.Command, tenant, environment string) (string, string, error) {
 	tenant, environment = strings.TrimSpace(tenant), strings.TrimSpace(environment)
 	if tenant == "" {
@@ -119,9 +107,6 @@ func resolveAISessionHookTarget(cmd *cobra.Command, tenant, environment string) 
 	)
 }
 
-// validAISessionHookEvent accepts only the model events a hook can report, so a
-// typo in a settings file is refused rather than recorded as an unsupported
-// event on every turn boundary.
 func validAISessionHookEvent(event string) bool {
 	for _, kind := range podruntime.AISessionHookBindings() {
 		if string(kind.ModelEvent) == event {
@@ -131,8 +116,6 @@ func validAISessionHookEvent(event string) bool {
 	return false
 }
 
-// toolLabelForHook names the reporting tool in a refusal, falling back to the
-// generic form when a settings entry left --tool off.
 func toolLabelForHook(tool string) string {
 	if tool = strings.TrimSpace(tool); tool != "" {
 		return tool

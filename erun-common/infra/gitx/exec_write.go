@@ -9,13 +9,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// WriteWorkingTreeFileParams names the write explicitly: Path is never
-// defaulted, so content can never land somewhere the caller did not choose.
+// WriteWorkingTreeFileParams has no default Path, so content lands only where the caller chose.
 type WriteWorkingTreeFileParams struct {
-	// Path is the destination, absolute or relative to the working tree root.
+	// Path is absolute or relative to the working tree root.
 	Path string
-	// Content is written verbatim. It is data, not a shell fragment: nothing
-	// in it is interpreted, expanded, or executed.
+	// Content is written verbatim; nothing in it is interpreted.
 	Content string
 }
 
@@ -25,11 +23,7 @@ type WriteWorkingTreeFileResult struct {
 	Bytes int64  `json:"bytes"`
 }
 
-// WriteWorkingTreeFile writes Content to Path inside root byte-for-byte — no
-// heredoc, no generated script, no shell anywhere in the path. The resolved
-// path is traced and the write is refused outright when it would land outside
-// root, so granting this operation can never become a path traversal into the
-// rest of the pod.
+// WriteWorkingTreeFile writes Content without any shell and refuses paths outside root.
 func WriteWorkingTreeFile(ctx core.Context, root string, params WriteWorkingTreeFileParams) (WriteWorkingTreeFileResult, error) {
 	resolved, _, err := resolveWorkingTreePath(root, params.Path)
 	if err != nil {
@@ -51,23 +45,9 @@ func WriteWorkingTreeFile(ctx core.Context, root string, params WriteWorkingTree
 	return WriteWorkingTreeFileResult{Path: resolved, Bytes: int64(len(content))}, nil
 }
 
-// resolveWorkingTreePath validates and resolves requested against root,
-// refusing anything that would land outside it — a "../" escape, an absolute
-// path elsewhere, root itself (a directory, not a file to write), or a path
-// that traverses a symlink anywhere between root and the target.
-//
-// Containment is decided against the real filesystem, not the lexical
-// string: root is resolved to its real path first (root itself may be a
-// symlink), and every existing path component between the real root and the
-// target is checked with Lstat so a symlink planted inside the tree cannot
-// redirect the write elsewhere. Writing through an in-tree symlink is
-// refused outright rather than followed: the property this command exists to
-// guarantee — a write can only land inside the working tree — has to hold
-// even when the tree's own agent planted the symlink, and "follow it if the
-// target still resolves in-tree" would leave a TOCTOU window between the
-// check and the write. The second return value is the real, symlink-free
-// root; callers that compute further paths relative to root must use it
-// instead of the caller-supplied root string, which may still be a symlink.
+// resolveWorkingTreePath refuses "../" escapes, outside absolute paths, root itself, and
+// any symlink between the real root and the target. Symlinks are refused rather than
+// followed to avoid a TOCTOU window. The second result is the real root; callers must use it.
 func resolveWorkingTreePath(root, requested string) (string, string, error) {
 	requested = strings.TrimSpace(requested)
 	if requested == "" {
@@ -96,9 +76,7 @@ func resolveWorkingTreePath(root, requested string) (string, string, error) {
 	return resolved, realRoot, nil
 }
 
-// realWorkingTreeRoot resolves root to its real, symlink-free path so
-// containment is decided against the actual filesystem location rather than
-// a symlink that happens to be named root.
+// realWorkingTreeRoot resolves root's symlinks so containment uses the real location.
 func realWorkingTreeRoot(root string) (string, error) {
 	root = filepath.Clean(strings.TrimSpace(root))
 	resolved, err := filepath.EvalSymlinks(root)
@@ -108,11 +86,7 @@ func realWorkingTreeRoot(root string) (string, error) {
 	return filepath.Clean(resolved), nil
 }
 
-// refuseSymlinkInPath walks relative one path component at a time from root,
-// refusing as soon as an existing component is a symlink. A component that
-// does not exist yet ends the walk: nothing can exist beneath a path that
-// does not exist, and the eventual write only ever creates plain files and
-// directories.
+// refuseSymlinkInPath stops at the first missing component: nothing beneath it can exist.
 func refuseSymlinkInPath(root, relative, requested string) error {
 	current := root
 	for _, segment := range strings.Split(filepath.ToSlash(relative), "/") {

@@ -2,35 +2,20 @@ package main
 
 import "time"
 
-// environment_usage.go answers the comparison question environment_activity.go
-// cannot: not just whether an environment is busy, but how much of its own
-// CPU/memory/disk it is using — the evidence an operator needs to compare
-// environments against each other at a glance, not only against themselves the
-// way the Runtime tab's on-demand reading already does. It reuses LoadRuntimeUsage
-// unchanged (the same kubectl-exec probe the Runtime tab's refresh button
-// drives), but calls it from a bounded sweep instead of per-hover: hovering an
-// environment must never trigger a probe of its own (the same precedent the activity poller set).
+// Usage is sampled by a bounded sweep (via LoadRuntimeUsage), never per hover.
 
-// environmentUsageInterval paces the usage sweep. It is slower than
-// environmentActivityInterval (20s, environment_activity.go) because each
-// reading costs a real kubectl exec plus a 1s in-container CPU sample, not a
-// lightweight local HTTP call — sampling every configured environment that
-// often would multiply real exec load across the fleet for a reading that does
-// not need second-by-second freshness to let an operator compare environments.
+// environmentUsageInterval is slow because each reading is a kubectl exec plus a
+// 1s in-container CPU sample.
 const environmentUsageInterval = 90 * time.Second
 
-// environmentUsageReading pairs one cached usage reading with when it was
-// taken, so a consumer can render both the figures and their age rather than
-// presenting a cached number as if it were live.
+// environmentUsageReading keeps the sample time so cached figures render with their age.
 type environmentUsageReading struct {
 	usage      uiRuntimeUsage
 	observedAt time.Time
 }
 
 func (a *App) runEnvironmentUsagePoller(stop <-chan struct{}) {
-	// No eager first sweep, matching runEnvironmentActivityPoller: boot is
-	// already the desktop's busiest moment, and a reading that arrives one tick
-	// late costs nothing a hover card cannot already show as "not yet observed".
+	// No eager first sweep: boot is the desktop's busiest moment.
 	ticker := time.NewTicker(environmentUsageInterval)
 	defer ticker.Stop()
 	for {
@@ -43,11 +28,8 @@ func (a *App) runEnvironmentUsagePoller(stop <-chan struct{}) {
 	}
 }
 
-// reconcileEnvironmentUsageOnce samples every configured environment, gated on
-// the activity sweep's own reachability observation: an environment with no
-// confirmed live pod gets an explicit "not running" reading rather than a
-// spent kubectl exec that would only fail the same way the activity sweep
-// already knows it would.
+// reconcileEnvironmentUsageOnce skips the exec for environments the activity
+// sweep found unreachable.
 func (a *App) reconcileEnvironmentUsageOnce() {
 	reachability := a.envActivitySnapshot()
 	for _, selection := range a.configuredSelections() {
@@ -61,10 +43,7 @@ func (a *App) sampleEnvironmentUsageOnce(selection uiSelection, reachability map
 	var usage uiRuntimeUsage
 	switch {
 	case !known || !state.reachable:
-		// Reported so, never as a bare 0: a stopped environment, a host
-		// environment (never reachable by this check — there is no pod to
-		// forward to), and one nobody has opened here all land in this branch,
-		// and none of them are "idle at 0%".
+		// Never a bare 0: an unreachable environment is not "idle at 0%".
 		usage = uiRuntimeUsage{
 			Tenant:      selection.Tenant,
 			Environment: selection.Environment,
@@ -95,9 +74,7 @@ func (a *App) sampleEnvironmentUsageOnce(selection uiSelection, reachability map
 	a.emitEnvUsage(selection, reading)
 }
 
-// envUsageSnapshot copies the poller's per-environment readings under lock, for
-// callers assembling a read model outside any a.mu section of their own —
-// mirrors envActivitySnapshot.
+// envUsageSnapshot locks a.mu (not reentrant); callers holding it read a.envUsage directly.
 func (a *App) envUsageSnapshot() map[string]environmentUsageReading {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -111,28 +88,16 @@ func (a *App) envUsageSnapshot() map[string]environmentUsageReading {
 	return out
 }
 
-// ResetEnvironmentUsageObservations is
-// ResetEnvironmentActivityObservations's usage-cache counterpart — see that
-// method's comment for why the headless Playwright harness needs it. Clears
-// only the in-memory cache: a.envUsage is read from
-// environment_usage_history.go's persisted file once, at App construction,
-// never again during the process lifetime, so a stale on-disk file left by an
-// earlier test cannot resurrect what this clears.
+// ResetEnvironmentUsageObservations clears only the in-memory cache; the
+// persisted file is read once, at App construction.
 func (a *App) ResetEnvironmentUsageObservations() {
 	a.mu.Lock()
 	a.envUsage = nil
 	a.mu.Unlock()
 }
 
-// seedEnvironmentUsageSnapshots attaches each environment's last cached
-// reading, if any, to the initial-state read model — the same reason
-// seedEnvironmentActivitySnapshots exists: a Redux reset that does not restart
-// the Go process must not wait out a full sweep interval before a hover card
-// has anything to show. a.envUsage itself is now seeded from
-// environment_usage_history.go's persisted file at App construction, so this
-// also covers a genuine process restart, not only a Redux reset: the reading
-// it attaches renders stale with its true age rather than as "Not yet
-// observed" for an environment this desktop measured moments before exiting.
+// seedEnvironmentUsageSnapshots attaches the last cached reading, persisted
+// across restarts, so a hover card shows it with its true age.
 func (a *App) seedEnvironmentUsageSnapshots(state *uiState) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -161,9 +126,7 @@ func (a *App) emitEnvUsage(selection uiSelection, reading environmentUsageReadin
 	})
 }
 
-// uiEnvironmentUsageSnapshotFrom carries StaleAfterSeconds alongside every
-// reading so a renderer never has to hardcode environmentUsageInterval to
-// decide whether a figure has gone stale.
+// StaleAfterSeconds spares renderers from hardcoding environmentUsageInterval.
 func uiEnvironmentUsageSnapshotFrom(reading environmentUsageReading) *uiEnvironmentUsageSnapshot {
 	return &uiEnvironmentUsageSnapshot{
 		Usage:             reading.usage,

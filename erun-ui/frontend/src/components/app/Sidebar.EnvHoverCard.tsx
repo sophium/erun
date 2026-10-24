@@ -33,8 +33,7 @@ import type {
 
 import { EnvironmentWorkingIssue } from '../../../wailsjs/go/main/App';
 
-// EnvTypeBadge shows a host env's distinct badge, a local-agent env's "Local"
-// badge, or nothing for a remote/runtime env.
+// EnvTypeBadge: Host, Local, or nothing for remote/runtime.
 function EnvTypeBadge({
   isLocal,
   isHost,
@@ -53,9 +52,7 @@ function EnvTypeBadge({
   return <HoverCardBadge>Local</HoverCardBadge>;
 }
 
-// EnvHoverCard shows an env row's details in a Popover rather than a tooltip
-// (a multi-field card doesn't belong in a tooltip; see erun-ui/AGENTS.md),
-// without swallowing the row's own click-to-open and edit affordances.
+// EnvHoverCard is a Popover (a multi-field card, see erun-ui/AGENTS.md) that keeps the row's click and edit.
 export function EnvHoverCard({
   className,
   tenantName,
@@ -102,9 +99,7 @@ export function EnvHoverCard({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverAnchor asChild>
-        {/* Pointer and focus are distinct holders of `open` -- see
-            useHoverCardOpenState. Wiring them to one pair of callbacks is what
-            let a blur close a card the pointer was still resting on. */}
+        {/* Pointer and focus hold `open` separately; see useHoverCardOpenState. */}
         <div
           className={className}
           onMouseEnter={hoverEnter}
@@ -119,14 +114,11 @@ export function EnvHoverCard({
         side="right"
         align="start"
         sideOffset={8}
-        // Hover-card semantics: not a focus trap, and pointer-down outside
-        // (e.g. clicking the row to open the env) must not be swallowed.
+        // Not a focus trap, and outside pointer-down must reach the row.
         onOpenAutoFocus={(event) => {
           event.preventDefault();
         }}
-        // The layer's own dismissal on focus moving out of the popover -- see
-        // refuseDismissWhileHeld: it must not outrank a holder that is still
-        // holding the card.
+        // Must not outrank a holder still holding the card.
         onFocusOutside={refuseDismissWhileHeld}
         onMouseEnter={hoverEnter}
         onMouseLeave={hoverLeave}
@@ -160,8 +152,6 @@ export function EnvHoverCard({
   );
 }
 
-// EnvHoverCardFields is the card's body, split out from EnvHoverCard so that
-// component stays the popover's open/close lifecycle and this one stays markup.
 function EnvHoverCardFields({
   runtimeVersion,
   runtimeVersionLine,
@@ -188,11 +178,7 @@ function EnvHoverCardFields({
   nodeIndicator: EnvironmentNodeIndicator;
 }): React.ReactElement {
   return (
-    // Two zones, per the spacing hierarchy's level 3 (Sidebar.HoverCardRow.tsx):
-    // stable identity above the hairline, live state below it, so a conditional
-    // row here (Erun version, Line mismatch) changes only this zone's height.
-    // tabular-nums lives here, once, rather than per row -- every digit in the
-    // card is equal-width with no per-value decision left to make.
+    // Identity above the hairline, live state below, so conditional rows only resize their zone.
     <div className="tabular-nums">
       <dl className={`${HOVER_CARD_GRID_CLASS} px-3 pt-2.5 pb-2`}>
         <HoverCardRow label="Version">
@@ -217,9 +203,7 @@ function EnvHoverCardFields({
           <ActivityState activityLabel={activityLabel} indicator={indicator} />
         </HoverCardRow>
         <UsageRows usage={usage} excludesBuilds={usageExcludesBuilds} />
-        {/* The Cloud node row is omitted entirely when there is no node: "this
-            cluster is not power-managed by erun" explains an absence the
-            operator cannot act on, and it was the longest row on the card. */}
+        {/* Omitted when there is no node: nothing actionable to say. */}
         {node && (
           <HoverCardRow label="Cloud node">
             <NodeState node={node} nodeIndicator={nodeIndicator} />
@@ -234,10 +218,7 @@ function Muted({ children }: { children: React.ReactNode }): React.ReactElement 
   return <HoverCardMuted>{children}</HoverCardMuted>;
 }
 
-// RuntimeVersionState names the release line beside the runtime-version
-// number, the same convention `erun list` already uses (erun-cli's
-// runtimeVersionLabel) -- a bare number reads as an erun version even when it
-// names a tenant's own <tenant>-devops line.
+// RuntimeVersionState names the release line, as `erun list` does.
 function RuntimeVersionState({
   runtimeVersion,
   line,
@@ -259,11 +240,7 @@ function RuntimeVersionState({
   );
 }
 
-// ErunVersionState is the erun version this environment's runtime chart
-// carries, distinct from the runtime-version row above whenever the running
-// image itself rides a tenant's own release line. Coincides with the runtime
-// version whenever both are confirmed on erun's own line, in which case this
-// says so rather than repeating an identical-looking number unexplained.
+// ErunVersionState is the runtime chart's erun version, which differs when the image rides a tenant line.
 function ErunVersionState({ summary }: { summary: ErunVersionSummary }): React.ReactElement {
   if (!summary.known) {
     return <Muted>Undetermined — no chart recorded to confirm it</Muted>;
@@ -278,10 +255,7 @@ function ErunVersionState({ summary }: { summary: ErunVersionSummary }): React.R
   );
 }
 
-// LineMismatchWarning surfaces EnvConfig.RuntimeImageLineMismatch: the
-// environment's recorded and last-observed runtime images name different
-// release lines -- the case an operator most needs to see, since it means a
-// redeploy would pull a different line than what is actually running.
+// LineMismatchWarning: a redeploy would pull a different line than what runs.
 function LineMismatchWarning({
   mismatch,
 }: {
@@ -298,10 +272,7 @@ function LineMismatchWarning({
   );
 }
 
-// ActivityState reports the desktop's own in-flight command when there is one,
-// and otherwise the environment's condition — which now distinguishes an env
-// that is busy (and with what), one that is merely reachable because someone
-// opened it outside the desktop, and one nobody has opened at all.
+// ActivityState prefers the desktop's in-flight command over the env's reported condition.
 function ActivityState({
   activityLabel,
   indicator,
@@ -318,14 +289,7 @@ function ActivityState({
   return <Muted>{indicator.activity}</Muted>;
 }
 
-// NodeState names the machine the environment's cluster runs on and the power
-// state it was last observed in. It renders whenever there IS a node, including
-// for a running node the row itself stays silent about: "the node is fine, it
-// is the environment that could not be determined" is the answer a blank row
-// cannot give, and this is where it is available without new row vocabulary.
-// The no-node case is not handled here -- the caller omits the row outright,
-// because "nothing power-manages this cluster" is not a fact an operator acts
-// on and was the longest line on the card.
+// NodeState renders whenever a node exists, even a running one; the caller omits the no-node row.
 function NodeState({
   node,
   nodeIndicator,
@@ -407,16 +371,8 @@ type WorkingIssueState =
   | { status: 'loaded'; value: UIWorkingIssue }
   | { status: 'error' };
 
-// useWorkingIssue re-resolves per card open (not once per row lifetime) so a
-// remote env's "open it to see its in-pod work" answer flips to the real
-// branch the moment the env opens; the prior value keeps rendering during a
-// refetch to avoid a "Resolving…" flash over known data.
-//
-// The fetch is guarded by an in-flight ref, not the state status: adding the
-// status to the effect deps would re-run on setState('loading'), whose
-// cleanup cancels the just-started fetch and strands the card on "Resolving…".
-// Selection is read through a ref so its per-render identity churn doesn't
-// retrigger the effect.
+// useWorkingIssue re-resolves per open, keeping the prior value during a refetch.
+// An in-flight ref, not status, guards the fetch: status in deps would cancel it. Selection is read via a ref.
 function useWorkingIssue(selection: UISelection, open: boolean): WorkingIssueState {
   const [state, setState] = React.useState<WorkingIssueState>({ status: 'idle' });
   const selectionRef = React.useRef(selection);
@@ -434,8 +390,7 @@ function useWorkingIssue(selection: UISelection, open: boolean): WorkingIssueSta
     if (!open || inFlight.current) {
       return;
     }
-    // Result is guarded by mount, not by the card's open state: closing the
-    // card mid-fetch must not drop the result.
+    // Guarded by mount, not open state, so closing mid-fetch keeps the result.
     inFlight.current = true;
     setState((prev) => (prev.status === 'loaded' ? prev : { status: 'loading' }));
     void EnvironmentWorkingIssue(selectionRef.current)

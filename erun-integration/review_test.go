@@ -12,20 +12,12 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// reviewRepository is the repository the review scenarios below open their
-// reviews in. A review has to name one — two repositories a tenant serves
-// would otherwise share a queue for the same target branch — and scenarios
-// that do not exercise the checkout's own origin derive it, name it here so
-// the assertion is about the review rather than about the runner's cwd.
+// reviewRepository is the repository review scenarios open reviews in.
 const reviewRepository = "https://github.com/sophium/erun"
 
-// otherRepository is a second repository the same tenant serves, which is the
-// shape that made a target branch alone an ambiguous name for a queue.
+// otherRepository is a second repository of the same tenant.
 const otherRepository = "https://github.com/sophium/other"
 
-// createReviewJSON runs `review create --output json` against the stub
-// server and decodes the resulting reviewId, for scenarios that need a real
-// review to act on rather than a --dry-run trace.
 func createReviewJSON(t testing.TB, setup env.Setup, name, sourceBranch, targetBranch string) struct{ ReviewID string } {
 	t.Helper()
 	result := erun.Run(t, []string{
@@ -45,9 +37,7 @@ func createReviewJSON(t testing.TB, setup env.Setup, name, sourceBranch, targetB
 	return decoded
 }
 
-// postCommentJSON runs `review comment --output json` against the stub
-// server and decodes the resulting commentId. parentCommentID is passed as
-// --reply-to when non-empty, making the posted comment a reply.
+// postCommentJSON passes a non-empty parentCommentID as --reply-to.
 func postCommentJSON(t testing.TB, setup env.Setup, reviewID, commitID, filePath string, line int, body, parentCommentID string) string {
 	t.Helper()
 	args := []string{
@@ -207,18 +197,12 @@ func testReviewListRejectsMineCombinedWithAuthorUserID(t *testing.T) {
 	golden.Equal(t, "review/list_rejects_mine_combined_with_author_user_id", normalize.Apply(result.Combined))
 }
 
-// The reported failure: a mistyped --status reached the platform verbatim,
-// came back as a clean empty listing, and printed "no reviews" at exit 0 --
-// indistinguishable from a review queue that genuinely has nothing in that
-// state. Both halves are asserted together below, because the defect is
-// precisely that the two were the same output.
+// A mistyped --status must not print "no reviews" at exit 0 like a genuinely empty queue.
 func testReviewListMistypedStatusIsRefusedRatherThanListedAsEmpty(t *testing.T) {
 	setup := env.New(t)
 	server := reviewAPIStubServer(t)
 	platformAlias(t, setup, server)
 
-	// The control: a valid status that genuinely matches nothing. This one
-	// legitimately reports an empty result at exit 0.
 	empty := erun.Run(t, []string{"review", "list", "--status", "OPEN"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if empty.ExitCode != 0 {
 		t.Fatalf("a valid status matching nothing should still exit 0, got %d:\n%s", empty.ExitCode, empty.Combined)
@@ -227,7 +211,6 @@ func testReviewListMistypedStatusIsRefusedRatherThanListedAsEmpty(t *testing.T) 
 		t.Fatalf("expected the genuine empty listing to say 'no reviews', got:\n%s", empty.Combined)
 	}
 
-	// The reproduction: the same empty queue, reached by a typo.
 	bogus := erun.Run(t, []string{"review", "list", "--status", "BOGUS"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if bogus.ExitCode == 0 {
 		t.Fatalf("a mistyped --status must not exit 0, got:\n%s", bogus.Combined)
@@ -242,17 +225,14 @@ func testReviewListMistypedStatusIsRefusedRatherThanListedAsEmpty(t *testing.T) 
 	}
 	golden.Equal(t, "review/list_mistyped_status_is_refused", normalize.Apply(bogus.Combined))
 
-	// A near-miss typo is the same refusal: the defect was that any value
-	// outside the vocabulary listed as empty, not only an obviously foreign one.
+	// Any value outside the vocabulary is refused, not only obviously foreign ones.
 	nearMiss := erun.Run(t, []string{"review", "list", "--status", "MERGEDD"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if nearMiss.ExitCode == 0 || strings.Contains(nearMiss.Combined, "no reviews") {
 		t.Fatalf("a near-miss --status must be refused too, got exit %d:\n%s", nearMiss.ExitCode, nearMiss.Combined)
 	}
 }
 
-// Case-insensitivity is the documented behavior here, so a lower-case
-// spelling must resolve to the stored one rather than be refused with it:
-// the rejection is only for values outside the six in any casing.
+// Status matching is case-insensitive.
 func testReviewListLowercaseStatusResolvesToTheStoredSpelling(t *testing.T) {
 	setup := env.New(t)
 	server := reviewAPIStubServer(t)
@@ -268,12 +248,8 @@ func testReviewListLowercaseStatusResolvesToTheStoredSpelling(t *testing.T) {
 	}
 }
 
-// The reported failure: `--repository sophium/erun` names a repository on
-// whichever forge the caller had in mind, so the platform answered it with
-// the subset of rows a caller had once recorded under that same shorthand
-// -- a silently short listing for a repository holding many reviews. It is
-// refused as a bad argument, like a mistyped --status, and equally before
-// the alias lookup: no alias is configured here on purpose.
+// A forge-less shorthand like `sophium/erun` matches only rows recorded under it, so it
+// is refused before alias lookup (no alias is configured on purpose).
 func testReviewListRefusesARepositoryThatNamesNoRepository(t *testing.T) {
 	setup := env.New(t)
 	result := erun.Run(t, []string{"review", "list", "--repository", "sophium/erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -288,10 +264,7 @@ func testReviewListRefusesARepositoryThatNamesNoRepository(t *testing.T) {
 	}
 }
 
-// The other half: whichever spelling of the repository's own remote the
-// caller holds reaches the rows the other spelling recorded. The stub
-// matches the filter exactly, so a client that stopped canonicalizing
-// would answer empty here.
+// The stub filters exactly, so a client that stopped canonicalizing would answer empty.
 func testReviewListFindsARepositoryByAnySpellingOfItsRemote(t *testing.T) {
 	setup := env.New(t)
 	server := reviewAPIStubServer(t)
@@ -309,9 +282,7 @@ func testReviewListFindsARepositoryByAnySpellingOfItsRemote(t *testing.T) {
 	}
 }
 
-// The refusal is a bad-argument error, so it must not depend on the platform
-// being configured at all: a caller with no alias still learns their filter
-// was wrong rather than being sent to set up an alias that would not help.
+// A bad filter is reported even with no alias configured.
 func testReviewListRejectsUnknownStatusBeforeResolvingAnAlias(t *testing.T) {
 	setup := env.New(t)
 	result := erun.Run(t, []string{"review", "list", "--status", "BOGUS"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -337,8 +308,7 @@ func testReviewCreateDryRun(t *testing.T) {
 	golden.Equal(t, "review/create_dry_run", normalize.Apply(result.Combined))
 }
 
-// --issue is recorded, and recorded as declared: the trace has to name
-// the reference, or a mistyped flag reads as a link the platform took.
+// The trace must name the issue, or a mistyped flag reads as a link the platform took.
 func testReviewCreateWithIssueDryRun(t *testing.T) {
 	setup := env.New(t)
 	seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
@@ -355,9 +325,6 @@ func testReviewCreateWithIssueDryRun(t *testing.T) {
 }
 
 func testReviewFullLifecycleRealRun(t *testing.T) {
-	// create -> list -> show -> comment -> reply -> close -> list again,
-	// against the real stub server, covering every review/comment
-	// PlatformClient method's request/response handling in one pass.
 	setup := env.New(t)
 	server := reviewAPIStubServer(t)
 	platformAlias(t, setup, server)
@@ -382,8 +349,6 @@ func testReviewFullLifecycleRealRun(t *testing.T) {
 	}
 }
 
-// createDeclaredIssueReview opens a review with a declared issue and requires
-// the platform to answer with that issue as a DECLARED link.
 func createDeclaredIssueReview(t *testing.T, setup env.Setup) string {
 	t.Helper()
 	create := erun.Run(t, []string{
@@ -405,9 +370,7 @@ func createDeclaredIssueReview(t *testing.T, setup env.Setup) string {
 	if created.ReviewID == "" {
 		t.Fatalf("expected a non-empty reviewId, got:\n%s", create.Stdout)
 	}
-	// The declared issue travels the whole way: --issue into the request
-	// body, and the platform's answer back out through the shared client
-	// as a DECLARED link rather than one re-derived from the branch.
+	// The platform answers DECLARED, not an issue re-derived from the branch.
 	if created.IssueRef != "sophium/erun#2683" || created.IssueRefSource != "DECLARED" {
 		t.Fatalf("create --issue reported issueRef=%q issueRefSource=%q, want the declared link it recorded, got:\n%s",
 			created.IssueRef, created.IssueRefSource, create.Stdout)
@@ -415,8 +378,6 @@ func createDeclaredIssueReview(t *testing.T, setup env.Setup) string {
 	return created.ReviewID
 }
 
-// assertCommentShownOnReview posts one comment and requires show to render it
-// alongside the review's declared issue.
 func assertCommentShownOnReview(t *testing.T, setup env.Setup, reviewID string) {
 	t.Helper()
 	commentArgs := []string{"review", "comment", reviewID, "--commit", "abc123", "--file", "main.go", "--line", "42"}
@@ -504,10 +465,6 @@ func testReviewUnresolveDryRunTracesResolvedCall(t *testing.T) {
 }
 
 func testReviewResolveAndUnresolveRootRealRun(t *testing.T) {
-	// create -> comment (root) -> resolve -> show (unresolved: 0, status=CLOSED)
-	// -> unresolve -> show (unresolved: 1, status=OPEN), covering
-	// PlatformClient.UpdateCommentStatus's request/response handling and
-	// ReviewDetail.UnresolvedThreads end to end.
 	setup := env.New(t)
 	server := reviewAPIStubServer(t)
 	platformAlias(t, setup, server)
@@ -540,8 +497,7 @@ func testReviewResolveAndUnresolveRootRealRun(t *testing.T) {
 }
 
 func testReviewResolveReplyRefusedNamesRootRealRun(t *testing.T) {
-	// A status change addressed to a reply must be refused, naming the
-	// thread's root comment id so the caller can retry against it.
+	// The refusal names the thread's root comment id to retry against.
 	setup := env.New(t)
 	server := reviewAPIStubServer(t)
 	platformAlias(t, setup, server)

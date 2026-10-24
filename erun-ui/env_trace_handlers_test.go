@@ -11,9 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// setTestHomeDir points os.UserHomeDir() at dir on the current OS. Windows reads
-// USERPROFILE, not HOME, so setting HOME alone leaves production resolving the host
-// trace under the real profile while the test staged it under the temp dir.
+// setTestHomeDir sets HOME and USERPROFILE, since Windows reads the latter.
 func setTestHomeDir(t *testing.T, dir string) {
 	t.Helper()
 	t.Setenv("HOME", dir)
@@ -83,9 +81,6 @@ func TestLoadEnvTraceHostFileMissing(t *testing.T) {
 	}
 }
 
-// TestLoadEnvTraceRemoteUnreachableKeepsHostTrace pins the fix: a
-// remote env's operator-driven commands trace on the host, so an
-// unreachable pod must degrade to a notice — not blank the pane.
 func TestLoadEnvTraceRemoteUnreachableKeepsHostTrace(t *testing.T) {
 	home := t.TempDir()
 	setTestHomeDir(t, home)
@@ -106,9 +101,6 @@ func TestLoadEnvTraceRemoteUnreachableKeepsHostTrace(t *testing.T) {
 	}
 }
 
-// TestLoadEnvTraceRemoteMergesHostAndPod pins the merged timeline: the two
-// stamped tails interleave chronologically and pod-origin lines carry the
-// [pod] marker so the vantage point stays attributable.
 func TestLoadEnvTraceRemoteMergesHostAndPod(t *testing.T) {
 	home := t.TempDir()
 	setTestHomeDir(t, home)

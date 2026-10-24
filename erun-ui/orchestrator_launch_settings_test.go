@@ -22,9 +22,6 @@ const (
 	testGatewayToken         = "sk-gateway-test-secret"
 )
 
-// orchestratorLaunchRecorder captures every launch an orchestrator test app
-// resolves and every PTY it starts, so a test can read both the command line
-// and the environment a session actually received.
 type orchestratorLaunchRecorder struct {
 	mu       sync.Mutex
 	launches []orchestrator.OrchestratorLaunch
@@ -57,8 +54,6 @@ func (r *orchestratorLaunchRecorder) setCredential(token string, err error) {
 	r.token, r.tokenErr = token, err
 }
 
-// launchSettingsTestApp is orchestratorTestApp with the real command builder
-// behind a recording launch seam and a staged gateway credential.
 func launchSettingsTestApp(t *testing.T) (*App, *orchestratorLaunchRecorder) {
 	t.Helper()
 	app := orchestratorTestApp(t)
@@ -100,8 +95,6 @@ func stageGatewayCatalog(app *App) {
 	}
 }
 
-// editStoredOrchestrator changes the persisted definition behind the desktop's
-// back, as a hand edit or a CLI writer would.
 func editStoredOrchestrator(app *App, id string, edit func(*configpkg.OrchestratorConfig)) {
 	config := stubStore(app).config
 	for i := range config.Orchestrators {
@@ -122,8 +115,6 @@ func launchSettingsOfInfo(info orchestratorInfo) orchestratorLaunchInput {
 	return orchestratorLaunchInput{UseGateway: info.UseGateway, Model: info.Model, Effort: info.Effort}
 }
 
-// requireLaunchSettingsRow fails unless info reports want as its configured
-// settings and changed as its restart flag.
 func requireLaunchSettingsRow(t *testing.T, label string, info orchestratorInfo, want orchestratorLaunchInput, changed bool) {
 	t.Helper()
 	if launchSettingsOfInfo(info) != want || info.LaunchSettingsChanged != changed {
@@ -156,8 +147,6 @@ func mustCreateOrchestratorWithLaunch(t *testing.T, app *App, launch orchestrato
 	return info
 }
 
-// agentSettingsOf reads the settings file an orchestrator's background agent
-// starts from: what its launch actually runs on.
 func agentSettingsOf(t *testing.T, id string) (map[string]any, map[string]string) {
 	t.Helper()
 	path := orchestratorAgentSettingsPath(id)
@@ -181,7 +170,6 @@ func agentSettingsOf(t *testing.T, id string) (map[string]any, map[string]string
 	return settings, env
 }
 
-// lastAgentCreate is the `claude --bg` argv the most recent agent was created with.
 func lastAgentCreate(t *testing.T, app *App) []string {
 	t.Helper()
 	fake := fakeAgentsOf(t, app)
@@ -193,7 +181,6 @@ func lastAgentCreate(t *testing.T, app *App) []string {
 	return fake.creates[len(fake.creates)-1]
 }
 
-// requireAgentEnv fails unless the agent's settings env carries every pair.
 func requireAgentEnv(t *testing.T, env map[string]string, want map[string]string) {
 	t.Helper()
 	for key, value := range want {
@@ -203,8 +190,6 @@ func requireAgentEnv(t *testing.T, env map[string]string, want map[string]string
 	}
 }
 
-// requireNoGatewayEnv fails when an orchestrator off the gateway was handed any
-// of the gateway's routing.
 func requireNoGatewayEnv(t *testing.T, env map[string]string) {
 	t.Helper()
 	for key := range env {
@@ -214,8 +199,6 @@ func requireNoGatewayEnv(t *testing.T, env map[string]string) {
 	}
 }
 
-// TestATransientSessionWithNoSettingsLaunchesExactlyAsBefore pins the unset
-// transient launch byte for byte, on both shells.
 func TestATransientSessionWithNoSettingsLaunchesExactlyAsBefore(t *testing.T) {
 	launch := defaultOrchestratorLaunch()
 	if !slices.Equal(launch.Env, []string{"CLAUDE_CODE_SUBAGENT_MODEL=opus"}) {
@@ -229,8 +212,6 @@ func TestATransientSessionWithNoSettingsLaunchesExactlyAsBefore(t *testing.T) {
 	}
 }
 
-// TestAnOrchestratorWithNoSettingsLaunchesOnTheDefaults pins a persisted
-// orchestrator's unset agent: ultracode Opus, off the gateway.
 func TestAnOrchestratorWithNoSettingsLaunchesOnTheDefaults(t *testing.T) {
 	app, rec := launchSettingsTestApp(t)
 	defer app.shutdown(context.Background())
@@ -295,8 +276,7 @@ func TestAConfiguredModelReachesTheLaunchAndItsSubagents(t *testing.T) {
 	}
 }
 
-// TestAGatewayLaunchDeliversItsCredentialOnlyThroughTheEnvironment: the token
-// is a secret, and a command line is visible to every process on the host.
+// A command line is visible to every process on the host.
 func TestAGatewayLaunchDeliversItsCredentialOnlyThroughTheEnvironment(t *testing.T) {
 	app, rec := launchSettingsTestApp(t)
 	defer app.shutdown(context.Background())
@@ -309,8 +289,7 @@ func TestAGatewayLaunchDeliversItsCredentialOnlyThroughTheEnvironment(t *testing
 	if launch.Model != "acme/coder" {
 		t.Fatalf("expected the catalog's default model through the gateway, got %q", launch.Model)
 	}
-	// A background agent never inherits the environment of the command that
-	// started it, so the gateway reaches it through its settings file.
+	// A background agent does not inherit its starter's environment.
 	settings, env := agentSettingsOf(t, created.ID)
 	requireAgentEnv(t, env, map[string]string{
 		"ANTHROPIC_BASE_URL":                         testGatewayURL,
@@ -355,9 +334,6 @@ func TestAGatewayLaunchWithoutACredentialRefusesToStart(t *testing.T) {
 	}
 }
 
-// TestAGatewayWithNoCatalogRefusesToStartAndKeepsTheRunningSession: a hand
-// edit can turn the gateway on with no catalog behind it. The start is refused,
-// and a restart is refused before it tears the running session down.
 func TestAGatewayWithNoCatalogRefusesToStartAndKeepsTheRunningSession(t *testing.T) {
 	app, rec := launchSettingsTestApp(t)
 	defer app.shutdown(context.Background())
@@ -385,10 +361,6 @@ func TestAGatewayWithNoCatalogRefusesToStartAndKeepsTheRunningSession(t *testing
 	}
 }
 
-// TestChangingLaunchSettingsOnARunningOrchestratorAsksForARestart: the live
-// session keeps the model, effort and gateway it launched with, so a save, or a
-// CLI write, must be reported as not yet live, and every row must carry the
-// configured values rather than the launched ones.
 func TestChangingLaunchSettingsOnARunningOrchestratorAsksForARestart(t *testing.T) {
 	app, rec := launchSettingsTestApp(t)
 	defer app.shutdown(context.Background())
@@ -419,7 +391,6 @@ func TestChangingLaunchSettingsOnARunningOrchestratorAsksForARestart(t *testing.
 		t.Fatalf("expected the restart to launch the configured model, got %q", launch.Model)
 	}
 
-	// The terminal writer, over the same store, while the session runs.
 	_, err = orchestrator.SetOrchestratorEffort(core.Context{}, app.deps.store, orchestrator.SetOrchestratorEffortParams{
 		OrchestratorID: created.ID, Effort: "low",
 	})
@@ -427,8 +398,6 @@ func TestChangingLaunchSettingsOnARunningOrchestratorAsksForARestart(t *testing.
 	requireLoneLaunchSettingsRow(t, app, "polled after a CLI write", orchestratorLaunchInput{Model: "sonnet", Effort: "low"}, true)
 }
 
-// TestACrashRespawnKeepsTheLaunchItContinues: crash recovery continues the
-// launch it replaces; only an explicit Restart applies changed settings.
 func TestACrashRespawnKeepsTheLaunchItContinues(t *testing.T) {
 	app, rec := launchSettingsTestApp(t)
 	defer app.shutdown(context.Background())
@@ -465,9 +434,6 @@ func TestACrashRespawnKeepsTheLaunchItContinues(t *testing.T) {
 	}
 }
 
-// TestLaunchSettingsPersistAndSurviveAnUnrelatedEdit is the round trip the
-// alias needed too: the save replaces the whole entry, so a dialog that did not
-// carry the settings back would erase them on a rename.
 func TestLaunchSettingsPersistAndSurviveAnUnrelatedEdit(t *testing.T) {
 	app, _ := launchSettingsTestApp(t)
 	defer app.shutdown(context.Background())
@@ -485,7 +451,6 @@ func TestLaunchSettingsPersistAndSurviveAnUnrelatedEdit(t *testing.T) {
 	requireLaunchSettingsRow(t, "rename", renamed, want, false)
 	requireStoredLaunchSettings(t, app, "after rename", want)
 
-	// A value the terminal wrote reaches the dialog and survives its next save.
 	_, err = orchestrator.SetOrchestratorModel(core.Context{}, app.deps.store, orchestrator.SetOrchestratorModelParams{
 		OrchestratorID: created.ID, Model: "",
 	})

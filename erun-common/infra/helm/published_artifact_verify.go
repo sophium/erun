@@ -10,22 +10,14 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// registryVerifyMaxAttempts bounds a post-push read-back and
-// registryVerifyRetryBase is its linear backoff step, so the worst case costs a
-// few seconds rather than stalling a publish.
-// A tag erun just pushed is not always immediately readable: the registry can
-// mint the pull token before the new tag has propagated and answer the first
-// fetch 403 denied. Verification reads back an object erun itself wrote, so a
-// transient-looking read is a propagation race, not a verdict — a few fast
-// attempts clear it, while a genuinely unreadable artifact still fails.
+// A just-pushed tag can briefly answer 403 before it propagates, so read-back
+// retries a few times with linear backoff.
 const (
 	RegistryVerifyMaxAttempts = 4
 	registryVerifyRetryBase   = 500 * time.Millisecond
 )
 
-// VerifyPublishedHelmChart re-pulls the just-pushed chart so a release never
-// assumes remote state: the artifact later steps and consuming envs depend on
-// must be provably fetchable.
+// VerifyPublishedHelmChart re-pulls the pushed chart to prove it is fetchable.
 func VerifyPublishedHelmChart(ctx core.Context, ociRepo, chartName, version string) error {
 	destination := filepath.Join(os.TempDir(), "erun-chart-verify")
 	args := []string{
@@ -71,11 +63,8 @@ func ReadBackPublishedArtifact(ctx core.Context, describe string, read func() (s
 	return lastErr
 }
 
-// IsTransientRegistryReadError classifies a failed read-back of an artifact erun
-// just pushed. Authorization and not-found answers are the shape registry
-// read-after-write propagation takes (the pull token is minted for a tag the
-// backend has not yet listed), and transport failures are transient by nature;
-// anything else is treated as final.
+// IsTransientRegistryReadError treats auth, not-found, and transport failures as
+// propagation races; anything else is final.
 func IsTransientRegistryReadError(output string) bool {
 	message := strings.ToLower(output)
 	for _, marker := range []string{

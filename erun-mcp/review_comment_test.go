@@ -15,12 +15,8 @@ import (
 
 const reviewCommentTestAlias = "erun-test"
 
-// stubReviewCommentStore satisfies runtimeStore's read surface with one erun
-// platform alias. Embedding the interface leaves the rest unimplemented on
-// purpose: resolving the alias reads the config and nothing else, and the
-// preview path under test returns before any of the other methods, the
-// platform client, or a bearer token is reached. A call that does reach one
-// panics loudly rather than silently passing.
+// stubReviewCommentStore embeds the interface so any call beyond alias
+// resolution panics instead of passing.
 type stubReviewCommentStore struct {
 	shared.RuntimeStore
 	config configpkg.ERunConfig
@@ -43,9 +39,7 @@ func reviewCommentTestRuntime() shared.RuntimeConfig {
 	}
 }
 
-// callReviewCommentTool drives the registered tool over a real MCP session,
-// the same schema-validating path a client uses, so a declared-required field
-// the caller omitted is caught here rather than only in the handler.
+// callReviewCommentTool goes through a real MCP session so schema validation applies.
 func callReviewCommentTool(t *testing.T, arguments map[string]any) review.ReviewCommentResult {
 	t.Helper()
 	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, reviewCommentTestRuntime())
@@ -67,9 +61,6 @@ func callReviewCommentTool(t *testing.T, arguments map[string]any) review.Review
 	return out
 }
 
-// traceLine returns the single planned platform call, the MCP analogue of the
-// CLI's --dry-run trace, or "" when the result carries a different number of
-// trace lines.
 func traceLine(result review.ReviewCommentResult) string {
 	if len(result.Trace) != 1 {
 		return ""
@@ -77,12 +68,7 @@ func traceLine(result review.ReviewCommentResult) string {
 	return result.Trace[0]
 }
 
-// TestReviewCommentToolAcceptsAnUnanchoredComment is the parity the CLI has
-// and MCP did not: both transports must plan the same call for a comment
-// carrying no commit/file/line anchor, byte for byte, since both drive the
-// same RunReviewComment. What the platform then does with an anchor-less
-// comment is deliberately not asserted here -- this test pins the client
-// contract, and the two transports disagreeing about it was the defect.
+// Both transports drive RunReviewComment, so they must plan the same call byte for byte.
 func TestReviewCommentToolAcceptsAnUnanchoredComment(t *testing.T) {
 	result := callReviewCommentTool(t, map[string]any{
 		"reviewId": "018f0000-0000-7000-8000-000000000000",
@@ -99,8 +85,6 @@ func TestReviewCommentToolAcceptsAnUnanchoredComment(t *testing.T) {
 	}
 }
 
-// TestReviewCommentToolKeepsALineAnchoredComment guards the direction that
-// already worked: an anchor must still reach the server intact.
 func TestReviewCommentToolKeepsALineAnchoredComment(t *testing.T) {
 	result := callReviewCommentTool(t, map[string]any{
 		"reviewId": "018f0000-0000-7000-8000-000000000000",
@@ -117,8 +101,6 @@ func TestReviewCommentToolKeepsALineAnchoredComment(t *testing.T) {
 	}
 }
 
-// TestReviewCommentToolKeepsAReplyInItsThread guards the third shape:
-// replying to an existing thread, which carries an anchor and a parent.
 func TestReviewCommentToolKeepsAReplyInItsThread(t *testing.T) {
 	result := callReviewCommentTool(t, map[string]any{
 		"reviewId":        "018f0000-0000-7000-8000-000000000000",
@@ -136,10 +118,6 @@ func TestReviewCommentToolKeepsAReplyInItsThread(t *testing.T) {
 	}
 }
 
-// TestReviewCommentInputSchemaRequiresOnlyReviewIDAndBody is the declared half
-// of the same contract. A caller reading the schema, or a client that
-// validates against it, must see the anchor as optional -- declaring it
-// required was enough on its own to make the call unreachable.
 func TestReviewCommentInputSchemaRequiresOnlyReviewIDAndBody(t *testing.T) {
 	session := connectTestMCPSession(t, model.BuildInfo{Version: "1.2.3"}, reviewCommentTestRuntime())
 	tools, err := session.ListTools(context.Background(), nil)

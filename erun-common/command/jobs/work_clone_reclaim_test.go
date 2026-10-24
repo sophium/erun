@@ -13,15 +13,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// This repository squash-merges every branch. That means the *normal* end
-// state for a landed feature branch is: its commits are individually absent
-// from the default branch (folded into one squash commit under a different
-// SHA), and its own remote branch is very often deleted outright once GitHub
-// merges it. A reclaim check that reads "no upstream" or "commits not on
-// upstream" as unsafe by itself would therefore refuse to reclaim almost
-// every clone that actually finished cleanly. The tests below pin both
-// halves of that: the ordinary unpushed-and-truly-abandoned case stays kept,
-// and the squash-merged case is proven safe and reclaimed.
+// Branches here are squash-merged and their remote branch deleted, so "no upstream"
+// or "commits not on upstream" alone must not block a reclaim.
 
 func withFakeWorkHome(t *testing.T) (home, root string) {
 	t.Helper()
@@ -55,8 +48,6 @@ func testContext() core.Context {
 	return core.Context{Logger: core.NewLogger(core.VerbosityInfo)}
 }
 
-// writeAndCommit writes name/content into dir and commits it, for building up
-// the exact commit graphs the decision tests below compare against.
 func writeAndCommit(t *testing.T, dir, name, content, message string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
@@ -66,9 +57,7 @@ func writeAndCommit(t *testing.T, dir, name, content, message string) {
 	runGitForTest(t, dir, "commit", "-q", "-m", message)
 }
 
-// newRepoWithBareRemote is newAgentJobTestRepo plus newBareRemoteForTest,
-// returning both paths for scenarios that need a second clone of the same
-// remote (simulating a separate actor merging the branch).
+// newRepoWithBareRemote returns both paths so a second clone can act as a separate merger.
 func newRepoWithBareRemote(t *testing.T) (repo, bare string) {
 	t.Helper()
 	repo = newAgentJobTestRepo(t)
@@ -194,11 +183,7 @@ func TestDecideWorkCloneReclaimSquashMergedBranchWithADeletedRemoteBranchIsRecla
 	writeAndCommit(t, repo, "feature-b.txt", "feature work b\n", "feature commit 2")
 	runGitForTest(t, repo, "push", "-q", "-u", "origin", "feature/lane")
 
-	// A separate clone plays the role of the merge tool: squash-merge
-	// feature/lane into main, push main, then delete the remote feature
-	// branch outright -- the exact behavior GitHub's "delete branch on
-	// merge" performs, and the normal end state for a branch this
-	// repository lands.
+	// A separate clone squash-merges feature/lane, pushes main, and deletes the remote branch.
 	merger := t.TempDir()
 	runGitForTest(t, filepath.Dir(merger), "clone", "-q", "--branch", "main", bare, merger)
 	runGitForTest(t, merger, "config", "user.email", "test@example.com")
@@ -225,8 +210,6 @@ func TestDecideWorkCloneReclaimUnpushedBranchThatOnlyLooksLikeASquashMergeIsKept
 	writeAndCommit(t, repo, "feature-a.txt", "feature work a\n", "feature commit 1")
 	runGitForTest(t, repo, "push", "-q", "-u", "origin", "feature/lane")
 
-	// Somebody else's unrelated work lands on main -- main moves, but
-	// feature/lane's own changeset never gets merged anywhere.
 	other := t.TempDir()
 	runGitForTest(t, filepath.Dir(other), "clone", "-q", "--branch", "main", bare, other)
 	runGitForTest(t, other, "config", "user.email", "test@example.com")
@@ -234,9 +217,6 @@ func TestDecideWorkCloneReclaimUnpushedBranchThatOnlyLooksLikeASquashMergeIsKept
 	writeAndCommit(t, other, "unrelated.txt", "unrelated\n", "unrelated main work")
 	runGitForTest(t, other, "push", "-q", "origin", "main")
 
-	// Then feature/lane's own commit gets one more unpushed commit ahead of
-	// what it already pushed, so this is unambiguously "still live work in
-	// progress", not a landed branch.
 	writeAndCommit(t, repo, "feature-b.txt", "feature work b\n", "feature commit 2, unpushed")
 
 	decision := DecideWorkCloneReclaim(testContext(), repo)
@@ -331,9 +311,7 @@ func TestReclaimAgentJobWorkCloneCommandJobsAreNeverReclaimed(t *testing.T) {
 func TestReclaimAgentJobWorkCloneOutsideWorkRootIsNeverReclaimed(t *testing.T) {
 	isolateActivityCache(t)
 	withFakeWorkHome(t)
-	// Deliberately outside the fake home's work root -- stands in for the
-	// runtime repo itself, or any other directory a caller might mistakenly
-	// pass as Dir.
+	// Deliberately outside the fake home's work root.
 	repo := newAgentJobTestRepo(t)
 	newBareRemoteForTest(t, repo)
 	runGitForTest(t, repo, "checkout", "-q", "-b", "feature/lane")
@@ -406,20 +384,8 @@ func TestReclaimAgentJobWorkCloneStillRunningIsNeverTouched(t *testing.T) {
 	}
 }
 
-// TestReclaimAgentJobWorkCloneNeverReportsFinishedAheadOfSettledReclaim guards
-// the exact false success this repository just shipped: finishEnvironmentJob
-// used to settle State (a terminal value job.Finished() polls on) in one
-// recorder.update, then decide and act on reclaim, then settle
-// CloneReclaimed/CloneKeptReason in a *second* recorder.update. A caller
-// polling the job record between those two writes -- exactly what job
-// status/await do from a separate process -- could read "finished" while the
-// clone was still fully present on disk and the reclaim decision not yet
-// made, let alone acted on. A concurrent poller here stands in for that
-// caller: it fails the moment it ever observes the job as finished with
-// neither a reclaim nor a kept-reason recorded yet, or observes
-// CloneReclaimed=true while the directory still resolves on disk.
-// pollReclaimSettleOnce reads the job record once and flags either violation
-// the concurrent poller in the test below watches for.
+// pollReclaimSettleOnce flags a job read as finished before its reclaim outcome is
+// recorded, or reported reclaimed while the clone is still on disk.
 func pollReclaimSettleOnce(tenant, environment, id, repo string, sawUnsettledFinish, sawReclaimedWhilePresent *atomic.Bool) {
 	job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())
 	if err != nil {
@@ -478,11 +444,7 @@ func TestReclaimAgentJobWorkCloneNeverReportsFinishedAheadOfSettledReclaim(t *te
 	}
 }
 
-// TestReclaimAgentJobWorkCloneRemovalFailureIsKeptNeverReclaimed covers the
-// other direction of the same contract: a clone the git-state check judges
-// safe to delete, but whose actual removal fails, must be reported kept with
-// a reason -- never reclaimed -- because a caller that trusted "reclaimed"
-// would believe the disk is clear when it is not.
+// A clone judged safe whose removal fails must be reported kept, never reclaimed.
 func TestReclaimAgentJobWorkCloneRemovalFailureIsKeptNeverReclaimed(t *testing.T) {
 	isolateActivityCache(t)
 	_, root := withFakeWorkHome(t)
@@ -492,11 +454,7 @@ func TestReclaimAgentJobWorkCloneRemovalFailureIsKeptNeverReclaimed(t *testing.T
 	runGitForTest(t, repo, "checkout", "-q", "-b", "feature/lane")
 	runGitForTest(t, repo, "push", "-q", "-u", "origin", "feature/lane")
 
-	// Inject the removal failure rather than fixturing it with a chmod'd
-	// file: os.RemoveAll succeeds against any permission a process's own uid
-	// can bypass, including root's, so a filesystem-permission fixture proves
-	// nothing when the suite runs as root -- as it does inside the
-	// erun-devops test-stage build that gates this module's own tests.
+	// Inject the failure: os.RemoveAll bypasses permission fixtures when the suite runs as root.
 	simulatedErr := errors.New("simulated removal failure: locked file")
 	originalRemoveAll := workCloneRemoveAll
 	workCloneRemoveAll = func(string) error { return simulatedErr }

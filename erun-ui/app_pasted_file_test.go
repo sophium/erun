@@ -52,7 +52,6 @@ func TestSavePastedFileCopiesIntoCurrentRuntime(t *testing.T) {
 	app.sessions[managed.key] = managed
 	app.mu.Unlock()
 
-	// A non-image file (PDF) must be accepted and copied, not silently dropped.
 	result, err := app.SavePastedFile(serial, pastedFilePayload{
 		Data:     base64.StdEncoding.EncodeToString(fileData),
 		MIMEType: "application/pdf",
@@ -92,9 +91,7 @@ func TestDecodePastedFilePayloadAcceptsDataURL(t *testing.T) {
 }
 
 func TestDecodePastedFilePayloadAcceptsNonImage(t *testing.T) {
-	// The image-only MIME gate is gone: a PDF (and a file with no MIME type at
-	// all, common for arbitrary clipboard files) must decode without the old
-	// "clipboard item is not an image" rejection.
+	// A PDF, or a file with no MIME type, must decode without an image-only gate.
 	pdfData := []byte("%PDF-1.7 body")
 	cases := []struct {
 		name     string
@@ -156,9 +153,7 @@ func TestPastedFileFilenameDerivation(t *testing.T) {
 
 func TestPastedFileFilenameRejectsTraversal(t *testing.T) {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 600000000, time.UTC)
-	// A crafted clipboard name must not let the staged file escape the
-	// attachments dir. The derived filename must contain no path separator and
-	// must not be "."/".." — so path.Join(dir, name) can never climb out.
+	// The derived filename must contain no separator and not be "."/"..".
 	cases := []string{
 		"../../etc/passwd",
 		"/etc/passwd",
@@ -185,10 +180,7 @@ func TestPastedFileFilenameRejectsTraversal(t *testing.T) {
 }
 
 func TestBuildPastedFileCopyCommandTargetsRuntimeDeployment(t *testing.T) {
-	// Use a non-erun tenant so the Helm release name (petios-devops) is distinct
-	// from the runtime container literal (erun-devops). For tenant "erun" the two
-	// coincide, which previously masked the bug where the release name was passed
-	// as the kubectl -c container flag.
+	// A non-erun tenant keeps the Helm release name distinct from the container name.
 	result := configpkg.OpenResult{
 		Tenant:      "petios",
 		Environment: "local",

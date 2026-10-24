@@ -12,16 +12,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// A port-forward state file is the record that something established a local
-// forward to an environment. `erun open` writes one whoever ran it — the
-// operator at a terminal or the desktop shelling out — which is what makes it
-// the honest answer to "is this environment reachable", as opposed to "did the
-// desktop open it". Reading it belongs here rather than in the CLI because both
-// transports need the same answer from the same path.
+// A state file records that someone (CLI or desktop) established a forward, so it
+// answers "is this environment reachable" for both transports.
 
-// PortForwardState is the persisted record for one forward. It is the shape the
-// mcp and api forwards write; the sshd forward adds fields, which unmarshal
-// harmlessly into the extras this reader ignores.
+// PortForwardState is one forward's record; sshd's extra fields are ignored.
 type PortForwardState struct {
 	Tenant            string `json:"tenant"`
 	Environment       string `json:"environment"`
@@ -32,22 +26,9 @@ type PortForwardState struct {
 	ProcessID         int    `json:"processId,omitempty"`
 }
 
-// PortForwardStatePath is the canonical location for a forward's state. Under
-// the config dir, not the cache dir: an evicted cache entry would orphan the
-// still-running kubectl port-forward and leave the next `erun open` unable to
-// recognise its own forward.
-//
-// The config tree is named through configRoot rather than spelled out again
-// here, because a second spelling is a second thing to keep in step: state
-// that resolved to a different root than the tenant config it is validated
-// against would stop being found, taking the recorded local port and the log
-// beside it out of reach. This tree is the lowercase one; the desktop's own
-// per-installation state is a separate capitalized tree, and the two are only
-// indistinguishable on a case-insensitive volume. The config home is the one
-// the tenant config resolves through (xdg.ConfigHome), not os.UserConfigDir:
-// on macOS the latter ignores XDG_CONFIG_HOME and on Windows it names a
-// different AppData root, either of which would put this tree beside a
-// config tree other than the one it is validated against.
+// PortForwardStatePath is a forward's state location. It lives under the config dir, not the
+// cache, so eviction cannot orphan a running forward, and resolves through configRoot
+// (xdg.ConfigHome, not os.UserConfigDir) so it sits beside the config it is validated against.
 func PortForwardStatePath(kind, tenant, environment string) (string, error) {
 	kind = strings.TrimSpace(kind)
 	tenant = strings.TrimSpace(tenant)
@@ -67,14 +48,8 @@ func PortForwardStatePath(kind, tenant, environment string) (string, error) {
 	return config.ResolveConfigFilePath(filepath.Join(config.ConfigRoot, "portforward", kind, tenant, environment+".json"))
 }
 
-// ResolvePortForwardStatePath is PortForwardStatePath for the writer: a record
-// an earlier release left at a legacy location is moved into the canonical
-// tree first, with its log, so a forward that was running across the upgrade
-// is still found instead of being started a second time.
-//
-// A dry run moves nothing — resolving this path is a read every forward setup
-// makes before its own dry-run check — and returns the legacy path it found, so
-// it still reports where the record lives today.
+// ResolvePortForwardStatePath first migrates a legacy-location record and its log into the
+// canonical tree. A dry run moves nothing and returns the legacy path it found.
 func ResolvePortForwardStatePath(kind, tenant, environment string, dryRun bool) (string, error) {
 	statePath, err := PortForwardStatePath(kind, tenant, environment)
 	if err != nil {
@@ -96,9 +71,7 @@ func ResolvePortForwardStatePath(kind, tenant, environment string, dryRun bool) 
 	return statePath, nil
 }
 
-// legacyPortForwardStatePaths lists where earlier releases kept a forward's
-// record, oldest layout first: the cache dir, then the tree os.UserConfigDir
-// named. A location that coincides with the canonical path is left out.
+// legacyPortForwardStatePaths lists earlier record locations, oldest first, excluding the canonical one.
 func legacyPortForwardStatePaths(kind, tenant, environment, statePath string) []string {
 	var paths []string
 	if cacheDir, err := os.UserCacheDir(); err == nil {
@@ -116,10 +89,8 @@ func legacyPortForwardStatePaths(kind, tenant, environment, statePath string) []
 	return legacy
 }
 
-// legacyPortForwardRoot is the forward tree as it resolved through
-// os.UserConfigDir, reported only where it differs from the current one: on
-// macOS with XDG_CONFIG_HOME set and on Windows. Elsewhere the two coincide and
-// there is no second tree to look in.
+// legacyPortForwardRoot is the os.UserConfigDir forward tree, reported only where it differs
+// (macOS with XDG_CONFIG_HOME set, Windows).
 func legacyPortForwardRoot() (string, bool) {
 	configDir, err := legacyUserConfigDir()
 	if err != nil {
@@ -133,8 +104,7 @@ func legacyPortForwardRoot() (string, bool) {
 	return legacy, true
 }
 
-// legacyUserConfigDir is os.UserConfigDir with the macOS branch keyed on the
-// detected host, so the integration suite can pin that layout on any host.
+// legacyUserConfigDir keys the macOS branch on the detected host so tests can pin it anywhere.
 func legacyUserConfigDir() (string, error) {
 	if core.DetectHost().OS == core.HostOSDarwin {
 		home, err := os.UserHomeDir()
@@ -146,10 +116,7 @@ func legacyUserConfigDir() (string, error) {
 	return os.UserConfigDir()
 }
 
-// migrateLegacyPortForwardState moves a legacy record, its log and the log's
-// rotated generation into the canonical tree. Best-effort: a record that cannot
-// be moved is left where it is, and the forward setup carries on with the
-// canonical path.
+// migrateLegacyPortForwardState is best-effort: an unmovable record stays put.
 func migrateLegacyPortForwardState(legacyPath, statePath string) {
 	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
 		return
@@ -163,21 +130,13 @@ func migrateLegacyPortForwardState(legacyPath, statePath string) {
 	_ = os.Rename(legacyLog+".1", newLog+".1")
 }
 
-// PortForwardLogPathForState is where a forward's kubectl output accumulates:
-// the state-file path with its extension replaced, which is exactly how the
-// state record's own logPath field is derived when it is written. Both
-// directions go through this one spelling, because a reader that derived the
-// log differently from the writer would look for a file the writer never
-// touched.
-//
-// It takes the state path rather than the record's identity so the migration
-// and removal of a legacy-location record can derive the log beside a path
-// that is not the canonical one.
+// PortForwardLogPathForState derives the log path the writer records in logPath; readers and
+// writers must share it.
 func PortForwardLogPathForState(statePath string) string {
 	return strings.TrimSuffix(statePath, filepath.Ext(statePath)) + ".log"
 }
 
-// PortForwardLogPath is that same log resolved from a record's identity.
+// PortForwardLogPath is PortForwardLogPathForState resolved from a record's identity.
 func PortForwardLogPath(kind, tenant, environment string) (string, error) {
 	statePath, err := PortForwardStatePath(kind, tenant, environment)
 	if err != nil {
@@ -186,30 +145,9 @@ func PortForwardLogPath(kind, tenant, environment string) (string, error) {
 	return PortForwardLogPathForState(statePath), nil
 }
 
-// RemovePortForwardRecord removes everything one forward leaves on disk: the
-// state file, the log its kubectl output was appended to, and the rotated
-// generation the log cap leaves beside it. Removing the state file alone frees
-// the local port but strands the log next to it, and a log whose environment
-// is gone is residue nothing will ever open, restart, or rotate again -- which
-// is how the forward tree accumulated hundreds of megabytes that no per-log
-// cap could ever reclaim, since a cap bounds a log that is still being written
-// and says nothing about the ones nobody will write to again.
-//
-// One thing it must not remove is a log a live forward is still writing to.
-// The forward holds the file it opened at start as its own stdout/stderr, so
-// unlinking it would keep consuming disk invisibly while taking away the
-// forward the operator is still reading. The record is read before anything is
-// removed, and a recorded process that is still alive keeps its log.
-//
-// The state file goes regardless: the local port it names is already freed and
-// reissued to whichever environment is created next, so a record that outlived
-// its environment resolves to a live forward belonging to somebody else, which
-// is the failure removing it exists to prevent.
-//
-// A record still at a legacy location is removed by the same rules: it is
-// unmigrated only because nothing opened the environment since the upgrade, and
-// the next open would otherwise move it into the canonical tree for an
-// environment of the same name created later.
+// RemovePortForwardRecord removes a forward's state file, log, and rotated log, at canonical and
+// legacy locations. A log a live forward still writes to is kept; the state file always goes,
+// since its port is reissued to the next environment.
 func RemovePortForwardRecord(ctx core.Context, kind, tenant, environment string) error {
 	statePath, err := PortForwardStatePath(kind, tenant, environment)
 	if err != nil {
@@ -227,22 +165,10 @@ func RemovePortForwardRecord(ctx core.Context, kind, tenant, environment string)
 }
 
 func removePortForwardRecordAt(ctx core.Context, kind, statePath string) error {
-	// Derived from the state path, never read from the record's own logPath:
-	// a hand-edited or half-written record must not be able to point the
-	// removal at a file outside the forward tree.
+	// Never trust the record's logPath: it could point outside the forward tree.
 	logPath := PortForwardLogPathForState(statePath)
-	// Two ways a log can still have a writer, and both have to be checked.
-	// The record's own process answers it whenever there is a record; the
-	// open-file check answers the case where there is not — deleting an
-	// environment whose forward was still running keeps the log and takes the
-	// state file with it, so by the next sweep the record that would have
-	// answered is gone. Without the second check the delete path would keep a
-	// log the sweep then removed, and the guard would be decorative.
-	//
-	// The ".1" generation is checked with the live log because rotation
-	// renames rather than copies: after a rotation the writer holds the file
-	// that is now named ".1", so checking only the live path would unlink the
-	// file the forward is actually writing to.
+	// The record's process covers the normal case; the open-file check covers a log whose state
+	// file is already gone. Check ".1" too, since rotation renames the file the writer holds.
 	if record, ok := readPortForwardStateFile(statePath); ok && core.IsProcessAlive(record.ProcessID) {
 		ctx.Trace(fmt.Sprintf("%s: keeping port-forward log %s: the forward that recorded it (PID %d) is still running", kind, logPath, record.ProcessID))
 	} else if portForwardLogHeldByProcess(logPath) {
@@ -258,16 +184,10 @@ func removePortForwardRecordAt(ctx core.Context, kind, statePath string) error {
 	return removeFileIfPresent(ctx, statePath)
 }
 
-// portForwardLogHeldByProcess is the seam a test overrides to decide, without
-// depending on lsof being installed, whether the log or the generation beside
-// it is still open somewhere.
+// portForwardLogHeldByProcess is a test seam so tests need not depend on lsof.
 var portForwardLogHeldByProcess = logHeldByLiveProcess
 
-// logHeldByLiveProcess reports whether any process holds the log, or the
-// rotated generation the cap leaves beside it, open. Nothing is reported as
-// held when the question cannot be asked — no lsof on the host, a Windows
-// host, a probe that failed — which leaves the reclaim behaving as it did
-// before this check rather than refusing to run.
+// logHeldByLiveProcess reports false when it cannot ask (no lsof, Windows, probe failure).
 func logHeldByLiveProcess(logPath string) bool {
 	if core.DetectHost().OS == core.HostOSWindows {
 		return false
@@ -277,9 +197,7 @@ func logHeldByLiveProcess(logPath string) bool {
 		if err != nil {
 			continue
 		}
-		// lsof exits non-zero when nothing holds the file, so reaching here
-		// already means a holder; the header it prints either way is skipped
-		// so a version that reports no holder on stdout says so the same way.
+		// A non-zero lsof exit means no holder; skip the header line.
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "COMMAND") {
 				return true
@@ -289,13 +207,8 @@ func logHeldByLiveProcess(logPath string) bool {
 	return false
 }
 
-// readPortForwardStateFile reads the raw record at path, bypassing
-// LoadPortForwardState's "is this environment still configured" filter. That
-// filter is what makes a deleted environment's record read as "no forward",
-// which is right for resolving a forward and wrong here, where the record's
-// own processId is the only evidence of whether its log is still being
-// written. A missing or unreadable record reads as "no live forward", which is
-// also what an environment with no record at all gets.
+// readPortForwardStateFile bypasses LoadPortForwardState's configured-environment filter, since
+// the record's processId is the only evidence its log is still written.
 func readPortForwardStateFile(path string) (PortForwardState, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -308,11 +221,7 @@ func readPortForwardStateFile(path string) (PortForwardState, bool) {
 	return state, true
 }
 
-// removeFileIfPresent removes one file, tracing it first so a dry run shows the
-// same removals it would perform. A stat failure that is not a genuine absence
-// is skipped rather than returned: this runs as part of a teardown that must
-// not fail on a file it cannot inspect, which is the behaviour the port-forward
-// state removal has always had.
+// removeFileIfPresent skips files it cannot stat so teardown never fails on them.
 func removeFileIfPresent(ctx core.Context, path string) error {
 	if !pathStats(path) {
 		return nil
@@ -332,17 +241,8 @@ func pathStats(path string) bool {
 	return err == nil
 }
 
-// LoadPortForwardState reads a forward's state. A missing file is reported as
-// "no forward", not an error: an environment nobody opened is the ordinary case.
-//
-// A file naming an environment no longer in the config store reads the same
-// way: deleting an environment is supposed to remove its state files (see
-// RunDeleteEnvironment), but a file that predates that cleanup, or one left by
-// a delete that failed partway, must not resolve as a live forward either. The
-// local port range a deleted environment's file names is freed and reissued to
-// whichever environment is created next, so trusting an orphaned file would
-// hand back a forward that now belongs to somebody else — a stale record has
-// to read as "no forward", not as a wrong one.
+// LoadPortForwardState reads a forward's state. A missing file, or one naming an unconfigured
+// environment, reads as no forward: the orphan's port may now belong to another environment.
 func LoadPortForwardState(kind, tenant, environment string) (PortForwardState, bool, error) {
 	path, err := PortForwardStatePath(kind, tenant, environment)
 	if err != nil {
@@ -369,13 +269,7 @@ func LoadPortForwardState(kind, tenant, environment string) (PortForwardState, b
 	return state, state.LocalPort > 0, nil
 }
 
-// environmentIsConfigured reports whether the config store still knows this
-// tenant/environment. A genuine absence (ErrNotInitialized) reports false,
-// nil; any other read failure is returned rather than swallowed, so a config
-// read that fails for an unrelated reason (corruption, a permission error)
-// is not silently misreported as "this environment was deleted" -- the same
-// distinction LoadPortForwardState itself draws for a state file it cannot
-// read.
+// environmentIsConfigured returns false only for ErrNotInitialized; other read failures are returned.
 func environmentIsConfigured(tenant, environment string) (bool, error) {
 	_, _, err := config.ConfigStore{}.LoadEnvConfig(tenant, environment)
 	if err == nil {

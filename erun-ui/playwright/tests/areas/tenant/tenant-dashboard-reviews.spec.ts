@@ -10,11 +10,8 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// See tenant-dashboard-audit-log.spec.ts for why this stages a throwaway env
-// with an apiUrl and stubs the RPCs: the collaboration API these tests stage
-// comes from a hosted erun-backend-api the inert harness deliberately has no
-// access to, so this exercises the Reviews tab and its detail dialog over the
-// stubbed RPC. The Go side is covered by erun-ui/tenant_review_detail_test.go.
+// The collaboration API is hosted and unreachable from the harness, so the RPCs
+// are stubbed.
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
   seedEnvironment(SEED_TENANT, environment, 'apiurl: http://127.0.0.1:1/unreachable\n');
@@ -81,13 +78,8 @@ function reviewDetail(comments: unknown[]): Record<string, unknown> {
   };
 }
 
-// openReviewsTabWithOneReview registers exactly one `page.route` matching
-// `**/__erun_invoke` for the whole test: Playwright chains overlapping route
-// handlers LIFO, and a handler's `route.continue()` sends the request straight
-// to the network rather than falling through to an earlier-registered
-// handler — so a second `page.route` call for the same pattern would shadow
-// this one instead of layering on top of it. replyResult lets a test also
-// stub CreateReviewReply without a second registration.
+// Registers a single `page.route` for the test: a second handler for the same
+// pattern would shadow this one, so replyResult covers CreateReviewReply too.
 async function openReviewsTabWithOneReview(
   app: AppShell,
   page: Page,
@@ -222,7 +214,6 @@ test.describe('tenant dashboard — reviews tab and detail dialog (#1199)', () =
 
       await expect(app.reviewDetailDialog.locator()).toContainText('fixed, thanks');
       await expect(app.reviewDetailDialog.locator()).toContainText('operator');
-      // The composer closes once the reply lands.
       await expect(app.reviewDetailDialog.replyInput()).toHaveCount(0);
     } finally {
       removeEnvironment(SEED_TENANT, environment);
@@ -254,9 +245,6 @@ test.describe('tenant dashboard — reviews tab and detail dialog (#1199)', () =
   });
 });
 
-// Discovery: an author column and unresolved-thread count readable
-// from the row, plus the Mine/Waiting-on-me one-click filters and their own
-// distinct "nothing matches this filter" empty state.
 test.describe('tenant dashboard — reviews discovery (#1378)', () => {
   test('the row shows the signed-in author as "You" and the unresolved-thread count without opening the review', async ({
     app,
@@ -318,10 +306,7 @@ test.describe('tenant dashboard — reviews discovery (#1378)', () => {
             environment,
             apiUrl: 'http://127.0.0.1:1/unreachable',
             user: { tenantId: 't1', userId: 'u1', username: 'operator' },
-            // Filtering is proven by the request the desktop makes (the
-            // stub cannot re-filter server-side), not by which reviews come
-            // back — so it always returns the same review and the assertion
-            // is on filterCalls plus the distinct empty state below.
+            // The stub cannot filter, so filtering is proven by the request made.
             reviews: mine || waitingOnMe ? [] : [REVIEW],
             panels: [{ tab: 'users' }, { tab: 'reviews' }],
           });
@@ -360,11 +345,7 @@ test.describe('tenant dashboard — reviews discovery (#1378)', () => {
     }
   });
 
-  // A tenant accumulates MERGED and CLOSED reviews forever, so an unfiltered
-  // list is mostly finished work with the actionable rows buried in it — one
-  // tenant was at 155 reviews of which 87 were merged and 68 closed. This pins
-  // the two halves of that: the status chips exist at all, and the list opens
-  // on OPEN+MERGE rather than on everything.
+  // Finished reviews accumulate forever, so the list opens on OPEN+MERGE.
   test('the status chips open on OPEN+MERGE and narrow the list to them', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('reviews-status-filter');
     try {
@@ -396,8 +377,6 @@ test.describe('tenant dashboard — reviews discovery (#1378)', () => {
       await app.tenantDashboard.waitForOpen();
       await app.tenantDashboard.selectTab('Reviews');
 
-      // The group exists, and it opens on the two actionable statuses: the
-      // MERGED review is hidden without the operator asking for it.
       await expect(app.tenantDashboard.reviewStatusFilterGroup()).toBeVisible();
       await expect(app.tenantDashboard.reviewStatusFilterButton('OPEN')).toHaveAttribute(
         'aria-pressed',
@@ -412,17 +391,14 @@ test.describe('tenant dashboard — reviews discovery (#1378)', () => {
         'false',
       );
       await expect(app.tenantDashboard.reviewsRows()).toHaveCount(1);
-      // The count names both numbers, so a filtered "1" cannot be misread as
-      // the tenant's whole history.
+      // Both numbers, so a filtered count is not misread as the whole history.
       await expect(app.tenantDashboard.reviewCountText()).toHaveText('1 of 2 reviews');
 
-      // Turning MERGED on brings the hidden row back.
       await app.tenantDashboard.reviewStatusFilterButton('MERGED').click();
       await expect(app.tenantDashboard.reviewsRows()).toHaveCount(2);
       await expect(app.tenantDashboard.reviewCountText()).toHaveText('2 reviews');
 
-      // And turning OPEN off leaves only MERGED: the chips narrow the list
-      // rather than acting as a mutually-exclusive tab strip.
+      // The chips narrow independently, not as mutually exclusive tabs.
       await app.tenantDashboard.reviewStatusFilterButton('OPEN').click();
       await expect(app.tenantDashboard.reviewsRows()).toHaveCount(1);
       await expect(app.tenantDashboard.reviewCountText()).toHaveText('1 of 2 reviews');
@@ -432,12 +408,8 @@ test.describe('tenant dashboard — reviews discovery (#1378)', () => {
   });
 });
 
-// The list row and the dialog over it name the same quantity — how many of a
-// review's threads are still open — so they must report the same number. They
-// come from two different reads: the dashboard row's own per-review
-// enrichment, which is best effort, and the detail dialog's comment load,
-// which holds the threads. A row whose enrichment produced no count must not
-// render a bare dash while the dialog over it says "1 unresolved".
+// Row and dialog come from different reads; a row without an enriched count
+// must not show a dash while the dialog reports one.
 test.describe('tenant dashboard — the reviews row and the detail dialog agree on thread count', () => {
   test('a row with no computed count reports the dialog’s count once the review has been opened', async ({
     app,
@@ -453,9 +425,7 @@ test.describe('tenant dashboard — the reviews row and the detail dialog agree 
             environment,
             apiUrl: 'http://127.0.0.1:1/unreachable',
             user: { tenantId: 't1', userId: 'u1', username: 'operator' },
-            // No unresolvedThreads on the row at all: the exact shape the
-            // dashboard read model produces when its per-review comment read
-            // did not yield a count.
+            // No unresolvedThreads: the best-effort enrichment yielded no count.
             reviews: [{ ...REVIEW }],
             panels: [{ tab: 'users' }, { tab: 'reviews' }],
           });
@@ -477,8 +447,6 @@ test.describe('tenant dashboard — the reviews row and the detail dialog agree 
       await app.tenantDashboard.waitForOpen();
       await app.tenantDashboard.selectTab('Reviews');
 
-      // A row that could not compute its count says so: a dash here reads as
-      // "none" beside a dialog that reports one.
       const row = app.tenantDashboard.reviewsRows().first();
       await expect(row).toContainText('Unknown');
       await expect(row).not.toContainText('1 unresolved');
@@ -487,9 +455,7 @@ test.describe('tenant dashboard — the reviews row and the detail dialog agree 
       await app.reviewDetailDialog.waitForOpen();
       await expect(app.reviewDetailDialog.locator()).toContainText('1 unresolved');
 
-      // Dismissing the dialog leaves the row reporting what the dialog
-      // reported for the same review. The row is behind the modal's inert
-      // subtree while the dialog is open, so this is read after it closes.
+      // The row is inert behind the modal, so read it after closing.
       await page.keyboard.press('Escape');
       await app.reviewDetailDialog.waitForClosed();
       await expect(row).toContainText('1 unresolved');
@@ -499,8 +465,6 @@ test.describe('tenant dashboard — the reviews row and the detail dialog agree 
   });
 });
 
-// Resolution: a thread's status is visible and actionable from the
-// review detail dialog, offered only on a thread's root.
 test.describe('tenant dashboard — resolving a comment thread (#1378)', () => {
   test('resolving a thread flips its status, the action to Reopen, and the header count', async ({
     app,
@@ -609,15 +573,12 @@ test.describe('tenant dashboard — resolving a comment thread (#1378)', () => {
       await app.tenantDashboard.waitForOpen();
       await app.tenantDashboard.selectTab('Reviews');
 
-      // C: a resolved username, not the raw "u2" id.
       const row = app.tenantDashboard.reviewsRows().first();
       await expect(row).toContainText('Pat Reviewer');
       await expect(row).not.toContainText('u2');
-      // D: an initials avatar renders beside it (decorative, so a structural
-      // locator — no accessible name exists to query by design).
+      // The avatar is aria-hidden, so it has no accessible name to query.
       await expect(row.locator('span[aria-hidden="true"]').filter({ hasText: 'PR' })).toBeVisible();
 
-      // E: counts are visible on the filter buttons before either is clicked.
       await expect(app.tenantDashboard.mineFilterButton()).toContainText('3');
       await expect(app.tenantDashboard.waitingOnMeFilterButton()).toContainText('5');
 
@@ -625,16 +586,13 @@ test.describe('tenant dashboard — resolving a comment thread (#1378)', () => {
       await app.reviewDetailDialog.waitForOpen();
       const dialog = app.reviewDetailDialog.locator();
 
-      // K: the dialog gets a diff-discussion-appropriate width, not ~510px.
       const dialogBox = await boundingBoxOf(dialog, 'review detail dialog');
       expect(dialogBox.width).toBeGreaterThan(700);
 
-      // M: the branch line middle-ellipses rather than running three lines
-      // unbounded, with the full value still reachable via title.
+      // The branch middle-ellipsises, with the full value in its title.
       await expect(dialog.getByText(longBranch, { exact: true })).toHaveCount(0);
       await expect(dialog.locator(`[title="${longBranch}"]`)).toHaveCount(1);
 
-      // I: Resolve carries the primary button weight; Reply stays secondary.
       await expect(dialog.getByRole('button', { name: 'Resolve' }).first()).toHaveAttribute(
         'data-variant',
         'default',
@@ -693,11 +651,8 @@ test.describe('tenant dashboard — resolving a comment thread (#1378)', () => {
   });
 });
 
-// A review-linked build's "View profile" button opens the same
-// BuildProfileDialog the Builds tab uses (see tenant-dashboard-builds.spec.ts
-// for the dialog's own content coverage) -- this only proves the two dialogs
-// nest correctly (ReviewDetailDialog -> BuildProfileDialog) and that closing
-// the inner one leaves the outer one open.
+// Only checks that BuildProfileDialog nests in ReviewDetailDialog and closing
+// it leaves the outer dialog open.
 test.describe('tenant dashboard — review build profile (#2274)', () => {
   test('opens over the review detail dialog and closes back to it', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('review-build-profile');
@@ -748,8 +703,7 @@ test.describe('tenant dashboard — review build profile (#2274)', () => {
       await app.reviewDetailDialog.buildProfileButtonFor('build-gate-1').click();
       await app.buildProfileDialog.waitForOpen();
       await expect(app.buildProfileDialog.locator()).toContainText('erun-devops');
-      // No cgroup was reported for this profile's one step, so every
-      // cgroup-derived cell must read "Not available", never a zero.
+      // No cgroup reading, so cells read "Not available", never zero.
       await expect(app.buildProfileDialog.notAvailableNotice()).toBeVisible();
 
       await page.keyboard.press('Escape');
@@ -760,9 +714,7 @@ test.describe('tenant dashboard — review build profile (#2274)', () => {
     }
   });
 
-  // The denial a caller refused a review actually sees. It has to carry the
-  // grant, filled in with the caller's own user id: an assertion that it
-  // merely names the missing read passes on the version that stopped short.
+  // The denial must carry the grant with the caller's own user id.
   test('a review the caller may not open hands over the grant that lifts it', async ({
     app,
     page,

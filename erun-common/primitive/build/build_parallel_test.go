@@ -18,9 +18,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// buildSpecFromDockerfile writes a Dockerfile and returns the spec that builds
-// it. The FROM edges are read off disk, so the graph under test has to be real
-// files rather than a hand-built adjacency map.
+// FROM edges are read off disk, so the graph under test must be real files.
 func buildSpecFromDockerfile(t *testing.T, dir, tag, from string) shared.DockerBuildSpec {
 	t.Helper()
 	path := filepath.Join(dir, "Dockerfile."+strings.ReplaceAll(tag, "/", "_"))
@@ -35,8 +33,6 @@ func dependencyContext(stdout, stderr io.Writer) core.Context {
 	return core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard), Stdout: stdout, Stderr: stderr}
 }
 
-// traceContext captures the audit channel, which is where the dependency plan
-// is reported.
 func traceContext(trace io.Writer) core.Context {
 	return core.Context{Logger: core.NewLoggerWithWriters(0, trace, trace)}
 }
@@ -51,10 +47,6 @@ func resolveTestDependencies(t *testing.T, builds []shared.DockerBuildSpec) ([]s
 	return ordered, dependencies
 }
 
-// The graph is the whole scheduling contract, so it has to record the FROM edges
-// and nothing else. erun-devops FROMs erun-ubuntu alone; it must not be recorded
-// as waiting on the images it merely happens to be discovered beside, however
-// long those take.
 func TestBuildDependenciesRecordOnlyTheFromEdges(t *testing.T) {
 	dir := t.TempDir()
 	builds := []shared.DockerBuildSpec{
@@ -75,8 +67,6 @@ func TestBuildDependenciesRecordOnlyTheFromEdges(t *testing.T) {
 	}
 }
 
-// A Dockerfile that FROMs itself is not waiting for anything: an image cannot
-// wait for its own tags, and recording the edge would strand it forever.
 func TestBuildDependenciesIgnoreASelfReference(t *testing.T) {
 	dir := t.TempDir()
 	builds := []shared.DockerBuildSpec{
@@ -88,10 +78,6 @@ func TestBuildDependenciesIgnoreASelfReference(t *testing.T) {
 	}
 }
 
-// The audit line names the dependency structure, not a schedule: it says what
-// has to wait for what, which is what holds whatever the run does. A build with
-// nothing to order says nothing — every independent-image golden would churn for
-// no information.
 func TestTraceBuildDependencyPlanSaysNothingWhenNothingMustWait(t *testing.T) {
 	dir := t.TempDir()
 	for name, builds := range map[string][]shared.DockerBuildSpec{
@@ -108,16 +94,12 @@ func TestTraceBuildDependencyPlanSaysNothingWhenNothingMustWait(t *testing.T) {
 	}
 }
 
-// The sequential loop tolerated a FROM cycle by simply picking an order. A
-// dependency-driven scheduler would wait forever on bases that are waiting on
-// it, so the cycle has to be found and reported rather than hung on.
 func TestBuildDependenciesReportAFromCycleInsteadOfHanging(t *testing.T) {
 	dir := t.TempDir()
 	builds := []shared.DockerBuildSpec{
 		buildSpecFromDockerfile(t, dir, "alpha", "beta"),
 		buildSpecFromDockerfile(t, dir, "beta", "alpha"),
-		// An image the cycle cannot be blamed for: it is in no cycle at all, and
-		// naming it would send a reader looking for an edge that is not there.
+		// Naming a bystander would send a reader looking for an edge that is not there.
 		buildSpecFromDockerfile(t, dir, "bystander", "debian:bookworm"),
 	}
 	_, err := buildDependencies(builds)
@@ -134,12 +116,7 @@ func TestBuildDependenciesReportAFromCycleInsteadOfHanging(t *testing.T) {
 	}
 }
 
-// The reported behaviour: erun-devops FROMs erun-ubuntu, which is a tag write
-// that finishes in under a second, and it used to wait out the whole dependency
-// level behind it — here, erun-backend-api, which it does not depend on. This
-// holds erun-backend-api open and asserts erun-devops starts anyway. On the
-// barrier it could not: erun-devops was the next level, so it started only once
-// every image beside its base had finished.
+// erun-backend-api is held open; erun-devops, which only FROMs erun-ubuntu, must start anyway.
 func TestRunBuildDependenciesStartsAnImageAsSoonAsItsOwnBasesAreDone(t *testing.T) {
 	dir := t.TempDir()
 	builds := []shared.DockerBuildSpec{
@@ -154,8 +131,6 @@ func TestRunBuildDependenciesStartsAnImageAsSoonAsItsOwnBasesAreDone(t *testing.
 	releaseSlow := make(chan struct{})
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(releaseSlow) }) }
-	// Whatever the assertions do, the blocked build is released, so a failure
-	// here cannot leave the run's goroutines behind.
 	defer release()
 
 	build := func(spec shared.DockerBuildSpec, _, _ io.Writer) error {
@@ -179,8 +154,6 @@ func TestRunBuildDependenciesStartsAnImageAsSoonAsItsOwnBasesAreDone(t *testing.
 	case <-time.After(30 * time.Second):
 		t.Fatal("erun-backend-api never started")
 	}
-	// A bound, not a sleep: erun-devops must start on its own, and if it never
-	// does the run is waiting on an edge the Dockerfiles do not declare.
 	select {
 	case <-devopsStarted:
 	case <-time.After(30 * time.Second):
@@ -194,11 +167,6 @@ func TestRunBuildDependenciesStartsAnImageAsSoonAsItsOwnBasesAreDone(t *testing.
 	}
 }
 
-// Dispatch decides when an image may start, not whether its bases held: an image
-// whose Dockerfile FROMs a sibling still cannot start until that sibling has
-// finished and written its tags, whatever else is running. The base is held open
-// while the scheduler has other work in flight, so a scheduler that started a
-// dependent early would record it here.
 func TestRunBuildDependenciesNeverStartsAnImageBeforeItsBases(t *testing.T) {
 	dir := t.TempDir()
 	builds := []shared.DockerBuildSpec{
@@ -253,9 +221,6 @@ func TestRunBuildDependenciesNeverStartsAnImageBeforeItsBases(t *testing.T) {
 	}
 }
 
-// Concurrency must not reach the reader: two runs of the same build produce the
-// same stream, and each image's output stays in one piece rather than
-// interleaving with its neighbours.
 func TestRunBuildDependenciesFlushesOutputInBuildOrderWhateverFinishesFirst(t *testing.T) {
 	dir := t.TempDir()
 	builds := []shared.DockerBuildSpec{
@@ -264,8 +229,7 @@ func TestRunBuildDependenciesFlushesOutputInBuildOrderWhateverFinishesFirst(t *t
 	}
 	ordered, dependencies := resolveTestDependencies(t, builds)
 
-	// The first image finishes last, so an implementation that flushed on
-	// completion would emit them the other way round.
+	// The first image finishes last, so flushing on completion would reverse them.
 	var released sync.WaitGroup
 	released.Add(1)
 	build := func(spec shared.DockerBuildSpec, stdout, _ io.Writer) error {
@@ -289,13 +253,7 @@ func TestRunBuildDependenciesFlushesOutputInBuildOrderWhateverFinishesFirst(t *t
 	}
 }
 
-// The order independent dispatch has to be shown to keep: an image that ran
-// ahead of another still publishes after it. The barrier got this for free — no
-// later image existed yet when an earlier one was flushed — so it is the
-// property most at risk when images start whenever their own bases are done.
-//
-// erun-devops (third in build order) finishes while erun-backend-api (second) is
-// still running; the stream must still read backend-api before devops.
+// erun-devops (third) finishes while erun-backend-api (second) runs; the stream keeps build order.
 func TestRunBuildDependenciesPublishesInBuildOrderAcrossTheOldBarrier(t *testing.T) {
 	dir := t.TempDir()
 	builds := []shared.DockerBuildSpec{
@@ -317,8 +275,6 @@ func TestRunBuildDependenciesPublishesInBuildOrderAcrossTheOldBarrier(t *testing
 			return nil
 		}
 		if tag == "erun-backend-api" {
-			// Runs ahead of its own build order: it is still going when the
-			// image after it has already finished.
 			<-devopsDone
 		}
 		return nil
@@ -335,8 +291,6 @@ func TestRunBuildDependenciesPublishesInBuildOrderAcrossTheOldBarrier(t *testing
 	}
 }
 
-// Failures are reported in build order too, so which error a build reports does
-// not depend on which goroutine lost the race.
 func TestRunBuildDependenciesReportsTheFirstFailureInBuildOrder(t *testing.T) {
 	dir := t.TempDir()
 	builds := []shared.DockerBuildSpec{
@@ -355,8 +309,6 @@ func TestRunBuildDependenciesReportsTheFirstFailureInBuildOrder(t *testing.T) {
 	}
 }
 
-// A base that fails takes its dependents with it: the FROM edge is an ordering
-// constraint, and building on a tag that was never written cannot work.
 func TestRunBuildDependenciesSkipsDependentsOfAFailedBase(t *testing.T) {
 	dir := t.TempDir()
 	builds := []shared.DockerBuildSpec{
@@ -383,8 +335,6 @@ func TestRunBuildDependenciesSkipsDependentsOfAFailedBase(t *testing.T) {
 	}
 }
 
-// The bound is a bound: it exists because each build spawns BuildKit and an
-// emulated foreign arch, so exceeding it trades wall-clock for memory pressure.
 func TestRunBuildDependenciesNeverExceedsItsBound(t *testing.T) {
 	dir := t.TempDir()
 	builds := []shared.DockerBuildSpec{
@@ -434,7 +384,6 @@ func TestResolveBuildJobsPrefersTheExplicitDegreeThenTheEnvironment(t *testing.T
 	if got := resolveBuildJobs(core.Context{}, 8); got != 4 {
 		t.Fatalf("the environment override must apply, got %d", got)
 	}
-	// Never more workers than there is work: the extra ones would only idle.
 	if got := resolveBuildJobs(core.Context{BuildJobs: 16}, 3); got != 3 {
 		t.Fatalf("expected the degree capped at the image count, got %d", got)
 	}

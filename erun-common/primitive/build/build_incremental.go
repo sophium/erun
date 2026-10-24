@@ -86,9 +86,7 @@ func parseDockerfileCopyInstructions(dockerfile string) [][]string {
 	return results
 }
 
-// filterDockerfileCopyArgs reports fromStage when a COPY --from=<stage> is seen:
-// such a COPY references a build stage, not a host path, so its sources are not
-// fingerprint inputs and the caller skips the instruction entirely.
+// filterDockerfileCopyArgs reports fromStage for COPY --from, whose sources are not host paths.
 func filterDockerfileCopyArgs(args []string) (filtered []string, fromStage bool) {
 	filtered = make([]string, 0, len(args))
 	for _, arg := range args {
@@ -104,26 +102,8 @@ func filterDockerfileCopyArgs(args []string) (filtered []string, fromStage bool)
 	return filtered, fromStage
 }
 
-// computeBuildFingerprint derives a content identity for a build. Ignored files
-// (.dockerignore/.gitignore) are excluded so generated artifacts and untracked
-// state do not churn the result, and the digest is truncated to 16 chars to fit
-// in a Docker tag.
-//
-// This identity — and the fp-<fingerprint> tag a promotion resolves — is
-// deliberately a function of the build's *inputs* alone: the context the
-// Dockerfile copies, its chart, and the version it consumes. It must never
-// become a function of the container it is computed in, because the container
-// is the one thing an environment does not keep: a deploy or a resize replaces
-// the pod (new hostname, new cgroup namespace, new per-pod paths) while the
-// repository, the local Docker store and the cache volume all survive, so an
-// input taken from the pod would move the identity on every roll and make a
-// warm environment rebuild from cold. The one pod-scoped value a build carries
-// is CgroupParent, derived from the pod's own hostname; it is a runtime
-// placement for the RUN containers rather than an input to the image they
-// produce, so it stays out of this set (see buildContainerCPUCapCgroupParent,
-// which also records what a roll pays for it in BuildKit's own layer cache).
-// TestBuildFingerprintSurvivesAPodRoll
-// pins that, including for a content change that must still move the identity.
+// computeBuildFingerprint derives a build's content identity from its inputs only, never
+// the pod it runs in, so a pod roll does not force a cold rebuild.
 func computeBuildFingerprint(buildInput shared.DockerBuildSpec) (string, error) {
 	contextDir := strings.TrimSpace(buildInput.ContextDir)
 	if contextDir == "" {
@@ -151,9 +131,6 @@ func computeBuildFingerprint(buildInput shared.DockerBuildSpec) (string, error) 
 	return digest[:16], nil
 }
 
-// hashContextSourcesInto hashes every file the sources name in the context,
-// less what the context's ignore files exclude: the same input set for an
-// image and for a linux package component.
 func hashContextSourcesInto(hasher io.Writer, contextDir string, sources []string) error {
 	ignored, err := LoadContextIgnoreSet(contextDir, sources)
 	if err != nil {
@@ -166,9 +143,7 @@ func hashContextSourcesInto(hasher io.Writer, contextDir string, sources []strin
 	return hashFingerprintFiles(hasher, contextDir, files)
 }
 
-// hashFingerprintFiles separates entries with a NUL byte so distinct file lists
-// can never collide into the same digest, and slash-normalizes paths so the
-// result is stable across host filesystems.
+// NUL separators prevent file-list collisions; slash-normalized paths keep it host-stable.
 func hashFingerprintFiles(hasher io.Writer, contextDir string, files []string) error {
 	for _, path := range files {
 		rel, err := filepath.Rel(contextDir, path)
@@ -192,21 +167,13 @@ func hashFingerprintFiles(hasher io.Writer, contextDir string, files []string) e
 	return nil
 }
 
-// hashBuildVersionInto folds the ERUN_VERSION build arg into the fingerprint of
-// every build whose Dockerfile consumes it. The version is a build input that
-// lives in no file in the context, so hashing only files answered "is this the
-// same source?" where a versioned artifact needs "is this the same artifact?":
-// a release whose only diff was VERSION promoted the previous release's image,
-// and the binary inside kept reporting the version before the tag it shipped
-// under. A build that never references the version keeps a version-independent
-// identity, so the cache still spans releases for everything that does not bake
-// one in.
+// hashBuildVersionInto folds ERUN_VERSION into builds that consume it, so a version bump
+// does not promote an image reporting the old version.
 func hashBuildVersionInto(w io.Writer, buildInput shared.DockerBuildSpec) error {
 	if !dockerfileConsumesVersion(buildInput.DockerfilePath) {
 		return nil
 	}
-	// The unsuffixed value, so both per-arch fingerprints stay identical and one
-	// version change still invalidates them together.
+	// Unsuffixed, so both per-arch fingerprints move together.
 	version := shared.DockerBuildArgVersion(buildInput)
 	if version == "" {
 		return nil
@@ -218,18 +185,9 @@ func hashBuildVersionInto(w io.Writer, buildInput shared.DockerBuildSpec) error 
 	return err
 }
 
-// hashComponentChartInto folds the component's Helm chart into the build
-// fingerprint. The chart ships at the same version as the image but lives
-// outside the image build context, so without this a chart-only edit would
-// leave the fingerprint unchanged, the image would promote from cache, and the
-// chart change would be silently dropped. Hashing it keeps image and chart one
-// versioned contract. A component with no chart contributes nothing.
+// hashComponentChartInto folds the component's chart in, so a chart-only edit is not dropped by promotion.
 func hashComponentChartInto(w io.Writer, buildInput shared.DockerBuildSpec) error {
-	// A version-pinned base image takes its identity from its upstream pin, not
-	// the release, but its chart is bumped to the release version every cycle.
-	// Folding that chart in would churn a stable image's fingerprint every
-	// release and force a needless rebuild, so skip it; the chart still publishes
-	// at the release version through push regardless.
+	// A version-pinned base's chart is bumped every release; folding it in would churn its fingerprint.
 	if buildInput.Image.VersionFromBuildDir {
 		return nil
 	}
@@ -259,10 +217,7 @@ func hashComponentChartInto(w io.Writer, buildInput shared.DockerBuildSpec) erro
 	})
 }
 
-// componentChartDirForBuild derives the component's chart dir from the repo
-// convention that a charted component's Dockerfile at <module>/docker/<component>
-// has its chart at the sibling <module>/k8s/<component>. Returns "" when the
-// Dockerfile is outside that layout or the component has no chart.
+// componentChartDirForBuild returns the component's chart dir, or "" when it has none.
 func componentChartDirForBuild(buildInput shared.DockerBuildSpec) string {
 	dockerfilePath := strings.TrimSpace(buildInput.DockerfilePath)
 	if dockerfilePath == "" {
@@ -282,14 +237,8 @@ func componentChartDirForBuild(buildInput shared.DockerBuildSpec) string {
 	return chartDir
 }
 
-// componentChartDirCandidate resolves the component's chart dir the same way
-// deploy resolves it — the paths.k8s override, else the -devops convention — so
-// the chart folded into the image fingerprint is always the chart that ships,
-// preserving the image+chart one-version contract even when paths.docker
-// relocates the build root away from the k8s tree. It falls back to the
-// sibling-of-docker convention only for layouts the deploy resolver cannot
-// anchor (no git-detected tenant, or an ambiguous set of modules), and never
-// fails the build on a resolver error.
+// componentChartDirCandidate resolves the chart dir as deploy does, so the hashed chart is
+// the one that ships; it never fails the build.
 func componentChartDirCandidate(projectRoot, dockerDir string) string {
 	component := filepath.Base(dockerDir)
 	if k8sDir, ok, err := shared.ResolveCurrentDevopsK8sDir(config.FindProjectRoot, projectRoot, projectRoot); err == nil && ok {
@@ -377,9 +326,7 @@ func hashFileInto(w io.Writer, path string) error {
 	return err
 }
 
-// LoadContextIgnoreSet builds the ignore matcher for fingerprint computation.
-// Patterns are appended in load order (root files, then nested .gitignores) so
-// a later negation can override an earlier exclusion.
+// LoadContextIgnoreSet appends patterns in load order so later negations override.
 func LoadContextIgnoreSet(contextDir string, sources []string) (*shared.IgnoreSet, error) {
 	combined := &shared.IgnoreSet{}
 	for _, name := range []string{".dockerignore", ".gitignore"} {
@@ -395,14 +342,10 @@ func LoadContextIgnoreSet(contextDir string, sources []string) (*shared.IgnoreSe
 	return combined, nil
 }
 
-// LocalDockerImageInspector reports whether an image tag exists in the local
-// Docker daemon, used to detect fp-tagged images eligible for incremental
-// promotion.
+// LocalDockerImageInspector reports whether an image tag exists in the local daemon.
 type LocalDockerImageInspector func(tag string) (bool, error)
 
-// ApplyIncrementalToBuildExecution applies fingerprint-based incremental
-// promotion to the execution's docker builds, returning a copy (unchanged when
-// noIncremental is true).
+// ApplyIncrementalToBuildExecution applies incremental promotion to an execution's docker builds.
 func ApplyIncrementalToBuildExecution(ctx core.Context, execution shared.BuildExecutionSpec, noIncremental bool) (shared.BuildExecutionSpec, error) {
 	updated, err := ApplyIncrementalToDockerBuilds(ctx, execution.DockerBuilds, noIncremental)
 	if err != nil {
@@ -412,17 +355,8 @@ func ApplyIncrementalToBuildExecution(ctx core.Context, execution shared.BuildEx
 	return execution, nil
 }
 
-// ApplyIncrementalToDockerBuilds applies fingerprint-based incremental
-// promotion to a slice of docker builds. This is the single entry point every
-// command uses, so deploy, push, and runtime deploy share the same skip logic as
-// erun build. Images listed in the project's docker.fingerprints config are
-// first pulled and tagged locally under their configured fingerprint so a
-// matching build promotes instead of rebuilding; in dry-run those would-be tags
-// are treated as present so the trace still reflects the promote path.
-//
-// A tested component is promotable like any other: an fp tag is written only
-// after a successful docker build, which ran the Dockerfile's test stage, so
-// promoting from it reuses that component's last successful result.
+// ApplyIncrementalToDockerBuilds is the single incremental-promotion entry point for every
+// command. In dry-run, configured fingerprint tags are treated as present.
 func ApplyIncrementalToDockerBuilds(ctx core.Context, builds []shared.DockerBuildSpec, noIncremental bool) ([]shared.DockerBuildSpec, error) {
 	if len(builds) == 0 {
 		return builds, nil
@@ -446,10 +380,8 @@ func ApplyIncrementalToDockerBuilds(ctx core.Context, builds []shared.DockerBuil
 	return applyIncrementalPromotion(builds, inspect)
 }
 
-// applyIncrementalPromotion marks each build whose fp-tagged image already
-// exists locally for promotion (re-tag + push) instead of rebuild. Cascade: a
-// rebuilt local-base image forces every dependent that FROMs it to rebuild too,
-// even when the dependent's own fingerprint matches.
+// applyIncrementalPromotion promotes builds whose fp-tagged image exists locally; a rebuilt
+// local base forces its dependents to rebuild.
 func applyIncrementalPromotion(builds []shared.DockerBuildSpec, inspect LocalDockerImageInspector) ([]shared.DockerBuildSpec, error) {
 	if len(builds) == 0 {
 		return builds, nil

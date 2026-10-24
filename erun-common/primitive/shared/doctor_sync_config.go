@@ -10,8 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// InjectedRuntimeConfig is the canonical config the chart-injected ERUN_* env
-// vars describe; the runtime boot writes it (writeRuntimeBootConfig).
+// InjectedRuntimeConfig is the config the chart-injected ERUN_* vars describe.
 type InjectedRuntimeConfig struct {
 	Tenant      string
 	Environment string
@@ -20,9 +19,7 @@ type InjectedRuntimeConfig struct {
 	Contexts    []configpkg.CloudContextConfig
 }
 
-// ResolveInjectedRuntimeConfig builds the canonical config from the chart's
-// ERUN_* env vars. It returns ok=false when tenant or environment are unset
-// (the runtime boot's own guard) so the caller can report "nothing to reconcile".
+// ResolveInjectedRuntimeConfig reports ok=false without a tenant and environment.
 func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfig, bool) {
 	if env == nil {
 		env = os.Getenv
@@ -79,10 +76,8 @@ func injectedCloudConfig(provider, alias, region, instanceID, contextName, kuber
 	if region == "" {
 		return providers, nil
 	}
-	// Route through NormalizeCloudContextConfig so an unset ERUN_CLOUD_CONTEXT_NAME
-	// defaults to the kubernetes context exactly as every writer (upsertCloudContext,
-	// the runtime boot) already defaults it — otherwise the injected ""
-	// never matches the on-disk default and drift never clears.
+	// Normalize like every writer does, or the injected "" never matches the
+	// on-disk default and drift never clears.
 	contexts := []configpkg.CloudContextConfig{configpkg.NormalizeCloudContextConfig(configpkg.CloudContextConfig{
 		Name:               contextName,
 		Provider:           provider,
@@ -94,8 +89,6 @@ func injectedCloudConfig(provider, alias, region, instanceID, contextName, kuber
 	return providers, contexts
 }
 
-// injectedManagedCloud reports whether the injected env describes a
-// cloud-managed environment.
 func injectedManagedCloud(get func(string) string, provider, alias, region string) bool {
 	if strings.EqualFold(get("ERUN_CLOUD_ENVIRONMENT"), "true") {
 		return true

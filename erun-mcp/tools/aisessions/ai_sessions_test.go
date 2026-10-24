@@ -10,9 +10,6 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// requireEchoedTarget fails the test unless the result echoes the given
-// resolved tenant/environment, keeping that check out of each scenario's own
-// cyclomatic complexity below.
 func requireEchoedTarget(t *testing.T, result AISessionsResult, tenant, environment string) {
 	t.Helper()
 	if result.Tenant != tenant || result.Environment != environment {
@@ -20,11 +17,6 @@ func requireEchoedTarget(t *testing.T, result AISessionsResult, tenant, environm
 	}
 }
 
-// The read model here must resolve AwaitingInput from the last reported
-// event rather than from silence -- see erun-common's own coverage of
-// ResolveAISessionStatus for the state machine itself. This test only pins
-// the MCP transport contract: server context defaulting and the single vs.
-// list shapes.
 func TestAISessionsToolResolvesAgainstServerContext(t *testing.T) {
 	isolateLeaseCache(t)
 	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
@@ -55,10 +47,6 @@ func TestAISessionsToolResolvesAgainstServerContext(t *testing.T) {
 	requireEchoedTarget(t, all, "tenant-a", "dev")
 }
 
-// TestAISessionsToolEmptyEnvironmentReturnsEmptyArrayNotNull pins the exact
-// shape: an environment with no recorded AI sessions must return
-// "sessions": [] like idle_stop_history's "entries": [], never
-// "sessions": null, which forces every caller to special-case this one tool.
 func TestAISessionsToolEmptyEnvironmentReturnsEmptyArrayNotNull(t *testing.T) {
 	isolateLeaseCache(t)
 	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "never-touched"}}

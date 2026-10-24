@@ -9,13 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// TestResolveEnvironmentLifecycleStateUnknownIsNotAFalseNegative is the
-// mandatory negative case: an environment whose power state was never
-// observed must read as Unknown, never as Stopped or Idle just because a
-// bool defaulted to false. CloudContextStatus is a live value this package
-// never persists (see CloudContextStatus's own doc comment), so a
-// managed-cloud environment queried without a fresh refresh is exactly the
-// realistic case this guards.
+// An unobserved power state must read as Unknown, never Stopped or Idle.
 func TestResolveEnvironmentLifecycleStateUnknownIsNotAFalseNegative(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -67,9 +61,7 @@ func TestResolveEnvironmentLifecycleStateManagedCloudPowerState(t *testing.T) {
 }
 
 func TestResolveEnvironmentLifecycleStateDeployFailedTakesPriorityOverIdle(t *testing.T) {
-	// A deploy diagnosis reporting unhealthy must win even when the idle
-	// policy would otherwise call the environment stop-eligible: an
-	// environment stuck on a bad release is not "idle", it is broken.
+	// Unhealthy deploy wins over idle eligibility.
 	got := ResolveEnvironmentLifecycleState(EnvironmentLifecycleInputs{
 		DeployHealthObserved: true, DeployHealthy: false,
 		IdleStatusObserved: true, StopEligible: true,
@@ -111,10 +103,7 @@ func TestAssembleEnvironmentReadModelNilSignalsStayUnknown(t *testing.T) {
 }
 
 func TestAssembleEnvironmentReadModelUnrefreshedCloudContextIsUnknownNotStopped(t *testing.T) {
-	// CloudContextStatus.Status is blank whenever it was loaded from config
-	// only (findCloudContextForKubernetesContext never refreshes it) -- this
-	// is the realistic shape ResolveEnvironmentReadModel's default,
-	// no-live-refresh call produces for a managed-cloud environment.
+	// Status is blank when loaded from config only, as the no-refresh read model produces.
 	entry := ListEnvironmentResult{Name: "dev", Type: config.EnvironmentTypeRuntime}
 	cloudContext := &config.CloudContextStatus{CloudContextConfig: config.CloudContextConfig{Name: "acme-dev"}}
 	idle := &activity.EnvironmentIdleStatus{ManagedCloud: true, StopEligible: false}

@@ -13,9 +13,7 @@ import (
 
 const DefaultSSHUser = "erun"
 
-// SSHHostAliasRoot and SSHHostAliasPrefix are how erun's own derived aliases
-// are told apart from a hand-maintained Host block: every alias SSHHostAlias
-// builds begins with the prefix.
+// SSHHostAliasPrefix distinguishes erun's aliases from hand-maintained Host blocks.
 const (
 	SSHHostAliasRoot   = "erun"
 	SSHHostAliasPrefix = SSHHostAliasRoot + "-"

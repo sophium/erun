@@ -102,9 +102,7 @@ func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, 
 }
 
 func runUpgrade(ctx core.Context, store deploypkg.DeployStore, target lifecycle.UpgradeTarget, deploy lifecycle.UpgradeItemDeployer) error {
-	// A scoped run (the desktop's per-env Upgrade-all fan-out) captures into
-	// that env's trace log; the cross-tenant global run has no single env to
-	// attribute the trace to.
+	// Only a scoped run has one env to attribute the trace to.
 	if target.Tenant != "" && target.Environment != "" {
 		var closeEnvTrace func()
 		ctx, closeEnvTrace = e2e.ActivateEnvTrace(ctx, target.Tenant, target.Environment)
@@ -145,10 +143,7 @@ func runUpgrade(ctx core.Context, store deploypkg.DeployStore, target lifecycle.
 	return nil
 }
 
-// printUpgradeDryRunMarker prints the unambiguous terminal line the dry-run
-// convention uses elsewhere (e.g. `erun exec plan-ruleset-bypass --dry-run`),
-// so a fleet-wide "--fleet"/"--gate-environment" preview can never read as a
-// completed rollout no matter how many members the resolved plan announces.
+// printUpgradeDryRunMarker prints the dry-run terminal line so a preview never reads as a rollout.
 func printUpgradeDryRunMarker(ctx core.Context) error {
 	if !ctx.DryRun {
 		return nil
@@ -180,10 +175,8 @@ func newUpgradeDeployer(store deploypkg.DeployStore, saveEnvConfig deploypkg.Env
 	}
 }
 
-// upgradeScopeReason names why no environments are in the plan. --fleet and
-// --gate-environment already include every non-host environment in scope
-// regardless of opt-in, so an empty plan there means the tenant itself has no
-// environment to fill it, not a missed "Upgrade all" opt-in.
+// upgradeScopeReason explains an empty plan. --fleet and --gate-environment ignore
+// opt-in, so an empty plan there means the tenant has no environments.
 func upgradeScopeReason(target lifecycle.UpgradeTarget) string {
 	if target.Fleet || target.GateEnvironment != "" {
 		return " to roll"

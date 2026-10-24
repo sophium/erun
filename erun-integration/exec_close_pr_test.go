@@ -38,9 +38,7 @@ func testExecClosePrDryRunTracesLookup(t *testing.T) {
 }
 
 func testExecClosePrDryRunMissingRequiredFlagsTracesThenRefuses(t *testing.T) {
-	// branch, target, gated-commit, and landing-commit are all validated
-	// together as one refusal, so omitting any subset produces the same
-	// message -- one scenario (omitting every flag) covers the branch.
+	// All four flags are validated as one refusal, so one scenario covers any subset.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"exec", "close-pr", "feature/add-widget", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode == 0 {
@@ -50,9 +48,7 @@ func testExecClosePrDryRunMissingRequiredFlagsTracesThenRefuses(t *testing.T) {
 }
 
 func testExecClosePrDryRunEmptyBranchTracesThenRefuses(t *testing.T) {
-	// BRANCH is a positional arg an empty string can still satisfy
-	// cobra.ExactArgs(1), so the shared validation (and its trace) is what
-	// actually catches this, not command-tree wiring.
+	// An empty BRANCH satisfies cobra.ExactArgs(1); the shared validation catches it.
 	setup := env.New(t)
 	result := erun.Run(t, []string{
 		"exec", "close-pr", "",
@@ -69,8 +65,6 @@ func testExecClosePrDryRunEmptyBranchTracesThenRefuses(t *testing.T) {
 }
 
 func testExecClosePrDryRunMalformedRemoteUrlTracesThenRefuses(t *testing.T) {
-	// A non-github.com remote reaches parseGitHubOwnerRepo's rejection
-	// branch, distinct from the missing-remote-url case above.
 	setup := env.New(t)
 	result := erun.Run(t, []string{
 		"exec", "close-pr", "feature/add-widget",
@@ -87,9 +81,7 @@ func testExecClosePrDryRunMalformedRemoteUrlTracesThenRefuses(t *testing.T) {
 }
 
 func testExecClosePrRealRunFailsCleanlyWithoutAToken(t *testing.T) {
-	// No --dry-run, no gh on the scrubbed PATH, and no GITHUB_TOKEN/GH_TOKEN
-	// in the environment: the real-run token resolution must refuse before
-	// ever reaching the network, naming the fix rather than a raw HTTP error.
+	// With no gh and no token, the refusal comes before any network call.
 	setup := env.New(t)
 	result := erun.Run(t, []string{
 		"exec", "close-pr", "feature/add-widget",
@@ -105,9 +97,7 @@ func testExecClosePrRealRunFailsCleanlyWithoutAToken(t *testing.T) {
 }
 
 func testExecClosePrRealRunNoOpenPullRequestIsANoOp(t *testing.T) {
-	// findAndClosePullRequest's no-pulls branch: a queued plain branch
-	// with no open pull request is legitimate, so this is a no-op result
-	// rather than an error.
+	// A queued branch with no open pull request is a no-op, not an error.
 	setup := env.New(t)
 	github := githubPullRequestStubServer(t, nil)
 	envVars := append(setup.Env(), githubStubEnv(github)...)
@@ -125,9 +115,6 @@ func testExecClosePrRealRunNoOpenPullRequestIsANoOp(t *testing.T) {
 }
 
 func testExecClosePrRealRunCommentsAndClosesAMatchingPullRequest(t *testing.T) {
-	// The full mutating path: postGitHubIssueComment then
-	// closeGitHubPullRequest, once the open pull request's head matches
-	// --gated-commit.
 	setup := env.New(t)
 	github := githubPullRequestStubServer(t, &githubPullRequestStubPull{
 		Number: 42, HeadSHA: "sourcesha0000000000000000000000000000000",
@@ -147,9 +134,7 @@ func testExecClosePrRealRunCommentsAndClosesAMatchingPullRequest(t *testing.T) {
 }
 
 func testExecClosePrRealRunRefusesWhenHeadMoved(t *testing.T) {
-	// The open pull request's head no longer matches --gated-commit --
-	// something pushed to the branch after the gate fetched it, so
-	// closing would silently discard whatever moved it.
+	// A moved head means closing would discard what moved it.
 	setup := env.New(t)
 	github := githubPullRequestStubServer(t, &githubPullRequestStubPull{
 		Number: 42, HeadSHA: "movedsha00000000000000000000000000000000",
@@ -168,17 +153,12 @@ func testExecClosePrRealRunRefusesWhenHeadMoved(t *testing.T) {
 	golden.Equal(t, "exec/close_pr_real_run_refuses_when_head_moved", normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
 }
 
-// githubPullRequestStubPull is the one open pull request `exec close-pr`
-// should find for feature/add-widget -> main, or nil for the no-open-PR
-// scenario.
+// githubPullRequestStubPull is the open pull request to find, or nil for none.
 type githubPullRequestStubPull struct {
 	Number  int
 	HeadSHA string
 }
 
-// githubPullRequestStubServer answers the three calls `exec close-pr` makes
-// in real-run mode: the open-pull-requests lookup, the landing-commit
-// comment, and the close itself.
 func githubPullRequestStubServer(t testing.TB, pull *githubPullRequestStubPull) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()

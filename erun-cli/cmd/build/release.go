@@ -54,14 +54,11 @@ func runReleaseCommand(ctx core.Context, store sharedpkg.DockerStore, findProjec
 	if runGit == nil {
 		runGit = gitx.GitCommandRunner
 	}
-	// stdout carries the released version and nothing else, so git chatter is
-	// redirected to stderr for orchestrators reading the version.
+	// stdout carries only the released version.
 	gitToStderr := func(dir string, stdout, stderr io.Writer, args ...string) error {
 		return runGit(dir, ctx.Stderr, stderr, args...)
 	}
-	// Source control only: release stamps, commits, tags and pushes the version
-	// and never builds or publishes an artifact. Build and publish are
-	// `erun build --release` and `erun push --version`. See RunReleaseSpec.
+	// Release never builds or publishes; see RunReleaseSpec.
 	spec, ok := execute.BuildExecutionReleaseSpec(execution)
 	if !ok {
 		return fmt.Errorf("release: the resolved plan is not a release")

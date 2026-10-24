@@ -14,12 +14,10 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/zitadel"
 )
 
-// inviteTTL is the fixed lifetime every invite is minted with, so invites
-// expire by default. Deliberately not operator-configurable.
+// inviteTTL is deliberately not operator-configurable.
 const inviteTTL = 7 * 24 * time.Hour
 
-// InviteStore is the persistence dependency for POST/GET/DELETE /v1/invites.
-// *repository.InviteRepository satisfies it.
+// InviteStore persists invites.
 type InviteStore interface {
 	Create(ctx context.Context, params repository.CreateInviteParams) (model.Invite, error)
 	List(ctx context.Context, filter repository.InviteFilter) ([]model.Invite, error)
@@ -30,16 +28,8 @@ type InviteRoutes struct {
 	invites InviteStore
 }
 
-// RegisterInviteRoutes registers the authenticated half of the invite-only
-// registration model: an enrolled user creates, lists, and
-// revokes invites for a tenant they can access. Unlike identity
-// administration (which is restricted to an OPERATIONS tenant, since it
-// manages the platform's shared IdP org settings), invite creation is open
-// to every tenant — a COMPANY tenant needs its own way to add members, and
-// resolveTargetTenant already gates the one case that needs to stay
-// OPERATIONS-only: minting an invite for a tenant other than the caller's
-// own, which is how an invite to an OPERATIONS tenant (a cross-tenant grant
-// by URL) gets its own explicit gate.
+// RegisterInviteRoutes registers invite management for every tenant type;
+// resolveTargetTenant keeps invites for another tenant OPERATIONS-only.
 func RegisterInviteRoutes(register ProtectedRouteRegistrar, invites InviteStore) {
 	routes := InviteRoutes{invites: invites}
 	register(http.MethodPost, "/v1/invites", http.HandlerFunc(routes.createInvite))
@@ -68,8 +58,6 @@ func (r InviteRoutes) createInvite(w http.ResponseWriter, req *http.Request) {
 		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
-	// TenantID is only passed through when it differs from the caller's own
-	// session tenant, the same convention CreateUserParams uses.
 	overrideTenantID := ""
 	if targetTenantID != securityContext.TenantID {
 		overrideTenantID = targetTenantID
@@ -116,7 +104,6 @@ func (r InviteRoutes) revokeInvite(w http.ResponseWriter, req *http.Request) {
 }
 
 // InviteAccepter accepts an invite token and enrolls the invitee.
-// *service.InviteService satisfies it.
 type InviteAccepter interface {
 	Accept(ctx context.Context, params service.AcceptInviteParams) (service.AcceptInviteResult, error)
 }
@@ -130,20 +117,14 @@ type acceptInviteRequest struct {
 	Password  string `json:"password"`
 }
 
-// acceptInviteResponse mirrors enrollIdentityUserResponse's half-landed
-// shape: ErunUser absent with Error set means the IdP identity was created
-// but the erun-side mapping failed, reported rather than swallowed.
+// acceptInviteResponse: Error with no ErunUser means only the IdP half landed.
 type acceptInviteResponse struct {
 	IdPUser  zitadel.User `json:"idpUser"`
 	ErunUser *model.User  `json:"erunUser,omitempty"`
 	Error    string       `json:"error,omitempty"`
 }
 
-// RegisterInviteAcceptRoute registers POST /v1/invites/accept directly on
-// the mux, unauthenticated: an invitee accepting an invite has no bearer
-// token yet — the token in the request body is the credential, the same
-// shape the DNS-01 broker and registry token routes already use for a
-// caller that authenticates some other way than the user-OIDC bearer token.
+// RegisterInviteAcceptRoute is unauthenticated: the body's token is the credential.
 func RegisterInviteAcceptRoute(mux *http.ServeMux, accepter InviteAccepter) {
 	mux.HandleFunc("POST /v1/invites/accept", func(w http.ResponseWriter, req *http.Request) {
 		var body acceptInviteRequest
@@ -178,10 +159,6 @@ func RegisterInviteAcceptRoute(mux *http.ServeMux, accepter InviteAccepter) {
 	})
 }
 
-// writeInviteAcceptError distinguishes the token-shaped failures that must be
-// reported plainly (not found, expired, already consumed) from a downstream
-// Zitadel failure, which forwards the IdP's own real status and message the
-// same way writeIdentityAdminError does.
 func writeInviteAcceptError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, repository.ErrNotFound):

@@ -22,8 +22,7 @@ type mcpTokenClaims struct {
 	ExpiresAt int64  `json:"exp"`
 }
 
-// verifyMCPToken checks the bearer erun minted the way the env's edge does:
-// EdDSA over the signing input, against the seeded desktop public key.
+// verifyMCPToken checks the bearer as the edge does: EdDSA against the seeded desktop key.
 func verifyMCPToken(t *testing.T, token string, publicKey ed25519.PublicKey) mcpTokenClaims {
 	t.Helper()
 	segments := strings.Split(strings.TrimSpace(token), ".")
@@ -133,9 +132,7 @@ func testMCPDryRunTracesEmcpLaunch(t *testing.T) {
 
 func testMCPDryRunUsesEnvironmentLocalPortByDefault(t *testing.T) {
 	t.Parallel()
-	// Seeding alpha first pushes "team" to index 1, so the default port
-	// resolves to 17100 (17000 + 100), not the index-0 17000 — the seed
-	// order proves the port is environment-scoped.
+	// Seeding alpha first puts "team" at index 1, proving the port is environment-scoped.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "alpha", "dev")
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -148,9 +145,6 @@ func testMCPDryRunUsesEnvironmentLocalPortByDefault(t *testing.T) {
 
 func testMCPRealRunLaunchesEmcpStub(t *testing.T) {
 	t.Parallel()
-	// Real-run: the launcher body only executes past the dry-run gate,
-	// so a stub is the only way to reach the bare-name emcp resolution
-	// and lock the argv it launches.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -166,9 +160,7 @@ exit 0`)
 
 func testMCPRealRunErrorsWhenEmcpMissing(t *testing.T) {
 	t.Parallel()
-	// A missing emcp must surface the friendly "build or install it
-	// first" message, not a raw exec error. The scenario's scrubbed PATH is
-	// what makes emcp absent, on every host.
+	// The scrubbed PATH makes emcp absent on every host.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"mcp", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -180,9 +172,6 @@ func testMCPRealRunErrorsWhenEmcpMissing(t *testing.T) {
 
 func testMCPRealRunPropagatesEmcpExitFailure(t *testing.T) {
 	t.Parallel()
-	// A launched emcp that exits non-zero must propagate its raw exit
-	// error and the tool's stderr (not the friendly missing-binary
-	// message).
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -238,8 +227,6 @@ func testMCPTokenHelp(t *testing.T) {
 
 func testMCPTokenDryRunTracesTheAudience(t *testing.T) {
 	t.Parallel()
-	// The audience is the whole point of the token, so the plan names it; no
-	// identity is read in dry-run.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"mcp", "token", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -251,8 +238,7 @@ func testMCPTokenDryRunTracesTheAudience(t *testing.T) {
 
 func testMCPTokenWithoutADesktopIdentitySaysWhereItComesFrom(t *testing.T) {
 	t.Parallel()
-	// No identity on this machine: the error must point at the desktop app
-	// rather than mint a key no deployed environment would trust.
+	// Without an identity, point at the desktop app rather than mint an untrusted key.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"mcp", "token"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -264,10 +250,7 @@ func testMCPTokenWithoutADesktopIdentitySaysWhereItComesFrom(t *testing.T) {
 
 func testMCPTokenRealRunMintsAVerifiableBearer(t *testing.T) {
 	t.Parallel()
-	// Real-run: the mint only happens past the dry-run gate. The token is a
-	// fresh signature over a live timestamp, so the golden locks the result
-	// shape (with the token normalized away) and the claims are asserted from
-	// the parsed payload — the one thing the snapshot cannot check.
+	// The token is normalized in the golden; claims are asserted from the payload.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
 	identity := fixture.SeedDesktopIdentity(t, setup)

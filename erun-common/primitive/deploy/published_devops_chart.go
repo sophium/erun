@@ -13,18 +13,9 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// PublishedChartProbeOverrideEnv is a test-only seam that answers the "does
-// charts/<name>:<version> exist?" registry probe from a static list instead of
-// a live registry read, so integration goldens never depend on a real
-// registry's contents. Not a production knob: when the variable is unset the
-// probe performs the real authenticated registry read. Format: comma-separated
-// "<chart>:<version>" entries treated as published in every registry, or
-// "<registry>/<chart>:<version>" to publish one only in that registry — which is
-// what lets a scenario put the same chart name in one registry and not another,
-// the shape the runtime chart ladder walks. "*" in place of the version marks a
-// chart published at every version, for a scenario that only cares that the
-// chart resolves rather than pinning to one version. Anything absent (including
-// an empty value) is treated as unpublished.
+// PublishedChartProbeOverrideEnv is a test-only seam answering the chart probe
+// from a static list: comma-separated "<chart>:<version>" (any registry) or
+// "<registry>/<chart>:<version>"; "*" matches every version. Unset means a real read.
 const PublishedChartProbeOverrideEnv = "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE"
 
 func publishedChartOverrideHasVersion(override, containerRegistry, chartName, version string) bool {
@@ -48,45 +39,25 @@ func publishedChartOverrideHasVersion(override, containerRegistry, chartName, ve
 	return false
 }
 
-// IsOCIChartReference reports whether the chart path addresses a published
-// OCI chart (oci://<registry>/charts/<name>) rather than a local chart
-// directory. Transports use it to tell a published-chart runtime spec from a
-// repo-local one.
+// IsOCIChartReference reports whether chartPath is a published oci:// chart rather than a local directory.
 func IsOCIChartReference(chartPath string) bool {
 	return isOCIChartReference(chartPath)
 }
 
-// ResolvePublishedDevopsDeploySpec rebuilds the runtime deploy spec against
-// the published chart for transport flows that override inputs after the
-// initial resolution (e.g. `erun open --runtime-image`). Callers on this path
-// never carry a --runtime-chart override of their own, and always carry an
-// operator-stated runtime image (that is the whole point of the call), so it
-// must never be discarded for an inferred one.
+// ResolvePublishedDevopsDeploySpec rebuilds the runtime spec for transports that
+// override inputs later; their runtime image is always operator-stated.
 func ResolvePublishedDevopsDeploySpec(ctx core.Context, target config.OpenResult, versionOverride string) (DeploySpec, error) {
 	return ResolvePublishedDevopsDeploySpecWithOverrides(ctx, target, versionOverride, "", true)
 }
 
-// ResolvePublishedDevopsDeploySpecWithOverrides builds the deploy spec for an environment
-// with no local runtime chart, using the published erun-devops chart pinned to
-// the env's runtime version (one version covers both chart and image, published
-// together at release). The published chart is the single contract, replacing
-// the per-tenant embedded chart copy init once scaffolded, which had drifted
-// from canonical. runtimeChartOverride is the operator's --runtime-chart value
-// when one is coming (applyRuntimeChartOverride applies it after this spec is
-// built) -- see resolvePublishedRuntimeChartReference's deferToOverride doc.
-// runtimeImageExplicit is true when target.EnvConfig.RuntimeImage was set by an
-// operator's --runtime-image on this very invocation, rather than merely
-// carried over from a previous deploy's persisted memo -- see
-// resolveDeployRuntimeImage.
+// ResolvePublishedDevopsDeploySpecWithOverrides builds the spec for an env with no
+// local runtime chart, pinned to the env's runtime version.
 func ResolvePublishedDevopsDeploySpecWithOverrides(ctx core.Context, target config.OpenResult, versionOverride, runtimeChartOverride string, runtimeImageExplicit bool) (DeploySpec, error) {
 	return ResolvePublishedDevopsDeploySpecWithReason(ctx, target, versionOverride, "no local runtime chart", runtimeChartOverride, runtimeImageExplicit)
 }
 
 func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.OpenResult, versionOverride, reason, runtimeChartOverride string, runtimeImageExplicit bool) (DeploySpec, error) {
-	// Every chart probe below (the runtime ladder and the tenant-chart check)
-	// reads a registry. A deploy running inside the target env's own runtime pod
-	// resolves the credential that env declared for itself first, so a private
-	// namespace read is definitive instead of anonymous-and-therefore-refused.
+	// Resolve the env's declared registry credential first so private reads are not refused as anonymous.
 	registrypkg.ConfigureInPodDeclaredRegistryAuth(ctx, target)
 	registry := publishedDevopsChartRegistry(target)
 	version := strings.TrimSpace(versionOverride)
@@ -94,8 +65,7 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 		version = strings.TrimSpace(target.EnvConfig.RuntimeVersion)
 	}
 	if version == "" {
-		// Dry-run contract: the decision that stops the plan must surface as a
-		// trace line before the error return.
+		// Dry-run contract: trace the stopping decision before the error return.
 		ctx.Trace("deploy: " + reason + " and no runtime version resolved; cannot deploy the published " + config.DevopsComponentName + " chart")
 		return DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", config.DevopsComponentName)
 	}
@@ -115,17 +85,13 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 	if err != nil {
 		return DeploySpec{}, err
 	}
-	// A tenant's own <tenant>-devops chart wraps the canonical erun-devops as a
-	// subchart; helm won't pass this by-reference deploy's top-level --sets into
-	// subchart scope, so re-scope them under erun-devops. Empty (no re-scope) when
-	// the tenant rides the shared erun-devops chart.
+	// helm does not pass top-level --sets into subchart scope, so re-scope them under
+	// the wrapped erun-devops.
 	deployInput.SubchartKey = publishedUmbrellaSubchartKey(target.Tenant, chart.name)
 	deployInput.ChartVersion = chart.version
 	deployInput.ChartCandidates = chart.candidates
 	if chart.movedPin {
-		// The env stated the older version, so the config still records it:
-		// without this the next deploy reads the same lagging pin back and the
-		// roll never converges.
+		// Without this the next deploy reads the lagging pin back and never converges.
 		deployInput.PersistRuntimeChart = chart.reference + ":" + chart.version
 	}
 	deployInput.ReleaseName = config.RuntimeReleaseName(target.Tenant)
@@ -139,10 +105,7 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 		deployInput.ImageOverrides = map[string]string{config.DevopsComponentName: image}
 		deployInput.ResolvedRuntimeImage = image
 	} else {
-		// No override applies, so the chart's own stock default wins -- see
-		// service.yaml's devopsImage default, `<registry>/erun-devops:<appVersion>`.
-		// That is fully known here even though nothing is threaded to helm for
-		// it, so record it rather than leaving the memo empty.
+		// No override applies, so the chart's stock default image is fully known; record it.
 		deployInput.ResolvedRuntimeImage = registry + "/" + config.DefaultRuntimeImageName + ":" + deployInput.resolvedChartVersion()
 	}
 	deployInput.PersistRuntimeImage = persistImage
@@ -150,9 +113,6 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 	if err := guardRuntimeCoordinate(ctx, target, chart, runtimeChartOverride, deployInput, explicitLineChange); err != nil {
 		return DeploySpec{}, err
 	}
-	// A runtime env that opted into a mutable source worktree clones this repo
-	// at the deployed release tag on first boot; resolveWorktreeStorage already
-	// put the worktree on a PVC for it.
 	if target.EnvConfig.MountsRuntimeSource() {
 		deployInput.RepoURL = strings.TrimSpace(target.EnvConfig.RepoURL)
 		deployInput.RepoRef = "v" + version
@@ -166,15 +126,8 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 	}, nil
 }
 
-// resolvePublishedComponentDeploySpec builds a deploy spec that installs a
-// published platform component chart by reference — the sourceless analogue of
-// resolvePublishedDevopsDeploySpec. A canonical erun-<component> chart installs
-// directly (top-level), so erun deploy's top-level --set tenant/environment
-// reach it. A tenant's own <tenant>-<component> chart is an umbrella wrapping
-// the canonical erun-<component> as a subchart, which those top-level --sets do
-// not reach; publishedUmbrellaSubchartKey resolves the erun-<component> scope so
-// command() re-scopes them and the subchart's required tenant/environment are
-// satisfied. The release is named <tenant>-<component> so it is tenant-clear.
+// resolvePublishedComponentDeploySpec installs a published component chart by
+// reference; a tenant umbrella gets its --sets re-scoped into the wrapped subchart.
 func resolvePublishedComponentDeploySpec(ctx core.Context, target config.OpenResult, componentName, versionOverride string) (DeploySpec, error) {
 	registry := publishedTenantComponentChartRegistry(target)
 	version := strings.TrimSpace(versionOverride)
@@ -182,7 +135,6 @@ func resolvePublishedComponentDeploySpec(ctx core.Context, target config.OpenRes
 		version = strings.TrimSpace(target.EnvConfig.RuntimeVersion)
 	}
 	if version == "" {
-		// Dry-run contract: trace the stopping decision before the error return.
 		ctx.Trace("deploy: no version resolved for component " + componentName + "; cannot deploy its published chart")
 		return DeploySpec{}, fmt.Errorf("version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", componentName)
 	}
@@ -210,10 +162,8 @@ func resolvePublishedComponentDeploySpec(ctx core.Context, target config.OpenRes
 	}, nil
 }
 
-// publishedComponentReleaseName maps a published component chart to its release
-// name: <tenant>-<component-suffix> (e.g. erun-backend-api → frs-backend-api). A
-// chart already named for this tenant (a tenant's own frs-backend-api) is its
-// own release name — don't double-prefix it to frs-frs-backend-api.
+// publishedComponentReleaseName maps a chart to <tenant>-<suffix> without
+// double-prefixing a chart already named for the tenant.
 func publishedComponentReleaseName(tenant, component string) string {
 	tenant = strings.TrimSpace(tenant)
 	component = strings.TrimSpace(component)
@@ -224,11 +174,8 @@ func publishedComponentReleaseName(tenant, component string) string {
 	return tenant + "-" + suffix
 }
 
-// publishedDevopsValuesOverlayPath finds the env's operator values overlay.
-// A published chart has no local chart directory to hold the usual
-// values.<env>.yaml, so the overlay lives beside the env config instead; its
-// absence just means chart defaults and erun's --set list fully describe the
-// deploy.
+// A published chart has no local directory for values.<env>.yaml, so the overlay
+// lives beside the env config.
 func publishedDevopsValuesOverlayPath(ctx core.Context, target config.OpenResult) string {
 	configDir, err := config.ERunConfigDir()
 	if err != nil {
@@ -242,21 +189,13 @@ func publishedDevopsValuesOverlayPath(ctx core.Context, target config.OpenResult
 	return overlayPath
 }
 
-// publishedDevopsChartRegistry prefers the env's recorded RuntimeRegistry so a
-// reopen keeps addressing the registry the env was deployed from.
 func publishedDevopsChartRegistry(target config.OpenResult) string {
 	if registry := strings.TrimSpace(target.EnvConfig.RuntimeRegistry); registry != "" {
 		return registry
 	}
-	// The published erun-devops runtime chart and its platform images (erun-devops,
-	// erun-dind, …) are released together to the runtime image's registry
-	// (e.g. ghcr.io/sophium). A `--cluster-registry` env's deploy registry is the
-	// in-cluster erun-registry that only ever holds the tenant's built app images —
-	// never the erun platform chart — so for that env alone the chart must resolve
-	// from the runtime image's own registry, or every chart pull fails
-	// (ImagePullBackOff at init). A plain env publishes its platform chart to its
-	// deploy registry, so its chart follows where charts are published, never a
-	// runtime-image override (an image-only concern the chart must not inherit).
+	// A --cluster-registry env's in-cluster registry never holds the platform chart, so
+	// its chart comes from the runtime image's registry; other envs ignore runtime-image
+	// overrides here.
 	if isClusterRegistryEnv(target) {
 		if registry := config.RuntimeImageRegistry(target.EnvConfig.RuntimeImage); registry != "" {
 			return registry
@@ -271,14 +210,8 @@ func publishedDevopsChartRegistry(target config.OpenResult) string {
 	return config.DefaultContainerRegistry
 }
 
-// resolveRuntimeRegistry is the registry projected into the runtime pod as
-// RUNTIME_REGISTRY (nested in-pod image resolution). Prefer the persisted
-// runtimeregistry; when it is empty a `--cluster-registry` env falls back to the
-// runtime image's own registry — the same precedence publishedDevopsChartRegistry
-// uses — so the pod resolves nested platform images from where they are published
-// (e.g. ghcr) rather than the in-cluster registry that never held them. A plain
-// env projects nothing here: its runtime registry follows the deploy registry the
-// chart already renders, never a runtime-image override.
+// resolveRuntimeRegistry is projected as RUNTIME_REGISTRY, with the same precedence
+// as publishedDevopsChartRegistry.
 func resolveRuntimeRegistry(target config.OpenResult) string {
 	if r := strings.TrimSpace(target.EnvConfig.RuntimeRegistry); r != "" {
 		return r
@@ -289,33 +222,18 @@ func resolveRuntimeRegistry(target config.OpenResult) string {
 	return ""
 }
 
-// isClusterRegistryEnv reports whether the deploy target addresses an in-cluster
-// (`--cluster-registry`) registry — either still as an unresolved cluster: entry
-// (the init path passes it through to the runtime chart) or already concretized to
-// its in-cluster pull host on ClusterPullRegistry (the deploy path resolves it up
-// front). The erun platform chart and images are never published to that in-cluster
-// registry, so only such an env resolves its runtime chart/registry from the runtime
-// image's own registry instead of its deploy registry.
+// isClusterRegistryEnv matches both an unresolved cluster: entry and one already
+// concretized onto ClusterPullRegistry.
 func isClusterRegistryEnv(target config.OpenResult) bool {
 	return target.EnvConfig.ContainerRegistries.HasClusterEntry() ||
 		strings.TrimSpace(target.ClusterPullRegistry) != ""
 }
 
-// RuntimeChartConfirmationError reports that a by-reference deploy's runtime
-// chart search ended with no candidate confirmed published at the requested
-// version -- never a reason to substitute an unconfirmed coordinate, because
-// the shared erun-devops chart is versioned on erun's own release line and a
-// tenant's own version can never be a valid coordinate for it. Candidates
-// names each coordinate the ladder probed and its answer: "confirmed absent"
-// for a registry read that succeeded and excluded the version, or "could not
-// determine: <err>" for a read that failed outright (auth, network, an
-// unreachable registry) -- an answer that must never be read as absence.
+// RuntimeChartConfirmationError reports that no runtime chart candidate was confirmed
+// at the version; an unconfirmed coordinate is never substituted.
 type RuntimeChartConfirmationError struct {
-	Version    string
-	Candidates []string
-	// Inconclusive is true when at least one candidate's registry read failed
-	// outright, so the search cannot say the chart is genuinely unpublished --
-	// only that it could not confirm one.
+	Version      string
+	Candidates   []string
 	Inconclusive bool
 }
 
@@ -333,24 +251,15 @@ func (e *RuntimeChartConfirmationError) Error() string {
 		"publish the version, or name a chart explicitly with `runtimechart` in the env config (or `--runtime-chart <ref>` for one deploy)."
 }
 
-// PublishedChartNotFoundError reports that the chart a by-reference deploy
-// resolved to could not be pulled at the resolved version. For the runtime chart
-// it carries the coordinates resolution probed, because the cause is usually
-// *where* the deploy looked rather than which version it asked for: erun
-// publishes charts/erun-devops only beside the runtime image it releases, so an
-// environment whose deploy registry holds nothing but its own app images has no
-// platform chart in it at any version. It replaces helm's opaque chart-pull exit
-// status with the coordinates tried and the ways out of them.
+// PublishedChartNotFoundError reports a by-reference chart that could not be
+// pulled, with the coordinates probed, since the cause is usually where it looked.
 type PublishedChartNotFoundError struct {
 	ChartReference string
 	Version        string
 	Registry       string
-	// Candidates are the registry/chart coordinates the runtime chart ladder
-	// probed, in order. Empty for a component chart, which has a single
-	// coordinate and no ladder.
+	// Candidates is empty for a component chart, which has no ladder.
 	Candidates []string
-	// TenantChart is the tenant's own runtime umbrella, named so the message can
-	// point at publishing it. Empty when the tenant rides the shared chart.
+	// TenantChart is empty when the tenant rides the shared chart.
 	TenantChart string
 	HelmOutput  string
 	Err         error

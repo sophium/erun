@@ -22,10 +22,7 @@ func TestDindEntrypoint(t *testing.T) {
 	})
 
 	t.Run("refuses_a_host_that_is_not_linux", func(t *testing.T) {
-		// The MTU and cgroup work reads a Linux kernel's procfs and sysfs and
-		// hands over with execve; anywhere else the command names its one
-		// venue instead of half-running. Pinned to darwin so the golden holds
-		// on every host.
+		// Linux-only; pinned to darwin so the golden holds on every host.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"dind-entrypoint", "--", "--insecure-registry", "registry.cluster.local:5000"}, erun.RunOptions{
 			Cwd: setup.Cwd,

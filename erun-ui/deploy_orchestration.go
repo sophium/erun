@@ -18,10 +18,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// runDeployOrchestration is the desktop's deploy. The desktop is barred from the
-// `build --deploy` operator-convenience switches (erun-ui/AGENTS.md), so it
-// composes the pure primitives itself and threads the version `build` minted
-// forward, guaranteeing what deploys is exactly what was built.
+// runDeployOrchestration composes build/push/deploy primitives (the desktop may not use
+// `build --deploy`, per erun-ui/AGENTS.md), threading the minted version so what deploys is what was built.
 func (a *App) runDeployOrchestration(ctx context.Context, selection uiSelection, result config.OpenResult, force bool) error {
 	cli := a.deps.resolveCLIPath()
 	dir := resolveTerminalStartDir(result.RepoPath)
@@ -78,11 +76,8 @@ func (a *App) runInstallByReferenceDeploy(ctx context.Context, cli, dir string, 
 	return err
 }
 
-// appendMCPAuthPublicKeyFlag makes the deployed env require the same
-// desktop-signed bearer the desktop sends to its MCP edge. A missing identity
-// (as in unit tests) or a key-generation failure proceeds without the flag
-// rather than blocking the deploy: an unauthenticated env is recoverable, a
-// blocked deploy is not.
+// appendMCPAuthPublicKeyFlag requires the desktop-signed MCP bearer; on failure it
+// omits the flag, since an unauthenticated env is recoverable and a blocked deploy is not.
 func (a *App) appendMCPAuthPublicKeyFlag(args []string) []string {
 	if a.identity == nil {
 		return args
@@ -98,16 +93,9 @@ func (a *App) appendMCPAuthPublicKeyFlag(args []string) []string {
 	return append(args, "--mcp-auth-public-key", path)
 }
 
-// deployNeedsBuildOrchestration encodes the desktop's per-env-type deploy policy
-// (root AGENTS.md § "Command primitives vs orchestration"): a local-agent env
-// rebuilds from scratch, while a runtime env or a pinned published version
-// installs by reference. A forced deploy is the rebuild-&-redeploy recovery, so
-// it always rebuilds; remote-agent envs build in their own pod, not through
-// this local orchestration; a host env has no pod to deploy to at all, so it
-// never needs build orchestration either — deploy refuses it outright (see
-// EnvConfig.ResolvedType/HasPod in erun-common). Checked against ResolvedType
-// rather than the broader "BuildsHere() && !RemoteRepo()" combination, which a
-// host env also satisfies.
+// deployNeedsBuildOrchestration: local-agent envs (and forced deploys) rebuild; runtime
+// envs and pinned versions install by reference; remote-agent envs build in-pod; host
+// envs have no pod. Checks ResolvedType, since a host env also satisfies BuildsHere() && !RemoteRepo().
 func deployNeedsBuildOrchestration(result config.OpenResult, version string, force bool) bool {
 	if result.EnvConfig.ResolvedType() != config.EnvironmentTypeLocalAgent {
 		return false
@@ -115,13 +103,10 @@ func deployNeedsBuildOrchestration(result config.OpenResult, version string, for
 	return force || strings.TrimSpace(version) == ""
 }
 
-// maybeStartDeployOrchestration launches the desktop's pure-primitive deploy in
-// the background and returns true once started. Runtime/remote envs return false
-// so the caller falls back to the in-shell `erun deploy` path.
+// maybeStartDeployOrchestration returns false for envs that use in-shell `erun deploy` instead.
 func (a *App) maybeStartDeployOrchestration(selection uiSelection, force bool) (startSessionResult, bool) {
 	selection = normalizeSelection(selection)
-	// a.ctx is nil in unit tests; never fall back to the machine's real CLI
-	// and config there (the hazard class).
+	// a.ctx is nil in unit tests; never fall back to the real CLI and config there.
 	if a.ctx == nil || selection.Tenant == "" || selection.Environment == "" {
 		return startSessionResult{}, false
 	}
@@ -134,12 +119,7 @@ func (a *App) maybeStartDeployOrchestration(selection uiSelection, force bool) (
 	}
 	go func() {
 		ctx := a.activityWatcherCtx()
-		// The orchestration runs detached from any PTY, so a build/push failure —
-		// or a deploy that errors before emitting its "==> Deploy failed" trace —
-		// would otherwise vanish: no pods, no cause, and (for a builds-here create)
-		// an empty Local shell. That was the erun/local create-with-no-pods report.
-		// Surface it as a failed env-status + an actionable notification, unless the
-		// app is shutting down (ctx cancelled), which is not a deploy failure.
+		// Detached from any PTY, so surface failures explicitly unless the app is shutting down.
 		if err := a.runDeployOrchestration(ctx, selection, result, force); err != nil && ctx.Err() == nil {
 			a.surfaceDeployFailure(selection.Tenant, selection.Environment, deployOrchestrationFailureReason(err))
 		}
@@ -147,17 +127,10 @@ func (a *App) maybeStartDeployOrchestration(selection uiSelection, force bool) (
 	return startSessionResult{Selection: selection, Orchestrated: true}, true
 }
 
-// deployOrchestrationFailureReasonMaxLen caps the single-line reason surfaced
-// in the failure notification; the full captured output is still available in
-// the activity card's Detail (see recordOutputLine).
 const deployOrchestrationFailureReasonMaxLen = 300
 
-// deployOrchestrationFailureReason condenses a background build/push/deploy error
-// into a single-line notification reason. For an *erunCommandError it drops
-// erun's own "==> ..." progress markers — captured stderr's first line is
-// always one, since erun routes Info to stderr, and it carries no diagnostic
-// value — and keeps the actual compiler/tool output that follows, which used
-// to be discarded by truncating to that first line.
+// deployOrchestrationFailureReason drops erun's "==> ..." markers, which lead
+// captured stderr, and keeps the tool output after them.
 func deployOrchestrationFailureReason(err error) string {
 	if err == nil {
 		return ""
@@ -169,9 +142,7 @@ func deployOrchestrationFailureReason(err error) string {
 	return truncateFailureReasonTail(strings.TrimSpace(err.Error()), deployOrchestrationFailureReasonMaxLen)
 }
 
-// truncateFailureReasonTail keeps the tail of an over-long reason rather than
-// the head: the actionable content (the actual error) sits at the end of
-// captured tool output, after any preceding log noise.
+// truncateFailureReasonTail keeps the tail, where the actual error sits.
 func truncateFailureReasonTail(msg string, maxLen int) string {
 	if len(msg) <= maxLen {
 		return msg
@@ -179,9 +150,7 @@ func truncateFailureReasonTail(msg string, maxLen int) string {
 	return "..." + msg[len(msg)-maxLen:]
 }
 
-// runErunCaptured runs `erun <args>` in dir and returns its captured stdout. erun
-// writes its `--output json` result to stdout and trace/`==>` lines to stderr
-// (forwarded to onLine), so the structured result stays clean of progress noise.
+// runErunCaptured returns stdout (the `--output json` result) and forwards stderr lines to onLine.
 func runErunCaptured(ctx context.Context, cliPath, dir string, onLine func(string), args ...string) (string, error) {
 	if strings.TrimSpace(cliPath) == "" {
 		cliPath = "erun"
@@ -231,10 +200,7 @@ func runErunCaptured(ctx context.Context, cliPath, dir string, onLine func(strin
 	return stdoutBuf.String(), nil
 }
 
-// erunCommandError reports a failed `erun <Command>` subprocess invocation
-// alongside its full captured stderr, so a caller can pick the meaningful
-// content out of Detail (see meaningfulReason) instead of string-parsing an
-// already-flattened error message.
+// erunCommandError carries the full captured stderr in Detail.
 type erunCommandError struct {
 	Command string
 	Err     error
@@ -250,11 +216,7 @@ func (e *erunCommandError) Error() string {
 
 func (e *erunCommandError) Unwrap() error { return e.Err }
 
-// meaningfulReason drops erun's own "==> ..." progress markers from Detail —
-// each one is routed to stderr via Info — and joins what remains, which is
-// the actual compiler/tool output a build/push/deploy failure produced. Falls
-// back to the bare exec error when Detail carried nothing but markers (e.g. a
-// process that exited non-zero before producing any tool output).
+// meaningfulReason joins Detail without "==> ..." markers, falling back to the exec error.
 func (e *erunCommandError) meaningfulReason() string {
 	var kept []string
 	for _, line := range strings.Split(e.Detail, "\n") {
@@ -285,9 +247,7 @@ func scanErunStderr(stderrPipe io.Reader, onLine func(string), lastErr *strings.
 	}
 }
 
-// parseBuildResultVersion extracts the minted version from `erun build
-// --output json` stdout. It scans for the JSON object so a stray prefix/suffix
-// line cannot break the parse.
+// parseBuildResultVersion scans for the JSON object, tolerating stray lines.
 func parseBuildResultVersion(stdout string) string {
 	s := strings.TrimSpace(stdout)
 	start := strings.IndexByte(s, '{')

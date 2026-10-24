@@ -14,10 +14,7 @@ func buildDoctorArgs(selection uiSelection) []string {
 	return []string{"doctor", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)}
 }
 
-// buildOpenNoShellArgs builds the forwarder-rebind open. Every caller is the
-// desktop reacting to a dropped connection rather than the operator asking for
-// the environment, so it carries --reconnect: a rebind must reattach to a
-// running environment, never start the one the operator just stopped.
+// buildOpenNoShellArgs passes --reconnect: a rebind must never start an environment the operator stopped.
 func buildOpenNoShellArgs(tenant, environment string) []string {
 	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment), "--no-shell", "--no-alias-prompt", "--reconnect"}
 }
@@ -25,19 +22,12 @@ func buildOpenNoShellArgs(tenant, environment string) []string {
 func buildInitArgs(selection uiSelection) []string {
 	envType := strings.TrimSpace(selection.Type)
 	if envType == "" {
-		// Older frontends that don't yet send Type still expect the
-		// pre-Type behavior — pinned to remote-agent. The CLI itself
-		// defaults to local-agent when --type is unset, which would be
-		// a silent behavior change for the desktop flow.
+		// Older frontends omit Type and expect remote-agent; the CLI default is local-agent.
 		envType = "remote-agent"
 	}
 	args := []string{"init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--type=" + envType}
 	args = appendInitOptionalFlags(args, selection)
-	// local-agent and host both resolve their worktree from a directory on this
-	// machine, so both pass it through as --project-root; init refuses a host
-	// create outright when it has no directory to use. remote-agent checks out
-	// its own worktree on a cluster PVC and runtime has no worktree at all, so
-	// neither takes the flag.
+	// Only local-agent and host have a worktree on this machine.
 	if envType == "local-agent" || envType == "host" {
 		if localRepoPath := strings.TrimSpace(selection.LocalRepoPath); localRepoPath != "" {
 			args = append(args, "--project-root", localRepoPath)
@@ -62,12 +52,9 @@ func appendInitOptionalFlags(args []string, selection uiSelection) []string {
 		{"--runtime-memory", strings.TrimSpace(selection.RuntimeMemory)},
 		{"--kubernetes-context", strings.TrimSpace(selection.KubernetesContext)},
 	}
-	// Where erun's own chart is pulled from is a separate coordinate from where
-	// the project's images go, so it is not part of the mutually exclusive set
-	// below.
+	// The runtime chart registry is independent of the mutually exclusive image registry choices.
 	pairs = append(pairs, struct{ flag, value string }{"--runtime-registry", strings.TrimSpace(selection.RuntimeRegistry)})
-	// The three registry choices are mutually exclusive (`erun init` rejects any
-	// pair); the explicit hosted and cluster selections win over a static string.
+	// `erun init` rejects any pair of these.
 	if !selection.ClusterRegistry && !selection.ErunRegistry {
 		pairs = append(pairs, struct{ flag, value string }{"--container-registry", strings.TrimSpace(selection.ContainerRegistry)})
 	}
@@ -76,8 +63,6 @@ func appendInitOptionalFlags(args []string, selection uiSelection) []string {
 			args = append(args, pair.flag, pair.value)
 		}
 	}
-	// Repeated rather than comma-joined: a secret name may legally contain no
-	// comma, but repeating is what the flag documents and never needs escaping.
 	for _, secret := range selection.ImagePullSecrets {
 		if name := strings.TrimSpace(secret); name != "" {
 			args = append(args, "--image-pull-secret", name)
@@ -97,9 +82,7 @@ func buildDeployArgs(selection uiSelection) []string {
 	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)
 	} else {
-		// deploy is a pure primitive: it requires an explicit version. With no
-		// version the operator means "redeploy what this env already runs", so
-		// install the persisted version via --current rather than erroring.
+		// No version means "redeploy what this env runs".
 		args = append(args, "--current")
 	}
 	if image := deployRuntimeImageOverride(selection); image != "" {
@@ -109,10 +92,7 @@ func buildDeployArgs(selection uiSelection) []string {
 	return args
 }
 
-// appendDeployComponentsFlag threads the operator's exact component selection
-// into the pure deploy primitive rather than reaching for a convenience switch
-// (erun-ui/AGENTS.md); an empty selection appends nothing so deploy falls back to
-// the env's saved default.
+// An empty selection lets deploy fall back to the env's saved default.
 func appendDeployComponentsFlag(args []string, selection uiSelection) []string {
 	names := make([]string, 0, len(selection.Components))
 	for _, raw := range selection.Components {
@@ -126,10 +106,7 @@ func appendDeployComponentsFlag(args []string, selection uiSelection) []string {
 	return append(args, "--components", strings.Join(names, ","))
 }
 
-// deployRuntimeImageOverride returns the runtime image to force via
-// `deploy --runtime-image`, or "" when the pick is the env's own image and needs
-// no override. An override lets an operator bootstrap a new env on the shared
-// ERun base image before the tenant's own <tenant>-devops image exists.
+// deployRuntimeImageOverride returns "" when the pick is the env's own image.
 func deployRuntimeImageOverride(selection uiSelection) string {
 	image := strings.TrimSpace(selection.RuntimeImage)
 	if image == "" {
@@ -148,9 +125,6 @@ func deployRuntimeImageOverride(selection uiSelection) string {
 	return image
 }
 
-// buildUpgradeArgs scopes `erun upgrade` to one env so the Upgrade-all flow can
-// upgrade each member in parallel; a selection Version pins the exact target the
-// operator picked from the versions an env's registries offered.
 func buildUpgradeArgs(selection uiSelection) []string {
 	args := []string{"upgrade", "--tenant", selection.Tenant, "--environment", selection.Environment}
 	if version := strings.TrimSpace(selection.Version); version != "" {

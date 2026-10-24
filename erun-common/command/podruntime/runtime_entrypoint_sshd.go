@@ -10,9 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// The pod's sshd listens on loopback only; the activity ssh-proxy in front of it
-// is what the chart exposes, so every SSH byte is counted as operator activity
-// before it reaches sshd.
+// sshd listens on loopback only; the activity ssh-proxy in front of it is what the chart exposes.
 const runtimeSSHDPort = "17023"
 
 func (b runtimeBoot) sshdProxyPort() string {
@@ -26,10 +24,8 @@ func describeRuntimeSSHD(boot runtimeBoot) string {
 	return "start sshd on 127.0.0.1:" + runtimeSSHDPort + " behind the activity ssh-proxy on 0.0.0.0:" + boot.sshdProxyPort()
 }
 
-// startRuntimeSSHD starts sshd and its activity proxy unless a live one already
-// holds the pid file. The pid files are on the home volume and survive the pod,
-// while every pod gets a fresh pid namespace that recycles low pids, so a pid is
-// only trusted when /proc says the process is the expected program.
+// Pid files survive the pod but pids recycle, so a pid is trusted only when /proc shows
+// the expected program.
 func startRuntimeSSHD(_ core.Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
 	sshdDir := boot.path(".sshd")
 	hostKeyDir := filepath.Join(sshdDir, "host_keys")
@@ -85,8 +81,7 @@ func launchRuntimeSSHD(boot runtimeBoot, sshdDir, hostKeyDir, pidFile string, su
 	if err := touchRuntimeFile(authorizedKeys, 0o600); err != nil {
 		return err
 	}
-	// sshd daemonises: this waits only for its parent, and the daemon itself is
-	// reparented here, where the init loop reaps its per-connection children.
+	// sshd daemonises; the init loop reaps its per-connection children.
 	return supervisor.run(core.Command(boot.sshdPath, "-f", configFile, "-E", filepath.Join(sshdDir, "sshd.log")))
 }
 
@@ -121,8 +116,6 @@ func startRuntimeSSHProxy(boot runtimeBoot, sshdDir string, supervisor *runtimeS
 	return nil
 }
 
-// runtimePIDFileRunning reports whether pidFile names a live process whose
-// command line contains want.
 func runtimePIDFileRunning(procRoot, pidFile, want string) bool {
 	data, err := os.ReadFile(pidFile)
 	if err != nil {

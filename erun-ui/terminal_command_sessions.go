@@ -14,33 +14,20 @@ import (
 )
 
 func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
-	// init owns the env's single deploy, so it must carry the desktop's MCP-auth
-	// key like the deploy paths do — otherwise the desktop would have to redeploy
-	// after init to inject it, rolling the pod init just created.
+	// Init owns the env's single deploy, so it carries the MCP-auth key; a later
+	// redeploy would roll the new pod.
 	return a.runErunCommandInLocal(selection, cols, rows, a.appendMCPAuthPublicKeyFlag(buildInitArgs(selection)))
 }
 
-// StartDeploySession runs the pure `erun deploy` primitive: it installs an
-// already-published version by reference and NEVER builds. Producing a new
-// version from working-tree source is the explicit StartCreateVersionSession
-// action — the Deploy button consumes a version, it does not produce one
-// (erun-ui/AGENTS.md: the desktop composes pure primitives). With no picked
-// version buildDeployArgs uses --current, i.e. redeploy the env's current
-// version.
+// StartDeploySession installs a published version and never builds; with no
+// picked version it redeploys the current one.
 func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	return a.runErunCommandInLocal(selection, cols, rows, a.appendMCPAuthPublicKeyFlag(buildDeployArgs(selection)))
 }
 
-// StartCreateVersionSession is the explicit "create & deploy new version"
-// action: it builds the env's working tree into a fresh version, pushes it, and
-// deploys it (build -> push -> deploy). Only a local-agent env builds and
-// deploys through this local orchestration; a runtime/consumer env produces
-// nothing, so this errors and the operator deploys a published version
-// instead, and a host env has no pod to deploy to at all regardless of it
-// having local source to build. The env-create flow's first deploy runs
-// through here too. Checked against ResolvedType rather than the broader
-// "BuildsHere() && !RemoteRepo()" combination, which a host env also
-// satisfies.
+// StartCreateVersionSession builds, pushes and deploys the working tree. Only a
+// local-agent env qualifies; ResolvedType is checked because a host env also
+// builds here but has no pod.
 func (a *App) StartCreateVersionSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("start create-version session", selection.Tenant, selection.Environment); err != nil {
@@ -68,11 +55,8 @@ func (a *App) StartCreateVersionSession(selection uiSelection, cols, rows int) (
 	return startSessionResult{Selection: normalizeSelection(selection), Orchestrated: true}, nil
 }
 
-// StartInitialDeploySession stands a freshly-created env up in one step: a
-// builds-here env builds+pushes+deploys its first version, while a
-// runtime/consumer env installs its configured version by reference. Creating an
-// env is itself the explicit "produce a version" act, so building here is not
-// the implicit-build the plain Deploy button avoids.
+// StartInitialDeploySession deploys a freshly created env's first version,
+// building only when the env builds here.
 func (a *App) StartInitialDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	if result, ok := a.maybeStartDeployOrchestration(selection, false); ok {
 		return result, nil
@@ -80,10 +64,7 @@ func (a *App) StartInitialDeploySession(selection uiSelection, cols, rows int) (
 	return a.runErunCommandInLocal(selection, cols, rows, a.appendMCPAuthPublicKeyFlag(buildDeployArgs(selection)))
 }
 
-// StartForceDeploySession runs `erun deploy --force`, the "Rebuild & redeploy"
-// recovery offered when a failing container looks like a missing-image case:
-// the registry lacks the chart's referenced tag, so a forced rebuild + push is
-// what fixes it.
+// StartForceDeploySession runs `erun deploy --force` to recover a missing image.
 func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	if result, ok := a.maybeStartDeployOrchestration(selection, true); ok {
 		return result, nil
@@ -92,9 +73,7 @@ func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (st
 	return a.runErunCommandInLocal(selection, cols, rows, args)
 }
 
-// StartUpgradeEnvironmentSession runs `erun upgrade` in each environment's own
-// Local shell, so an Upgrade-all fans out across envs in parallel and each
-// env's output, activity entry, and failures land on the env they belong to.
+// StartUpgradeEnvironmentSession runs `erun upgrade` in the env's own Local shell.
 func (a *App) StartUpgradeEnvironmentSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	return a.runErunCommandInLocal(selection, cols, rows, buildUpgradeArgs(selection))
 }
@@ -173,12 +152,8 @@ func buildLocalErunCommandForOS(goos, cliPath string, args []string) string {
 		cliPath = "erun"
 	}
 	if goos == "windows" {
-		// The Windows local shell is PowerShell (see resolveLocalShellCommand), so
-		// the command must be PowerShell syntax: run the quoted exe via the call
-		// operator (&) — a quoted path alone is just a string literal — and submit
-		// with a carriage return. PSReadLine treats a bare LF as a line
-		// continuation, which left the piped command stuck at the ">>" prompt and
-		// never ran (so init/deploy/sshd/doctor silently did nothing).
+		// PowerShell needs the call operator to run a quoted path, and a CR to submit:
+		// PSReadLine treats LF as a continuation.
 		parts := make([]string, 0, len(args)+2)
 		parts = append(parts, "&", powerShellQuoteIfNeeded(cliPath))
 		for _, arg := range args {
@@ -194,10 +169,7 @@ func buildLocalErunCommandForOS(goos, cliPath string, args []string) string {
 	return strings.Join(parts, " ") + "\n"
 }
 
-// powerShellQuoteIfNeeded quotes value for PowerShell only when it contains a
-// character that isn't safe bare (matching shellQuoteIfNeeded's safe set), so
-// readable tokens like --type=remote-agent stay unquoted while paths with
-// backslashes/colons are single-quoted.
+// powerShellQuoteIfNeeded single-quotes value only when it is unsafe bare.
 func powerShellQuoteIfNeeded(value string) string {
 	if value == "" {
 		return "''"
@@ -280,9 +252,8 @@ func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, erro
 	return startSessionResult{SessionID: serial}, nil
 }
 
-// StartCloudInitCloudflareSession opens a PTY running `erun cloud init
-// cloudflare`. The CLI owns Cloudflare alias creation end-to-end; the desktop
-// only launches the guided flow, so there is no in-app form.
+// StartCloudInitCloudflareSession runs `erun cloud init cloudflare`; the CLI owns
+// the flow.
 func (a *App) StartCloudInitCloudflareSession(cols, rows int) (startSessionResult, error) {
 	cols, rows = clampTerminalSize(cols, rows)
 	key := "cloud/init/cloudflare"

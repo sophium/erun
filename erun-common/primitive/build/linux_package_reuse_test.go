@@ -13,11 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// No test in this binary may read or write the operator's real package-test
-// record: one that has not pointed the seam at its own tree finds no record
-// and records nothing.
-// No test asks a real docker daemon for its platform either: the daemon is
-// linux/arm64 unless a test names another one.
+// Keep tests off the operator's real record and off a real docker daemon.
 func init() {
 	LinuxPackageTestRecordDir = func() (string, error) {
 		return "", errors.New("linux package test records are off in this test binary unless a test points them at its own directory")
@@ -43,7 +39,6 @@ func useLinuxPackageTestRecordClock(t *testing.T, now time.Time) *time.Time {
 	return &clock
 }
 
-// A release always builds its dist stage, whatever a plain build recorded.
 func TestReleaseNeverReusesARecordedPass(t *testing.T) {
 	useLinuxPackageTestRecordDir(t)
 	spec := linuxPackageReleaseSpec(t, "1.4.2")

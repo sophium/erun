@@ -15,36 +15,13 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 )
 
-// End-to-end proof that the invites/invite_requests retention sweep
-// (erun-backend-db/retention/invites_invite_requests.sql) deletes exactly the
-// rows the design in erun-backend-db/AGENTS.md ("Invites And Invite
-// Requests") says it should, and nothing else -- against the real migrated
-// postgres testpg serves. Locks:
-//
-//  1. invite_requests: a PENDING request is exempt regardless of age; an
-//     APPROVED/DECLINED request past the 180-day age bound (on updated_at)
-//     is deleted; one within it survives.
-//  2. invites: a live (unconsumed, unexpired) invite is exempt; a consumed
-//     invite past the 365-day bound (on consumed_at) is deleted; one within
-//     it survives; an unconsumed expired invite past the 30-day bound (on
-//     expires_at) is deleted; one within it survives; a population beyond the
-//     10,000-per-tenant count cap is deleted even within its age bound.
-//  3. a consumed invite still referenced by invite_requests.minted_invite_id
-//     survives even past its own age bound -- the RESTRICT-FK guard.
-//
-// It also proves dry_run=true reports the same counts but deletes nothing,
-// and that both runs record their outcome in retention_runs.
-//
-// The SQL file runs through retention.sh itself in a real psql container.
+// Runs erun-backend-db/retention/invites_invite_requests.sql through retention.sh in a
+// real psql container; policy is in erun-backend-db/AGENTS.md ("Invites And Invite Requests").
 
 const retentionInvitesPolicy = "invites_invite_requests.sql"
 
-// retentionInvitesUnlocked matches retention.sh's final pg_advisory_unlock
-// result printed true.
 var retentionInvitesUnlocked = regexp.MustCompile(`(?m)^\s*pg_advisory_unlock\s*\n-+\n\s*t\s*$`)
 
-// retentionInvitesRun runs the sweep and returns the per-table
-// eligible_for_deletion report the file's SELECTs print.
 func retentionInvitesRun(t *testing.T, psql retentionPsql, dryRun bool) map[string]int64 {
 	t.Helper()
 	out := psql.sweep(t, context.Background(), dryRun)
@@ -95,9 +72,7 @@ func TestRetentionInvitesInviteRequestsSweep(t *testing.T) {
 	retentionInvitesCheckCountCap(t, db, t2)
 }
 
-// retentionInvitesRequireNoFixtures guards the shared database: the sweep's
-// counts are platform-wide for invite_requests and its delete is global, so it
-// must hold no other invite fixtures this sweep would count.
+// The sweep is global, so the shared database must hold no other invite fixtures.
 func retentionInvitesRequireNoFixtures(t *testing.T, db *sql.DB) {
 	t.Helper()
 	if n := retentionInvitesCount(t, db, `SELECT count(*) FROM invites`); n != 0 {
@@ -108,11 +83,8 @@ func retentionInvitesRequireNoFixtures(t *testing.T, db *sql.DB) {
 	}
 }
 
-// retentionInvitesSeed seeds tenants, users and every fixture, registers their
-// cleanup, and returns the count-cap tenant's id.
 func retentionInvitesSeed(t *testing.T, db *sql.DB) string {
 	t.Helper()
-	// Unique names so a rerun against ERUN_TEST_DATABASE_URL never collides.
 	suffix := time.Now().Format("20060102150405.000000")
 	var t1, t2, u1, u2 string
 	mustNoErr(t, db.QueryRow(`INSERT INTO tenants (name) VALUES ($1) RETURNING tenant_id`, "t1-"+suffix).Scan(&t1), "seed t1")
@@ -147,7 +119,6 @@ func retentionInvitesCleanup(t *testing.T, db *sql.DB, t1, t2 string) {
 	}
 }
 
-// retentionInvitesSeedInvites seeds the per-case invites and returns the guarded invite's id.
 func retentionInvitesSeedInvites(t *testing.T, db *sql.DB, t1, u1 string) string {
 	t.Helper()
 	var guardedInviteID string
@@ -186,7 +157,6 @@ FROM generate_series(1, 10005) AS i`, t2, u2)
 	mustNoErr(t, err, "seed count-cap invites")
 }
 
-// lines 153-156
 func retentionInvitesInitialCounts(t *testing.T, db *sql.DB) (invites, requests int64) {
 	t.Helper()
 	initialInvites := retentionInvitesCount(t, db, `SELECT count(*) FROM invites`)
@@ -204,7 +174,6 @@ func retentionInvitesCheckDryRun(t *testing.T, db *sql.DB, psql retentionPsql, i
 	t.Helper()
 	runQuery := retentionInvitesRunQuery
 
-	// --- Dry run reports the exact eligible counts and deletes nothing (lines 154-163) ---
 	report := retentionInvitesRun(t, psql, true)
 	if got, ok := report["invite_requests"]; !ok || got != 1 {
 		t.Fatalf("dry run must report 1 invite_requests eligible (sub-approved-old), got %v", report)
@@ -215,7 +184,6 @@ func retentionInvitesCheckDryRun(t *testing.T, db *sql.DB, psql retentionPsql, i
 	retentionInvitesExpect(t, db, initialInvites, "dry run must not delete any invites", `SELECT count(*) FROM invites`)
 	retentionInvitesExpect(t, db, initialRequests, "dry run must not delete any invite_requests", `SELECT count(*) FROM invite_requests`)
 
-	// --- The dry run recorded its outcome: eligible counts, zero deleted (lines 165-173) ---
 	retentionInvitesExpect(t, db, 1, "the dry run must record 1 invite_requests eligible in retention_runs", fmt.Sprintf(runQuery, "eligible_count"), "invite_requests", true)
 	retentionInvitesExpect(t, db, 0, "the dry run must record 0 invite_requests deleted in retention_runs", fmt.Sprintf(runQuery, "deleted_count"), "invite_requests", true)
 	retentionInvitesExpect(t, db, 7, "the dry run must record 7 invites eligible in retention_runs", fmt.Sprintf(runQuery, "eligible_count"), "invites", true)
@@ -226,17 +194,14 @@ func retentionInvitesCheckRealRun(t *testing.T, db *sql.DB, psql retentionPsql) 
 	t.Helper()
 	runQuery := retentionInvitesRunQuery
 
-	// --- Real run deletes exactly the eligible rows (line 176) ---
 	retentionInvitesRun(t, psql, false)
 
-	// --- The real run recorded its outcome (lines 178-186) ---
 	retentionInvitesExpect(t, db, 1, "the real run must record 1 invite_requests eligible in retention_runs", fmt.Sprintf(runQuery, "eligible_count"), "invite_requests", false)
 	retentionInvitesExpect(t, db, 1, "the real run must record 1 invite_requests deleted in retention_runs", fmt.Sprintf(runQuery, "deleted_count"), "invite_requests", false)
 	retentionInvitesExpect(t, db, 7, "the real run must record 7 invites eligible in retention_runs", fmt.Sprintf(runQuery, "eligible_count"), "invites", false)
 	retentionInvitesExpect(t, db, 7, "the real run must record 7 invites deleted in retention_runs", fmt.Sprintf(runQuery, "deleted_count"), "invites", false)
 }
 
-// 1. invite_requests (lines 188-195)
 func retentionInvitesCheckRequestsOutcome(t *testing.T, db *sql.DB) {
 	t.Helper()
 	retentionInvitesExpect(t, db, 1, "a PENDING request must survive no matter how old it is", `SELECT count(*) FROM invite_requests WHERE subject = 'sub-pending'`)
@@ -246,18 +211,16 @@ func retentionInvitesCheckRequestsOutcome(t *testing.T, db *sql.DB) {
 
 func retentionInvitesCheckInvitesOutcome(t *testing.T, db *sql.DB) {
 	t.Helper()
-	// 2. invites (lines 197-208)
 	retentionInvitesExpect(t, db, 0, "a consumed invite past the 365-day bound must be deleted", `SELECT count(*) FROM invites WHERE token = 'tok-consumed-old'`)
 	retentionInvitesExpect(t, db, 1, "a consumed invite within the 365-day bound must survive", `SELECT count(*) FROM invites WHERE token = 'tok-consumed-young'`)
 	retentionInvitesExpect(t, db, 0, "an unconsumed expired invite past the 30-day bound must be deleted", `SELECT count(*) FROM invites WHERE token = 'tok-expired-old'`)
 	retentionInvitesExpect(t, db, 1, "an unconsumed expired invite within the 30-day bound must survive", `SELECT count(*) FROM invites WHERE token = 'tok-expired-young'`)
 	retentionInvitesExpect(t, db, 1, "a live invite must survive regardless of the sweep", `SELECT count(*) FROM invites WHERE token = 'tok-live'`)
 
-	// 3. minted_invite_id guard (lines 210-214)
+	// RESTRICT-FK guard.
 	retentionInvitesExpect(t, db, 1, "a consumed invite still referenced by invite_requests.minted_invite_id must survive", `SELECT count(*) FROM invites WHERE token = 'tok-consumed-guarded'`)
 }
 
-// 4. count cap (lines 216-222)
 func retentionInvitesCheckCountCap(t *testing.T, db *sql.DB, t2 string) {
 	t.Helper()
 	retentionInvitesExpect(t, db, 10000, "the count-cap tenant must keep exactly 10000 invites", `SELECT count(*) FROM invites WHERE tenant_id = $1`, t2)

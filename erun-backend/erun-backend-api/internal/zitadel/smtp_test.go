@@ -7,11 +7,6 @@ import (
 	"testing"
 )
 
-// TestGetSMTPStatusReportsUnconfiguredOn404 locks the exact shape this issue
-// started from: a real Zitadel instance with no SMTP provider answers 404
-// with {"code":5,"message":"SMTP configuration not found (QUERY-fwofw)"}
-// (verified live against a real v4.15.3 instance), which must read as
-// SMTPStatus{Configured: false}, not propagate as an error.
 func TestGetSMTPStatusReportsUnconfiguredOn404(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -53,11 +48,7 @@ func TestGetSMTPStatusReportsConfiguredConfig(t *testing.T) {
 	}
 }
 
-// TestUpdateSMTPConfigCreatesAndActivatesWhenNoneExists locks the
-// first-configuration path: Zitadel has no smtp config at all (the issue's
-// exact starting state), so this must create one and then explicitly
-// activate it -- a created-but-inactive config never becomes deliverable
-// (confirmed live: a fresh AddSMTPConfig defaults to SMTP_CONFIG_INACTIVE).
+// A fresh AddSMTPConfig defaults to SMTP_CONFIG_INACTIVE.
 func TestUpdateSMTPConfigCreatesAndActivatesWhenNoneExists(t *testing.T) {
 	var createBody map[string]any
 	activated := ""
@@ -99,9 +90,6 @@ func TestUpdateSMTPConfigRequiresPasswordOnFirstCreate(t *testing.T) {
 	}
 }
 
-// TestUpdateSMTPConfigUpdatesExistingConfigWithoutTouchingPassword locks that
-// an update with no Password leaves Zitadel's stored password alone -- the
-// only way it can be, since Zitadel never returns it to diff against.
 func TestUpdateSMTPConfigUpdatesExistingConfigWithoutTouchingPassword(t *testing.T) {
 	fieldPuts, passwordPuts, activates := 0, 0, 0
 	client := routedTestClient(t, []jsonRoute{
@@ -129,10 +117,6 @@ func TestUpdateSMTPConfigUpdatesExistingConfigWithoutTouchingPassword(t *testing
 	}
 }
 
-// TestUpdateSMTPConfigActivatesAnInactiveExistingConfig locks the
-// re-activation half: an existing-but-inactive config (e.g. deactivated by
-// an operator, or left over from an earlier failed converge) must be
-// activated again, not just have its fields updated.
 func TestUpdateSMTPConfigActivatesAnInactiveExistingConfig(t *testing.T) {
 	activated := ""
 	client := routedTestClient(t, []jsonRoute{
@@ -153,13 +137,7 @@ func TestUpdateSMTPConfigActivatesAnInactiveExistingConfig(t *testing.T) {
 	}
 }
 
-// TestUpdateSMTPConfigActivatesBeforeWritingThePassword locks a real
-// Zitadel business rule found live against a v4.15.3 instance: the
-// password-update command refuses an inactive config with the same "SMTP
-// configuration not found" error GetSMTPStatus's 404 uses, even though a
-// plain field update on the same inactive config succeeds -- so an inactive
-// existing config must be activated before its password is written, not
-// after.
+// Zitadel's password update refuses an inactive config, though a field update succeeds.
 func TestUpdateSMTPConfigActivatesBeforeWritingThePassword(t *testing.T) {
 	var order []string
 	client := routedTestClient(t, []jsonRoute{

@@ -8,13 +8,7 @@ import (
 	"testing"
 )
 
-// The reproduction this closes: an agent job's own exit status says nothing
-// about the state of the working tree it ran in. Six lanes in one session
-// each ended a turn with substantial work sitting uncommitted, and every one
-// of them read as a plain "exited 0" -- indistinguishable from a lane that
-// committed everything it did. A test that only proves the clean-finish case
-// still passes would leave every one of those cases shipping silently; the
-// dirty case below is the one that has to fail loudly.
+// An agent job's exit status says nothing about its working tree; the dirty case must fail loudly.
 
 func runGitForTest(t *testing.T, dir string, args ...string) {
 	t.Helper()
@@ -25,9 +19,6 @@ func runGitForTest(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// newAgentJobTestRepo creates a real git working tree with one commit on
-// branch "main", so tests exercise the actual git plumbing job_worktree.go
-// runs rather than a mocked stand-in for it.
 func newAgentJobTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -42,9 +33,6 @@ func newAgentJobTestRepo(t *testing.T) string {
 	return dir
 }
 
-// newBareRemoteForTest creates a bare repo elsewhere and wires it as dir's
-// "origin", so a checkpoint's push has a real remote to land on rather than
-// a stub that merely returns zero.
 func newBareRemoteForTest(t *testing.T, dir string) string {
 	t.Helper()
 	remote := t.TempDir()

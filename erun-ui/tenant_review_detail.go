@@ -10,15 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// tenant_review_detail.go extends the tenant dashboard's Reviews tab with a
-// single review's own detail — its comment threads, recorded builds, and its
-// position in its target branch's merge queue — plus replying to an existing
-// comment thread. Loaded lazily, one review at a time, from a row the
-// operator opens in the Reviews panel.
-
-// LoadReviewDetail loads one review's detail. Each sub-read is gated and
-// degrades independently, mirroring LoadTenantDashboard's own panels: a
-// caller who cannot read comments still sees the review and its builds.
+// LoadReviewDetail loads one review's detail; each sub-read degrades independently.
 func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error) {
 	tenant, err := requireTenant("loading review detail", input.Tenant)
 	if err != nil {
@@ -79,9 +71,7 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 	return detail, nil
 }
 
-// loadReviewDetailReviewers loads a review's assigned reviewers, degrading
-// independently like loadReviewDetailComments/loadReviewDetailBuilds: a
-// caller who cannot read reviewers still sees the rest of the detail.
+// loadReviewDetailReviewers degrades independently of the rest of the detail.
 func loadReviewDetailReviewers(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, reviewID string, usernames map[string]string, detail *uiReviewDetail) {
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviewers); restricted != "" {
 		detail.ReviewersRestricted = restricted
@@ -99,10 +89,8 @@ func loadReviewDetailReviewers(ctx context.Context, client *platformclient.Platf
 	detail.Reviewers = converted
 }
 
-// tenantDashboardEnrolledReviewerChoices lists the tenant's enrolled users for
-// the Add reviewers picker, best effort: a caller who cannot read /v1/users,
-// or a read that fails, gets back nil rather than failing the whole detail —
-// the Add reviewers action itself simply has nothing to offer.
+// tenantDashboardEnrolledReviewerChoices is best effort: nil leaves the picker empty
+// rather than failing the detail.
 func tenantDashboardEnrolledReviewerChoices(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities) []uiReviewer {
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers) != "" {
 		return nil
@@ -145,10 +133,8 @@ func loadReviewDetailBuilds(ctx context.Context, client *platformclient.Platform
 	detail.Builds = tenantDashboardBuildsForReview(builds, reviewName)
 }
 
-// loadReviewDetailQueuePosition reports 0 (not queued) both when the caller
-// may not read the queue and when the read itself fails — the position is
-// supplemental detail in the dialog header, not something worth its own
-// error line the way comments and builds get.
+// loadReviewDetailQueuePosition reports 0 on denial or failure: the position is
+// supplemental.
 func loadReviewDetailQueuePosition(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review platformclient.PlatformReview, reviewID string) int {
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadMergeQueue) != "" {
 		return 0
@@ -162,11 +148,8 @@ func loadReviewDetailQueuePosition(ctx context.Context, client *platformclient.P
 	return reviewQueuePosition(queue, reviewID)
 }
 
-// CreateReviewReply posts a reply in an existing comment thread. It is a
-// direct write, not a dashboard panel read, so a failure is a real Go error
-// the frontend's submit handler catches — matching the "submit failed with
-// the text preserved" contract: the caller keeps the draft body on error and
-// only clears it once this call actually succeeds.
+// CreateReviewReply returns a real error so the frontend keeps the draft until it
+// succeeds.
 func (a *App) CreateReviewReply(input uiCreateReviewReplyInput) (uiReviewComment, error) {
 	tenant, err := requireTenant("replying to a review comment", input.Tenant)
 	if err != nil {
@@ -255,9 +238,7 @@ func tenantDashboardComment(comment platformclient.PlatformComment) uiReviewComm
 	}
 }
 
-// reviewQueuePosition reports reviewID's 1-based position in queue, or 0 when
-// it is not present — the review is not currently queued for its target
-// branch.
+// reviewQueuePosition returns the 1-based position, or 0 when not queued.
 func reviewQueuePosition(queue []platformclient.PlatformReview, reviewID string) int {
 	for i, review := range queue {
 		if review.ReviewID == reviewID {

@@ -4,10 +4,7 @@ import (
 	"strings"
 )
 
-// MissingTenantOrEnvironmentFlags names which of the shared --tenant/--environment
-// flags a caller left empty, for validateActivityTarget/validateJobTarget to build
-// an operation-specific refusal instead of a bare "tenant and environment are
-// required" dead end.
+// MissingTenantOrEnvironmentFlags names which of --tenant/--environment were left empty.
 func MissingTenantOrEnvironmentFlags(tenant, environment string) []string {
 	var missing []string
 	if strings.TrimSpace(tenant) == "" {

@@ -11,15 +11,9 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// TestNewFsnotifyConfigWatcherFailsWhenTheRootCannotBeCreated locks in the
-// seam startConfigWatcher now uses to surface its own startup failure
-// instead of a bare return.
 func TestNewFsnotifyConfigWatcherFailsWhenTheRootCannotBeCreated(t *testing.T) {
 	tmp := t.TempDir()
-	// A regular file sits where the watcher root needs to be a directory, so
-	// os.MkdirAll fails — the same failure shape startConfigWatcher hits when
-	// the real config directory is blocked (e.g. a stray file left by another
-	// tool, a permissions problem).
+	// A file where the root directory belongs makes os.MkdirAll fail.
 	blocker := filepath.Join(tmp, "blocked")
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -31,9 +25,6 @@ func TestNewFsnotifyConfigWatcherFailsWhenTheRootCannotBeCreated(t *testing.T) {
 	}
 }
 
-// TestStartConfigWatcherSurfacesAStartupFailure: a failed watcher start must reach the user as an
-// actionable notification instead of leaving config-change detection
-// silently and permanently off.
 func TestStartConfigWatcherSurfacesAStartupFailure(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{emitFn: emits.fn()}
@@ -50,13 +41,9 @@ func TestStartConfigWatcherSurfacesAStartupFailure(t *testing.T) {
 	}
 }
 
-// TestConfigWatcherSurfacesARuntimeError covers the second swallowed path:
-// an error the fsnotify watcher reports after it already started (e.g. an
-// overflowed event queue) must not be discarded either.
 func TestConfigWatcherSurfacesARuntimeError(t *testing.T) {
 	root := t.TempDir()
-	// Own the injected channels: a real backend can close Errors while the
-	// test sends to it during shutdown.
+	// Own the channels: a real backend can close Errors while the test sends on it.
 	watcher := &fsnotify.Watcher{
 		Events: make(chan fsnotify.Event),
 		Errors: make(chan error),

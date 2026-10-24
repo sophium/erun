@@ -9,10 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
-// ParseDockerImageReference rejects a reference whose "registry" is really a
-// version string: helm printf templates embed .Chart.AppVersion as a namespace
-// prefix (e.g. "1.0.51-snapshot-.../image:tag"), which is not a valid registry
-// host and would fail with a push-time DNS lookup.
+// ParseDockerImageReference rejects a version string posing as a registry,
+// which helm templates produce from .Chart.AppVersion.
 func ParseDockerImageReference(image string) (registry, imageName, version string, ok bool) {
 	if image == "" {
 		return "", "", "", false
@@ -69,10 +67,8 @@ func ResolveDockerImageReferenceForProject(ctx core.Context, now NowFunc, projec
 	return ref, nil
 }
 
-// resolveDockerImageVersion mints the build version independently of the
-// environment: a timestamped snapshot by default, the bare base semver only when
-// an explicit override or a version-from-build-dir file pins it (release passes
-// the resolved release version as that override).
+// resolveDockerImageVersion mints a snapshot unless an override or a
+// version-from-build-dir file pins the version.
 func resolveDockerImageVersion(now NowFunc, projectRoot, buildDir, versionOverride, selectedComponent string) (string, string, bool, string, error) {
 	baseVersion, versionFromBuildDir, versionFilePath, err := ResolveDockerBuildVersion(buildDir, projectRoot, selectedComponent)
 	if err != nil {
@@ -114,8 +110,7 @@ func NewDockerBuildSpec(ctx core.Context, store DockerStore, now NowFunc, projec
 		return DockerBuildSpec{}, err
 	}
 
-	// Mark local snapshot builds so ERUN_VERSION reads "1.0.51-snapshot", not
-	// "1.0.51", which would falsely claim a release.
+	// "1.0.51" alone would falsely claim a release.
 	if imageRef.BaseVersion != "" {
 		imageRef.BaseVersion += "-snapshot"
 	}
@@ -189,8 +184,7 @@ func multiPlatformTraceCommands(b DockerBuildSpec) []helm.CommandSpec {
 	return commands
 }
 
-// stableBaseVersionTraceCommands must mirror tagStableBaseVersionAfterBuild's
-// ordering so the dry-run trace stays an honest preview of the real build.
+// stableBaseVersionTraceCommands must mirror tagStableBaseVersionAfterBuild.
 func stableBaseVersionTraceCommands(dir, platformTag, baseTag, platform string) []helm.CommandSpec {
 	if baseTag == "" {
 		return nil
@@ -229,11 +223,7 @@ func promoteTraceCommands(b DockerBuildSpec) []helm.CommandSpec {
 	return commands
 }
 
-// multiPlatformManifestTraceCommands mirrors assembleMultiPlatformManifest so the
-// dry-run trace stays an honest preview, including the discard of the cached
-// manifest list that keeps a re-published version from resolving to the previous
-// one, and the --insecure flag a plain-HTTP registry needs on every subcommand
-// but rm (which never leaves the local manifest-list store).
+// multiPlatformManifestTraceCommands must mirror assembleMultiPlatformManifest.
 func multiPlatformManifestTraceCommands(dir, tag string, perPlatformTags []string, insecure bool) []helm.CommandSpec {
 	createArgs := append(DockerManifestArgs("create", insecure), tag)
 	createArgs = append(createArgs, perPlatformTags...)

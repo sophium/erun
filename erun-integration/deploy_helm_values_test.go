@@ -14,13 +14,8 @@ import (
 )
 
 func testDeployDryRunStoppedEnvRendersReplicasZero(t *testing.T) {
-	// deploy reconciles the operator's stop rather than overriding it: an env
-	// carrying `stopped: true` threads --set stopped=true so the chart renders
-	// replicas: 0, and a helm upgrade cannot silently restart a pod the
-	// operator deliberately scaled away. deploy never wakes — `erun open`
-	// does, which is also why deploy's version dedup skipping the helm call
-	// cannot leave the run/stop state inconsistent. A running env emits no
-	// such --set (the sibling dry_run_from_devops_cwd golden shows its absence).
+	// A stopped env passes stopped=true so helm upgrade cannot restart it; only
+	// `erun open` wakes an env.
 	setup := env.New(t)
 	fixture.SeedStoppedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -32,12 +27,7 @@ func testDeployDryRunStoppedEnvRendersReplicasZero(t *testing.T) {
 }
 
 func testDeployDryRunPlatformAccountBindsClusterAdmin(t *testing.T) {
-	// An env flagged platformaccount:true threads --set platformAccount=true
-	// into the runtime helm command, so the chart binds the env's SA to
-	// cluster-admin (the <release>-platform ClusterRoleBinding) — the grant
-	// that lets in-pod `erun terraform apply` of the cluster edge create
-	// namespaces and CRDs. An off-by-default env emits no such --set (the
-	// sibling dry_run_from_devops_cwd golden shows its absence).
+	// platformAccount binds the env's SA to cluster-admin for in-pod terraform apply.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -55,10 +45,6 @@ func testDeployDryRunPlatformAccountBindsClusterAdmin(t *testing.T) {
 }
 
 func testDeployDryRunWithManagedCloudTracesHelmSetStrings(t *testing.T) {
-	// Exercises deploy.applyCloudProviderDeployMetadata,
-	// findCloudContextForKubernetesContext, cloudContextRegionFromName,
-	// and the managed-cloud helm --set-string lines that come from
-	// per-tenant cloud provider/context resolution.
 	setup := env.New(t)
 	seedCloudContextConfig(t, setup, "edge")
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -86,10 +72,6 @@ func testDeployDryRunWithManagedCloudTracesHelmSetStrings(t *testing.T) {
 }
 
 func testDeployDryRunWithAWSClaudeModelsTracesSetStrings(t *testing.T) {
-	// Exercises deploy.helmClaudeSetArgs' Models + MaxOutputTokens
-	// branches and NormalizedModels: claude.usebedrock/models/maxoutputtokens
-	// resolve into the runtime chart's claude.useBedrock/availableModels/
-	// maxOutputTokens helm --set-string args.
 	setup := env.New(t)
 	seedCloudContextConfig(t, setup, "edge")
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -127,12 +109,8 @@ func testDeployDryRunWithAWSClaudeModelsTracesSetStrings(t *testing.T) {
 }
 
 func testDeployDryRunWithOpenrouterGatewayTracesSetStrings(t *testing.T) {
-	// Exercises deploy.helmClaudeSetArgs' gateway branch: the erun-level
-	// catalog in root config resolves into the runtime chart's
-	// claude.openRouter* helm --set-string args. Only the credential's Secret
-	// name travels — a token value never reaches helm argv. This env is also
-	// AWS, so it pins that the gateway's available-models and model variables
-	// are not emitted twice.
+	// Only the credential's Secret name reaches helm argv, never the token. This
+	// env is also AWS, so model variables must not be emitted twice.
 	setup := env.New(t)
 	seedCloudContextConfig(t, setup, "edge")
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -167,12 +145,7 @@ func testDeployDryRunWithOpenrouterGatewayTracesSetStrings(t *testing.T) {
 }
 
 func testDeployDryRunSnapshotVersionResetsPostgresDatabase(t *testing.T) {
-	// Locks the contract under pure deploy: installing a snapshot
-	// version resolves ResetDatabase=true (deployResetsDatabase), so the
-	// erun-backend-postgres chart's helm upgrade carries
-	// --set api.postgres.reset=true. deploy installs by reference (no build);
-	// the docker stub answers every `manifest inspect` with exit 0 so the
-	// install-existing image-presence check passes without a registry.
+	// The docker stub answers every `manifest inspect` with 0, standing in for a registry.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -207,11 +180,6 @@ func testDeployDryRunSnapshotVersionResetsPostgresDatabase(t *testing.T) {
 }
 
 func testDeployDryRunReleasedVersionDoesNotResetPostgresDatabase(t *testing.T) {
-	// Installing an already-published RELEASED version must not arm the
-	// database wipe the way a snapshot does. This scenario is identical to
-	// dry_run_snapshot_version_resets_postgres_database except the
-	// version carries no -snapshot- marker, and must resolve
-	// --set api.postgres.reset=false.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")

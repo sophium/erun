@@ -43,19 +43,14 @@ func stdoutIsTerminalForAliasSetup(stdout io.Writer) bool {
 	return shared.WriterIsTerminal(stdout)
 }
 
-// nopWriteCloser adapts a writer to promptui's io.WriteCloser Stdout field so
-// promptui can render to it but never closes the underlying stream.
+// nopWriteCloser keeps promptui from closing the underlying stream.
 type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
 
-// UnwrapWriter exposes the adapted stream so a check that has to know what the
-// bytes land on -- the prompt's echo suppression -- can see past the adapter to
-// the file underneath it.
+// UnwrapWriter lets echo suppression see the file underneath.
 func (w nopWriteCloser) UnwrapWriter() io.Writer { return w.Writer }
 
-// promptStderr targets the confirm render at the process's real stderr (the same
-// TTY as stdout), wrapped so promptui cannot close it.
 func promptStderr() io.WriteCloser { return nopWriteCloser{os.Stderr} }
 
 func maybeConfigureOpenNoShellAlias(ctx core.Context, result config.OpenResult, promptRunner shared.PromptRunner, shellPath string, stderr io.Writer) error {
@@ -70,10 +65,7 @@ func maybeConfigureOpenNoShellAlias(ctx core.Context, result config.OpenResult, 
 		return nil
 	}
 
-	// Route the confirm to stderr: promptui repaints from a readline goroutine
-	// and the eval-able setup script prints to stdout right after, so sharing
-	// stdout lets the two interleave (see confirmPromptTo). os.Stderr is the same
-	// TTY, wrapped so promptui cannot close the process's real stderr.
+	// stderr: promptui repaints from a goroutine and would interleave with the stdout setup script.
 	ok, err := shared.ConfirmPromptTo(promptRunner, fmt.Sprintf("add %s to %s", aliasName, startupFile), promptStderr())
 	if err != nil {
 		return err

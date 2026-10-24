@@ -28,10 +28,7 @@ func deploymentNotFoundHandler(name string) http.HandlerFunc {
 	}
 }
 
-// TestLibraryDeploymentPresentMatchesSubprocessObservableResult pins the same
-// equivalence property the namespace/PVC tests do: the library path's
-// returned bool must agree with what defaultDeploymentPresent derives from
-// kubectl's exit code (found -> exit 0, not found -> "NotFound" stderr).
+// The library path's bool must match kubectl's exit-code result.
 func TestLibraryDeploymentPresentMatchesSubprocessObservableResult(t *testing.T) {
 	fakeKubernetesAPIServer(t, deploymentFoundHandler("team-dev", "team-api"))
 
@@ -56,10 +53,6 @@ func TestLibraryDeploymentPresentReportsNotFoundAsAbsentNotError(t *testing.T) {
 	}
 }
 
-// TestLibraryDeploymentPresentPropagatesOtherErrors proves a refusal distinct
-// from NotFound (Forbidden here) surfaces as an error rather than being
-// folded into "does not exist" — the same distinction defaultDeploymentPresent's
-// substring check draws against kubectl's own stderr.
 func TestLibraryDeploymentPresentPropagatesOtherErrors(t *testing.T) {
 	fakeKubernetesAPIServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -77,9 +70,6 @@ func TestLibraryDeploymentPresentPropagatesOtherErrors(t *testing.T) {
 	}
 }
 
-// TestLibraryDeploymentPresentHonorsContextOverride proves the context-name
-// argument actually selects the kubeconfig context, the same way `kubectl
-// --context X` does, rather than always following current-context.
 func TestLibraryDeploymentPresentHonorsContextOverride(t *testing.T) {
 	fakeKubernetesAPIServer(t, deploymentFoundHandler("team-dev", "team-api"))
 
@@ -96,10 +86,7 @@ func TestLibraryDeploymentPresentHonorsContextOverride(t *testing.T) {
 	}
 }
 
-// deploymentConditionHandler serves a Deployment Get whose Available
-// condition is False for the first failCount requests, then True -- so tests
-// can exercise libraryWaitForDeploymentAvailable's poll loop instead of only
-// its immediate-success path.
+// deploymentConditionHandler reports Available=False for the first failCount requests, then True.
 func deploymentConditionHandler(namespace, name string, failCount int) http.HandlerFunc {
 	path := "/apis/apps/v1/namespaces/" + namespace + "/deployments/" + name
 	calls := 0
@@ -120,9 +107,6 @@ func deploymentConditionHandler(namespace, name string, failCount int) http.Hand
 	}
 }
 
-// TestLibraryWaitForDeploymentAvailablePollsUntilConditionBecomesTrue proves
-// the poll loop keeps re-Getting -- the same observable behavior as `kubectl
-// wait` blocking until the condition flips -- rather than only checking once.
 func TestLibraryWaitForDeploymentAvailablePollsUntilConditionBecomesTrue(t *testing.T) {
 	t.Setenv("ERUN_KUBECTL_DEPLOYMENT_WAIT_POLL_INTERVAL", "5ms")
 	fakeKubernetesAPIServer(t, deploymentConditionHandler("team-dev", "team-api", 2))
@@ -132,10 +116,6 @@ func TestLibraryWaitForDeploymentAvailablePollsUntilConditionBecomesTrue(t *test
 	}
 }
 
-// TestLibraryWaitForDeploymentAvailableToleratesNotFoundUntilCreated proves
-// the wait survives the Deployment not existing yet at the first poll --
-// matching `kubectl wait`'s tolerance for a resource that has not been
-// created yet -- rather than failing outright on the first NotFound.
 func TestLibraryWaitForDeploymentAvailableToleratesNotFoundUntilCreated(t *testing.T) {
 	t.Setenv("ERUN_KUBECTL_DEPLOYMENT_WAIT_POLL_INTERVAL", "5ms")
 	calls := 0
@@ -158,9 +138,6 @@ func TestLibraryWaitForDeploymentAvailableToleratesNotFoundUntilCreated(t *testi
 	}
 }
 
-// TestLibraryWaitForDeploymentAvailableTimesOutWhenConditionNeverTrue proves
-// the wait gives up at the deadline instead of polling forever, the same
-// contract `kubectl wait --timeout` makes.
 func TestLibraryWaitForDeploymentAvailableTimesOutWhenConditionNeverTrue(t *testing.T) {
 	t.Setenv("ERUN_KUBECTL_DEPLOYMENT_WAIT_POLL_INTERVAL", "5ms")
 	fakeKubernetesAPIServer(t, deploymentConditionHandler("team-dev", "team-api", 1<<20))
@@ -174,9 +151,6 @@ func TestLibraryWaitForDeploymentAvailableTimesOutWhenConditionNeverTrue(t *test
 	}
 }
 
-// TestLibraryWaitForDeploymentAvailablePropagatesOtherErrors proves a
-// non-NotFound API error is not swallowed into a plain timeout the way a
-// bare "condition never became true" loop would.
 func TestLibraryWaitForDeploymentAvailablePropagatesOtherErrors(t *testing.T) {
 	fakeKubernetesAPIServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -211,9 +185,7 @@ func TestKubectlGetDeploymentArgsOmitsContextAndNamespaceFlagsWhenUnset(t *testi
 	}
 }
 
-// TestKubectlGetPodArgsSharedByBothPaths locks the one argv builder both
-// subprocess call sites (job_container_restart.go, build_resource_exhaustion.go)
-// call, so the audited kubectl invocation can never drift between them.
+// Both subprocess call sites share this argv builder so the audited kubectl call cannot drift.
 func TestKubectlGetPodArgsSharedByBothPaths(t *testing.T) {
 	got := KubectlGetPodArgs("pod-a")
 	want := []string{"get", "pod", "pod-a", "-o", "json"}

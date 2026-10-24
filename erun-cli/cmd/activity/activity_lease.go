@@ -17,12 +17,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The lease verbs are the CLI half of the activity lease: a long job announces
-// what it is, and the environment reports that instead of reading as untouched.
-// Shaped for a shell wrapper first — take, trap the release, let the recorded
-// pid reclaim the lease if the wrapper dies — and usable directly by an agent
-// that holds one across a detached run. A lease belongs to the environment it
-// holds, so off-environment these act through its edge.
+// Lease verbs let a long job announce itself so the environment does not read
+// as idle; off-environment they act through its edge.
 
 func newActivityLeaseCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	cmd := &cobra.Command{
@@ -190,10 +186,7 @@ func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen shared.OpenResolver
 	if !resolved {
 		return nil
 	}
-	// The note is resolved only for the wrong-store outcome, and only by
-	// asking the store that does hold the id. A note that cannot be read falls
-	// back to the plain summary rather than failing a release that already
-	// did the right thing.
+	// An unreadable note falls back to the plain summary; the release already succeeded.
 	note := ""
 	if outcome == activity.EnvironmentActivityLeaseHeldElsewhere {
 		note, _ = activity.EnvironmentActivityLeaseHeldElsewhereNote(tenant, environment, id, exclusive)
@@ -202,14 +195,8 @@ func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen shared.OpenResolver
 	return err
 }
 
-// releaseLeaseSummary reports what the release actually did. A caller that
-// cannot tell "removed" apart from "there was nothing there" has no way to
-// notice a release aimed at the wrong store -- an exclusive claim released
-// without --exclusive reported the same "lease released" line as a real
-// release, while the exclusive claim it never touched stayed held for its
-// full TTL. A no-match that the id turns out to be holding under the other
-// shape says so, and names the release that would match, rather than leaving
-// the operator to conclude the claim is already gone.
+// releaseLeaseSummary distinguishes "removed" from "nothing held", and names the
+// matching release when the id holds a lease of the other shape.
 func releaseLeaseSummary(outcome activity.EnvironmentActivityLeaseReleaseOutcome, id, note string) string {
 	trimmed := strings.TrimSpace(id)
 	switch outcome {
@@ -322,12 +309,7 @@ func WriteActivityLeases(ctx core.Context, leases []activity.EnvironmentActivity
 	return nil
 }
 
-// activityLeaseSummary renders one held claim, and renders an exclusive one as
-// exclusive. A presence lease's "name, expires in ..." line is indistinguishable
-// from an exclusive claim's, so a caller reading the list could not tell a claim
-// that refuses everyone else in its scope from one that refuses nobody — the
-// same invisibility that let an inert concurrency guard go unnoticed, because
-// nothing on this surface said the claim was there or what it covered.
+// activityLeaseSummary renders one held claim, marking exclusive ones.
 func activityLeaseSummary(lease activity.EnvironmentActivityLease, now time.Time) string {
 	value := fmt.Sprintf("%s, expires in %s", lease.Name, formatLeaseRemaining(lease, now))
 	if lease.Exclusive {
@@ -351,11 +333,8 @@ func formatLeaseRemaining(lease activity.EnvironmentActivityLease, now time.Time
 	return fmt.Sprintf("%ds", int64(remaining.Round(time.Second)/time.Second))
 }
 
-// newActivitySampleCmd is the uninstrumented-work half. The environment monitor
-// calls it on its tick; work that took no lease still registers because the
-// processes doing it burned CPU since the previous tick. The same tick retains a
-// resource-usage reading, so an environment accumulates the history its sizing
-// recommendation is derived from without a second scheduled job.
+// newActivitySampleCmd records activity from CPU use for work that took no lease,
+// and retains a resource-usage reading on the same tick.
 func newActivitySampleCmd() *cobra.Command {
 	var tenant string
 	var environment string
@@ -378,8 +357,6 @@ func newActivitySampleCmd() *cobra.Command {
 	return cmd
 }
 
-// recordActivityIf records the given kind only when found is true, so a
-// sampler tick that detects nothing leaves the activity snapshot untouched.
 func recordActivityIf(found bool, tenant, environment, kind string) error {
 	if !found {
 		return nil
@@ -434,10 +411,7 @@ func WriteActivitySampleResult(ctx core.Context, result activity.ResidentActivit
 	return err
 }
 
-// retainRuntimeUsage folds this tick's cgroup reading into the environment's
-// retained history. A host that supplies no counters records nothing: a history
-// of empty samples would only ever support "no evidence", and this runs on a
-// laptop as readily as in a container.
+// retainRuntimeUsage records nothing when the host supplies no cgroup counters.
 func retainRuntimeUsage(tenant, environment, cgroupRoot string) error {
 	sample := config.ReadLocalRuntimeUsage(cgroupRoot)
 	if !sample.HasCounters() {

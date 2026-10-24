@@ -8,8 +8,7 @@ import (
 	"time"
 )
 
-// desktopAction is one unit of work the runner serializes; its run
-// closure must honour ctx cancellation.
+// desktopAction's run closure must honour ctx cancellation.
 type desktopAction struct {
 	id        string
 	kind      string
@@ -18,18 +17,15 @@ type desktopAction struct {
 	run       func(ctx context.Context) error
 }
 
-// envActionQueue serializes work for one (tenant, env). Its channel is
-// buffered so enqueue never blocks the Wails caller and a user clicking
-// through the UI can queue requests without dropping them.
+// envActionQueue serializes work for one (tenant, env); its buffered channel
+// keeps enqueue from blocking the Wails caller.
 type envActionQueue struct {
 	pending chan *desktopAction
 }
 
 const desktopActionQueueDepth = 64
 
-// envActionQueueKey groups all tenant/env-less actions (cloud provider
-// login, etc.) under one global queue so they serialize among
-// themselves without blocking per-env work.
+// Tenant/env-less actions share one global queue.
 func envActionQueueKey(selection uiSelection) string {
 	tenant := strings.TrimSpace(selection.Tenant)
 	env := strings.TrimSpace(selection.Environment)
@@ -39,9 +35,8 @@ func envActionQueueKey(selection uiSelection) string {
 	return tenant + "\x00" + env
 }
 
-// enqueueDesktopAction returns an error only for setup failures (no
-// activity store, malformed action); the action's own errors surface
-// through the entry's terminal status, not the return value.
+// enqueueDesktopAction errors only on setup failures; action errors surface in
+// the entry's terminal status.
 func (a *App) enqueueDesktopAction(action desktopAction) (string, error) {
 	if a == nil || a.activityQueue == nil {
 		return "", errors.New("activity queue not initialized")
@@ -81,8 +76,7 @@ func (a *App) enqueueDesktopAction(action desktopAction) (string, error) {
 		StartedAt:         enq,
 	})
 	if !fresh {
-		// Duplicate of an in-flight entry: collapse onto it and discard
-		// this payload rather than double-running the action.
+		// Duplicate of an in-flight entry: collapse onto it.
 		return entry.ID, nil
 	}
 	a.rememberKubeContextForActivity(action.selection.KubernetesContext)
@@ -92,8 +86,6 @@ func (a *App) enqueueDesktopAction(action desktopAction) (string, error) {
 	case queue.pending <- &action:
 		return action.id, nil
 	default:
-		// Queue full — finalize the entry as failed so the user sees
-		// what happened instead of a silent dropped request.
 		a.activityQueue.finish(action.id, activityQueueStatusFailed, "desktop action queue is full")
 		return action.id, fmt.Errorf("action queue full for %s", envActionQueueKey(action.selection))
 	}
@@ -146,7 +138,7 @@ func (a *App) executeDesktopAction(action *desktopAction) {
 	}
 	current, ok := a.activityQueue.findByID(action.id)
 	if !ok {
-		// Entry was force-dismissed before its turn — drop silently.
+		// Force-dismissed before its turn.
 		return
 	}
 	if current.Status == activityQueueStatusCancelled || activityQueueStatusIsTerminal(current.Status) {
@@ -156,9 +148,7 @@ func (a *App) executeDesktopAction(action *desktopAction) {
 	if !ok {
 		return
 	}
-	// Re-emit the running snapshot so a dropped activity:state event or
-	// a late-mounted frontend still sees the transition; safe because
-	// the frontend dedupes identical payloads.
+	// Re-emit for a dropped event or late-mounted frontend; the frontend dedupes.
 	a.emitActivityState(promoted)
 	a.lockTerminalsForActivity(promoted)
 	a.startActivityStatusPollerForAction(action, current)
@@ -195,9 +185,7 @@ func desktopActionTerminalStatus(err error) (activityQueueStatus, string) {
 	return activityQueueStatusFailed, err.Error()
 }
 
-// registerCancel/clearCancel retain per-action cancel plumbing so a
-// running action can be cancelled. Only waiting cancellation is exposed
-// today; this keeps a future Cancel-running button ready.
+// Only waiting cancellation is exposed; running cancellation is plumbed for later.
 func (a *App) registerCancel(id string, cancel context.CancelFunc) {
 	a.actionQueueMu.Lock()
 	defer a.actionQueueMu.Unlock()
@@ -213,9 +201,7 @@ func (a *App) clearCancel(id string) {
 	delete(a.actionCancels, id)
 }
 
-// CancelWaitingAction cancels a queued-but-not-yet-started action;
-// no-op (returns false) once it is running, finalized, or unknown.
-// Wails-exported.
+// CancelWaitingAction cancels a queued action; returns false once it has started.
 func (a *App) CancelWaitingAction(id string) bool {
 	if a == nil || a.activityQueue == nil {
 		return false
@@ -233,8 +219,7 @@ func (a *App) CancelWaitingAction(id string) bool {
 	}
 	if final, finished := a.activityQueue.finish(id, activityQueueStatusCancelled, "cancelled before start"); finished {
 		a.unlockTerminalsForActivity(final)
-		// The queued action stays in the channel; the worker pops it
-		// later and skips it because the entry is now terminal.
+		// The worker skips the queued action because its entry is now terminal.
 		return true
 	}
 	return false
@@ -254,20 +239,13 @@ func (s *activityQueueStore) findByID(id string) (activityQueueEntry, bool) {
 	return activityQueueEntry{}, false
 }
 
-// gatedSessionStarter returns both the result the Wails caller wants
-// and the managedTerminal the runner waits on for the session-ready
-// signal.
 type gatedSessionStarter func(ctx context.Context) (startSessionResult, *managedTerminal, error)
 
-// gatedSessionMaxSetup caps how long the runner holds the gate waiting
-// for a session-ready marker: a safety net so the queue still drains if
-// every marker is missed, sized generously to span a cold build+deploy.
+// gatedSessionMaxSetup is a safety net so the queue drains if every ready marker
+// is missed; it spans a cold build+deploy.
 const gatedSessionMaxSetup = 6 * time.Minute
 
-// gatedSessionKind names a terminal tab whose start runs through
-// enqueueGatedSession. Its activity entry stays running only while that tab
-// is being established, which is setup of a terminal rather than work a
-// closing window would cut short.
+// gatedSessionKind's entry stays running only while its terminal is being established.
 type gatedSessionKind string
 
 const (
@@ -285,16 +263,12 @@ func isGatedSessionKind(kind string) bool {
 	return false
 }
 
-// isGatedSessionSetupEntry reports whether entry is a terminal tab still
-// being established by enqueueGatedSession.
 func isGatedSessionSetupEntry(entry activityQueueEntry) bool {
 	return entry.Source == "action" && isGatedSessionKind(entry.ActionKind)
 }
 
-// enqueueGatedSession blocks the Wails caller until the enqueued action
-// runs and creates the session, then holds the gate until the session
-// signals ready. Only a registered gatedSessionKind is accepted, so every
-// entry it creates is one isGatedSessionSetupEntry recognises.
+// enqueueGatedSession blocks until the session is created, then holds the gate
+// until it signals ready.
 func (a *App) enqueueGatedSession(selection uiSelection, kind gatedSessionKind, start gatedSessionStarter) (startSessionResult, error) {
 	if !isGatedSessionKind(string(kind)) {
 		return startSessionResult{}, fmt.Errorf("unregistered gated session kind %q", kind)
@@ -319,9 +293,7 @@ func (a *App) enqueueGatedSession(selection uiSelection, kind gatedSessionKind, 
 				return nil
 			}
 			waitErr := managed.waitReady(ctx, gatedSessionMaxSetup)
-			// A safety-net timeout is a successful release, not a
-			// failure: the session is interactive, only its ready
-			// marker went unmatched, so failing the entry would mislead.
+			// A timeout releases successfully: the session is usable, only its marker was missed.
 			if errors.Is(waitErr, context.DeadlineExceeded) {
 				return nil
 			}

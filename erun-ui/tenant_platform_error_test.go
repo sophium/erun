@@ -9,8 +9,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// A refusal is shown beside the control the operator just used, so it must
-// read as a reason rather than as the exchange that produced it.
 func TestOperatorPlatformErrorNamesTheReasonNotTheWire(t *testing.T) {
 	wire := fmt.Errorf("platform api PATCH /v1/reviews/r1/status: http 409: conflict: %w", platformclient.ErrPlatformConflict)
 
@@ -50,10 +48,7 @@ func TestOperatorPlatformErrorMapsEachDistinctRefusal(t *testing.T) {
 	}
 }
 
-// Assigning or removing a reviewer's 404 means "review or reviewer no longer
-// exists", not "that review no longer exists" — the generic review-detail
-// wording would be a wrong diagnosis for a reviewer that was removed by
-// someone else between the picker loading and the submit.
+// A reviewer 404 may mean the reviewer was removed, not the review.
 func TestOperatorPlatformErrorNamesReviewerNotFoundDistinctly(t *testing.T) {
 	for _, action := range []platformAction{actionAddReviewer, actionRemoveReviewer} {
 		got := operatorPlatformError(action, fmt.Errorf("wrapped: %w", platformclient.ErrPlatformNotFound))
@@ -66,8 +61,6 @@ func TestOperatorPlatformErrorNamesReviewerNotFoundDistinctly(t *testing.T) {
 	}
 }
 
-// A failure erun cannot classify keeps its own text: a sentence that guesses
-// wrong is worse than one that is merely technical.
 func TestOperatorPlatformErrorPassesThroughWhatItCannotClassify(t *testing.T) {
 	original := errors.New("dial tcp 127.0.0.1:1: connect: connection refused")
 	if got := operatorPlatformError(actionCreateReview, original); !errors.Is(got, original) || got.Error() != original.Error() {

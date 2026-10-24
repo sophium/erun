@@ -11,24 +11,11 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// The erun-backend-api component's tests -- its database suites included, which
-// start PostgreSQL themselves -- run as part of building that image, and the two
-// halves below are what make them so: the `test` stage has to run the module's
-// own `go test`, and a later stage has to consume it (`FROM test` or
-// `COPY --from=test`, which dockerfileHasConsumedTestStage reads), so no image
-// is produced when the suite failed. Drop either half and the image builds and
-// publishes with its tests never run.
-//
-// Naming the component rather than iterating every Dockerfile is deliberate.
-// A guard phrased "any Dockerfile that ships a test stage must consume it" goes
-// quiet in exactly the event it exists to catch, because deleting the stage
-// leaves nothing to iterate over.
+// The backend tests run only if the `test` stage runs them and a later stage consumes it.
+// The component is named rather than iterated: deleting the stage would leave nothing to check.
 const componentTestCommand = "go test -count=1 ./..."
 
-// testStageInstructionLines returns the instructions of the stage declared
-// `FROM ... AS test`, or nothing when the file declares no such stage. The
-// stage is delimited by its own FROM rather than by the next one, so a rename
-// reads as "no such stage" instead of silently picking up a neighbour's body.
+// Delimited by its own FROM, so a rename reads as "no such stage" rather than a neighbour's body.
 func testStageInstructionLines(text string) []string {
 	var lines []string
 	inTestStage := false
@@ -44,17 +31,10 @@ func testStageInstructionLines(text string) []string {
 	return lines
 }
 
-// TestErunBackendAPIOptInE2ESuitesStayInAConsumedTestStage locks the venue the
-// component's database-backed suites run in. The suites are opt-in on purpose
-// and skipping cleanly without a venue is correct; what must not be silent is
-// the venue's absence, because the loss is invisible in the only report the
-// gate makes -- a package line that reads `ok` either way.
+// Without a consumed test stage, the opt-in suites skip and the gate still reports `ok`.
 func TestErunBackendAPIOptInE2ESuitesStayInAConsumedTestStage(t *testing.T) {
 	root := repoRootForDockerignoreTest(t)
-	// The components are literals, not a constant run through filepath.FromSlash:
-	// the repo-root read scan resolves a filepath.Join only from literal parts,
-	// and reports a computed one as a read it cannot see. The name the messages
-	// use is derived from this same Join so the two cannot drift.
+	// Literal Join parts: the repo-root read scan cannot resolve a computed path.
 	path := filepath.Join(root, "erun-devops", "docker", "erun-backend-api", "Dockerfile")
 	venue := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
 	data, err := os.ReadFile(path)
@@ -69,9 +49,7 @@ func TestErunBackendAPIOptInE2ESuitesStayInAConsumedTestStage(t *testing.T) {
 	}
 }
 
-// dockerfileStageRuns reports whether a stage runs a command, reading only its
-// instructions. Comment lines are skipped: a prose mention of a command is not
-// a stage running it.
+// Comment lines are skipped: a prose mention is not a stage running the command.
 func dockerfileStageRuns(stage dockerfileStage, command string) bool {
 	for _, line := range stage.lines {
 		trimmed := strings.TrimSpace(line)
@@ -85,11 +63,7 @@ func dockerfileStageRuns(stage dockerfileStage, command string) bool {
 	return false
 }
 
-// componentDockerfiles are the Dockerfiles under erun-devops/docker that build
-// and test their own content, as opposed to the single-stage wrappers that pass
-// an upstream image through. Named rather than discovered for the reason given
-// above: a rule phrased over "every multi-stage Dockerfile" goes quiet when a
-// component collapses to one stage.
+// Named rather than discovered: a rule over multi-stage files goes quiet when one collapses.
 var componentDockerfiles = []string{
 	"erun-backend-api",
 	"erun-backend-db",
@@ -99,10 +73,7 @@ var componentDockerfiles = []string{
 	"erun-docs",
 }
 
-// linuxPackageDockerfiles are the package components under erun-devops/linux,
-// each mapped to whether it tests itself. erun-cli does not: the CLI and the
-// MCP server are tested in the erun-devops image's cli-test, so its package
-// only compiles and packs them.
+// erun-cli's CLI and MCP server are tested in the erun-devops cli-test stage instead.
 var linuxPackageDockerfiles = map[string]bool{
 	"erun-cli": false,
 	"erun-ui":  true,
@@ -140,8 +111,6 @@ func componentStagesOf(text string) []componentStage {
 	return stages
 }
 
-// stageReferences returns the stages a stage's instructions read from
-// (`COPY --from=<stage>`, `RUN --mount=...,from=<stage>`).
 func (s componentStage) stageReferences() []string {
 	var refs []string
 	for _, line := range s.lines {
@@ -152,34 +121,13 @@ func (s componentStage) stageReferences() []string {
 	return refs
 }
 
-// componentStageConventionProblems checks a component Dockerfile against the
-// repository's stage convention, build -> test -> helpers -> runtime, and
-// returns one line per violation:
-//
-//   - a build stage (`build`, or `<part>-build` in a Dockerfile with several
-//     parts) holds the toolchain, dependencies, source and a native compile,
-//     pinned to BUILDPLATFORM, with no version stamping and no TARGET* args,
-//     so the tests built on it run once per source change rather than once
-//     per version or architecture;
-//   - its test stage (`test`, or `<part>-test`) is FROM it, stamps no version
-//     either, and is the only stage that reads it, so nothing can take an
-//     artifact around the tests;
-//   - the stage named `test` is the one erun detects: every `<part>-test`
-//     feeds it, and every helper built from a stage of this file descends
-//     from it;
-//   - the last stage is `runtime` and reaches `test`, which keeps the tests in
-//     the graph BuildKit walks for the image.
-//
-// A stage FROM an external image that reads no other stage is a toolchain
-// source (a target-arch toolchain, a pinned node) and is allowed as is.
+// componentStageConventionProblems checks build -> test -> helpers -> runtime: build stages pin
+// BUILDPLATFORM and stamp nothing, only the test stage reads them, and runtime reaches `test`.
 func componentStageConventionProblems(text string) []string {
 	return stageConventionProblems(text, "runtime", true)
 }
 
-// packageStageConventionProblems checks a package component's Dockerfile: the
-// same chain, ending in `dist` instead of `runtime`, FROM scratch so a local
-// output export writes the package files and nothing else. A package tested
-// elsewhere declares no test stage; its build stages still stamp nothing.
+// packageStageConventionProblems checks the same chain ending in a FROM scratch `dist`.
 func packageStageConventionProblems(text string, tested bool) []string {
 	problems := stageConventionProblems(text, "dist", tested)
 	stages := componentStagesOf(text)
@@ -208,9 +156,6 @@ func stageConventionProblems(text, lastStage string, requireTest bool) []string 
 	return append(problems, graph.lastStageProblems(lastStage)...)
 }
 
-// untestedProblems checks a Dockerfile with no test stage: its build stages
-// stay free of version stamps and target-arch args, and its last stage is
-// named for what it ships.
 func (g componentStageGraph) untestedProblems(lastStage string) []string {
 	var problems []string
 	for _, stage := range g.stages {
@@ -236,9 +181,7 @@ func newComponentStageGraph(stages []componentStage) componentStageGraph {
 	return componentStageGraph{stages: stages, byName: byName}
 }
 
-// stageRole splits a build or test stage name into its part and role:
-// `build` is ("", "build"), `cli-test` is ("cli", "test"). Any other stage
-// has no role.
+// stageRole splits `build` into ("", "build") and `cli-test` into ("cli", "test").
 func stageRole(name string) (part, role string) {
 	for _, r := range []string{"build", "test"} {
 		if name == r {
@@ -258,7 +201,6 @@ func partStageName(part, role string) string {
 	return part + "-" + role
 }
 
-// reads returns the stages of this file a stage builds on or reads from.
 func (g componentStageGraph) reads(stage componentStage) []string {
 	var local []string
 	for _, name := range append([]string{stage.base}, stage.stageReferences()...) {
@@ -269,8 +211,6 @@ func (g componentStageGraph) reads(stage componentStage) []string {
 	return local
 }
 
-// reaches reports whether a stage depends, directly or through other stages of
-// this file, on the named one.
 func (g componentStageGraph) reaches(from componentStage, target string) bool {
 	seen := map[string]bool{}
 	pending := g.reads(from)
@@ -289,8 +229,6 @@ func (g componentStageGraph) reaches(from componentStage, target string) bool {
 	return false
 }
 
-// descendsFromTest reports whether the named stage is `test` or built, through
-// stages of this file, FROM it.
 func (g componentStageGraph) descendsFromTest(name string) bool {
 	for range g.stages {
 		if name == "test" {
@@ -330,8 +268,7 @@ func (g componentStageGraph) stageProblems(stage componentStage) []string {
 	return problems
 }
 
-// buildReadProblems reports a stage that reads a build stage it is not the
-// test stage of, which would let an artifact reach the image around the tests.
+// buildReadProblems reports a stage that reads a build stage it does not test.
 func (g componentStageGraph) buildReadProblems(stage componentStage) []string {
 	var problems []string
 	for _, name := range g.reads(stage) {
@@ -383,9 +320,7 @@ func (g componentStageGraph) lastStageProblems(want string) []string {
 	return problems
 }
 
-// TestComponentDockerfilesFollowTheStageConvention pins the repository's
-// component stage convention on every component Dockerfile. Reads a sibling
-// module, so it must run uncached (go test -count=1).
+// Reads a sibling module, so it must run uncached (go test -count=1).
 func TestComponentDockerfilesFollowTheStageConvention(t *testing.T) {
 	root := repoRootForDockerignoreTest(t)
 	for _, component := range componentDockerfiles {
@@ -401,8 +336,6 @@ func TestComponentDockerfilesFollowTheStageConvention(t *testing.T) {
 	}
 }
 
-// TestLinuxPackageDockerfilesFollowTheStageConvention pins the same convention
-// on every package component, which ends in `dist` rather than `runtime`.
 // Reads a sibling module, so it must run uncached (go test -count=1).
 func TestLinuxPackageDockerfilesFollowTheStageConvention(t *testing.T) {
 	root := repoRootForDockerignoreTest(t)
@@ -425,9 +358,6 @@ func TestLinuxPackageDockerfilesFollowTheStageConvention(t *testing.T) {
 	}
 }
 
-// Every Dockerfile under erun-devops/docker is either a named component or a
-// single-stage wrapper; a new multi-stage image has to join the list above so
-// the convention covers it.
 func TestEveryMultiStageDockerfileIsANamedComponent(t *testing.T) {
 	named := make(map[string]struct{}, len(componentDockerfiles))
 	for _, component := range componentDockerfiles {
@@ -448,8 +378,6 @@ func TestEveryMultiStageDockerfileIsANamedComponent(t *testing.T) {
 	}
 }
 
-// multiPartStageDockerfileContent has two parts tested side by side, joined
-// by `test`.
 const multiPartStageDockerfileContent = "" +
 	"FROM --platform=$BUILDPLATFORM golang:1.26.0 AS cli-build\n" +
 	"RUN go build -o /out/app ./...\n" +
@@ -471,8 +399,6 @@ const multiPartStageDockerfileContent = "" +
 	"COPY --from=dist /dist/app /app\n" +
 	"COPY --from=test /src/scripts /scripts\n"
 
-// testedPackageDockerfileContent is a package component that tests itself:
-// build -> test -> package -> dist, the last FROM scratch.
 const testedPackageDockerfileContent = "" +
 	"FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build\n" +
 	"RUN go build -o /out/app ./...\n" +
@@ -487,7 +413,6 @@ const testedPackageDockerfileContent = "" +
 	"FROM scratch AS dist\n" +
 	"COPY --from=package /out/ /\n"
 
-// untestedPackageDockerfileContent is a package component tested elsewhere.
 const untestedPackageDockerfileContent = "" +
 	"FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build\n" +
 	"RUN go build -o /out/app ./...\n" +
@@ -585,12 +510,7 @@ func TestPackageStageConventionProblemsReportsEachBreak(t *testing.T) {
 	}
 }
 
-// The cli-test stage of the erun-devops Dockerfile copies erun-devops/docker
-// one image directory at a time, so a change to a script the runtime image
-// bakes does not rerun the Go suites, and erun-devops/linux whole. A directory
-// left off would vanish from the suites' view inside the build -- the
-// Dockerfile contract tests above would silently stop checking it -- while
-// every host run still sees it, so the list is checked from here.
+// A directory missing from cli-test's COPY list silently drops out of the Dockerfile contract tests.
 func TestCLITestStageCopiesEveryDockerDirectory(t *testing.T) {
 	root := repoRootForDockerignoreTest(t)
 	data, err := os.ReadFile(filepath.Join(root, "erun-devops", "docker", "erun-devops", "Dockerfile"))

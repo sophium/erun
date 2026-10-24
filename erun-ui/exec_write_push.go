@@ -13,31 +13,18 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// exec_write_push.go exposes the runtime repo's commit/push primitives to the
-// desktop, the same precondition `erun-cli/cmd/execcmd/exec.go` and the MCP
-// `exec_commit`/`exec_push` tools already give the CLI and agents — reached
-// the way `LoadDiff` (terminal_sessions.go) already reaches exec_diff, so a
-// review's source branch can be pushed from the app instead of requiring a
-// drop to the CLI first.
-
-// uiExecCommitInput commits every change in the runtime repo's working tree.
-// Branch is the caller's belief about the current branch, verified server-side
-// and refused loudly on mismatch — the same contract exec_commit's MCP tool
-// and `erun exec commit` already enforce.
+// uiExecCommitInput.Branch is verified server-side and refused on mismatch.
 type uiExecCommitInput struct {
 	Branch  string `json:"branch"`
 	Message string `json:"message"`
 }
 
-// uiExecPushInput pushes the runtime repo's current branch to a remote.
 type uiExecPushInput struct {
 	Branch string `json:"branch"`
 	Remote string `json:"remote,omitempty"`
 }
 
-// withDefaultExecWriteDeps wires the exec_commit/exec_push MCP defaults, kept
-// out of withDefaultWorkspaceDeps so that function stays under the module's
-// cyclomatic-complexity cap.
+// withDefaultExecWriteDeps is split out to stay under the cyclomatic-complexity cap.
 func withDefaultExecWriteDeps(deps erunUIDeps) erunUIDeps {
 	if deps.execCommit == nil {
 		deps.execCommit = execCommitViaMCP
@@ -48,9 +35,6 @@ func withDefaultExecWriteDeps(deps erunUIDeps) erunUIDeps {
 	return deps
 }
 
-// validateExecCommitInput trims and checks ExecCommit's input, kept apart
-// from the call itself so ExecCommit's own branching stays under the
-// module's cyclomatic-complexity cap.
 func validateExecCommitInput(selection uiSelection, input uiExecCommitInput) (branch, message string, err error) {
 	if err := errMissingTenantOrEnvironment("commit environment working tree", selection.Tenant, selection.Environment); err != nil {
 		return "", "", err
@@ -66,10 +50,8 @@ func validateExecCommitInput(selection uiSelection, input uiExecCommitInput) (br
 	return branch, message, nil
 }
 
-// ExecCommit commits the selected environment's working tree so its branch
-// can be pushed and opened as a review. A real, immediate write: there is no
-// preview path on the desktop, matching every other side-effecting dashboard
-// action.
+// ExecCommit commits the selected environment's working tree immediately; there
+// is no preview.
 func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (gitx.CommitWorkingTreeResult, error) {
 	selection = normalizeSelection(selection)
 	branch, message, err := validateExecCommitInput(selection, input)
@@ -103,9 +85,7 @@ func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (gitx.C
 	return commit, err
 }
 
-// ExecPush pushes the selected environment's current branch to its remote —
-// the precondition a review's sourceBranch requires before CreateReview can
-// reference it.
+// ExecPush pushes the selected environment's current branch to its remote.
 func (a *App) ExecPush(selection uiSelection, input uiExecPushInput) (gitx.PushWorkingTreeBranchResult, error) {
 	selection = normalizeSelection(selection)
 	branch := strings.TrimSpace(input.Branch)

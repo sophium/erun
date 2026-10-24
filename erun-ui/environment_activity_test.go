@@ -11,11 +11,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// The sidebar's busy line comes from the environment's own idle markers, so the
-// reduction from markers to "what is keeping it busy" is what has to be right:
-// a held lease is the only signal that names the work, and everything else must
-// read in the operator's language rather than by its wire name.
-
 func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 	activeMarker := func(name string) activitypkg.EnvironmentIdleMarker {
 		return activitypkg.EnvironmentIdleMarker{Name: name, Idle: false, Reason: "recent activity"}
@@ -36,9 +31,7 @@ func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 			}},
 		},
 		{
-			// working-hours is never activity — it is inverted (not idle means
-			// "inside working hours"), so counting it would make every
-			// environment busy all day.
+			// working-hours is inverted, so counting it would make every env busy all day.
 			name: "inside working hours alone is not activity",
 			status: activitypkg.EnvironmentIdleStatus{Markers: []activitypkg.EnvironmentIdleMarker{
 				activeMarker("working-hours"),
@@ -56,8 +49,6 @@ func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 			wantDetail: "holding: gradle-build",
 		},
 		{
-			// The lease is preferred over a bare marker precisely because it is
-			// the one signal that can say what the work is.
 			name: "a lease wins over a generic marker",
 			status: activitypkg.EnvironmentIdleStatus{
 				Leases: []activitypkg.EnvironmentActivityLease{
@@ -96,11 +87,7 @@ func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 	}
 }
 
-// TestSeedEnvironmentActivitySnapshotsCarriesTheLastObservation: a Redux reset that does not restart the Go
-// process (the ErrorBoundary "Reload app" button) must not lose a busy
-// environment's activity — the initial-state read model has to carry the
-// poller's own memory forward, since emitEnvActivityIfChanged only re-emits
-// on a transition and a still-busy env produces none.
+// A frontend reset without a Go restart must keep a busy env's activity.
 func TestSeedEnvironmentActivitySnapshotsCarriesTheLastObservation(t *testing.T) {
 	app := &App{envActivity: map[string]environmentActivityState{
 		selectionKey(uiSelection{Tenant: "acme", Environment: "dev"}): {
@@ -123,9 +110,6 @@ func TestSeedEnvironmentActivitySnapshotsCarriesTheLastObservation(t *testing.T)
 	}
 }
 
-// TestSeedEnvironmentActivitySnapshotsLeavesUnobservedEnvsNil guards the
-// other side: an env the poller has never reached (no forward established,
-// or the poller hasn't run yet) must not get a fabricated snapshot.
 func TestSeedEnvironmentActivitySnapshotsLeavesUnobservedEnvsNil(t *testing.T) {
 	app := &App{}
 	state := uiState{Tenants: []uiTenant{{Name: "acme", Environments: []uiEnvironment{{Name: "dev"}}}}}
@@ -137,11 +121,6 @@ func TestSeedEnvironmentActivitySnapshotsLeavesUnobservedEnvsNil(t *testing.T) {
 	}
 }
 
-// TestEnvActivitySnapshotCopiesRatherThanAliases guards the reason this
-// method exists at all: a caller assembling a read model outside any a.mu
-// section of its own (orchestratorInfoFor's unlocked call sites) must not
-// hold a live reference into a.envActivity, or a concurrent poller write
-// would race with that caller's later reads.
 func TestEnvActivitySnapshotCopiesRatherThanAliases(t *testing.T) {
 	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
 	app := &App{envActivity: map[string]environmentActivityState{key: {busy: true, detail: "gradle-build"}}}
@@ -163,10 +142,6 @@ func TestEnvActivitySnapshotNilWhenEmpty(t *testing.T) {
 	}
 }
 
-// TestResetEnvironmentActivityObservationsClearsTheCache guards the headless
-// Playwright harness's fix for the shared-baseline-row race: a cached
-// observation left by one spec must not survive into the next one in the
-// same worker.
 func TestResetEnvironmentActivityObservationsClearsTheCache(t *testing.T) {
 	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
 	app := &App{envActivity: map[string]environmentActivityState{key: {busy: true, detail: "gradle-build"}}}
@@ -186,10 +161,6 @@ func TestResetEnvironmentActivityObservationsOnEmptyCacheIsANoop(t *testing.T) {
 	}
 }
 
-// TestLoadStateSeedsEnvironmentActivityFromThePoller exercises the full
-// wiring: LoadState (what the frontend's boot() thunk actually calls) must
-// carry the poller's last observation onto the env it just reloaded from
-// disk, without waiting for the next poll tick.
 func TestLoadStateSeedsEnvironmentActivityFromThePoller(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -230,10 +201,6 @@ func TestLoadStateSeedsEnvironmentActivityFromThePoller(t *testing.T) {
 	}
 }
 
-// TestTriggerEnvironmentActivitySweepRunsSynchronously locks in the contract
-// a deterministic caller needs: the sweep must run to completion, and emit
-// for every configured selection, within the call itself rather than waiting
-// for the poller's own ticker.
 func TestTriggerEnvironmentActivitySweepRunsSynchronously(t *testing.T) {
 	store := stubUIStore{
 		tenants: map[string]config.TenantConfig{"acme": {Name: "acme"}},

@@ -13,55 +13,25 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// platform_machine_identity.go delivers a *machine* identity into an
-// environment's pod, over the same channel and at the same point as
-// platform_alias_secret.go delivers a delegated one.
-//
-// The two are the same Secret with the same three keys, mounted at the same
-// path and seeded by the same entrypoint function, and that is deliberate: an
-// environment has one platform identity, not two. Which kind it is, is a
-// property of the entry inside -- a refresh-token reference means a signed-in
-// person's session was delegated to it, a client-secret reference means it
-// authenticates as itself. Nothing downstream has to know the difference: the
-// entrypoint writes whichever credential the entry's reference names, and the
-// pod's own token resolution picks the grant that reference implies.
-//
-// This is also the constraint a migration has to work within: EnvConfig carries
-// one secret name, so an environment is on one identity or the other and never
-// both, and switching it is a re-provision rather than a merge.
+// A machine identity uses the same Secret, keys and mount as the delegated alias
+// (platform_alias_secret.go); the entry's secret reference decides which grant
+// the pod uses. EnvConfig holds one secret name, so an env has one or the other.
 
-// machineIdentityClientSecretRef is the secret-store reference a machine
-// identity's client secret is saved under, distinct from the refresh-token
-// reference so an alias can never resolve the wrong credential's file.
+// machineIdentityClientSecretRef differs from the refresh-token reference so an
+// alias never resolves the wrong credential file.
 func machineIdentityClientSecretRef(alias string) string {
 	return "erun/clientsecret/" + strings.TrimSpace(alias)
 }
 
-// provisionedMachineIdentity is a machine identity resolved all the way to
-// what gets written: the alias entry the pod reads, and the credential it
-// points at.
 type provisionedMachineIdentity struct {
 	provider     config.CloudProviderConfig
 	clientSecret string
-	// subject names the identity in the trace, so an operator reading a deploy
-	// can tell which identity an environment was given without reading the
-	// Secret.
-	subject string
+	subject      string
 }
 
-// provisionMachineIdentitySecret asks the platform for environment's own
-// machine identity and, when it gets a usable one, mints the Secret the
-// runtime chart already mounts.
-//
-// ok is false whenever there is nothing to deliver -- this host has no
-// signed-in erun alias to ask with, the environment is not registered on the
-// platform yet, the platform will not mint an identity for this tenant, or the
-// credential it returned could not be exchanged for a token. Every one of
-// those is a fall-back to the delegating alias rather than an error, because
-// that is what the environment has today and losing it would be a regression
-// dressed up as a feature; each is traced, because a deployment that silently
-// stayed on the operator's identity is indistinguishable from one that never
-// tried.
+// provisionMachineIdentitySecret mints the env's machine-identity Secret. ok is
+// false, with a trace, whenever there is nothing usable to deliver; the caller
+// then falls back to the delegated alias.
 func provisionMachineIdentitySecret(ctx core.Context, store config.CloudReadStore, tenant, environment, namespace, kubernetesContext string, deps cloud.CloudDependencies) (string, bool, error) {
 	provisioned, ok, err := resolveMachineIdentity(ctx, store, environment, deps)
 	if err != nil || !ok {
@@ -84,14 +54,8 @@ func provisionMachineIdentitySecret(ctx core.Context, store config.CloudReadStor
 	return name, true, nil
 }
 
-// resolveMachineIdentity walks every step from "this host" to "a credential
-// proven to mint a token", stopping at the first one it cannot complete.
-//
-// The credential is exchanged for a token *before* anything is written. A
-// machine identity that cannot mint a token is worse than none at all -- it
-// replaces a working delegated session with a pod that can reach nothing --
-// and the only moment erun can tell the two apart is here, in the process that
-// just minted it.
+// resolveMachineIdentity proves the credential mints a token before anything is
+// written: an unusable identity is worse than the delegated session it replaces.
 func resolveMachineIdentity(ctx core.Context, store config.CloudReadStore, environment string, deps cloud.CloudDependencies) (provisionedMachineIdentity, bool, error) {
 	deps = cloud.NormalizeCloudDependencies(deps)
 	client, host, ok, err := machineIdentityPlatformClient(ctx, store, deps)
@@ -99,8 +63,7 @@ func resolveMachineIdentity(ctx core.Context, store config.CloudReadStore, envir
 		return provisionedMachineIdentity{}, false, err
 	}
 	if ctx.DryRun {
-		// The environment's platform id and the identity itself are both
-		// server-side facts, so a preview can only name what it would ask for.
+		// Both are server-side facts, so a preview can only name the request.
 		ctx.Trace("machine identity: would provision " + environment + "'s own platform identity through " + host.ERun.APIURL)
 		return provisionedMachineIdentity{}, false, nil
 	}
@@ -118,29 +81,19 @@ func resolveMachineIdentity(ctx core.Context, store config.CloudReadStore, envir
 	}, true, nil
 }
 
-// machineIdentityPlatformClient is the platform client provisioning calls with:
-// this host's own signed-in alias, since that is the only credential the
-// invoking process has. Nothing about it reaches the environment.
+// machineIdentityPlatformClient authenticates as this host's alias; nothing
+// about it reaches the environment.
 func machineIdentityPlatformClient(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies) (*platformclient.PlatformClient, config.CloudProviderConfig, bool, error) {
-	// Re-resolved rather than threaded from the caller so "this host has
-	// nothing to ask with" is decided in the one place that already decides it,
-	// and without a second network-free resolution to keep in step.
 	provider, _, ok, err := deploy.ResolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
 	if err != nil && !deploy.HostAliasSelected(ctx.PlatformAlias) && deploy.IsPlatformAliasAmbiguity(err) {
-		// Several aliases and none named: nothing to ask with, so fall back.
-		// The delegated path declines on the same ambiguity and reports it,
-		// which is what keeps init from failing on such a host.
+		// Ambiguous aliases: fall back; the delegated path reports the ambiguity.
 		return nil, config.CloudProviderConfig{}, false, nil
 	}
 	if err != nil {
 		return nil, config.CloudProviderConfig{}, false, err
 	}
 	if !ok {
-		// A host with no alias to ask with is a silent no-op rather than a
-		// traced one, the same rule the sibling delegated path follows: the
-		// fall-back it triggers leaves the environment byte-for-byte as it was
-		// and says so itself, so a second line here would only double a
-		// statement every runtime deploy already carries.
+		// Silent, like the delegated path: its fallback already reports this.
 		return nil, config.CloudProviderConfig{}, false, nil
 	}
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, provider.Alias, deps)
@@ -150,8 +103,6 @@ func machineIdentityPlatformClient(ctx core.Context, store config.CloudReadStore
 	return client, provider, true, nil
 }
 
-// fetchMachineIdentity resolves the environment's platform id and asks for its
-// identity, reporting the reason it could not when it could not.
 func fetchMachineIdentity(ctx core.Context, client *platformclient.PlatformClient, environment string) (platformclient.PlatformMachineIdentity, bool) {
 	environmentID, err := cloud.ResolvePlatformEnvironmentID(context.Background(), client, environment)
 	if err != nil {
@@ -170,14 +121,8 @@ func fetchMachineIdentity(ctx core.Context, client *platformclient.PlatformClien
 	return identity, true
 }
 
-// machineIdentityProviderConfig is the host's erun alias with its credential
-// swapped for the machine identity's: same platform, same alias name (so
-// `ResolveERunPlatformAlias` finds it and the pod still holds exactly one erun
-// alias), same API URL -- a different way of proving who is calling.
-//
-// The issuer is the identity's own rather than the host's, because that is
-// where its tokens are minted; where a tenant's identity lives in the
-// platform's issuer the two are already the same value.
+// machineIdentityProviderConfig keeps the host alias's name and API URL, so the
+// pod still holds exactly one erun alias, but uses the identity's own issuer.
 func machineIdentityProviderConfig(host config.CloudProviderConfig, identity platformclient.PlatformMachineIdentity) config.CloudProviderConfig {
 	provider := host
 	provider.OIDCIssuerURL = strings.TrimSpace(identity.Issuer)
@@ -197,10 +142,6 @@ func machineIdentityCredentialAccepted(ctx core.Context, identity platformclient
 	return true
 }
 
-// verifyMachineIdentityCredential exchanges the freshly minted credential for
-// a token, the one check that stands between a working environment and one
-// whose platform access has just been replaced by a credential nothing
-// accepts.
 func verifyMachineIdentityCredential(ctx core.Context, identity platformclient.PlatformMachineIdentity, deps cloud.CloudDependencies) error {
 	discovery, err := deps.FetchOIDCDiscovery(ctx, strings.TrimSpace(identity.Issuer))
 	if err != nil {

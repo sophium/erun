@@ -8,12 +8,8 @@ import (
 	"strings"
 )
 
-// The regression-test policy a gate-merge enforces before a source lands: a
-// defect fix names the test case that reproduces the failure it fixes, or an
-// exemption from a closed set. Root AGENTS.md § "A Defect Fix Names Its
-// Reproduction" owns the rule; this decides only what is mechanically
-// decidable — that the claim is named, specific, and resolves in the staged
-// change. Whether the named case really reproduces the report is review's call.
+// The regression-test policy (root AGENTS.md § "A Defect Fix Names Its Reproduction"):
+// this checks only that the claim is named, specific, and resolves in the staged change.
 
 var (
 	mergeRegressionTestFile = regexp.MustCompile(`(_test\.go|\.(test|spec)\.(ts|tsx|mjs)|_test\.sh|\.tftest\.hcl)$`)
@@ -21,15 +17,10 @@ var (
 	mergeRegressionRevert   = regexp.MustCompile(`(?m)^This reverts commit [0-9a-f]{7,40}\b`)
 )
 
-// mergeRegressionMinReason is the shortest no-reproducible-failure reason
-// accepted: that kind is a bare claim, so it at least has to say something.
 const mergeRegressionMinReason = 30
 
-// evaluateMergeRegressionPolicy returns nil when the source is out of scope
-// or its declaration holds, and otherwise an error naming every failure.
-// bodies are the raw commit messages the source contributes, staged is what
-// its squash staged, and readFile reads a repository-relative path from the
-// squashed tree.
+// evaluateMergeRegressionPolicy returns nil when the source is out of scope or its
+// declaration holds, else an error naming every failure.
 func evaluateMergeRegressionPolicy(branch string, bodies, staged []string, readFile func(string) ([]byte, error)) error {
 	trailers := mergeRegressionTrailers(bodies)
 	if !mergeRegressionInScope(branch, trailers["Defect-Fix"]) {
@@ -46,8 +37,7 @@ func evaluateMergeRegressionPolicy(branch string, bodies, staged []string, readF
 	return fmt.Errorf("%s (see root AGENTS.md § \"A Defect Fix Names Its Reproduction\")", strings.Join(failures, "; "))
 }
 
-// mergeRegressionInScope decides whether the source is a defect fix: a
-// Defect-Fix trailer answers outright, and otherwise a bug/ branch is one.
+// mergeRegressionInScope: a Defect-Fix trailer answers outright, otherwise a bug/ branch is in scope.
 func mergeRegressionInScope(branch string, declared []string) bool {
 	for _, value := range declared {
 		if v := strings.ToLower(value); v == "yes" || v == "true" {
@@ -146,9 +136,7 @@ func mergeRegressionExistingFailures(existing, staged []string, readFile func(st
 	return failures
 }
 
-// resolveMergeRegressionCase checks that spec is <path>::<case>, that path is
-// a test file (staged by this change when requireStaged), and that the file
-// contains the case. It returns the problem, or "" when the case resolves.
+// resolveMergeRegressionCase returns the problem with spec, or "" when the case resolves.
 func resolveMergeRegressionCase(spec string, staged []string, requireStaged bool, readFile func(string) ([]byte, error)) string {
 	sep := strings.LastIndex(spec, "::")
 	if sep < 0 {
@@ -177,8 +165,7 @@ func resolveMergeRegressionCase(spec string, staged []string, requireStaged bool
 	return ""
 }
 
-// mergeRegressionTrailers reads the carried trailers out of every body into
-// token → values, a wrapped value's lines joined by single spaces.
+// mergeRegressionTrailers joins a wrapped value's lines with single spaces.
 func mergeRegressionTrailers(bodies []string) map[string][]string {
 	trailers := map[string][]string{}
 	for _, body := range bodies {

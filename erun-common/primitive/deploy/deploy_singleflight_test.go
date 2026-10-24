@@ -11,9 +11,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// writeInflightMarkerFile writes a marker JSON file to path with the same
-// encoding acquireHelmDeploySingleFlight itself uses, so tests can seed a
-// pre-existing marker without going through the acquire path.
 func writeInflightMarkerFile(t *testing.T, path string, record deployInflightRecord) {
 	t.Helper()
 	f, err := os.Create(path)
@@ -44,11 +41,6 @@ func markerPathFor(t *testing.T, configDir string, deploy HelmDeploySpec) string
 	return filepath.Join(deployDir, helmDeployReleaseKey(deploy)+".json")
 }
 
-// TestDryRunReclaimsAnAgedMarkerWithALivePIDLikeTheRealRun proves the dry-run
-// preview mirrors the real run's max-age reclaim arm: a marker older than
-// helmDeploySingleFlightMaxAge with a live PID and identical params must report
-// that it would proceed and reclaim, the same fate the real run reaches via
-// reconcileExistingInflightMarker.
 func TestDryRunReclaimsAnAgedMarkerWithALivePIDLikeTheRealRun(t *testing.T) {
 	configDir := t.TempDir()
 	deploy := testDeploySpec()
@@ -98,10 +90,6 @@ func TestDryRunReclaimsAnAgedMarkerWithALivePIDLikeTheRealRun(t *testing.T) {
 	}
 }
 
-// TestDryRunReclaimsAnAgedMarkerInsteadOfRefusingAsConcurrent proves the
-// different-params case: without the max-age arm, dry-run refused with a
-// concurrent-deploy error for a marker the real run would reclaim and deploy
-// past. It must instead report Proceed with no error.
 func TestDryRunReclaimsAnAgedMarkerInsteadOfRefusingAsConcurrent(t *testing.T) {
 	configDir := t.TempDir()
 	deploy := testDeploySpec()
@@ -150,9 +138,6 @@ func TestDryRunReclaimsAnAgedMarkerInsteadOfRefusingAsConcurrent(t *testing.T) {
 	}
 }
 
-// TestDryRunKeepsSkipBehaviorForAFreshMarkerWithIdenticalParams proves the fix
-// does not touch today's behavior for a marker within the max age: identical
-// params still report SkipDuplicate, and the marker is left untouched.
 func TestDryRunKeepsSkipBehaviorForAFreshMarkerWithIdenticalParams(t *testing.T) {
 	startedAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	fixedNow := startedAt.Add(time.Minute)
@@ -203,10 +188,6 @@ func TestDryRunKeepsSkipBehaviorForAFreshMarkerWithIdenticalParams(t *testing.T)
 	}
 }
 
-// TestDryRunKeepsRefuseBehaviorForAFreshMarkerWithDifferentParams proves the
-// fix does not touch today's behavior for a marker within the max age:
-// different params still refuse with a concurrent-deploy error, and the
-// marker is left untouched.
 func TestDryRunKeepsRefuseBehaviorForAFreshMarkerWithDifferentParams(t *testing.T) {
 	startedAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	fixedNow := startedAt.Add(time.Minute)

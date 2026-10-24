@@ -102,14 +102,8 @@ func overrideHelmChartVersion(chartPath, version string) error {
 	return os.WriteFile(chartFilePath, updated, 0o644)
 }
 
-// DiscoverComponentChartDirs returns the component-chart directories under the
-// project's devops k8s dir (<k8s>/<chart>/Chart.yaml), returning all of them
-// regardless of image name so a module's image-less component charts (a tenant's
-// wrappers) are included. It resolves that k8s dir scoped to the tenant — see
-// componentChartsK8sDir — rather than walking the whole project, so a brownfield
-// tenant's own unrelated k8s/*/Chart.yaml trees are never treated as publishable
-// component charts. It skips .git; vendored subcharts under charts/ are excluded
-// by the parent-is-k8s check.
+// DiscoverComponentChartDirs returns every <k8s>/<chart>/Chart.yaml in the tenant-scoped devops
+// k8s dir, image-less charts included; vendored subcharts are excluded.
 func DiscoverComponentChartDirs(projectRoot string) ([]shared.KubernetesDeployContext, error) {
 	k8sDir, ok, err := componentChartsK8sDir(projectRoot)
 	if err != nil {
@@ -149,16 +143,8 @@ func DiscoverComponentChartDirs(projectRoot string) ([]shared.KubernetesDeployCo
 	return contexts, nil
 }
 
-// componentChartsK8sDir resolves the directory whose subdirectories are the
-// project's component charts, scoped so a brownfield tenant's own unrelated
-// k8s/*/Chart.yaml trees are never treated as publishable component charts.
-// The paths.k8s override wins; otherwise resolution matches deploy's runtime
-// chart lookup exactly (resolveProjectRootDevopsK8sDir): the tenant's own
-// <tenant>-devops/k8s when present, else the single -devops/k8s convention
-// module. Only -devops modules are ever considered, so unrelated k8s trees stay
-// excluded whichever branch resolves — and build/push/deploy discover the same
-// charts, which the release-repo shape (repo basename != devops module prefix)
-// relies on.
+// componentChartsK8sDir resolves the component charts dir like deploy's runtime chart lookup,
+// considering only -devops modules so a brownfield tenant's own k8s trees stay excluded.
 func componentChartsK8sDir(projectRoot string) (string, bool, error) {
 	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
 	if projectRoot == "" {
@@ -177,12 +163,8 @@ func componentChartsK8sDir(projectRoot string) (string, bool, error) {
 	return shared.ResolveProjectRootDevopsK8sDir(configpkg.FindProjectRoot, projectRoot)
 }
 
-// declaredDevopsModuleK8sDir resolves component charts inside the devops module
-// the project declares through paths.docker. Declaring that module names which
-// module erun owns, so only its charts are publishable: a module carrying no
-// k8s/ yet has nothing to publish, which is not a reason to look elsewhere.
-// Without this a tenant migrating onto erun fell through to the single -devops
-// convention match and published the legacy module it is migrating away from.
+// declaredDevopsModuleK8sDir resolves charts inside the paths.docker-declared module only;
+// a migrating tenant must not publish the legacy module it is leaving.
 func declaredDevopsModuleK8sDir(dockerDir string) (string, bool, error) {
 	k8sDir := filepath.Join(filepath.Dir(dockerDir), "k8s")
 	isModule, err := shared.IsKubernetesDeployModuleDir(k8sDir)
@@ -314,11 +296,8 @@ func chartTemplateImageValue(line string) (string, bool) {
 	return "", false
 }
 
-// rewriteChartTemplateImageValue rewrites a quoted Sprintf-style image template
-// (%s placeholders fed .Chart.AppVersion) into the same {{ .Chart.AppVersion }}
-// form the helm-rendered values produce. A leading "%s/" registry placeholder
-// is dropped so the value matches the registry-less chart refs. Values without
-// the %s/.Chart.AppVersion pattern are returned unchanged.
+// rewriteChartTemplateImageValue rewrites a %s/.Chart.AppVersion image template into
+// {{ .Chart.AppVersion }} form, dropping a leading "%s/" registry; others are unchanged.
 func rewriteChartTemplateImageValue(value, line string) string {
 	if !strings.Contains(value, "%s") || !strings.Contains(line, ".Chart.AppVersion") {
 		return value

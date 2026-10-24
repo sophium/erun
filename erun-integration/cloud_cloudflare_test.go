@@ -28,11 +28,7 @@ func testCloudInitCloudflareDryRunRedactsTokenAndTracesAliasWrite(t *testing.T) 
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// The literal token must never reach the trace; the command prints
-	// "api-token=<redacted>" instead. Normalization does not mask this
-	// value, so a substring guard on the raw capture is the only way to
-	// lock the redaction contract (see erun-integration/AGENTS.md
-	// § "Whole-output snapshots vs targeted substring assertions" case 1).
+	// Normalization does not mask the token, so the redaction needs a raw substring guard.
 	if strings.Contains(result.Combined, "dummy-token") {
 		t.Fatalf("expected the api token to be redacted, but found the literal value in output:\n%s", result.Combined)
 	}
@@ -43,8 +39,6 @@ func testCloudInitCloudflareDryRunRedactsTokenAndTracesAliasWrite(t *testing.T) 
 }
 
 func testCloudInitCloudflareDryRunAutoResolvesAccount(t *testing.T) {
-	// Without --account-id, the wizard's account step auto-resolves the
-	// single available account non-interactively.
 	setup := env.New(t)
 	args := []string{
 		"cloud", "init", "cloudflare",
@@ -63,10 +57,7 @@ func testCloudInitCloudflareDryRunAutoResolvesAccount(t *testing.T) {
 }
 
 func testCloudInitCloudflareDryRunHonorsApiBaseUrlSeam(t *testing.T) {
-	// The ERUN_CLOUDFLARE_API_BASE_URL seam lets an e2e run point the
-	// subprocess at a mock Cloudflare API. The trailing slash on the
-	// override is deliberate: the golden's single `/client/v4/...` (no
-	// double slash) locks the base-URL trim.
+	// The trailing slash is deliberate: the golden locks the base-URL trim.
 	setup := env.New(t)
 	args := []string{
 		"cloud", "init", "cloudflare",
@@ -84,11 +75,6 @@ func testCloudInitCloudflareDryRunHonorsApiBaseUrlSeam(t *testing.T) {
 }
 
 func testCloudInitCloudflareRealRunVerifiesTokenAndResolvesAccountViaAccountsApi(t *testing.T) {
-	// Real run (no --dry-run) against a stub Cloudflare API reached through
-	// the ERUN_CLOUDFLARE_API_BASE_URL seam: exercises the actual HTTP round
-	// trips (verifyCloudflareTokenAt, listCloudflareAccountsAt) rather than
-	// dry-run's traced-but-unexecuted plan. --account-id is omitted so the
-	// non-interactive account resolution (a single account) also runs.
 	setup := env.New(t)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /client/v4/user/tokens/verify", func(w http.ResponseWriter, r *http.Request) {
@@ -138,10 +124,6 @@ func testCloudInitCloudflareRealRunVerifiesTokenAndResolvesAccountViaAccountsApi
 		t.Errorf("cloud-secrets should be a directory, not a file")
 	}
 
-	// `erun list` must report this healthy, just-signed-in alias as
-	// active — not "expired"/"unknown" with "cloud secret store is not
-	// configured", which is what ListCloudProviderStatuses reported before
-	// it was given a real CloudDependencies (DefaultCloudDependencies).
 	listResult := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if listResult.ExitCode != 0 {
 		t.Fatalf("list exit %d: %s", listResult.ExitCode, listResult.Combined)
@@ -152,11 +134,7 @@ func testCloudInitCloudflareRealRunVerifiesTokenAndResolvesAccountViaAccountsApi
 }
 
 func testCloudInitCloudflareRealRunResolvesAccountViaZonesFallback(t *testing.T) {
-	// A least-privilege Zone-only token cannot read /accounts (Cloudflare
-	// returns success with an empty result for such a token), so
-	// defaultListCloudflareAccounts falls back to deriving the account from
-	// the token's zones. This is the only path that exercises
-	// resolveCloudflareAccountsViaZones/distinctCloudflareZoneAccounts.
+	// A zone-only token gets an empty /accounts result, forcing the zone fallback.
 	setup := env.New(t)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /client/v4/user/tokens/verify", func(w http.ResponseWriter, _ *http.Request) {

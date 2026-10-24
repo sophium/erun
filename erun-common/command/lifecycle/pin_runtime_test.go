@@ -7,11 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// The same environment after a deploy that healed only half of the coordinate:
-// a persisted runtimeimage still naming erun's stock image while the pod
-// actually runs the tenant's own. The last image a deploy confirmed running is
-// the observed truth, so runtimeversion must follow it rather than the stale
-// pin — and the note must say where it read it.
+// The last confirmed running image wins over a stale persisted stock runtimeimage.
 func TestResolvePinPlanLeavesAnEnvsRuntimeVersionAloneWhenItsPodRanItsOwnImage(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
 	env := config.EnvConfig{
@@ -36,11 +32,7 @@ func TestResolvePinPlanLeavesAnEnvsRuntimeVersionAloneWhenItsPodRanItsOwnImage(t
 	}
 }
 
-// The other half of the pair: an environment whose runtime image is erun's own is
-// still re-pinned, runtimeversion included — either because it states the stock
-// image, or because it is an environment of erun's own tenant, whose deploys
-// install the stock image with nothing stated at all. Skipping those would leave
-// a real drift behind while the plan read as complete.
+// Stock-image environments, stated or defaulted for erun's own tenant, are still re-pinned.
 func TestResolvePinPlanStillPinsAStockEnvsRuntimeVersion(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -89,8 +81,7 @@ func TestResolvePinPlanStillPinsAStockEnvsRuntimeVersion(t *testing.T) {
 	}
 }
 
-// skipNoteNaming returns the one skipped note mentioning every fragment, so a
-// test asserting on a note's wording does not silently pass on a different one.
+// skipNoteNaming returns the one skipped note containing every fragment.
 func skipNoteNaming(t *testing.T, plan PinPlan, fragments ...string) string {
 	t.Helper()
 	matched := ""
@@ -115,9 +106,7 @@ func skipNoteNaming(t *testing.T, plan PinPlan, fragments ...string) string {
 	return matched
 }
 
-// A runtimechart naming the stock chart with no version stated already rides
-// the deploy version, exactly like a tagless runtimeimage — there is nothing
-// for pin to move, and nothing to warn about either.
+// A tagless stock runtimechart already follows the deploy version.
 func TestResolvePinPlanFindsNoSiteForAFloatingStockRuntimeChart(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
 	env := config.EnvConfig{Name: "dev", RuntimeChart: "oci://ghcr.io/sophium/charts/erun-devops"}
@@ -138,10 +127,7 @@ func TestResolvePinPlanFindsNoSiteForAFloatingStockRuntimeChart(t *testing.T) {
 	}
 }
 
-// An unclassifiable runtimechart (one pin cannot even read a chart name out
-// of) must proceed rather than block a plan it merely could not read — the
-// same "unknown is not fine, but unknown is not wrong either" rule
-// established for the runtime-image line guard.
+// An unclassifiable runtimechart is skipped with a note, never blocking.
 func TestResolvePinPlanLeavesAnUnreadableRuntimeChartAloneAndSaysSo(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
 	env := config.EnvConfig{Name: "dev", RuntimeChart: "oci://"}
@@ -166,10 +152,7 @@ func TestResolvePinPlanLeavesAnUnreadableRuntimeChartAloneAndSaysSo(t *testing.T
 	}
 }
 
-// The reported shape, exactly: a tenant-imaged env (runtimeimage on the
-// tenant's own line) whose runtimechart still names erun's own stock chart at
-// an old version. Resolving the plan must report the split pairing — and,
-// since ResolvePinPlan never writes, it must do so without mutating anything.
+// ResolvePinPlan never writes, even when reporting a split image/chart pairing.
 func TestResolvePinPlanReportsASplitImageChartPairingWithoutMutating(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
 	env := config.EnvConfig{

@@ -13,26 +13,10 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// The reproduction this closes: `erun build --release` ran its
-// disk-headroom preflight immediately before the publish, which is *after* the
-// "release" stage has written the version files, committed the stamp and
-// created the annotated tag. A run refused for space therefore exited having
-// left all three behind, unpushed — and the next attempt reported
-//
-//	release tag "vX" already exists at <sha>, expected current HEAD <sha>
-//
-// instead of the disk that was still too short. The remedy that message names
-// ("delete it with `git tag -d vX` to retry") then reapplied to a symptom, one
-// fresh tag per attempt, for as long as the node stayed full.
-//
-// These tests drive the real release entrypoint against a real git repository
-// and a docker/df stand-in that makes the headroom read refuse, so the claim
-// under test is the one that matters: after the refusal the repository is
-// exactly as it was found.
+// A release refused for disk headroom must leave the repository exactly as it
+// was found: no version files, stamp commit, or tag.
 
-// releaseDiskResidueStubDocker is a docker stand-in whose every headroom read
-// answers. The `buildx` branch covers both the prune and the post-prune cache
-// reading that follows it.
+// releaseDiskResidueStubDocker answers every headroom read, including buildx.
 func releaseDiskResidueStubDocker(t *testing.T, root string) string {
 	t.Helper()
 	return writeExecutableScript(t, `case "$1" in
@@ -42,33 +26,24 @@ func releaseDiskResidueStubDocker(t *testing.T, root string) string {
 esac`)
 }
 
-// refuseReleaseDiskHeadroom points the headroom reads at a filesystem with 1 GiB
-// free under a 20 GiB floor, which is the measured shortage the preflight
-// refuses on. The df stand-in answers every `df -Pk <path>` the check makes,
-// including the mount-point comparisons it uses to name co-located space.
+// refuseReleaseDiskHeadroom reports 1 GiB free under a 20 GiB floor for every df read.
 func refuseReleaseDiskHeadroom(t *testing.T, root string) {
 	t.Helper()
 	t.Setenv("ERUN_DOCKER_BIN", releaseDiskResidueStubDocker(t, root))
 	t.Setenv("ERUN_DF_BIN", writeExecutableScript(t, `echo "Filesystem     1024-blocks     Used Available Capacity Mounted on"
 echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
 	t.Setenv(shared.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
-	// The cache ceiling above the floor is a separate reading. Leaving the
-	// volume unset keeps it out of the way so the floor is what refuses.
+	// Leave the cache volume unset so the floor is what refuses.
 	t.Setenv(shared.DockerVolumeBytesEnv, "")
 }
 
-// gitTagsForTest lists the repository's tags, one per line, or "" when it has
-// none — the before/after comparison for "no new tag".
 func gitTagsForTest(t *testing.T, dir string) string {
 	t.Helper()
 	return gitOutputForTest(t, dir, "tag", "--list")
 }
 
-// TestReleaseDiskPreflightRunsBeforeTheReleaseStageIsEntered states the ordering
-// where the test above states its effect: with the preflight refusing, no stage
-// of the release is entered at all. The same graph with no publisher still
-// reaches its stage — that is the control, and it is what shows this is about
-// ordering rather than about the stage having gone missing from the fixture.
+// With the preflight refusing, no release stage is entered; the no-publisher
+// control still reaches its stage.
 func TestReleaseDiskPreflightRunsBeforeTheReleaseStageIsEntered(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the disk-headroom preflight cannot refuse on Windows, so no refusal exists to order against the stages")
@@ -110,8 +85,6 @@ func TestReleaseDiskPreflightRunsBeforeTheReleaseStageIsEntered(t *testing.T) {
 
 const diskHeadroomTestFloor uint64 = 20 << 30 // 20 GiB
 
-// gitOutputForTest returns git's trimmed stdout, so a scenario asserts the
-// state it actually reached rather than assuming it.
 func gitOutputForTest(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)

@@ -1,12 +1,5 @@
-// scheduleTransientDismiss runs onDismiss after durationMs of the window
-// actually being focused -- "rendered" is not "read": a toast that pops while
-// the operator is in another application must not silently mark itself seen
-// just because a JS timer happened to elapse while nobody was looking. The
-// countdown pauses on window blur and resumes (with whatever time was left)
-// on focus, the same document.hasFocus() signal terminalFocus.ts already
-// uses for "is anyone actually looking at this window right now". Returns a
-// cancel function for a caller that needs to abandon the countdown early
-// (a fresh report replacing an unfired one, hover holding it open).
+// scheduleTransientDismiss counts only focused time, so a toast shown while the
+// operator is in another app is not dismissed unseen.
 export function scheduleTransientDismiss(durationMs: number, onDismiss: () => void): () => void {
   let remainingMs = durationMs;
   let startedAt = 0;

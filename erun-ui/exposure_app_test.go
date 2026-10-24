@@ -45,8 +45,6 @@ func exposableProjectRoot(t *testing.T) string {
 	return root
 }
 
-// stubKubectlOutput replaces kubectl on PATH for this test's duration with a
-// script that writes stdout/stderr and exits with the given code.
 func stubKubectlOutput(t *testing.T, stdout, stderr string, exitCode int) {
 	t.Helper()
 	dir := t.TempDir()
@@ -78,10 +76,6 @@ func TestListEnvironmentExposuresNotConfiguredWithoutPlatformBlock(t *testing.T)
 	}
 }
 
-// TestListEnvironmentExposuresNotConfiguredForHostEnvironment locks down that
-// a host environment (no pod, no cluster at all) reports the host-specific
-// reason even when the open project does have a platform block -- exposure
-// can never apply to a host env regardless of the project's configuration.
 func TestListEnvironmentExposuresNotConfiguredForHostEnvironment(t *testing.T) {
 	app := exposureTestApp(t, exposableProjectRoot(t))
 	result, err := app.ListEnvironmentExposures(uiSelection{Tenant: "team", Environment: "host"})
@@ -96,9 +90,6 @@ func TestListEnvironmentExposuresNotConfiguredForHostEnvironment(t *testing.T) {
 	}
 }
 
-// TestListEnvironmentExposuresRestrictedOnForbidden locks down that a
-// Kubernetes permission denial renders as Restricted, not as a genuinely empty
-// list an operator would read as "this environment has nothing exposed".
 func TestListEnvironmentExposuresRestrictedOnForbidden(t *testing.T) {
 	app := exposureTestApp(t, exposableProjectRoot(t))
 	stubKubectlOutput(t, "", `Error from server (Forbidden): ingresses.networking.k8s.io is forbidden: User "x" cannot list resource "ingresses"`, 1)
@@ -118,9 +109,6 @@ func TestListEnvironmentExposuresRestrictedOnForbidden(t *testing.T) {
 	}
 }
 
-// TestListEnvironmentExposuresErrorOnOtherFailure locks down that a
-// non-permission listing failure surfaces as a distinct Error state, not
-// silently collapsed into Restricted or an empty list.
 func TestListEnvironmentExposuresErrorOnOtherFailure(t *testing.T) {
 	app := exposureTestApp(t, exposableProjectRoot(t))
 	stubKubectlOutput(t, "", "Unable to connect to the server: dial tcp: i/o timeout", 1)
@@ -156,11 +144,8 @@ func TestListEnvironmentExposuresReturnsServices(t *testing.T) {
 	}
 }
 
-// stubKubectlIngressAndCertificates replaces kubectl with a script that
-// answers per resource, needed once a listing composes more than one kubectl
-// read: a single canned body (stubKubectlOutput above) would feed the same
-// JSON to both the Ingress and the Certificate reads, hiding exactly what
-// this test is about.
+// stubKubectlIngressAndCertificates answers per resource, so Ingress and
+// Certificate reads get different bodies.
 func stubKubectlIngressAndCertificates(t *testing.T, ingressJSON, certificateJSON string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -172,11 +157,8 @@ func stubKubectlIngressAndCertificates(t *testing.T, ingressJSON, certificateJSO
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// TestListEnvironmentExposuresReportsPendingCertificateHonestly is the
-// desktop-side half of the fix: the Ingress carries a tls block (cert-manager
-// writes that before issuance completes), but the Certificate backing it is
-// not yet Ready. The listing must say so -- TLSReady=false with a reason --
-// rather than reporting scheme "https" as if the URL is already safe to open.
+// cert-manager writes the tls block before issuance, so TLSReady must follow
+// the Certificate.
 func TestListEnvironmentExposuresReportsPendingCertificateHonestly(t *testing.T) {
 	app := exposureTestApp(t, exposableProjectRoot(t))
 	stubKubectlIngressAndCertificates(t,
@@ -205,9 +187,6 @@ func TestListEnvironmentExposuresReportsPendingCertificateHonestly(t *testing.T)
 	}
 }
 
-// TestListEnvironmentExposuresReportsReadyCertificate is the mirror case: once
-// cert-manager actually reaches Ready, the listing says so and carries no
-// stale reason from an earlier pending state.
 func TestListEnvironmentExposuresReportsReadyCertificate(t *testing.T) {
 	app := exposureTestApp(t, exposableProjectRoot(t))
 	stubKubectlIngressAndCertificates(t,
@@ -240,9 +219,6 @@ func TestExposeEnvironmentServiceRequiresServiceAndTargetIP(t *testing.T) {
 	}
 }
 
-// TestExposeEnvironmentServiceFailsWhenNotConfigured is the red/green subject
-// for this file: it fails clearly, before ever shelling out, when the open
-// project has no platform block to resolve a hostname from.
 func TestExposeEnvironmentServiceFailsWhenNotConfigured(t *testing.T) {
 	app := exposureTestApp(t, "")
 	_, err := app.ExposeEnvironmentService(uiSelection{Tenant: "team", Environment: "dev"}, uiExposeServiceInput{
@@ -253,10 +229,7 @@ func TestExposeEnvironmentServiceFailsWhenNotConfigured(t *testing.T) {
 	}
 }
 
-// stubKubectlByResource replaces kubectl with a script that answers per
-// resource, which the service listing needs: it reads Services and Ingresses
-// in one call, and a single canned stdout would make one of the two parse as
-// an empty list and hide exactly what this test is about.
+// stubKubectlByResource answers per resource; the listing reads Services and Ingresses.
 func stubKubectlByResource(t *testing.T, serviceJSON, ingressJSON string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -268,12 +241,6 @@ func stubKubectlByResource(t *testing.T, serviceJSON, ingressJSON string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// TestListEnvironmentServicesReportsPortsAndExistingExposure is the picker's
-// contract: every Service the environment runs, its ports, and -- for the ones
-// already published -- the hostname they answer at. The exposure is matched
-// through the Ingress backend, so a Service whose name does not follow the
-// <tenant>-<service> convention is still recognised as exposed rather than
-// offered for exposing a second time.
 func TestListEnvironmentServicesReportsPortsAndExistingExposure(t *testing.T) {
 	app := exposureTestApp(t, exposableProjectRoot(t))
 	stubKubectlByResource(t,
@@ -294,11 +261,8 @@ func TestListEnvironmentServicesReportsPortsAndExistingExposure(t *testing.T) {
 	if !result.Configured || result.Restricted {
 		t.Fatalf("unexpected result shape: %+v", result)
 	}
-	// Compared whole rather than field by field: the exposure has to be
-	// matched through the Ingress backend, so a Service whose name does not
-	// follow the <tenant>-<service> convention is still recognised as exposed
-	// rather than offered for exposing a second time -- and team-mcp, which
-	// nothing routes to, must come back with no exposure at all.
+	// Exposure matches through the Ingress backend, so off-convention names still
+	// count; team-mcp has no route.
 	want := []uiEnvironmentService{
 		{Name: "team-mcp", Type: "ClusterIP", Ports: []uiEnvironmentServicePort{{Port: 80}}},
 		{
@@ -331,8 +295,6 @@ func TestListEnvironmentServicesRestrictedOnForbidden(t *testing.T) {
 	}
 }
 
-// A host environment has no cluster, so the picker reports the same
-// not-applicable reason the exposure list does rather than an empty namespace.
 func TestListEnvironmentServicesNotConfiguredForHostEnvironment(t *testing.T) {
 	app := exposureTestApp(t, exposableProjectRoot(t))
 	result, err := app.ListEnvironmentServices(uiSelection{Tenant: "team", Environment: "host"})

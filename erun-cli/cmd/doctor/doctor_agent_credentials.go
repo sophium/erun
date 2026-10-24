@@ -8,23 +8,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// reportAgentCredentials tells the operator whether this environment's runtime
-// pod can actually reach the model provider erun configured for it.
-//
-// It exists because every other surface answers a neighbouring question. The
-// helm release says the release is deployed; the pod listing says the pod is
-// Running and Ready; neither reads the container's environment, and an
-// environment whose chart predates the credential injection satisfies both
-// while being unable to serve a single agent turn. Without this section that
-// state is reportable only by the model client, which knows nothing about the
-// chart and names whatever it guessed at.
-//
-// The section stays silent for an environment no gateway routes: such an
-// environment may reach a provider through Bedrock, injected host credentials,
-// or a sign-in in its own home volume, and a diagnosis has no standing to call
-// it broken. Like the neighbouring host-credentials section, it also stays
-// silent under --dry-run: the read is still traced by the diagnosis that owns
-// it, but the section is a live report.
+// reportAgentCredentials reports whether the runtime pod carries the model-provider
+// credentials erun configured. Silent when no gateway routes the env, and under --dry-run.
 func reportAgentCredentials(ctx core.Context, result config.OpenResult, diagnosis deploy.DeployDiagnosisResult) error {
 	status := diagnosis.AgentCredentials
 	if status.State == "" || status.State == deploy.RuntimeAgentCredentialNotApplicable {
@@ -42,9 +27,6 @@ func reportAgentCredentials(ctx core.Context, result config.OpenResult, diagnosi
 
 const agentCredentialSectionHeader = "Agent capability"
 
-// agentCredentialStatusLine is the whole finding in one sentence, with the next
-// action attached rather than left to be inferred. Each arm says what was read,
-// what it means for an agent run, and what to do about it.
 func agentCredentialStatusLine(status deploy.RuntimeAgentCredentialStatus, result config.OpenResult) string {
 	switch status.State {
 	case deploy.RuntimeAgentCredentialConfigured:

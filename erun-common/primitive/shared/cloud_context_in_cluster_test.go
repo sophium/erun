@@ -9,8 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// inClusterPodEnv is the env a runtime pod's chart injects: a cloud provider,
-// alias and region are set, but the pod has no instance — it *is* the workload.
+// inClusterPodEnv has a cloud provider set, but the pod is the workload, not an instance.
 func inClusterPodEnv() func(string) string {
 	values := map[string]string{
 		"ERUN_TENANT":               "frs",
@@ -27,8 +26,6 @@ func inClusterPreflightTestContext() core.Context {
 	return core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
 }
 
-// countingRunAWS fails the test's intent if any AWS call is made: an in-cluster
-// context has nothing to power on, so preflight must not reach AWS at all.
 func countingRunAWS(calls *int) func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
 	return func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, _ []string) (string, error) {
 		*calls++
@@ -36,8 +33,6 @@ func countingRunAWS(calls *int) func(core.Context, configpkg.CloudProviderConfig
 	}
 }
 
-// inClusterPreflightStore is the config a runtime pod's own injected env
-// produces — the exact store preflight reads on the pod.
 func inClusterPreflightStore(t *testing.T) cloud.CloudContextStore {
 	t.Helper()
 	injected, ok := ResolveInjectedRuntimeConfig(inClusterPodEnv())
@@ -53,10 +48,6 @@ func inClusterPreflightStore(t *testing.T) cloud.CloudContextStore {
 	}}
 }
 
-// TestResolveInjectedRuntimeConfigNamesTheInClusterSentinel pins the half of the
-// defect that synthesises the context: a pod with no ERUN_KUBERNETES_CONTEXT
-// gets the in-cluster sentinel, and the context built from it is recognised as
-// the pod's own cluster rather than as a power-manageable one.
 func TestResolveInjectedRuntimeConfigNamesTheInClusterSentinel(t *testing.T) {
 	injected, ok := ResolveInjectedRuntimeConfig(inClusterPodEnv())
 	if !ok {
@@ -77,12 +68,7 @@ func TestResolveInjectedRuntimeConfigNamesTheInClusterSentinel(t *testing.T) {
 	}
 }
 
-// TestCloudContextPreflightInClusterIsAlreadyRunning pins the fix: an
-// in-cluster context names the cluster the pod already runs in, so preflight
-// returns cleanly instead of refreshing its (nonexistent) instance and powering
-// it on. The working-hours gate lives inside StartCloudContext, so "no start"
-// is also "no gate" — the trace that preceded the failure was
-// `checking working-hours gate`.
+// The working-hours gate lives inside StartCloudContext, so no start means no gate.
 func TestCloudContextPreflightInClusterIsAlreadyRunning(t *testing.T) {
 	calls := 0
 	deps := cloud.CloudContextDependencies{RunAWS: countingRunAWS(&calls)}
@@ -95,8 +81,6 @@ func TestCloudContextPreflightInClusterIsAlreadyRunning(t *testing.T) {
 	}
 }
 
-// TestCloudContextPreflightInClusterRepeatedCallsStayClean covers the started
-// cache: the second call in the same run stays clean too.
 func TestCloudContextPreflightInClusterRepeatedCallsStayClean(t *testing.T) {
 	calls := 0
 	deps := cloud.CloudContextDependencies{RunAWS: countingRunAWS(&calls)}

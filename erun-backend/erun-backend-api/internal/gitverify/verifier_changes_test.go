@@ -9,9 +9,6 @@ import (
 	"testing"
 )
 
-// writeFile writes content into dir/name and stages it, so a test can build
-// repositories whose commits actually change something — the empty commits
-// the Contain/IsAncestor tests get away with carry no change set to compare.
 func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
@@ -27,14 +24,7 @@ func commitFile(t *testing.T, dir, name, content, message string) string {
 	return runGit(t, dir, "rev-parse", "HEAD")
 }
 
-// squashLandedRepo builds the shape a GitHub squash merge leaves behind: main
-// carries a branch's work as one commit of its own, and none of the branch's
-// commits are ancestors of main. It returns the remote URL, the squash commit
-// on main, and the branch's own tip.
-//
-// With unrelatedLanding true, main also advances with a commit of its own
-// before the squash — so the squash commit's diff is the branch's work only,
-// not the whole span from where the branch forked.
+// squashLandedRepo returns the remote URL, the squash commit on main, and the branch tip.
 func squashLandedRepo(t *testing.T, unrelatedLanding bool) (remoteURL, squashCommit, branchTip string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -57,19 +47,11 @@ func squashLandedRepo(t *testing.T, unrelatedLanding bool) (remoteURL, squashCom
 }
 
 const (
-	// branchLine is the first line of the paragraph the feature branch adds.
-	// The target's own edit reuses it in one of the shapes below, so the
-	// comparison has to weigh a whole change set rather than a shared line.
-	branchLine = "branch: the edge answered without a session this client recognizes"
-	// branchSecondLine is the rest of the branch's paragraph, which the target
-	// never carries.
+	branchLine       = "branch: the edge answered without a session this client recognizes"
 	branchSecondLine = "branch: recovery is to retry the call, or dispatch over the CLI"
-	// targetLine is main's own paragraph, added above the branch's.
-	targetLine = "main: the resumed job's turn is handed back to it"
+	targetLine       = "main: the resumed job's turn is handed back to it"
 )
 
-// lineBlock is a run of numbered lines, so a fixture can insert a paragraph at
-// a known place in a file and a shift in the line numbers is a real one.
 func lineBlock(prefix string, from, to int) []string {
 	lines := make([]string, 0, to-from+1)
 	for i := from; i <= to; i++ {
@@ -78,8 +60,6 @@ func lineBlock(prefix string, from, to int) []string {
 	return lines
 }
 
-// fileOf joins line groups into newline-terminated file content, the way a
-// real text file ends.
 func fileOf(groups ...[]string) string {
 	var lines []string
 	for _, group := range groups {
@@ -88,11 +68,6 @@ func fileOf(groups ...[]string) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// branchOverTargetRepo lays down a main and a feature branch that both edit
-// shared.md, with the branch's paragraph at the bottom of the file — leaving
-// room above it for main's own. The branch also adds a file of its own, which
-// the target never touches, so the comparison always has a path that is not in
-// contention beside the one that is.
 func branchOverTargetRepo(t *testing.T) (dir string) {
 	t.Helper()
 	dir = t.TempDir()
@@ -109,12 +84,8 @@ func branchOverTargetRepo(t *testing.T) (dir string) {
 	return dir
 }
 
-// squashLandedOverTargetEditRepo is the shape a squash landing takes when the
-// target moves under it: main edits shared.md above the branch's paragraph
-// before the commit that lands the branch's work, so the file that work was
-// made against is not the file it landed against, while the change to it is
-// the same two lines either way. It returns the remote URL, the squash commit
-// on main, and the branch's own tip.
+// squashLandedOverTargetEditRepo has main edit shared.md above the branch's
+// paragraph before the squash lands.
 func squashLandedOverTargetEditRepo(t *testing.T) (remoteURL, squashCommit, branchTip string) {
 	t.Helper()
 	dir := branchOverTargetRepo(t)
@@ -130,10 +101,8 @@ func squashLandedOverTargetEditRepo(t *testing.T) (remoteURL, squashCommit, bran
 	return "file://" + dir, squashCommit, branchTip
 }
 
-// targetEditedTheSameFileRepo lands main's own edit in the branch's place
-// instead of the branch's work, carrying the same paths, the same actions and
-// the same shared line — so the only thing left to tell the two changes apart
-// is the rest of what each adds.
+// targetEditedTheSameFileRepo lands a main edit sharing paths and first line
+// with the branch's work, but not the rest.
 func targetEditedTheSameFileRepo(t *testing.T, targetParagraph []string) (remoteURL, landing, branchTip string) {
 	t.Helper()
 	dir := branchOverTargetRepo(t)
@@ -147,11 +116,6 @@ func targetEditedTheSameFileRepo(t *testing.T, targetParagraph []string) (remote
 	return "file://" + dir, landing, branchTip
 }
 
-// TestRemoteVerifierContainsChangesFindsASquashLandedBranch is the case a
-// squash-landed review turns on, and it establishes both halves: the check
-// report-merged needs — the branch tip being an ancestor of the target —
-// really is false for a squash merge, and ContainsChanges still reports the
-// work as landed, naming the squash commit.
 func TestRemoteVerifierContainsChangesFindsASquashLandedBranch(t *testing.T) {
 	remoteURL, squashCommit, branchTip := squashLandedRepo(t, false)
 	verifier := NewRemoteVerifier()
@@ -176,10 +140,6 @@ func TestRemoteVerifierContainsChangesFindsASquashLandedBranch(t *testing.T) {
 	}
 }
 
-// TestRemoteVerifierContainsChangesTolerantOfUnrelatedCommitsInBetween: the
-// squash commit's parent is not where the branch forked, because main moved
-// under it. The branch's change set is still exactly what that commit adds,
-// which is what the comparison is made of.
 func TestRemoteVerifierContainsChangesTolerantOfUnrelatedCommitsInBetween(t *testing.T) {
 	remoteURL, squashCommit, _ := squashLandedRepo(t, true)
 
@@ -195,22 +155,12 @@ func TestRemoteVerifierContainsChangesTolerantOfUnrelatedCommitsInBetween(t *tes
 	}
 }
 
-// TestRemoteVerifierContainsChangesFindsASquashLandedOverTheTargetsOwnEditToTheSameFile
-// is the case that made a squash landing unverifiable. main edits a file the
-// branch is also editing before the commit that lands the branch's work there,
-// so the file's content differs between where the branch forked and the
-// squash's parent while the change to it does not. An identity built from the
-// blob a path moved to or from reads those as two different changes and
-// refuses a landing that happened; an identity built from the lines each
-// change adds and removes reads them as one.
 func TestRemoteVerifierContainsChangesFindsASquashLandedOverTheTargetsOwnEditToTheSameFile(t *testing.T) {
 	remoteURL, squashCommit, branchTip := squashLandedOverTargetEditRepo(t)
 	dir := strings.TrimPrefix(remoteURL, "file://")
 	verifier := NewRemoteVerifier()
 
-	// The premise, asserted so the fixture cannot quietly stop reproducing
-	// the defect: shared.md's blob is not the same on the two sides, which is
-	// the whole reason a blob-level identity cannot match here.
+	// Premise: shared.md's blob differs on the two sides.
 	mergeBase := runGit(t, dir, "merge-base", "main", "feature")
 	before := runGit(t, dir, "rev-parse", mergeBase+":shared.md")
 	atSquash := runGit(t, dir, "rev-parse", squashCommit+"^:shared.md")
@@ -238,13 +188,6 @@ func TestRemoteVerifierContainsChangesFindsASquashLandedOverTheTargetsOwnEditToT
 	}
 }
 
-// TestRemoteVerifierContainsChangesRefusesATargetEditThatIsNotTheBranchs is
-// the half the fix must not move. A change's identity is now the lines it adds
-// and removes, which is weaker than the blob pair it replaced, so what has to
-// hold is that a target whose own commit touches the same paths, in the same
-// places, adding the same first line, is still refused — the rest of what it
-// adds is all there is left to tell them apart. A test that only ever adds a
-// whole missing file would not cross that line.
 func TestRemoteVerifierContainsChangesRefusesATargetEditThatIsNotTheBranchs(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
@@ -257,9 +200,6 @@ func TestRemoteVerifierContainsChangesRefusesATargetEditThatIsNotTheBranchs(t *t
 			remoteURL, _, branchTip := targetEditedTheSameFileRepo(t, tc.targetParagraph)
 			dir := strings.TrimPrefix(remoteURL, "file://")
 
-			// The premise: the branch's uncontested file really is identical
-			// on both sides, so the contested path is the only thing the
-			// comparison can be deciding on.
 			if branchFile, onMain := runGit(t, dir, "rev-parse", branchTip+":branch-only.txt"), runGit(t, dir, "rev-parse", "main:branch-only.txt"); branchFile != onMain {
 				t.Fatalf("fixture no longer isolates the contested file: branch-only.txt is %s on the branch and %s on main", branchFile, onMain)
 			}
@@ -278,9 +218,6 @@ func TestRemoteVerifierContainsChangesRefusesATargetEditThatIsNotTheBranchs(t *t
 	}
 }
 
-// TestRemoteVerifierContainsChangesFindsAnOrdinaryLanding: a branch that
-// really did land by merge commit or fast-forward is answered by the plain
-// ancestor case, naming its own tip.
 func TestRemoteVerifierContainsChangesFindsAnOrdinaryLanding(t *testing.T) {
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--initial-branch=main")
@@ -302,9 +239,6 @@ func TestRemoteVerifierContainsChangesFindsAnOrdinaryLanding(t *testing.T) {
 	}
 }
 
-// TestRemoteVerifierContainsChangesRefusesABranchThatNeverLanded: the
-// reconciliation verifies rather than believes — an unlanded branch is not
-// contained, however much an operator might want it marked MERGED.
 func TestRemoteVerifierContainsChangesRefusesABranchThatNeverLanded(t *testing.T) {
 	remoteURL, _, _ := squashLandedRepo(t, false)
 	dir := strings.TrimPrefix(remoteURL, "file://")
@@ -321,13 +255,6 @@ func TestRemoteVerifierContainsChangesRefusesABranchThatNeverLanded(t *testing.T
 	}
 }
 
-// TestRemoteVerifierContainsChangesFindsAFastForwardedLanding: the branch's
-// commit landed by fast-forwarding the target onto the branch tip, leaving
-// both refs on the same commit. That is the strongest form of the landing this
-// check confirms — the branch is contained in the target by identity — and it
-// leaves no change set to compare, so a guard that skips the ancestry question
-// whenever the tips are equal refuses exactly the landing it should confirm,
-// stranding a review whose work is demonstrably on the target.
 func TestRemoteVerifierContainsChangesFindsAFastForwardedLanding(t *testing.T) {
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--initial-branch=main")
@@ -349,14 +276,8 @@ func TestRemoteVerifierContainsChangesFindsAFastForwardedLanding(t *testing.T) {
 	}
 }
 
-// TestRemoteVerifierContainsChangesTreatsAnEmptyBranchAsContained pins the
-// decision the equal-tip case forces rather than leaving it to be rediscovered.
-// A branch cut from the target and never committed to, with the target
-// unmoved, is indistinguishable from a fast-forward landing on the two refs
-// alone — and a branch that genuinely adds nothing is already reported as
-// contained the moment it trails the target instead of sitting exactly on it.
-// So there is no refusal left for the guard to buy, and the answer is the one
-// that does not strand landed work.
+// TestRemoteVerifierContainsChangesTreatsAnEmptyBranchAsContained: an untouched
+// branch is indistinguishable from a fast-forward landing.
 func TestRemoteVerifierContainsChangesTreatsAnEmptyBranchAsContained(t *testing.T) {
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--initial-branch=main")
@@ -376,9 +297,6 @@ func TestRemoteVerifierContainsChangesTreatsAnEmptyBranchAsContained(t *testing.
 	}
 }
 
-// TestRemoteVerifierContainsChangesRefusesUnrelatedHistories: no merge base
-// means there is no "what this branch added" to match against, so nothing can
-// be established and the answer is a refusal rather than a guess.
 func TestRemoteVerifierContainsChangesRefusesUnrelatedHistories(t *testing.T) {
 	remoteURL, _, _ := squashLandedRepo(t, false)
 	dir := strings.TrimPrefix(remoteURL, "file://")

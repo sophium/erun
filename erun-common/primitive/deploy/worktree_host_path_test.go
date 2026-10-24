@@ -4,12 +4,8 @@ import (
 	"testing"
 )
 
-// TestWindowsDrivePathToWSLMount locks the Windows-drive → WSL2 mount translation
-// a local-agent env's host worktree needs. The local k3s node runs in WSL2, which
-// exposes C:\ under /mnt/c, and helm --set mangles backslashes, so the mount path
-// must be the forward-slashed /mnt/<drive> view. The integration deploy goldens
-// exercise this path but normalize the result to <TMP>, so they cannot pin the
-// concrete translation; this does, on every host.
+// The k3s node runs in WSL2 and helm --set mangles backslashes, so the mount
+// must be /mnt/<drive>; the deploy goldens normalize this away.
 func TestWindowsDrivePathToWSLMount(t *testing.T) {
 	cases := []struct{ name, in, want string }{
 		{"drive path with backslashes", `C:\Users\me\git\erun`, "/mnt/c/Users/me/git/erun"},

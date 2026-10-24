@@ -8,13 +8,7 @@ import (
 	"syscall"
 )
 
-// DesktopProcessAlive probes pid with signal 0, the standard POSIX liveness
-// check: os.FindProcess never fails on Unix (it does not open anything), so
-// the real answer comes from whether the process accepts a signal. A nil
-// error or EPERM (it exists, but this caller may not signal it) both mean
-// something is still there at that pid; any other error — ESRCH, or Go's own
-// "process already finished" once this process has reaped that pid itself —
-// means gone.
+// DesktopProcessAlive probes pid with signal 0; nil or EPERM means alive.
 func DesktopProcessAlive(pid int) bool {
 	if pid <= 0 {
 		return false

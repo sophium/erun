@@ -1,33 +1,22 @@
-# The cert-manager DNS-01 webhook shim is a per-cluster singleton, not a
-# per-tenant resource: one webhook serves every tenant's per-tenant Issuers, and
-# tenant isolation is enforced centrally at the broker it forwards to.
+# A per-cluster singleton; tenant isolation is enforced at the broker.
 
-# groupName is the API group the aggregated apiserver registers under; the
-# per-tenant Issuer's webhook solver references it. Keep stable across a cluster.
+# Referenced by every per-tenant Issuer; keep stable across a cluster.
 groupName: acme.erun.io
 
 name: erun-dns01-webhook
-# Namespace the webhook + its PKI live in (co-located with cert-manager so the
-# cainjector and the cert-manager caller are local).
 namespace: cert-manager
 
-# Full image reference (repository:tag), required — set by the module to the
-# pinned erun version.
+# Required; the module sets it to the pinned erun version.
 image: ""
 imagePullPolicy: IfNotPresent
 
-# Pull secrets for the image above, by name, in this chart's namespace. Empty for
-# a public registry. The Secret itself is provisioned out of band -- note it must
-# live in the cert-manager namespace, which is not where an operator expects to
-# put a registry credential.
+# The referenced Secrets must live in the cert-manager namespace.
 imagePullSecrets: []
 
-# The broker endpoint the shim forwards to, and the Secret key the per-env token
-# is delivered under. brokerURL is the base; the shim appends /present /cleanup.
+# Base URL; the shim appends /present and /cleanup.
 brokerURL: ""
 
-# cert-manager's ServiceAccount, granted the domain-solver verb so it can invoke
-# this webhook's aggregated API.
+# Granted the domain-solver verb on this webhook's aggregated API.
 certManager:
   namespace: cert-manager
   serviceAccountName: cert-manager

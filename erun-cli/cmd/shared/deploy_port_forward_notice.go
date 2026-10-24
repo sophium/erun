@@ -6,15 +6,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// NoticeStaleRuntimePortForwards tells the operator when a runtime rollout left
-// the environment's local port-forwards pointing at the replaced pod.
-//
-// `kubectl port-forward` binds one pod, so a rollout orphans the forward: the
-// local socket keeps listening while every request fails, which reads as "the
-// environment is broken" rather than "reconnect me". deploy does not own
-// port-forward lifecycle — `erun open` starts, adopts, and tracks the forwards —
-// so this reports the condition and names the command that repairs it instead of
-// silently starting background processes for an env the operator never opened.
+// NoticeStaleRuntimePortForwards warns when a rollout left local port-forwards bound to the
+// replaced pod. deploy does not own forwards, so it names the repair rather than restarting them.
 func NoticeStaleRuntimePortForwards(ctx core.Context, specs []deploy.DeploySpec) {
 	if ctx.DryRun {
 		return
@@ -32,9 +25,7 @@ func NoticeStaleRuntimePortForwards(ctx core.Context, specs []deploy.DeploySpec)
 	}
 }
 
-// runtimeMCPPortForwardIsStale reports whether this env has a tracked MCP
-// port-forward that no longer answers. An env with no tracked forward was never
-// opened on this host, so there is nothing to repair.
+// runtimeMCPPortForwardIsStale reports whether a tracked MCP port-forward no longer answers.
 func runtimeMCPPortForwardIsStale(tenant, environment string) bool {
 	statePath, err := McpPortForwardStatePath(tenant, environment, false)
 	if err != nil {

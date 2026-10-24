@@ -98,12 +98,8 @@ func newActivityStatusCmd(store config.OpenStore) *cobra.Command {
 	return cmd
 }
 
-// newActivityStopReadyCmd drives the idle grace-period decision. Its
-// exit code is a contract with the runtime boot's idle monitor
-// (startRuntimeEnvironmentMonitor):
-// exit 0 only on Fire, meaning the caller may now stop the instance;
-// every other grace state (Skip/Arm/Wait) exits non-zero so the env
-// stays running.
+// newActivityStopReadyCmd exits 0 only on Fire; startRuntimeEnvironmentMonitor stops the
+// instance on that exit code.
 func newActivityStopReadyCmd(store config.OpenStore) *cobra.Command {
 	var tenant string
 	var environment string
@@ -146,10 +142,7 @@ func runActivityStopReady(cmd *cobra.Command, store config.OpenStore, tenant, en
 	return stopReadyExitForAction(status, result)
 }
 
-// emitStopReadyJSON writes the stop-ready decision for the in-pod
-// monitor's heartbeat log. On Fire the pending file is already gone
-// (Fire clears it for crash safety), so this payload is the only way
-// record-stop can recover the pending state for the audit row.
+// On Fire the pending file is already cleared, so this payload is how record-stop recovers it.
 func emitStopReadyJSON(stdout io.Writer, status activity.EnvironmentIdleStatus, result activity.MaybeArmOrFireIdleStopResult) error {
 	payload := stopReadyJSON{
 		StopEligible:     status.StopEligible,
@@ -186,9 +179,7 @@ func stopReadyExitForAction(status activity.EnvironmentIdleStatus, result activi
 	}
 }
 
-// stopReadyJSON is the --json wire contract: the in-pod entrypoint
-// script logs it and, on Fire, pipes it into record-stop --state-stdin
-// so the audit row keeps the per-marker breakdown.
+// stopReadyJSON is piped into record-stop --state-stdin by the in-pod entrypoint on Fire.
 type stopReadyJSON struct {
 	StopEligible     bool                             `json:"stopEligible"`
 	BlockedReason    string                           `json:"blockedReason,omitempty"`
@@ -200,10 +191,7 @@ type stopReadyJSON struct {
 	PendingState     *activity.EnvironmentStopPending `json:"pendingState,omitempty"`
 }
 
-// newActivityCancelStopPendingCmd backs the desktop's Cancel button
-// (via the cancelStopPending MCP tool, which shells out here) and
-// manual operator recovery. Idempotent: a missing pending file is not
-// an error.
+// newActivityCancelStopPendingCmd is idempotent: a missing pending file is not an error.
 func newActivityCancelStopPendingCmd() *cobra.Command {
 	var tenant string
 	var environment string
@@ -223,11 +211,8 @@ func newActivityCancelStopPendingCmd() *cobra.Command {
 	return cmd
 }
 
-// newActivityRecordStopCmd appends a stop entry to the env's audit
-// history. The in-pod monitor calls it after stopping the host
-// (--source pod-monitor); the desktop's manual Stop button calls it
-// via the idle_stop_record MCP tool (--source host-manual). The
-// source flag distinguishes the two on the History tab.
+// newActivityRecordStopCmd appends a stop entry; --source distinguishes pod-monitor
+// from host-manual.
 func newActivityRecordStopCmd() *cobra.Command {
 	var tenant string
 	var environment string
@@ -265,17 +250,11 @@ func runActivityRecordStop(cmd *cobra.Command, tenant, environment, reason, clou
 	if err := activity.AppendStopHistoryEntry(tenant, environment, entry); err != nil {
 		return err
 	}
-	// Clear the pending file once we've persisted the
-	// audit record so a follow-up `stop-ready` call after
-	// the env restarts arms a fresh grace window from
-	// scratch rather than reusing the stale entry.
+	// Cleared after persisting so the next stop-ready arms a fresh grace window.
 	return activity.ClearEnvironmentStopPending(tenant, environment)
 }
 
-// loadPendingForRecord prefers stdin over the on-disk pending file
-// because the Fire branch clears that file before record-stop runs.
-// ok=false with no error is the expected case for a manual stop with
-// no prior grace, not a failure.
+// Stdin wins because Fire clears the pending file; ok=false is normal for a manual stop.
 func loadPendingForRecord(stdin io.Reader, stateStdin bool, tenant, environment string) (activity.EnvironmentStopPending, bool, error) {
 	if stateStdin {
 		body, err := io.ReadAll(stdin)
@@ -331,9 +310,7 @@ func buildStopHistoryEntry(now time.Time, source, reason, cloudContextName strin
 	return entry
 }
 
-// normalizeStopHistorySource coerces any unrecognized value to empty
-// so old runtime images that omit --source do not break the audit
-// append.
+// Unknown values coerce to empty so older runtime images still append.
 func normalizeStopHistorySource(source string) string {
 	source = strings.TrimSpace(source)
 	switch source {

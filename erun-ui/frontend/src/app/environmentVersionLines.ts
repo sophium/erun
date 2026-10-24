@@ -1,16 +1,11 @@
 import type { UIErunVersion, UIRuntimeVersionLine } from '@/uiRuntimeVersionLineTypes';
 
-// RuntimeVersionLineSummary reduces runtimeVersion + runtimeVersionLine
-// (eruncommon.RuntimeVersionLine, resolved from config alone -- see
-// erun-common/runtime_version_line.go) to what the hover card's Version row
-// renders: the number, and a caption naming which release line it belongs to
-// -- never left bare, since a bare number reads as an erun version even when
-// it names a tenant's own <tenant>-devops line.
+// RuntimeVersionLineSummary is the hover card's Version row: the number plus a
+// caption naming its release line, since a bare number reads as an erun version.
 export interface RuntimeVersionLineSummary {
   hasVersion: boolean;
   version: string;
-  // caption is '' when there is no line to report -- an environment that has
-  // never deployed has no RuntimeVersionLine at all.
+  // caption is '' for an environment that has never deployed.
   caption: string;
 }
 
@@ -35,8 +30,6 @@ function runtimeVersionLineCaption(line: UIRuntimeVersionLine | undefined): stri
   return runtimeVersionLineSegments(line).join(' — ');
 }
 
-// runtimeVersionLineSegments is split out of runtimeVersionLineCaption to
-// keep that function's own branching within the complexity budget.
 function runtimeVersionLineSegments(line: UIRuntimeVersionLine): string[] {
   const lineName = line.line?.trim();
   const image = line.image?.trim();
@@ -48,17 +41,10 @@ function runtimeVersionLineSegments(line: UIRuntimeVersionLine): string[] {
   return segments;
 }
 
-// ErunVersionSummary reduces the environment's erun-line version
-// (eruncommon.ErunVersion) to what the hover card's second version row
-// renders. null when the environment has never deployed -- there is nothing
-// to annotate.
+// ErunVersionSummary is the hover card's erun version row; null when never deployed.
 export interface ErunVersionSummary {
-  // known is false when the erun version cannot be read from config alone --
-  // the row renders "Undetermined" rather than guessing.
+  // known is false when config alone cannot tell; the row renders "Undetermined".
   known: boolean;
-  // sameAsRuntime is true when the erun version is the runtime version's own
-  // number, on erun's own line -- the row states that instead of repeating
-  // the number.
   sameAsRuntime: boolean;
   version: string;
 }

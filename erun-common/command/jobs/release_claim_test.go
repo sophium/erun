@@ -9,12 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// TestClaimReleaseVersionReclaimsTheLeftoversOfACancelledRelease drives the
-// production entry point, not the claim primitive, so the wiring that feeds the
-// liveness probe is covered too — a reclaim the production path never asks for
-// is not a fix. The leftovers it starts from are exactly what a release
-// cancelled with SIGTERM leaves: both claims taken, neither dropped, and the
-// local one still naming the process the signal ended.
+// Drives the production entry point against a SIGTERM-cancelled release's
+// leftover claims, so the liveness wiring is covered too.
 func TestClaimReleaseVersionReclaimsTheLeftoversOfACancelledRelease(t *testing.T) {
 	isolateActivityCache(t)
 	repo := newAgentJobTestRepo(t)
@@ -34,10 +30,7 @@ func TestClaimReleaseVersionReclaimsTheLeftoversOfACancelledRelease(t *testing.T
 		t.Fatalf("cancelled release's local claim: %v", err)
 	}
 
-	// The leftovers are still live by the only rule the claim had before: it
-	// names this environment and its process is gone, but its expiry is nearly
-	// twenty minutes away. That window is what the report measured, and where
-	// the refusal it described came from.
+	// Process gone but expiry far off: the claim must still be reclaimed.
 	if !time.Now().Before(readReleaseRepoClaimForTest(t, ctx, repo, cancelledSHA).ExpiresAt) {
 		t.Fatal("the cancelled holder's claim must still be inside its TTL to reproduce the reported refusal")
 	}
@@ -49,8 +42,6 @@ func TestClaimReleaseVersionReclaimsTheLeftoversOfACancelledRelease(t *testing.T
 	}
 	defer release()
 
-	// The reclaim is a real one: the version's claim ref now names this
-	// attempt, so a release elsewhere is refused from here on.
 	sha, exists, err := shared.GitLsRemoteRef(ctx, repo, shared.ReleaseRepoClaimRemote, shared.ReleaseRepoClaimRef(version))
 	if err != nil || !exists {
 		t.Fatalf("expected the reclaiming attempt to hold the version's claim, exists=%v err=%v", exists, err)
@@ -60,8 +51,7 @@ func TestClaimReleaseVersionReclaimsTheLeftoversOfACancelledRelease(t *testing.T
 	}
 }
 
-// runtimePodEnvForTest is the environment a release reads its pod identity
-// from, so claimReleaseVersion resolves a tenant and environment to claim in.
+// runtimePodEnvForTest sets the pod identity a release reads.
 func runtimePodEnvForTest(tenant, environment string) func(string) string {
 	return func(key string) string {
 		switch key {
@@ -74,8 +64,6 @@ func runtimePodEnvForTest(tenant, environment string) func(string) string {
 	}
 }
 
-// readReleaseRepoClaimForTest reads a claim blob back by its sha, failing the
-// test rather than returning an error it would only ever report the same way.
 func readReleaseRepoClaimForTest(t *testing.T, ctx core.Context, repo, sha string) shared.ReleaseRepoClaimRecord {
 	t.Helper()
 	record, err := shared.ReadReleaseRepoClaimBlob(ctx, repo, sha)

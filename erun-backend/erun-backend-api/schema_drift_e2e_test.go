@@ -12,22 +12,9 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 )
 
-// Proves that the declarative schema (schema/*.sql, the source of truth
-// atlas.hcl's `src` list points at) and the migration-applied state
-// (migrations/default) describe the exact same database, against a real
-// postgres rather than a catalog-privilege guess. A grant present in a
-// migration but missing from schema/roles.sql (or the reverse), a missing
-// trigger, a differently-named constraint, or a table on one side only all
-// fail here.
-//
-// `atlas migrate diff` cannot do this comparison: the schema declares
-// PL/pgSQL functions, and the pinned atlas CLI (1.2.0) refuses to diff a
-// function-bearing source without `atlas login` against Atlas Cloud. So both
-// states are built by pure execution -- testpg's `atlas migrate apply` for
-// the migrations, and atlas.hcl's own `src` list concatenated and piped
-// through psql for the declared side -- then compared with plain SQL
-// introspection ordered by name, so incremental-migration column order is
-// never mistaken for drift.
+// Proves schema/*.sql and migrations/default build the same database. atlas migrate
+// diff needs Atlas Cloud login for PL/pgSQL functions, so both sides are applied and
+// compared by name-ordered SQL introspection, which ignores column order.
 
 const (
 	schemaDriftDBModuleDir     = "../erun-backend-db"
@@ -37,8 +24,7 @@ const (
 	schemaDriftDeclaredSchema  = "/tmp/declared_schema.sql"
 )
 
-// schemaDriftConcatScript is the script's own concatenation of atlas.hcl's
-// `src` list, so the ordering can never drift from the one atlas uses.
+// schemaDriftConcatScript reads atlas.hcl's src list so ordering matches atlas.
 const schemaDriftConcatScript = `set -eu
 cd "$1"
 : >"$2"
@@ -51,8 +37,6 @@ done
 func TestSchemaDriftDeclaredMatchesMigrations(t *testing.T) {
 	ctx := context.Background()
 	migratedURL := testpg.FreshURL(t)
-	// The retention suites' psql container, with no policies: only its psql,
-	// grep, sed and diff are used.
 	psql := startRetentionPsql(t, ctx, migratedURL)
 	copySchemaDriftInputs(t, ctx, psql)
 
@@ -70,8 +54,6 @@ func TestSchemaDriftDeclaredMatchesMigrations(t *testing.T) {
 	t.Log("OK: the declared schema (schema/*.sql via atlas.hcl's src order) and the migration-applied state describe the same database")
 }
 
-// The comparator must report a one-row divergence, the shape of a grant
-// present in a migration but missing from schema/roles.sql.
 func TestSchemaDriftComparatorReportsDivergence(t *testing.T) {
 	ctx := context.Background()
 	psql := startRetentionPsql(t, ctx, testpg.URL(t))
@@ -91,8 +73,6 @@ func TestSchemaDriftComparatorReportsDivergence(t *testing.T) {
 	}
 }
 
-// copySchemaDriftInputs copies atlas.hcl, schema/ and the introspection query
-// into the psql container.
 func copySchemaDriftInputs(t *testing.T, ctx context.Context, psql retentionPsql) {
 	t.Helper()
 	if out, code := psql.run(t, ctx, nil, "mkdir", "-p", schemaDriftContainerModule); code != 0 {
@@ -107,9 +87,6 @@ func copySchemaDriftInputs(t *testing.T, ctx context.Context, psql retentionPsql
 	mustNoErr(t, psql.container.CopyFileToContainer(ctx, query, schemaDriftContainerSQL, 0o644), "copy the introspection query")
 }
 
-// createSchemaDriftDeclaredDatabase creates the empty database the declared
-// schema is applied to, beside the migrated one, and drops it when the test
-// ends.
 func createSchemaDriftDeclaredDatabase(t *testing.T, ctx context.Context, psql retentionPsql) string {
 	t.Helper()
 	name := fmt.Sprintf("erun_declared_%d", time.Now().UnixNano())
@@ -126,7 +103,6 @@ func createSchemaDriftDeclaredDatabase(t *testing.T, ctx context.Context, psql r
 	return schemaDriftDatabaseURL(t, psql.url, name)
 }
 
-// schemaDriftDatabaseURL is databaseURL pointed at another database.
 func schemaDriftDatabaseURL(t *testing.T, databaseURL, name string) string {
 	t.Helper()
 	parsed, err := url.Parse(databaseURL)
@@ -135,8 +111,6 @@ func schemaDriftDatabaseURL(t *testing.T, databaseURL, name string) string {
 	return parsed.String()
 }
 
-// applySchemaDriftDeclared concatenates schema/*.sql in atlas.hcl's `src`
-// order and applies it with psql.
 func applySchemaDriftDeclared(t *testing.T, ctx context.Context, psql retentionPsql, declaredURL string) {
 	t.Helper()
 	if out, code := psql.run(t, ctx, nil, "sh", "-c", schemaDriftConcatScript, "concat", schemaDriftContainerModule, schemaDriftDeclaredSchema); code != 0 {
@@ -148,8 +122,6 @@ func applySchemaDriftDeclared(t *testing.T, ctx context.Context, psql retentionP
 	}
 }
 
-// introspectSchemaDrift runs the introspection query against databaseURL and
-// returns psql's combined output, the text the two sides are compared by.
 func introspectSchemaDrift(t *testing.T, ctx context.Context, psql retentionPsql, databaseURL string) string {
 	t.Helper()
 	script := `psql -v ON_ERROR_STOP=1 -d "$1" <"$2"`
@@ -160,8 +132,6 @@ func introspectSchemaDrift(t *testing.T, ctx context.Context, psql retentionPsql
 	return out
 }
 
-// schemaDrift compares the two introspections with `diff -u` in the psql
-// container and returns the unified diff and whether they differ.
 func schemaDrift(t *testing.T, ctx context.Context, psql retentionPsql, declared, migrated string) (string, bool) {
 	t.Helper()
 	declaredFile, migratedFile := "/tmp/declared.txt", "/tmp/migrated.txt"

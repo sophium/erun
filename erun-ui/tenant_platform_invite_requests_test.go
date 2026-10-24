@@ -65,12 +65,8 @@ func TestSubmitTenantInviteRequestRateLimited(t *testing.T) {
 	}
 }
 
-// TestSubmitTenantInviteRequestRateLimitedWithoutRetryAfterUsesConfiguredWindow
-// covers a 429 with no usable Retry-After (missing entirely here; the RFC
-// 9110 HTTP-date form hits the same statusErr.RetryAfter() ok=false path).
-// Reporting 0 seconds would read as "try again now" and hide that the
-// caller was rate limited at all, so this must fall back to a real,
-// non-zero wait rather than discarding the ok bool.
+// A 429 without a usable Retry-After falls back to the configured window,
+// never 0.
 func TestSubmitTenantInviteRequestRateLimitedWithoutRetryAfterUsesConfiguredWindow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.URL.Path {
@@ -97,9 +93,6 @@ func TestSubmitTenantInviteRequestRateLimitedWithoutRetryAfterUsesConfiguredWind
 	}
 }
 
-// TestSubmitTenantInviteRequestRateLimitedWithoutRetryAfterOrConfigUsesDefault
-// covers the case where even the configured-window fallback read fails: the
-// caller must still see a sane non-zero wait, never 0.
 func TestSubmitTenantInviteRequestRateLimitedWithoutRetryAfterOrConfigUsesDefault(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.URL.Path {
@@ -223,14 +216,7 @@ func TestListTenantPlatformEnrollmentStatusesEnrolled(t *testing.T) {
 	}
 }
 
-// TestListTenantPlatformEnrollmentStatusesRefusesAPlatformTenantThatIsNotTheLocalOne
-// is the reproduction of the sidebar glyph claiming enrolment for a tenant the
-// platform never resolved this credential to. whoami answers 200 here, so the
-// pre-fix code read the call's success as the enrolment answer and never
-// looked at the value it discarded -- whose TenantName is the platform's own
-// statement of *whose* identity the bearer resolved to, and it names "erun"
-// for a row decorating "frs". The credential authenticates and resolves; it
-// just resolves somewhere else, which is enough for whoamiErr == nil.
+// whoami succeeding is not enough: it must name the local tenant.
 func TestListTenantPlatformEnrollmentStatusesRefusesAPlatformTenantThatIsNotTheLocalOne(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path != "/v1/whoami" {
@@ -246,24 +232,14 @@ func TestListTenantPlatformEnrollmentStatusesRefusesAPlatformTenantThatIsNotTheL
 	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentTenantMismatch {
 		t.Fatalf("expected no enrolment claim for a platform tenant that is not the local one, got %+v", statuses)
 	}
-	// The row must be able to say which tenant the platform answered for -- "not
-	// this one" without naming the one it is, is the same dead end as no state
-	// at all.
 	if statuses[0].PlatformTenant != "erun" {
 		t.Fatalf("expected the status to name the platform tenant the credential resolved to, got %q", statuses[0].PlatformTenant)
 	}
-	// And which platform answered, so the copy stops asserting a hostname this
-	// machine may not have talked to (the operator's own machine is configured
-	// against two).
 	if want := strings.TrimPrefix(server.URL, "http://"); statuses[0].PlatformHost != want {
 		t.Fatalf("expected the status to name the platform host that answered (%q), got %q", want, statuses[0].PlatformHost)
 	}
 }
 
-// TestListTenantPlatformEnrollmentStatusesEnrolledForTheMatchingPlatformTenant
-// is the agreeing control for the refusal above: the same call, with the
-// platform naming the local tenant back, still reads enrolled -- the new check
-// must refuse a mismatch, not a successful whoami.
 func TestListTenantPlatformEnrollmentStatusesEnrolledForTheMatchingPlatformTenant(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -294,19 +270,8 @@ func TestListTenantPlatformEnrollmentStatusesUnknownOnWhoamiFault(t *testing.T) 
 	}
 }
 
-// TestListTenantPlatformEnrollmentStatusesEnrolledOnWhoamiForbidden is the
-// regression for the sidebar dot conflating a 403 with "not enrolled": the
-// same whoami read tenantDashboardIdentityFailure classifies treats Forbidden
-// as an identity the platform already resolved to a tenant user, refused only
-// for lacking permissions on the read itself -- that is enrolled, and must
-// never fall through to the invite-request lookup (which this server would
-// fail, proving the code path is not reached).
-//
-// This is also the boundary of the tenant-correspondence check above: a 403
-// carries a bare status string, no tenant name, so there is nothing to hold
-// against this row -- the state is read as it was before that check existed,
-// exactly as a whoami that reports no name is. The two are the same "no answer
-// to compare", reached from a success and a failure.
+// A 403 means enrolled and carries no tenant name to compare; the server
+// fails the invite-request lookup to prove it is not reached.
 func TestListTenantPlatformEnrollmentStatusesEnrolledOnWhoamiForbidden(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path != "/v1/whoami" {
@@ -323,13 +288,7 @@ func TestListTenantPlatformEnrollmentStatusesEnrolledOnWhoamiForbidden(t *testin
 	}
 }
 
-// TestListTenantPlatformEnrollmentStatusesUnknownOnUnresolvedOrFailedAuth is
-// the inversion the fix must not introduce: TENANT_UNRESOLVED and
-// RESOLUTION_FAILED are not enrollment answers (tenantDashboardIdentityFailure
-// and enrollERunPlatformUserError already draw this line on their own reads),
-// so they must report unknown rather than falling through to the
-// invite-request lookup and rendering a confident local-only/pending answer
-// for a state that could not actually be determined.
+// TENANT_UNRESOLVED and RESOLUTION_FAILED report unknown, not local-only.
 func TestListTenantPlatformEnrollmentStatusesUnknownOnUnresolvedOrFailedAuth(t *testing.T) {
 	for _, code := range []string{"TENANT_UNRESOLVED", "RESOLUTION_FAILED"} {
 		t.Run(code, func(t *testing.T) {

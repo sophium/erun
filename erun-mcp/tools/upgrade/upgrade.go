@@ -22,9 +22,8 @@ type UpgradeInput struct {
 	sharedpkg.JobEnvelopeInput
 }
 
-// UpgradeTool redeploys the runtime's environment only when it is opted into
-// autoupgrade and lags its channel latest. The in-pod runtime serves one
-// tenant/environment, so the plan is scoped to that single target.
+// UpgradeTool redeploys the runtime's environment only when it opts into
+// autoupgrade and lags its channel latest.
 func UpgradeTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UpgradeInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input UpgradeInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
 		execute := sharedpkg.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {

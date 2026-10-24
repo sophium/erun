@@ -11,9 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
-// newAIOccupancyTestApp isolates the activity-lease cache per test and returns
-// an App plus a counter of how many PTYs StartAISession actually launched, so
-// each test can assert on spawn count without repeating the stub wiring.
+// newAIOccupancyTestApp returns the app and a counter of launched AI PTYs.
 func newAIOccupancyTestApp(t *testing.T) (*App, *int) {
 	t.Helper()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -55,9 +53,7 @@ func takeTestLease(t *testing.T, name string) {
 	}
 }
 
-// TestStartAISessionReportsOccupancyInsteadOfStartingASecondAgent: opening the AI tab on an environment already held by another job's activity
-// lease must not silently launch a competing agent. Unless the caller confirms,
-// the start is reported back as occupied and no PTY is spawned.
+// Without confirmation, an env held by another job's lease is reported occupied and no PTY spawns.
 func TestStartAISessionReportsOccupancyInsteadOfStartingASecondAgent(t *testing.T) {
 	app, started := newAIOccupancyTestApp(t)
 	takeTestLease(t, "job-fix-1201")
@@ -69,8 +65,6 @@ func TestStartAISessionReportsOccupancyInsteadOfStartingASecondAgent(t *testing.
 	}
 	assertOccupiedUnconfirmedResult(t, result, *started)
 
-	// Confirmed retries the same start and this time actually launches the AI
-	// PTY — the whole point is a deliberate second agent, not a refused one.
 	confirmed, err := app.StartAISession(selection, 0, 80, 24, true)
 	if err != nil {
 		t.Fatalf("confirmed StartAISession failed: %v", err)
@@ -104,9 +98,6 @@ func assertConfirmedStartResult(t *testing.T, result startSessionResult, started
 	}
 }
 
-// TestStartAISessionStartsNormallyWithNoHeldLease pins the common path: an
-// environment with no agent already working in it shows no occupancy notice
-// and the AI tab starts immediately, matching today's behavior.
 func TestStartAISessionStartsNormallyWithNoHeldLease(t *testing.T) {
 	app, started := newAIOccupancyTestApp(t)
 
@@ -122,9 +113,7 @@ func TestStartAISessionStartsNormallyWithNoHeldLease(t *testing.T) {
 	}
 }
 
-// TestStartAISessionReuseSkipsOccupancyCheck pins that reattaching to this
-// desktop's own already-tracked AI session never consults leases: reuse is
-// not a second agent, so it must never gate on a coexisting job's lease.
+// Reattaching to this desktop's own session is not a second agent.
 func TestStartAISessionReuseSkipsOccupancyCheck(t *testing.T) {
 	app, started := newAIOccupancyTestApp(t)
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
@@ -134,8 +123,7 @@ func TestStartAISessionReuseSkipsOccupancyCheck(t *testing.T) {
 		t.Fatalf("first StartAISession failed: %v", err)
 	}
 
-	// A job takes a lease only after the AI tab is already live — the case
-	// this desktop's own reattach must not treat as a foreign occupant.
+	// The lease is taken after the AI tab is live.
 	takeTestLease(t, "job-fix-1201")
 
 	again, err := app.StartAISession(selection, 0, 80, 24, false)
@@ -153,12 +141,7 @@ func TestStartAISessionReuseSkipsOccupancyCheck(t *testing.T) {
 	}
 }
 
-// TestStartAISessionReportsAHeldLeaseWhenAnActivitySnapshotIsUnreadable
-// reproduces the occupancy notice failing open: the idle-status read the check
-// reuses parses every activity snapshot, and the ERun tab rewrites cli.json at
-// the instant its prompt releases the queued AI start. A snapshot caught
-// between truncate and write is empty, the whole status read failed, and the
-// start launched a second agent with no notice although the lease was held.
+// A snapshot caught mid-rewrite must not make the occupancy check fail open.
 func TestStartAISessionReportsAHeldLeaseWhenAnActivitySnapshotIsUnreadable(t *testing.T) {
 	app, started := newAIOccupancyTestApp(t)
 	takeTestLease(t, "job-fix-1201")

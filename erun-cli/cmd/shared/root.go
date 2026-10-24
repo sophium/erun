@@ -18,21 +18,9 @@ type (
 	APILauncher              func(io.Reader, io.Writer, io.Writer, []string) error
 )
 
-// A piped stdout falls back to plain prompts because promptui repaints from its
-// own goroutines, so its cursor-control frames' final flush would otherwise race
-// process exit.
-//
-// Windows takes the plain reader for interactive terminals too: the desktop app's
-// terminal is a ConPTY, whose repaints re-send promptui's in-place cursor redraws
-// as duplicate lines, so each answered prompt echoes twice. A single-write plain
-// prompt gives ConPTY nothing to re-paint. Masked prompts stay on promptui so the
-// secret input remains hidden — keeping it masked matters more than the repaint.
-//
-// The promptui branch binds its reader to os.Stdin explicitly: on Windows
-// readline otherwise opens the console directly and cannot read piped stdin at
-// all, so a forced-TTY scenario (or any scripted run) would read EOF. Passing
-// os.Stdin is a no-op for a real interactive terminal — that is already the
-// default source — and lets piped input drive the prompt on every host.
+// RunPrompt falls back to plain prompts on a piped stdout (promptui's goroutine
+// repaints race exit) and on Windows (ConPTY duplicates repaints); masked prompts stay
+// on promptui. Its reader is os.Stdin so piped input works on Windows too.
 func RunPrompt(prompt promptui.Prompt) (string, error) {
 	if promptRepaints(prompt) {
 		prompt.Stdin = os.Stdin
@@ -41,11 +29,7 @@ func RunPrompt(prompt promptui.Prompt) (string, error) {
 	return runPlainPrompt(prompt)
 }
 
-// promptRepaints reports whether promptui would own this prompt's render, i.e.
-// whether runPrompt would call Prompt.Run and so start the readline ioloop that
-// repaints concurrently with the caller. A caller that renders the prompt
-// itself takes the same decision from here rather than testing the terminal
-// again, so the two branches cannot disagree about which renderer a prompt got.
+// promptRepaints reports whether RunPrompt would hand this prompt to promptui's repainting renderer.
 func promptRepaints(prompt promptui.Prompt) bool {
 	return WriterIsTerminal(os.Stdout) && (runtime.GOOS != "windows" || prompt.Mask != 0)
 }

@@ -22,8 +22,6 @@ func initPromptScenarios(t *testing.T) {
 }
 
 func testInitPromptsForContainerRegistryViaStdin(t *testing.T) {
-	// Exercises the container-registry prompt body itself, so it omits
-	// --container-registry and answers the prompt over stdin.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "local",
@@ -44,8 +42,6 @@ func testInitPromptsForContainerRegistryViaStdin(t *testing.T) {
 }
 
 func testInitContainerRegistryEmptySubmitUsesDefault(t *testing.T) {
-	// A bare Enter at the container-registry prompt must submit the prompt's
-	// default; this empty-input fallback only exists inside the prompt.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "local",
@@ -66,9 +62,7 @@ func testInitContainerRegistryEmptySubmitUsesDefault(t *testing.T) {
 }
 
 func testInitSelectsKubernetesContextViaStdin(t *testing.T) {
-	// Exercises the kubernetes-context select prompt. preferCurrentKubernetesContext
-	// moves the current context (ctx-two) to the front, so confirming the
-	// highlighted first item selects it, not the alphabetical first.
+	// The current context (ctx-two) is moved to the front, so Enter selects it.
 	setup := env.New(t)
 	stubs := setup.Cwd + "/stubs"
 	stubKubectlContexts(t, stubs, []string{"ctx-one", "ctx-two"}, "ctx-two")
@@ -92,11 +86,7 @@ func testInitSelectsKubernetesContextViaStdin(t *testing.T) {
 }
 
 func testInitEntersKubernetesContextManuallyViaStdin(t *testing.T) {
-	// The kubectl stub fails the context listing so init falls to the
-	// manual-entry prompt. That listing-failure path is the only way to
-	// reach the manual prompt here: choosing manual entry inside the select
-	// would need a second promptui prompt, which readline's read-ahead makes
-	// unreachable over piped stdin.
+	// Readline read-ahead makes a second prompt unreachable over piped stdin, so a failed listing reaches manual entry.
 	setup := env.New(t)
 	stubs := setup.Cwd + "/stubs"
 	fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{
@@ -123,9 +113,7 @@ func testInitEntersKubernetesContextManuallyViaStdin(t *testing.T) {
 }
 
 func testInitPromptsDefaultTenantConfirmViaStdin(t *testing.T) {
-	// Bare Enter at the default-tenant confirm exercises the default-yes
-	// branch. Only one promptui prompt survives per subprocess (readline
-	// read-ahead), so the environment confirm is bypassed via its flag.
+	// Only one promptui prompt survives per subprocess (readline read-ahead).
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "local",
@@ -146,9 +134,6 @@ func testInitPromptsDefaultTenantConfirmViaStdin(t *testing.T) {
 }
 
 func testInitPromptsEnvironmentConfirmViaStdin(t *testing.T) {
-	// Typing "y" at the environment confirm exercises the typed-yes branch;
-	// the tenant confirm is bypassed via --set-default-tenant to keep the
-	// run at one prompt.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "local",
@@ -169,8 +154,6 @@ func testInitPromptsEnvironmentConfirmViaStdin(t *testing.T) {
 }
 
 func testInitEnvironmentConfirmDeclinedViaStdin(t *testing.T) {
-	// Declining the environment confirm must abort before the env config
-	// is created.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "local",
@@ -193,8 +176,6 @@ func testInitEnvironmentConfirmDeclinedViaStdin(t *testing.T) {
 	golden.Equal(t, "init/environment_confirm_declined_via_stdin", normalize.Apply(result.Combined))
 }
 
-// stubKubectlContexts feeds init's kubernetes-context selection deterministic
-// input so the rendered select list stays stable across machines.
 func stubKubectlContexts(t *testing.T, dir string, contexts []string, current string) {
 	t.Helper()
 	script := strings.Join([]string{

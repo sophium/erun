@@ -8,16 +8,6 @@ import (
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
-// computeObserveDrift is pure (no subprocess, no filesystem), the same shape
-// as fetchObservedHelmRelease's parse layer in observe_helm_release_test.go —
-// so it gets a focused unit test here rather than relying only on the
-// integration goldens, which can only lock the couple of shapes the observe
-// command's own fixtures happen to produce. The branch matrix this function
-// needs (found / genuinely absent / unreadable, each crossed with image and
-// pod drift) is cheaper and more exhaustive to hit directly than by threading
-// distinct helm/kubectl stub output through a real `erun observe` subprocess
-// for each case.
-
 func TestComputeObserveDriftNilReleaseReturnsNil(t *testing.T) {
 	if got := computeObserveDrift(config.ShellLaunchParams{RuntimeVersion: "1.0.0"}, nil, nil); got != nil {
 		t.Fatalf("drift = %v, want nil", got)
@@ -32,20 +22,14 @@ func TestComputeObserveDriftUnreadableReleaseWithNoRecordedVersionReportsNothing
 	if len(got) != 0 {
 		t.Fatalf("drift = %v, want no findings when the env config never recorded a runtimeversion", got)
 	}
-	// The run read, so it still reports the verdict the read produced: an
-	// empty list, never nil. nil is reserved for a dry run, where nothing was
-	// read and the serialized field says so.
+	// The run read, so the verdict is an empty list, never nil.
 	if got == nil {
 		t.Fatal("drift is nil on a run that read; want a non-nil empty list so the JSON carries the verdict")
 	}
 }
 
 func TestComputeObserveDriftEvaluatesImageDriftWhenReleaseUnreadableButPodsAvailable(t *testing.T) {
-	// release.Found is false with Error set (an unreadable release), yet
-	// ImageOverrides still carries an entry — a shape fetchObservedHelmRelease
-	// cannot produce today (a failed `helm status` returns before any config
-	// is parsed) but the drift computation must not assume that of its input;
-	// it evaluates whatever runningImageDrift's own inputs allow.
+	// An unreadable release carrying ImageOverrides cannot occur today, but drift must not assume that.
 	req := config.ShellLaunchParams{Namespace: "team-dev"}
 	release := &clusterread.ObservedHelmRelease{
 		Name:           "team-devops",

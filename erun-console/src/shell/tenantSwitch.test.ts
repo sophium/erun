@@ -11,9 +11,6 @@ describe('tenantSwitch', () => {
     beginTenantSwitch({ tenantId: 'tenant-b', name: 'Beta' });
 
     expect(consumeTenantSwitchIntent()).toEqual({ tenantId: 'tenant-b', name: 'Beta' });
-    // One-shot: a second read after the first must not resurrect the same
-    // target, since an ordinary later sign-in must not be treated as a
-    // pending switch it never asked for.
     expect(consumeTenantSwitchIntent()).toBeUndefined();
   });
 

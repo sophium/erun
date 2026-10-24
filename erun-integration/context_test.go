@@ -154,9 +154,6 @@ func testContextEnableAPIStopHelp(t *testing.T) {
 }
 
 func testContextDisableAPIStopDryRunTracesAWSModifyAttribute(t *testing.T) {
-	// The lock direction: --disable-api-stop must appear and
-	// --no-disable-api-stop must not, so the golden pins the audit
-	// contract for the "AWS rejects every stop until I unlock it" lever.
 	setup := env.New(t)
 	seedCloudContextConfig(t, setup, "edge")
 	result := erun.Run(t, []string{"context", "disable-api-stop", "edge", "--dry-run", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -167,10 +164,6 @@ func testContextDisableAPIStopDryRunTracesAWSModifyAttribute(t *testing.T) {
 }
 
 func testContextStopRealRunRecoversIncorrectInstanceState(t *testing.T) {
-	// Locks the IncorrectInstanceState absorption: stop-instances is
-	// rejected because the instance is already stopping, so production
-	// falls through to the stopped-wait instead of failing. Real-run,
-	// not dry-run: the branch keys off the aws CLI's error output.
 	setup := env.New(t)
 	seedCloudContextConfig(t, setup, "edge")
 	stubs := setup.Cwd + "/stubs"
@@ -187,10 +180,6 @@ func testContextStopRealRunRecoversIncorrectInstanceState(t *testing.T) {
 }
 
 func testContextStopRealRunBlockedByStopProtection(t *testing.T) {
-	// Locks the stop-protection block: when DisableApiStop is set the
-	// user-facing error must name the unlock command
-	// (`erun context enable-api-stop edge`), not a bare AWS exit 1.
-	// Real-run, not dry-run: the classifier branches on aws error output.
 	setup := env.New(t)
 	seedCloudContextConfig(t, setup, "edge")
 	stubs := setup.Cwd + "/stubs"
@@ -207,9 +196,6 @@ func testContextStopRealRunBlockedByStopProtection(t *testing.T) {
 }
 
 func testContextStopRealRunExpiredCredentials(t *testing.T) {
-	// Locks the expired-credentials block: ExpiredToken must surface as
-	// `erun cloud login --alias dev`, not the raw AWS message. Real-run,
-	// not dry-run: the classifier branches on aws error output.
 	setup := env.New(t)
 	seedCloudContextConfig(t, setup, "edge")
 	stubs := setup.Cwd + "/stubs"
@@ -226,9 +212,6 @@ func testContextStopRealRunExpiredCredentials(t *testing.T) {
 }
 
 func testContextEnableAPIStopDryRunTracesAWSModifyAttribute(t *testing.T) {
-	// The unlock direction: --no-disable-api-stop, not
-	// --disable-api-stop, so the reverse operation is unambiguous in
-	// audit output.
 	setup := env.New(t)
 	seedCloudContextConfig(t, setup, "edge")
 	result := erun.Run(t, []string{"context", "enable-api-stop", "edge", "--dry-run", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -239,11 +222,6 @@ func testContextEnableAPIStopDryRunTracesAWSModifyAttribute(t *testing.T) {
 }
 
 func testContextListRealRunReportsLiveInstanceStates(t *testing.T) {
-	// Locks the state mapping from one grouped describe-instances call:
-	// running, pending, stopped, an unknown state ("terminated") carrying
-	// its raw message, a missing instance ("not found in AWS"), and a
-	// no-instance-id context that is skipped. Real-run, not dry-run: the
-	// parse branches on real aws stdout.
 	setup := env.New(t)
 	seedCloudConfigWithContexts(t, setup,
 		contextYAMLItem("ctx-a", "dev", "us-east-1", "i-0aaaa11111aaaa1111")+
@@ -267,10 +245,7 @@ func testContextListRealRunReportsLiveInstanceStates(t *testing.T) {
 }
 
 func testContextListRealRunRefreshFailuresMarkUnknown(t *testing.T) {
-	// Both refresh-failure families — an alias with no configured
-	// provider, and a describe-instances call that itself fails — must
-	// downgrade to status=Unknown carrying the failure, never a stale
-	// cached state.
+	// Refresh failures must report Unknown, never a stale cached state.
 	setup := env.New(t)
 	seedCloudConfigWithContexts(t, setup,
 		contextYAMLItem("edge", "dev", "us-east-1", "i-0aaaa11111aaaa1111")+
@@ -289,11 +264,7 @@ func testContextListRealRunRefreshFailuresMarkUnknown(t *testing.T) {
 }
 
 func testContextListRealRunReportsABatchedRefreshFailureOnce(t *testing.T) {
-	// One describe-instances call covers every context sharing its
-	// (alias, region), and its failure is one fact about that batch. The
-	// operator must read it once, at the batch level -- not once per
-	// context, where each row would also re-quote the several-hundred-
-	// character command naming every sibling context's instance ID.
+	// A batch's describe failure is reported once, not re-quoted per context row.
 	setup := env.New(t)
 	seedCloudConfigWithContexts(t, setup,
 		contextYAMLItem("ctx-a", "dev", "us-east-1", "i-0aaaa11111aaaa1111")+
@@ -310,8 +281,6 @@ func testContextListRealRunReportsABatchedRefreshFailureOnce(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// The state classification stays honest -- the refresh could not
-	// determine the state, so it reports unknown rather than guessing.
 	if got := strings.Count(result.Combined, "status refresh failed"); got != 1 {
 		t.Fatalf("status refresh failure appears %d times, want exactly once:\n%s", got, result.Combined)
 	}
@@ -324,11 +293,6 @@ func testContextListRealRunReportsABatchedRefreshFailureOnce(t *testing.T) {
 }
 
 func testContextStopRealRunWaitFailureReportsTransitioning(t *testing.T) {
-	// Locks the post-stop wait failure: AWS accepts stop-instances but the
-	// stopped-wait exhausts its attempts, and the error must say the stop
-	// was accepted yet not observed stopped — "stopped" is only reported
-	// once AWS observes it. Real-run, not dry-run: the wait result only
-	// exists in real execution.
 	setup := env.New(t)
 	seedCloudContextConfig(t, setup, "edge")
 	stubs := setup.Cwd + "/stubs"
@@ -365,12 +329,7 @@ func testContextDisableAPIStopWithoutInstanceFails(t *testing.T) {
 	golden.Equal(t, "context/disable_api_stop_without_instance_fails", normalize.Apply(result.Combined))
 }
 
-// contextYAMLItem renders one cloudcontexts YAML item; an empty instanceID
-// omits the instanceid key so refresh scenarios can stage a context the AWS
-// refresh must skip.
-// contextListRows returns only the per-context rows of a context listing, so a
-// batch-level line that legitimately names the whole batch's instance IDs is
-// not mistaken for a row disclosing its siblings.
+// contextListRows drops batch-level lines, which legitimately name every instance ID.
 func contextListRows(out string) []string {
 	var rows []string
 	for _, line := range strings.Split(out, "\n") {
@@ -394,9 +353,6 @@ func contextYAMLItem(name, alias, region, instanceID string) string {
 	return item
 }
 
-// seedCloudConfigWithContexts stages the "dev" AWS provider plus arbitrary raw
-// cloudcontexts YAML, so refresh and naming scenarios can express context
-// shapes that seedCloudContextConfig's fixed single-context layout cannot.
 func seedCloudConfigWithContexts(t testing.TB, setup env.Setup, contextsYAML string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")

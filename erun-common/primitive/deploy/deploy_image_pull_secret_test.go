@@ -7,11 +7,8 @@ import (
 	"testing"
 )
 
-// imagePullSecretKubectlStub builds a kubectl stub that answers `get secret
-// <name> -o json` from a fixed table (an empty body means the Secret does not
-// exist yet) and, when applyLog is non-empty, appends every applied
-// manifest's stdin to it; an empty applyLog makes any `apply` invocation fail
-// the test, the same "must not run" shape failingBinaryPath uses.
+// imagePullSecretKubectlStub answers `get secret` from getResponses ("" means
+// NotFound); an empty applyLog makes any apply fail.
 func imagePullSecretKubectlStub(t *testing.T, getResponses map[string]string, applyLog string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -42,9 +39,6 @@ func imagePullSecretKubectlStub(t *testing.T, getResponses map[string]string, ap
 	t.Setenv("ERUN_KUBECTL_BIN", path)
 }
 
-// TestRefreshImagePullSecretsFirstDeployNoExistingSecret proves a first
-// deploy, with no pre-existing Secret to read back, behaves as it always did:
-// the Secret is minted from whatever resolves this run.
 func TestRefreshImagePullSecretsFirstDeployNoExistingSecret(t *testing.T) {
 	dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, b64Auth("alice:s3cret")))
 	useDockerConfigDir(t, dir)

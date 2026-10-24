@@ -5,10 +5,7 @@ import (
 	"time"
 )
 
-// TestApplyHelmReleaseSnapshotIgnoresStaleVersionOnDeployed guards a race: at
-// deploy start the previous release still reads status="deployed" (with the
-// prior AppVersion) before helm flips it to pending-upgrade, so the poller must
-// not finalize on that stale snapshot.
+// At deploy start the prior release still reads "deployed" with the old version.
 func TestApplyHelmReleaseSnapshotIgnoresStaleVersionOnDeployed(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	app.activityQueue.start(activityQueueEntry{
@@ -38,10 +35,7 @@ func TestApplyHelmReleaseSnapshotIgnoresStaleVersionOnDeployed(t *testing.T) {
 	}
 }
 
-// TestApplyHelmReleaseSnapshotIgnoresStaleTimestampOnDeployed covers same-version
-// redeploys (common in snapshot workflows): AppVersion alone can't tell the prior
-// "deployed" snapshot from the new one, so the Updated freshness check must
-// reject snapshots older than the entry's start.
+// Same-version redeploys need the Updated freshness check.
 func TestApplyHelmReleaseSnapshotIgnoresStaleTimestampOnDeployed(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	now := time.Now()
@@ -74,8 +68,6 @@ func TestApplyHelmReleaseSnapshotIgnoresStaleTimestampOnDeployed(t *testing.T) {
 	}
 }
 
-// TestApplyHelmReleaseSnapshotFinalizesOnFreshDeployedMatch verifies the happy
-// path: a fresh snapshot whose AppVersion matches the entry finalizes it.
 func TestApplyHelmReleaseSnapshotFinalizesOnFreshDeployedMatch(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	app.activityQueue.start(activityQueueEntry{
@@ -105,10 +97,7 @@ func TestApplyHelmReleaseSnapshotFinalizesOnFreshDeployedMatch(t *testing.T) {
 	}
 }
 
-// TestApplyHelmReleaseSnapshotFinalizesOnFailedRegardlessOfVersion: the version
-// gate applies only to "deployed" — a "failed" status finalizes even on a
-// version mismatch, so a PTY that dies before the `==> Deploy failed` trace
-// can't leave the entry stuck running.
+// The version gate applies only to "deployed".
 func TestApplyHelmReleaseSnapshotFinalizesOnFailedRegardlessOfVersion(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	app.activityQueue.start(activityQueueEntry{
@@ -137,8 +126,6 @@ func TestApplyHelmReleaseSnapshotFinalizesOnFailedRegardlessOfVersion(t *testing
 	}
 }
 
-// TestParseHelmUpdatedAcceptsHelmFormats covers the `helm list -o json`
-// timestamp shapes parseHelmUpdated must handle.
 func TestParseHelmUpdatedAcceptsHelmFormats(t *testing.T) {
 	cases := []string{
 		"2026-05-10 17:00:26.926452 +0300 EEST",
@@ -160,9 +147,7 @@ func TestParseHelmUpdatedAcceptsHelmFormats(t *testing.T) {
 	}
 }
 
-// TestHelmListArgsAvoidsDeprecatedAllFlag: helm v4 removed the `--all` flag — if
-// it slips back in, every poll errors, the reconcile channel goes silent, and
-// entries stick at running with no visible failure mode.
+// helm v4 removed `--all`; using it makes every poll fail silently.
 func TestHelmListArgsAvoidsDeprecatedAllFlag(t *testing.T) {
 	args := helmListTenantDevopsArgs("erun")
 	for _, a := range args {

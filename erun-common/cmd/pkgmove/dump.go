@@ -6,10 +6,8 @@ import (
 	"sort"
 )
 
-// dump writes one row per reference from a top-level declaration to a
-// package-level object: the referring file and declaration, the referenced
-// file and name, and how many times. Declarations are named as declName
-// names them, so a method row names its receiver type.
+// dump writes one TSV row per reference between top-level declarations and
+// package-level objects, with a count.
 func dump(w *world, m packageMap, out io.Writer) error {
 	d := w.decide(m)
 	rows := map[string]int{}

@@ -6,12 +6,7 @@ import (
 	"testing"
 )
 
-// TestConfigureHelmDeployCmdOutputConcurrentStreams runs a real child process
-// that writes on both stdout and stderr at once through the exact wiring
-// configureHelmDeployCmdOutput builds. os/exec runs one copier goroutine per
-// stream, and helmOutput is reachable from both (as cmd.Stdout and through
-// cmd.Stderr's io.MultiWriter), so it must be synchronized. Run with -race: it
-// must report no race, and both streams must still be captured.
+// Run with -race: helmOutput is written by both stream copier goroutines.
 func TestConfigureHelmDeployCmdOutputConcurrentStreams(t *testing.T) {
 	cmd := exec.Command("sh", "-c", `for i in $(seq 1 400); do echo "out-$i"; echo "err-$i" >&2; done`)
 	params := HelmDeployParams{}

@@ -22,33 +22,23 @@ func newHelmDeploySpec(target configpkg.OpenResult, deployContext shared.Kuberne
 	return newHelmDeploySpecWithValues(target, deployContext, versionOverride, valuesFilePath)
 }
 
-// newHelmDeploySpecWithValues is newHelmDeploySpec for callers that resolve
-// the values overlay themselves — a published OCI chart has no local chart
-// directory to look in, so it passes an empty path.
 func newHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext shared.KubernetesDeployContext, versionOverride, valuesFilePath string) (HelmDeploySpec, error) {
 	version := strings.TrimSpace(versionOverride)
 	ports := configpkg.LocalPortsForResult(target)
 
-	// The full marked registry list the pod acts on (remote-agent build/push;
-	// runtime deploy). deployTargetContainerRegistries validates markers, so a
-	// bad list surfaces here at deploy time rather than silently in-pod.
+	// Validated here so a bad marker list fails at deploy time, not in-pod.
 	containerRegistries, err := configpkg.DeployTargetContainerRegistries(target)
 	if err != nil {
 		return HelmDeploySpec{}, err
 	}
 
-	// Per-env rollout timeout (config > default). A flag/MCP override, when
-	// present, is applied on top of this by the public resolve entrypoints.
 	rolloutTimeout, err := target.EnvConfig.Deploy.Resolve()
 	if err != nil {
 		return HelmDeploySpec{}, err
 	}
 
-	// A repo-local runtime umbrella wraps the published erun-devops chart as a
-	// subchart; helm won't pass the runtime --sets into subchart scope, so record
-	// the subchart key and let command() prefix every runtime value with it. A
-	// by-reference umbrella (published OCI chart) has no local Chart.yaml to read,
-	// so its key is set by the published-spec resolvers instead.
+	// helm won't pass --sets into subchart scope, so command() prefixes them with
+	// the umbrella's subchart key.
 	subchartKey := ""
 	if deployContextOwnsRuntimeChart(deployContext, target.Tenant) && !isOCIChartReference(deployContext.ChartPath) {
 		subchartKey, err = helm.HelmChartRuntimeSubchartKey(deployContext.ChartPath)
@@ -57,9 +47,6 @@ func newHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext shar
 		}
 	}
 
-	// A context-resolved cluster registry supplies the concrete in-cluster pull
-	// host; a plain registry keeps the on-disk DEPLOY entry, so non-cluster envs
-	// render identically.
 	containerRegistry := resolveProjectContainerRegistry(target.RepoPath, target.Environment)
 	if strings.TrimSpace(target.ClusterPullRegistry) != "" {
 		containerRegistry = target.ClusterPullRegistry
@@ -105,10 +92,8 @@ func newHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext shar
 	}, nil
 }
 
-// resolveProjectContainerRegistry resolves the registry the cluster pulls from
-// — the DEPLOY-marked entry of the environment's configured registry list.
-// Returns "" when the project is uninitialized or marks no list, so callers'
-// own fallbacks (deploy provenance, default) still apply.
+// resolveProjectContainerRegistry returns "" when unset so callers' fallbacks
+// apply.
 func resolveProjectContainerRegistry(projectRoot, environment string) string {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
@@ -126,18 +111,8 @@ func resolveProjectContainerRegistry(projectRoot, environment string) string {
 	return registry
 }
 
-// ResolveProjectPlatform loads the per-instance platform config from the
-// project's .erun/config.yaml and returns it with defaults resolved. Returns a
-// zero PlatformConfig when the project is uninitialized or declares no platform
-// block, so deploy threads no platform.* values for non-platform projects.
-//
-// On the `erun deploy` / `build --deploy` path the block is validated up front
-// (loadProjectK8sPlanForRepo), so a malformed block fails the plan before
-// reaching here. The open-runtime deploy path does not pass through that plan
-// step, so it reaches here unvalidated — harmless today because the runtime
-// chart it deploys ignores the threaded platform.* values (only the platform
-// singletons read them, and open never deploys one). Do not rely on this
-// function having validated the block.
+// ResolveProjectPlatform returns the project's platform config with defaults.
+// The open-runtime path reaches it unvalidated, so do not rely on validation here.
 func ResolveProjectPlatform(projectRoot string) configpkg.PlatformConfig {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
@@ -185,18 +160,12 @@ func applyCloudProviderDeployMetadata(store configpkg.CloudReadStore, env config
 			return
 		}
 	}
-	// An env with an AWS alias but no cloud context (a local cluster, say) still
-	// needs a region: without one every AWS call in its pod has to be told the
-	// region by hand.
+	// Without a region every AWS call in the pod would need one by hand.
 	if deployInput.CloudRegion == "" && deployInput.CloudProvider == configpkg.CloudProviderAWS {
 		deployInput.CloudRegion = cloud.ResolveEnvironmentAWSRegion(store, env)
 	}
 }
 
-// resolveCloudProviderForAlias resolves the cloud provider for a non-empty
-// alias, preferring the store's configured provider and falling back to the
-// provider parsed from the alias suffix. When neither resolves, the existing
-// value is preserved.
 func resolveCloudProviderForAlias(store configpkg.CloudReadStore, alias, current string) string {
 	if provider, err := cloud.ResolveCloudProvider(store, alias); err == nil {
 		return provider.Provider
@@ -219,17 +188,11 @@ func cloudProviderFromAlias(alias string) string {
 	return ""
 }
 
-// resolveWorktreeStorage decides the deploy chart's worktree-storage value.
-// Every valid type has an explicit case: a deploy plan must never reach a host
-// env (deploy refuses it before spec-building — see
-// refuseHostEnvironmentOperation), so that case panics rather than silently
-// answering a question a host env does not have.
+// resolveWorktreeStorage panics for a host env: deploy refuses those earlier.
 func resolveWorktreeStorage(target configpkg.OpenResult) string {
 	if target.EnvConfig.Type.IsValid() {
 		switch target.EnvConfig.Type {
 		case configpkg.EnvironmentTypeRuntime:
-			// A runtime env is sourceless by default; opting into a mutable
-			// source worktree gives it a PVC checkout the pod clones at boot.
 			if target.EnvConfig.MountsRuntimeSource() {
 				return WorktreeStoragePVC
 			}
@@ -265,19 +228,12 @@ func resolveWorktreeHostPath(repoPath string) string {
 	}
 
 	if runtime.GOOS == "windows" {
-		// A remote/PVC env's repo path is a Linux path on the pod's filesystem
-		// (e.g. /home/erun/git/<repo>); it must never be run through the host's
-		// OS-native filepath, which rewrites it to \home\erun\git\<repo>. A rooted
-		// path with no drive letter is never a real local Windows path, so treat
-		// it as the remote Linux path it is and normalize to forward slashes.
+		// A rooted path with no drive letter is the pod's Linux path; host filepath
+		// would rewrite its slashes.
 		if rootedWithoutDrive(repoPath) {
 			return path.Clean(filepath.ToSlash(repoPath))
 		}
-		// A local drive path (C:\...) is a local-agent env's host worktree. The
-		// local k3s node runs in WSL2, which exposes each Windows drive under
-		// /mnt/<drive>; the raw C:\... path is both invisible to that Linux node
-		// and mangled by helm --set backslash escaping, so mount it through the
-		// WSL2 view instead.
+		// The WSL2 k3s node sees Windows drives under /mnt/<drive>.
 		return WindowsDrivePathToWSLMount(filepath.Clean(repoPath))
 	}
 
@@ -290,12 +246,7 @@ func resolveWorktreeHostPath(repoPath string) string {
 	return resolved
 }
 
-// WindowsDrivePathToWSLMount rewrites a Windows drive path to the mount a WSL2
-// node sees it at (C:\Users\me\repo -> /mnt/c/Users/me/repo). Backslashes are
-// converted explicitly rather than via filepath.ToSlash so the translation is
-// correct and testable on any host, not only where the OS separator is "\".
-// A path that does not start with a drive letter passes through slash-normalized,
-// so the transform is inert for anything already POSIX-shaped.
+// WindowsDrivePathToWSLMount rewrites C:\a\b to /mnt/c/a/b on any host OS.
 func WindowsDrivePathToWSLMount(p string) string {
 	p = strings.ReplaceAll(p, `\`, "/")
 	if len(p) < 2 || p[1] != ':' {
@@ -313,9 +264,6 @@ func WindowsDrivePathToWSLMount(p string) string {
 	return mount + "/" + rest
 }
 
-// rootedWithoutDrive reports whether a path is absolute (rooted at / or \) but
-// carries no Windows drive letter — the shape of a remote Linux path, never a
-// real local Windows path.
 func rootedWithoutDrive(p string) bool {
 	if len(p) >= 2 && p[1] == ':' {
 		return false
@@ -323,9 +271,7 @@ func rootedWithoutDrive(p string) bool {
 	return strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`)
 }
 
-// Params pairs the full deploy spec with the rollout's output writers. The whole
-// spec rides along, so the executed command (built from it in helmDeployCommandSpec)
-// stays identical to the traced one — no field can be dropped in transit.
+// Params carries the whole spec so the executed command matches the traced one.
 func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 	return HelmDeployParams{HelmDeploySpec: d, Stdout: stdout, Stderr: stderr}
 }

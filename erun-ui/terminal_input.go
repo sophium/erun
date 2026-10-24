@@ -34,9 +34,7 @@ func (a *App) SendSessionInput(sessionID int, data string) error {
 	a.clearAwaitingPostRespawnInput(managed)
 	a.recordTerminalActivity(managed.selection)
 	if id, ok := orchestratorIDFromSessionKey(managed.key); ok {
-		// Real operator input into the pane is the other rearm the pacing
-		// nudge cap names: the operator is plainly at the keyboard, whatever
-		// the last report said.
+		// Real input rearms the orchestrator pacing nudge.
 		a.rearmOrchestratorPacing(id)
 	}
 	return nil
@@ -72,9 +70,8 @@ func (a *App) recordTerminalActivity(selection uiSelection) {
 	})
 }
 
-// SavePastedFile copies a file pasted into the desktop terminal into the env's
-// runtime pod and returns its in-pod path. Any file type is accepted, not just
-// images.
+// SavePastedFile copies a pasted file of any type into the runtime pod and
+// returns its in-pod path.
 func (a *App) SavePastedFile(sessionID int, payload pastedFilePayload) (pastedFileResult, error) {
 	data, mimeType, err := decodePastedFilePayload(payload)
 	if err != nil {
@@ -127,15 +124,9 @@ func (a *App) ResizeSession(sessionID, cols, rows int) error {
 	return managed.session.Resize(cols, rows)
 }
 
-// RepaintSession forces the session's program to fully repaint by raising a real
-// WINCH (shrink one row, then restore) on its backend pty. Switching to a tab
-// replays the retained buffer locally, but an Ink/alt-screen TUI (Claude) only
-// repaints on a geometry change, so a same-size switch would leave the tab blank
-// until the app next emits a diff on its own. Unlike maybeNudgeAIRepaint this is
-// deliberately NOT gated by repaintNudged (that guard is for the once-per-attach
-// streaming path — every alt-screen switch wants a fresh repaint); the frontend
-// calls it only for alt-screen sessions. The local xterm is never resized, so
-// the user sees the frame appear with no visible reflow.
+// RepaintSession forces a full repaint with a shrink-and-restore WINCH, since
+// main-screen TUIs repaint only on a geometry change. Unlike
+// maybeNudgeAIRepaint it ignores repaintNudged: every switch wants a repaint.
 func (a *App) RepaintSession(sessionID int) error {
 	a.mu.Lock()
 	managed := a.sessionBySerialLocked(sessionID)
@@ -152,22 +143,14 @@ func (a *App) RepaintSession(sessionID int) error {
 		return nil
 	}
 	if typedRecently {
-		// Switching into a pane fires this on every switch, so a
-		// switch-and-type sequence would resize the pty under a line being
-		// entered. Someone typing needs no synthetic repaint.
+		// Resizing under a line being typed corrupts it.
 		return nil
 	}
-	// Only main-screen TUIs (claude/codex, whether in an AI tab or an
-	// orchestrator pane) need the WINCH repaint: they only repaint on a real
-	// geometry change, so a tab switch leaves them blank until their next diff.
-	// Plain shells and alt-screen apps reconstruct from the replayed buffer, so a
-	// nudge would just cause a needless reflow. The frontend fires this on every
-	// switch and lets this gate decide.
+	// Shells and alt-screen apps rebuild from the replayed buffer.
 	if !needsWINCHRepaint(managed) {
 		return nil
 	}
-	// No attach delay on a switch: the program is already attached (unlike the
-	// attach-marker path, which must wait for dtach to reattach first).
+	// No attach delay: the program is already attached.
 	go a.nudgeAIRepaint(managed, cols, rows, 0, gen)
 	return nil
 }
@@ -200,20 +183,15 @@ func decodePastedFilePayload(payload pastedFilePayload) ([]byte, string, error) 
 	return data, mimeType, nil
 }
 
-// aiRepaintNudgeDelay waits after the attach marker so the bootstrap's
-// `dtach -A` has reattached the client to Claude and Claude is listening for
-// the WINCH; aiRepaintNudgeSettle spaces the shrink and restore so the two
-// SIGWINCHes are not coalesced.
+// aiRepaintNudgeDelay lets `dtach -A` reattach first; aiRepaintNudgeSettle keeps
+// the two SIGWINCHes from coalescing.
 var (
 	aiRepaintNudgeDelay  = 400 * time.Millisecond
 	aiRepaintNudgeSettle = defaultAIRepaintNudgeSettle()
 )
 
-// aiRepaintInputQuiet is how recently input must have arrived for the repaint
-// nudge to stand down. The nudge exists to repaint a BLANK reattached screen; a
-// pane receiving keystrokes is by definition not that, and resizing it mid-line
-// corrupts submitted prompts. Generous on purpose: skipping a
-// repaint costs one keypress to fix, while a bad reflow costs the message.
+// aiRepaintInputQuiet is generous: a skipped repaint costs a keypress, a bad
+// reflow costs the message.
 const aiRepaintInputQuiet = 1500 * time.Millisecond
 
 // noteSessionInput records that real user input just reached this pane.
@@ -239,20 +217,13 @@ func (a *App) sessionInputGen(managed *managedTerminal) uint64 {
 	return gen
 }
 
-// typedRecentlyLocked reports whether the pane saw input inside the quiet
-// window. Caller holds a.mu.
+// typedRecentlyLocked: caller holds a.mu.
 func typedRecentlyLocked(managed *managedTerminal) bool {
 	return !managed.lastInputAt.IsZero() && time.Since(managed.lastInputAt) < aiRepaintInputQuiet
 }
 
-// defaultAIRepaintNudgeSettle sizes the shrink-hold to the platform's resize
-// delivery. POSIX kubectl exec delivers the resize via SIGWINCH immediately, so
-// a short hold suffices. On Windows there is no SIGWINCH: kubectl exec -it POLLS
-// the terminal size (~250ms), so the shrink must be held past a poll interval or
-// the pod TTY never sees it — and then Claude, a main-screen TUI that only
-// repaints on a real geometry change, stays blank after a reattach until the
-// user types (verified: a held ConPTY resize does reach the pod TTY; a 150ms
-// blip does not).
+// defaultAIRepaintNudgeSettle is longer on Windows, where kubectl exec polls the
+// terminal size (~250ms) instead of receiving SIGWINCH.
 func defaultAIRepaintNudgeSettle() time.Duration {
 	if goruntime.GOOS == "windows" {
 		return 600 * time.Millisecond
@@ -260,10 +231,8 @@ func defaultAIRepaintNudgeSettle() time.Duration {
 	return 150 * time.Millisecond
 }
 
-// aiAttachMarker is the window-title escape (OSC 0) the open bootstrap prints
-// immediately before `dtach -A` reattaches to the running program — the precise
-// "about-to-reattach" signal. Nudging on the first output overall instead would
-// fire too early, before the pod-side attach.
+// aiAttachMarker is the OSC 0 title the bootstrap prints right before `dtach -A`
+// reattaches; the first output overall would be too early.
 var aiAttachMarker = []byte("\x1b]0;")
 
 func isAITabKind(managed *managedTerminal) bool {
@@ -271,22 +240,13 @@ func isAITabKind(managed *managedTerminal) bool {
 		(managed.kind == sessionKindAI || managed.kind == sessionKindContributeAI)
 }
 
-// needsWINCHRepaint reports whether a session runs a main-screen TUI that only
-// repaints on a real pty geometry change (a WINCH), so a same-size tab switch
-// or reattach leaves it blank until one is forced. AI tabs and the orchestrator
-// both run that kind of program (claude/codex). Kept separate from isAITabKind,
-// which also drives AI-activity accounting (managedAITabFor, aiActivityKind)
-// where an orchestrator is deliberately excluded for unrelated reasons — see
-// aiActivityKind's comment.
+// needsWINCHRepaint covers AI tabs and orchestrators. It is separate from
+// isAITabKind, whose activity accounting excludes orchestrators.
 func needsWINCHRepaint(managed *managedTerminal) bool {
 	return isAITabKind(managed) || (managed != nil && managed.kind == sessionKindOrchestrator)
 }
 
-// maybeNudgeAIRepaint fires the AI repaint nudge when the attach marker first
-// appears. dtach hands a reattached client a cleared screen, but Claude (an Ink
-// main-screen TUI) only fully repaints on an actual geometry change — a
-// same-size reattach raises no effective WINCH, so the tab would render blank.
-// The nudge forces that geometry change once Claude is attached.
+// maybeNudgeAIRepaint nudges once when the attach marker first appears.
 func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
 	if !needsWINCHRepaint(managed) || !bytes.Contains(chunk, aiAttachMarker) {
 		return
@@ -297,10 +257,8 @@ func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
 		return
 	}
 	if typedRecentlyLocked(managed) {
-		// The user is at the keyboard, so the pane is not the blank screen
-		// this nudge repaints -- and their typing will force the redraw
-		// anyway. Deliberately does NOT set repaintNudged: this attach has
-		// not been nudged, so a later chunk may still do it once they stop.
+		// Typing will redraw anyway. repaintNudged stays unset so a later chunk can
+		// still nudge.
 		a.mu.Unlock()
 		return
 	}
@@ -311,10 +269,8 @@ func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
 	go a.nudgeAIRepaint(managed, cols, rows, aiRepaintNudgeDelay, gen)
 }
 
-// nudgeAIRepaint briefly shrinks the backend pty by one row and restores it:
-// the change reaches Claude as a real WINCH and forces the full repaint a
-// same-size reattach cannot. The local xterm is never resized, so the user sees
-// the tab's content appear with no visible reflow.
+// nudgeAIRepaint shrinks the backend pty by one row and restores it; the local
+// xterm is never resized.
 func (a *App) nudgeAIRepaint(managed *managedTerminal, cols, rows int, initialDelay time.Duration, gen uint64) {
 	if cols <= 0 || rows <= 1 {
 		return
@@ -322,25 +278,19 @@ func (a *App) nudgeAIRepaint(managed *managedTerminal, cols, rows int, initialDe
 	if initialDelay > 0 {
 		time.Sleep(initialDelay)
 	}
-	// Input during the delay means the user started typing between the attach
-	// marker and here. Shrink now and the restore reflows their line, so do
-	// not start the cycle at all -- nothing has been resized yet, so bailing
-	// costs nothing.
+	// Nothing is resized yet, so bailing on input costs nothing.
 	if a.sessionInputGen(managed) != gen {
 		return
 	}
 	if !a.resizeSessionIfLive(managed, cols, rows-1) {
 		return
 	}
-	// Past this point the pty IS a row short, so it must be restored on every
-	// path. awaitRepaintSettle returns early on input so the shrunken geometry
-	// is held across as little typing as possible.
+	// The pty is now a row short and must be restored on every path.
 	a.awaitRepaintSettle(managed, gen)
 	a.resizeSessionIfLive(managed, cols, rows)
 }
 
-// awaitRepaintSettle waits out the nudge settle, returning as soon as user
-// input arrives so the caller can restore the pty immediately.
+// awaitRepaintSettle returns early on input.
 func (a *App) awaitRepaintSettle(managed *managedTerminal, gen uint64) {
 	const slice = 10 * time.Millisecond
 	for waited := time.Duration(0); waited < aiRepaintNudgeSettle; waited += slice {
@@ -351,8 +301,7 @@ func (a *App) awaitRepaintSettle(managed *managedTerminal, gen uint64) {
 	}
 }
 
-// resizeSessionIfLive guards the AI repaint nudge: a session that exits
-// mid-nudge must not panic on a nil/closed pty.
+// resizeSessionIfLive tolerates a session exiting mid-nudge.
 func (a *App) resizeSessionIfLive(managed *managedTerminal, cols, rows int) bool {
 	a.mu.Lock()
 	session := managed.session

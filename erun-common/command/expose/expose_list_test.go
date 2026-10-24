@@ -14,10 +14,8 @@ import (
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
-// installReadNamingKubectl points ERUN_KUBECTL_BIN at a stub that answers every
-// read with an empty list except resource, which fails the way an unreachable
-// API server does. It is what lets a test drive the shared fetcher's own
-// failure text without a cluster.
+// installReadNamingKubectl stubs kubectl so every read is empty except
+// resource, which fails like an unreachable API server.
 func installReadNamingKubectl(t *testing.T, resource string) {
 	t.Helper()
 	script := "#!/bin/sh\n" +
@@ -32,18 +30,8 @@ func installReadNamingKubectl(t *testing.T, resource string) {
 	t.Setenv("ERUN_KUBECTL_BIN", path)
 }
 
-// TestSharedReadsNameTheReadAndTheOperationNamesItself pins the naming the
-// shared kubectl fetchers now carry. `get ingress` is reached by erun e2e's
-// exposure listing, the services listing, and observe alike, so a fetcher
-// leading with "observe:" named a command two of its three callers never ran
-// (root AGENTS.md's diagnostic record: a message names the command actually
-// invoked, or names none).
-//
-// Both halves are load-bearing and neither alone is the contract: stripping
-// the prefix from the fetcher is only correct because observe re-adds it, so a
-// change that does either one without the other breaks the other caller's
-// output -- the listing naming an operation it never ran, or observe losing
-// the name its own output has always carried.
+// The shared fetcher drops the "observe:" prefix only because observe re-adds
+// it; both halves must change together.
 func TestSharedReadsNameTheReadAndTheOperationNamesItself(t *testing.T) {
 	installReadNamingKubectl(t, "ingress")
 	req := config.ShellLaunchParams{Tenant: "frs", Environment: "dev", Namespace: "frs-dev"}
@@ -68,9 +56,6 @@ func TestSharedReadsNameTheReadAndTheOperationNamesItself(t *testing.T) {
 	}
 }
 
-// TestFilterExposedServicesKeepsOnlyExposeIngresses pins the baseline shape
-// with an already-Ready certificate: nothing here changes for an env whose
-// TLS has already issued, the case every exposed service eventually reaches.
 func TestFilterExposedServicesKeepsOnlyExposeIngresses(t *testing.T) {
 	ingresses := []clusterread.ObservedIngress{
 		{Name: "expose-api", Hosts: []string{"api.frs-prod.services.test"}},
@@ -80,7 +65,6 @@ func TestFilterExposedServicesKeepsOnlyExposeIngresses(t *testing.T) {
 			Hosts: []string{"web.frs-prod.services.test"},
 			TLS:   []clusterread.ObservedIngressTLS{{Hosts: []string{"web.frs-prod.services.test"}, SecretName: "frs-prod-wildcard-tls"}},
 		},
-		// No host at all -- nothing to route or display.
 		{Name: "expose-broken", Hosts: nil},
 	}
 	certs := []clusterread.ObservedCertificate{{Name: "wildcard", Ready: true, SecretName: "frs-prod-wildcard-tls"}}
@@ -103,12 +87,8 @@ func TestFilterExposedServicesEmptyWhenNoneMatch(t *testing.T) {
 	}
 }
 
-// TestFilterExposedServicesReportsPendingCertificateHonestly is the whole
-// point of this addition: cert-manager writes the Ingress's tls block (and
-// the Secret it names) before issuance finishes, so scheme alone cannot tell
-// a caller that opening this URL right now would hit a certificate warning,
-// not a valid cert. TLSNotReadyReason surfaces the Certificate's own
-// condition here since the chain walk found nothing more specific.
+// cert-manager writes the tls block before issuance finishes, so scheme alone
+// cannot say the certificate is valid yet.
 func TestFilterExposedServicesReportsPendingCertificateHonestly(t *testing.T) {
 	ingresses := []clusterread.ObservedIngress{
 		{
@@ -133,10 +113,6 @@ func TestFilterExposedServicesReportsPendingCertificateHonestly(t *testing.T) {
 	}
 }
 
-// TestFilterExposedServicesWalksChallengeChainForTheRealBlocker matches
-// erun observe's own behavior: once the chain is walked, the Challenge's
-// reason (e.g. a webhook solver's RBAC denial) is the one that actually
-// explains a stuck issuance, not the Certificate's generic top-level reason.
 func TestFilterExposedServicesWalksChallengeChainForTheRealBlocker(t *testing.T) {
 	ingresses := []clusterread.ObservedIngress{
 		{
@@ -162,10 +138,6 @@ func TestFilterExposedServicesWalksChallengeChainForTheRealBlocker(t *testing.T)
 	}
 }
 
-// TestFilterExposedServicesReportsMissingCertificateHonestly: an Ingress can
-// carry a tls block naming a Secret with no matching Certificate at all (a
-// wildcard cert deleted out from under a still-live Ingress, for instance).
-// Absence must read as "not ready", never as an assumed success.
 func TestFilterExposedServicesReportsMissingCertificateHonestly(t *testing.T) {
 	ingresses := []clusterread.ObservedIngress{
 		{

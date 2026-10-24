@@ -14,11 +14,7 @@ interface GuidancePaths {
   shared: string;
 }
 
-// useOrchestratorGuidancePaths resolves where this orchestrator's two
-// guidance layers live on this host, so the row can show the operator the
-// convention instead of a bare filename. Read-only: it neither creates the
-// workspace nor seeds the role file, so opening the dialog never has that
-// side effect.
+// useOrchestratorGuidancePaths is read-only: opening the dialog never creates the workspace or role file.
 function useOrchestratorGuidancePaths(orchestratorId: string): GuidancePaths | null {
   const [paths, setPaths] = React.useState<GuidancePaths | null>(null);
 
@@ -38,12 +34,7 @@ function useOrchestratorGuidancePaths(orchestratorId: string): GuidancePaths | n
   return paths;
 }
 
-// OrchestratorGuidanceSection reveals both layers of guidance an orchestrator
-// operates under, in the operator's chosen host IDE — the same vscode/intellij
-// choice the titlebar's IDE buttons already offer, so this introduces no
-// second editor setting. Labelled for what each layer is rather than its
-// filename, with the resolved path shown as secondary text so the operator
-// learns the CLAUDE.<id>.md convention by seeing it.
+// OrchestratorGuidanceSection opens both guidance layers in the operator's chosen IDE.
 export function OrchestratorGuidanceSection({
   orchestratorId,
 }: {

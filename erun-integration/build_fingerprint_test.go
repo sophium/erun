@@ -19,13 +19,8 @@ func buildFingerprintScenarios(t *testing.T) {
 	t.Run("nested_gitignore_excludes_files_from_fingerprint", testBuildNestedGitignoreExcludesFilesFromFingerprint)
 	t.Run("dry_run_new_version_rebuilds_version_stamped_image", testBuildDryRunNewVersionRebuildsVersionStampedImage)
 	t.Run("real_run_with_existing_fingerprint_promotes_via_tag", testBuildRealRunWithExistingFingerprintPromotesViaTag)
-	// A component whose Dockerfile declares a consumed `test` stage reports
-	// each build's test outcome after it: `passed` when docker build ran the
-	// graph, `reused (fingerprint ...)` when the fingerprint image was promoted
-	// without a build. A component with no test stage says so instead. The
-	// docker stub answers the test-stage daemon forwarder's inspect calls with
-	// a stopped leftover (replaced) and then a running forwarder, so the real
-	// run reaches the build without a daemon on the machine.
+	// The stub answers the test-stage forwarder's inspects with a stopped
+	// leftover then a running one, so no daemon is needed.
 	for _, tc := range []struct {
 		name         string
 		imageInspect string
@@ -80,9 +75,6 @@ func buildFingerprintScenarios(t *testing.T) {
 }
 
 func testBuildRealRunConfiguredFingerprintInspectsRemoteManifest(t *testing.T) {
-	// Stubbing `image inspect <fp-tag>` to fail (no local fingerprint) forces
-	// the materialize step, which then runs `docker manifest inspect` and
-	// `docker pull` against the configured source tag.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	fixture.SeedProjectK8sConfig(t, setup,
@@ -95,9 +87,7 @@ func testBuildRealRunConfiguredFingerprintInspectsRemoteManifest(t *testing.T) {
 	stubs := setup.Cwd + "/stubs"
 	fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
 		`case "$1 $2" in`,
-		// Local fingerprint missing → forces materialize path.
 		`  "image inspect") exit 1 ;;`,
-		// Remote manifest present → DockerManifestExists returns true.
 		`  "manifest inspect") exit 0 ;;`,
 		`  *) exit 0 ;;`,
 		`esac`,
@@ -112,8 +102,6 @@ func testBuildRealRunConfiguredFingerprintInspectsRemoteManifest(t *testing.T) {
 }
 
 func testBuildDryRunWithDockerignoreDrivesIgnorePatternParser(t *testing.T) {
-	// Seeds a .dockerignore with a mix of negation (!), comment, glob (*), and
-	// directory patterns so the fingerprint walk exercises the ignore parser.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	dockerignore := strings.Join([]string{
@@ -127,9 +115,6 @@ func testBuildDryRunWithDockerignoreDrivesIgnorePatternParser(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(setup.Cwd, ".dockerignore"), []byte(dockerignore), 0o644); err != nil {
 		t.Fatalf("write .dockerignore: %v", err)
 	}
-	// Add a file that matches a pattern so the parser actually runs
-	// against a non-empty context. Without commit it's still in the
-	// build context for fingerprinting.
 	if err := os.WriteFile(filepath.Join(setup.Cwd, "noisy.log"), []byte("ignored"), 0o644); err != nil {
 		t.Fatalf("write noisy.log: %v", err)
 	}
@@ -139,20 +124,13 @@ func testBuildDryRunWithDockerignoreDrivesIgnorePatternParser(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// Build should still trace docker build for both images, even
-	// though the dockerignore parser fires during fingerprint walk.
 	golden.Equal(t, "build/dry_run_with_dockerignore_drives_ignore_pattern_parser", normalize.Apply(result.Combined))
 }
 
 func testBuildNestedGitignoreExcludesFilesFromFingerprint(t *testing.T) {
-	// A .gitignore at the root of a COPY'd directory must scope its patterns to
-	// that subtree so matching files drop out of the fingerprint hash. Guards
-	// the local-vs-CI drift where locally-built erun-cli/bin artifacts rolled
-	// the devops fingerprint despite being .gitignore'd by a nested file.
+	// A nested .gitignore must scope to its COPY'd subtree.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
-	// Replace the default no-COPY api Dockerfile with one that COPYs a
-	// subdirectory so the fingerprint walker actually descends.
 	dockerfile := filepath.Join(setup.Cwd, "erun-devops", "docker", "api", "Dockerfile")
 	mustWriteFile(t, dockerfile, "FROM alpine:3.22\nCOPY app/ /app/\n")
 	appDir := filepath.Join(setup.Cwd, "app")
@@ -188,15 +166,8 @@ func testBuildNestedGitignoreExcludesFilesFromFingerprint(t *testing.T) {
 }
 
 func testBuildDryRunNewVersionRebuildsVersionStampedImage(t *testing.T) {
-	// An image that bakes ERUN_VERSION into its content must not be published
-	// at a new version by re-tagging the previous version's cached copy: the
-	// binary inside would keep reporting the version before the tag it shipped
-	// under. `stamped` consumes ERUN_VERSION, `api` does not. The first build
-	// mints both fingerprints at 1.0.170; the docker stub then answers "present"
-	// for exactly those two fp tags and "missing" for everything else, so the
-	// second build at 1.0.171 sees the 1.0.170 cache and nothing more. stamped
-	// must rebuild; api and base must still promote, so the cache keeps paying
-	// for everything that carries no version.
+	// An image consuming ERUN_VERSION must rebuild at a new version rather than
+	// re-tag the cached copy; images without it still promote.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "docker", "stamped", "Dockerfile"),
@@ -225,9 +196,7 @@ func testBuildDryRunNewVersionRebuildsVersionStampedImage(t *testing.T) {
 	if second.ExitCode != 0 {
 		t.Fatalf("second build exit %d: %s", second.ExitCode, second.Combined)
 	}
-	// Normalization collapses every fingerprint to <HEX16>, so the golden
-	// cannot tell the 1.0.170 cache tag from a fresh one — assert the pinned
-	// hashes on the raw trace.
+	// Fingerprints normalize to <HEX16>, so assert hashes on the raw trace.
 	if staleTag := "ghcr.io/sophium/stamped:fp-" + cachedStamped + "-"; strings.Contains(second.Combined, staleTag) {
 		t.Fatalf("1.0.171 re-tagged the 1.0.170 stamped image (%s), so the published image would report 1.0.170:\n%s", staleTag, second.Combined)
 	}
@@ -238,11 +207,6 @@ func testBuildDryRunNewVersionRebuildsVersionStampedImage(t *testing.T) {
 }
 
 func testBuildRealRunWithExistingFingerprintPromotesViaTag(t *testing.T) {
-	// When `docker image inspect <fp-tag>` succeeds, the build re-tags the
-	// existing fingerprint image to the version tag instead of running docker
-	// build. The stub makes `image inspect` always succeed; asserts no
-	// `docker build` appears and `docker tag` re-tagging from the fingerprint
-	// does.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"

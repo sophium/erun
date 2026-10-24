@@ -11,9 +11,7 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// The lease tools are the MCP half of the activity lease. An orchestrator that
-// detaches a long job in this pod has no request to bump for the job's duration,
-// so without a lease the environment it is driving hard reads as untouched.
+// A detached job makes no requests, so without a lease its environment reads as idle.
 
 // ActivityLeaseTakeInput names the work the lease is being held for.
 type ActivityLeaseTakeInput struct {
@@ -23,14 +21,8 @@ type ActivityLeaseTakeInput struct {
 	ID          string `json:"id,omitempty" jsonschema:"lease id to take or renew; defaults to the name, so re-taking the same name renews rather than stacking"`
 	PID         int    `json:"pid,omitempty" jsonschema:"process id of the detached job; the lease is reclaimed once that process exits, so an abandoned lease cannot pin the environment awake"`
 	TTLSeconds  int64  `json:"ttlSeconds,omitempty" jsonschema:"seconds the lease holds without a renewal; defaults to 900, or 300 when exclusive is set"`
-	// Exclusive, Scope, and Orchestrator request the exclusive-claim mode: at
-	// most one exclusive holder per scope, so a second exclusive take in that
-	// scope is refused and told who holds it, while a holder in a different
-	// scope (a separate clone in the same pod) is unaffected. What a held
-	// claim then refuses depends on its scope: only an "environment" claim
-	// refuses other job starts, a "worktree" claim is refused by the
-	// worktree-rewriting gate-merge guard, and any other scope refuses
-	// neither.
+	// Exclusive claims allow one holder per scope; only an "environment" claim
+	// refuses other job starts, and a "worktree" claim blocks gate-merge.
 	Exclusive    bool   `json:"exclusive,omitempty" jsonschema:"take an exclusive claim instead of plain presence: a second exclusive take in the same scope is refused and told who holds it, rather than silently coexisting. Take this before any mutating work in a target environment."`
 	Scope        string `json:"scope,omitempty" jsonschema:"the resource this exclusive claim protects; defaults to 'worktree'. Only meaningful with exclusive=true - exclusivity is scoped, never environment-wide, so two jobs in two separate clones of the same repo in one pod can each hold their own claim"`
 	Orchestrator string `json:"orchestrator,omitempty" jsonschema:"the calling orchestrator's own id (its $ERUN_ORCHESTRATOR_ID), recorded on the lease so a refusal can name who to go ask"`
@@ -42,13 +34,7 @@ type ActivityLeaseResult struct {
 	Environment string                              `json:"environment"`
 	Lease       *activity.EnvironmentActivityLease  `json:"lease,omitempty"`
 	Held        []activity.EnvironmentActivityLease `json:"held"`
-	// Released is set only by activity_lease_release: true when a held claim
-	// actually existed under the given id (and scope, for an exclusive claim)
-	// and this call removed it, false when there was nothing there to remove.
-	// Both are a successful call — releasing an absent or already-expired
-	// lease is idempotent — but collapsing them into the same unconditional
-	// success is what let a release aimed at the wrong store -- an exclusive
-	// claim released without exclusive=true -- go unnoticed.
+	// Released is set only by release: false means nothing was held (still a success).
 	Released *bool `json:"released,omitempty"`
 }
 
@@ -72,9 +58,7 @@ func ActivityLeaseTakeTool(runtime shared.RuntimeConfig) func(context.Context, *
 			TTL:         time.Duration(input.TTLSeconds) * time.Second,
 			Scope:       input.Scope,
 			Exclusive:   input.Exclusive,
-			// Tenant and User come from the resolved auth identity, never
-			// from caller input, so a lease cannot be taken out in someone
-			// else's name.
+			// Tenant and User come from the auth identity, never caller input.
 			Holder: activity.EnvironmentActivityLeaseHolder{
 				Orchestrator: input.Orchestrator,
 				Tenant:       identity.Tenant,
@@ -82,13 +66,8 @@ func ActivityLeaseTakeTool(runtime shared.RuntimeConfig) func(context.Context, *
 			},
 		}
 		if input.Exclusive && !exclusiveEnvironmentActivityLeaseRenewsOwnClaim(tenant, environment, params) {
-			// The operator never takes a lease, so an operator's own
-			// interactive session leaves no claim to renew here - only a
-			// fresh claim is gated on their presence. Renewing a claim this
-			// same caller already holds is not re-litigated: by the time it
-			// is running detached work, that work's own resident process is
-			// indistinguishable from an operator's, and gating renewal on it
-			// would make the job refuse itself.
+			// Renewing one's own claim skips the operator-presence gate, or a running job
+			// would refuse itself.
 			status, statusErr := activity.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, time.Now())
 			if statusErr == nil {
 				if reason, present := activity.EnvironmentOperatorPresenceReason(status); present {
@@ -105,16 +84,9 @@ func ActivityLeaseTakeTool(runtime shared.RuntimeConfig) func(context.Context, *
 }
 
 // exclusiveEnvironmentActivityLeaseRenewsOwnClaim reports whether this take
-// would renew a claim the same holder id already has, in which case the
-// operator-presence gate does not apply. A best-effort read: if it cannot
-// tell, the take proceeds to the gate rather than skipping it.
-//
-// params.ID is still the caller's raw, unsanitized input at this point — the
-// store only sanitizes it inside TakeEnvironmentActivityLease, which has not
-// run yet — so it is resolved through the same normalisation the store uses
-// before comparing against the stored, already-sanitized lease.ID; otherwise
-// a lease id needing sanitisation (a space, a slash, a colon) never matches
-// its stored form and every renewal misreads as a fresh claim.
+// renews the holder's existing claim; when it cannot tell, the presence gate
+// still applies. params.ID is still unsanitized, so it is normalized the way the
+// store does before comparing.
 func exclusiveEnvironmentActivityLeaseRenewsOwnClaim(tenant, environment string, params activity.TakeEnvironmentActivityLeaseParams) bool {
 	id, err := activity.ResolveEnvironmentActivityLeaseID(params.ID, params.Name)
 	if err != nil {
@@ -138,9 +110,7 @@ type ActivityLeaseReleaseInput struct {
 	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment holds the lease; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
 	Environment string `json:"environment,omitempty" jsonschema:"environment to release; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 	ID          string `json:"id" jsonschema:"lease id to release; the name passed to activity_lease_take when no explicit id was given"`
-	// Exclusive and Scope select the exclusive-claim store; an exclusive
-	// claim is keyed by scope, not by id, so releasing one needs to know
-	// which scope it was taken on.
+	// An exclusive claim is keyed by scope, not id.
 	Exclusive bool   `json:"exclusive,omitempty" jsonschema:"release an exclusive claim rather than a plain lease; must match how it was taken"`
 	Scope     string `json:"scope,omitempty" jsonschema:"the scope the exclusive claim was taken on; defaults to 'worktree'. Only meaningful with exclusive=true"`
 }
@@ -171,9 +141,7 @@ func ActivityLeaseReleaseTool(runtime shared.RuntimeConfig) func(context.Context
 	}
 }
 
-// activityLeaseResult always returns what is still held, so a caller sees the
-// environment's whole claim set rather than only the lease it just moved.
-// released is non-nil only for a release call; take and list pass nil.
+// activityLeaseResult returns every claim still held; released is nil except on release.
 func activityLeaseResult(tenant, environment string, lease *activity.EnvironmentActivityLease, released *bool) (*mcp.CallToolResult, ActivityLeaseResult, error) {
 	held, err := activity.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {

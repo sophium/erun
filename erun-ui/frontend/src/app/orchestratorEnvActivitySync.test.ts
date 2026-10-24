@@ -12,12 +12,7 @@ import type { AppDispatch } from './store';
 import { selectionKey } from './versionSuggestions';
 import { handleEnvActivity } from './wailsEventThunks';
 
-// This is the bug from the reported card/row contradiction: the sidebar row
-// (envStatusSlice, driven by the env-activity event) and the orchestrator
-// card (orchestratorsSlice, joined onto env refs at read-model build time)
-// are two different feeds of the same poller observation. The fix routes one
-// event to both; this test drives that event through the real thunk and
-// reads both surfaces back, rather than asserting the reducer was called.
+// The sidebar row and the orchestrator card must both follow one env-activity event.
 function buildStore(orchestratorId: string, tenant: string, environment: string) {
   const store = configureStore({
     reducer: { envStatus: envStatusReducer, orchestrators: orchestratorsReducer },
@@ -50,10 +45,6 @@ function buildStore(orchestratorId: string, tenant: string, environment: string)
   return store;
 }
 
-// isFailure asks the one question the reported bug got wrong for: does this
-// surface currently read as a failure? Deriving it identically for both
-// surfaces from their own state is what proves they agree, rather than
-// re-testing each derivation function in isolation.
 function rowIsFailure(store: ReturnType<typeof buildStore>, key: string): boolean {
   const activity = store.getState().envStatus.activityByEnv[key];
   const indicator = environmentIndicator({
@@ -97,8 +88,6 @@ test('an env-activity event updates the orchestrator card, not just the sidebar 
   );
   assert.equal(cardIsFailure(store, 'orch'), true, 'card should show the outage once reported');
 
-  // This is the transition the bug lost: the card kept the stale outage after
-  // the poller recovered, because nothing routed the recovery event to it.
   dispatch(
     handleEnvActivity({
       tenant,

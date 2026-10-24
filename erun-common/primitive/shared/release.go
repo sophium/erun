@@ -68,17 +68,9 @@ type ReleasePackagingSyncSpec struct {
 	MarketplacePath string `json:"marketplacePath,omitempty"`
 }
 
-// ReleaseSpec splits its stages around the publish deliberately. Stages run
-// while the release is still private and every step is recoverable;
-// PostPublishStages carry the outward-facing, irreversible steps (the tag push,
-// the branch push, and the packaging sync that depends on the public tag).
-//
-// A run that publishes reaches them only once the version's images and charts
-// are published and proven resolvable, and ArtifactsPublished records that it
-// did. `erun release` marks source control only, so it reaches the same stages
-// having published nothing at all — the split is around a publish it does not
-// perform — and a failure there has to say so rather than congratulate the
-// operator on a registry it never wrote to.
+// ReleaseSpec runs Stages while the release is still private and recoverable;
+// PostPublishStages hold the irreversible pushes. `erun release` reaches them having
+// published nothing, and its failures must not claim otherwise.
 type ReleaseSpec struct {
 	ProjectRoot       string                   `json:"projectRoot"`
 	ReleaseRoot       string                   `json:"releaseRoot"`
@@ -94,17 +86,11 @@ type ReleaseSpec struct {
 	DockerImages      []ReleaseDockerImageSpec `json:"dockerImages,omitempty"`
 	Stages            []ReleaseStage           `json:"stages,omitempty"`
 	PostPublishStages []ReleaseStage           `json:"postPublishStages,omitempty"`
-	// LinuxPackages are the linux package components the release exports
-	// (their `dist` stage, every release platform) into LinuxPackageDir during
-	// the publish, and attaches to the GitHub release once the tag is public.
+	// LinuxPackages are exported during the publish and attached once the tag is public.
 	LinuxPackages   []LinuxPackageSpec `json:"linuxPackages,omitempty"`
 	LinuxPackageDir string             `json:"linuxPackageDir,omitempty"`
 
-	// ArtifactsPublished records that this run built, pushed and verified the
-	// version's images and charts, so the push-stage failures that come after
-	// it may say the registry holds them. It is run state rather than part of
-	// the resolved plan, so it is not serialized -- and it stays false for
-	// `erun release`, which marks source control and never publishes.
+	// ArtifactsPublished is run state, not plan; always false for `erun release`.
 	ArtifactsPublished bool `json:"-"`
 }
 
@@ -188,15 +174,8 @@ func RunReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRu
 	return RunClaimedReleaseSpec(ctx, spec, runGit, syncPackagingChecksums, publisher)
 }
 
-// RunClaimedReleaseSpec is the release's actual work, run only once
-// runReleaseSpec has claimed the version being released.
-//
-// publisher may be nil. erun release marks source control and nothing else, so
-// it reaches these stages without one, and everything the publish owns is
-// skipped: the refusal to announce a version whose resolved images this run
-// would not publish, the pre-spend base-branch and disk-headroom checks, and
-// the build+publish itself. That is why a release's tag is a record of the
-// source it points at and never a claim that artifacts exist for it.
+// RunClaimedReleaseSpec runs once the version is claimed. A nil publisher (erun release)
+// skips everything the publish owns, so a tag never implies artifacts exist.
 func RunClaimedReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
 	traceReleaseSpec(ctx, spec)
 	if err := ensureReleaseCouldPublish(spec, publisher); err != nil {
@@ -215,11 +194,6 @@ func RunClaimedReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCo
 	if err := publishClaimedRelease(ctx, spec, runGit, publisher); err != nil {
 		return err
 	}
-	// The publish, when this run has one, has now built, pushed and verified
-	// every image and chart this version resolves, which is what the
-	// post-publish stages' failures are allowed to say. `erun release` reaches
-	// the same stages with no publisher and nothing published, and those
-	// messages must not tell its operator otherwise.
 	if publisher != nil && publisher.Publish != nil {
 		spec.ArtifactsPublished = true
 	}
@@ -229,9 +203,7 @@ func RunClaimedReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCo
 	return uploadPublishedLinuxPackages(ctx, spec, publisher)
 }
 
-// uploadPublishedLinuxPackages attaches the linux packages only for a run that
-// published, which is the run that exported them; the GitHub release they
-// attach to needs the tag the post-publish stages pushed.
+// uploadPublishedLinuxPackages runs only for a run that published, after the tag push.
 func uploadPublishedLinuxPackages(ctx core.Context, spec ReleaseSpec, publisher *ReleasePublisher) error {
 	if publisher == nil || publisher.Publish == nil {
 		return nil
@@ -239,24 +211,8 @@ func uploadPublishedLinuxPackages(ctx core.Context, spec ReleaseSpec, publisher 
 	return UploadReleaseLinuxPackages(ctx, spec)
 }
 
-// ensureReleaseHasDiskHeadroom runs the release's disk preflight before the
-// release stage, the last of the refusals that precede any mutation, so a
-// refusal leaves the repository exactly as it was found.
-//
-// It belongs there rather than immediately before the publish, where it used to
-// run. By that point the "release" stage had already written the version files,
-// committed the stamp and created the annotated tag, so a run refused for space
-// left all three behind, unpushed — and the next attempt failed on that residue
-// (`release tag "vX" already exists at <sha>, expected current HEAD <sha>`)
-// instead of on the disk that was still too short. The remedy that collision
-// names ("delete it with `git tag -d vX` to retry") then reapplied to a symptom,
-// one fresh tag per attempt, for as long as the node stayed full. Everything
-// before this point in the run is read-only, and the only thing the preflight
-// itself writes is docker's own build cache, so a refusal here is
-// side-effect-free.
-//
-// A nil publisher means the caller is marking source control only (see
-// RunReleaseSpec), which builds nothing and so has no disk to size.
+// ensureReleaseHasDiskHeadroom runs before the release stage, so a refusal leaves no
+// version commit or tag behind. A nil publisher builds nothing and skips it.
 func ensureReleaseHasDiskHeadroom(ctx core.Context, publisher *ReleasePublisher) error {
 	if publisher == nil {
 		return nil
@@ -264,8 +220,6 @@ func ensureReleaseHasDiskHeadroom(ctx core.Context, publisher *ReleasePublisher)
 	return ensureReleaseDiskHeadroom(ctx)
 }
 
-// ensureReleaseCouldPublish refuses a release whose resolved images nothing in
-// this run would publish.
 func ensureReleaseCouldPublish(spec ReleaseSpec, publisher *ReleasePublisher) error {
 	if publisher == nil {
 		return nil
@@ -273,12 +227,7 @@ func ensureReleaseCouldPublish(spec ReleaseSpec, publisher *ReleasePublisher) er
 	return ensureReleasePublishesResolvedImages(spec, *publisher)
 }
 
-// publishClaimedRelease runs the release's own publication, or reports that
-// there was none. With a publisher it first re-checks the base branch, the one
-// pre-spend check that has to hold as late as possible; without one -- erun
-// release, which marks source control only -- it says what did not happen, so a
-// release that exits 0 having published nothing cannot read as one that
-// published something.
+// publishClaimedRelease publishes, or says nothing was published (erun release).
 func publishClaimedRelease(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRunnerFunc, publisher *ReleasePublisher) error {
 	if publisher == nil {
 		if spec.Version != "" {
@@ -287,11 +236,7 @@ func publishClaimedRelease(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCo
 		}
 		return nil
 	}
-	// The base branch is re-checked here rather than earlier on purpose: this is
-	// the last moment before the build spends, so the window in which it could
-	// have moved is as small as the check can make it. The disk preflight,
-	// which refuses without mutating anything, runs before the release stage
-	// instead; see ensureReleaseHasDiskHeadroom.
+	// Re-checked as late as possible, right before the build spends.
 	if err := ensureReleaseBaseBranchUnmoved(ctx, spec, runGit); err != nil {
 		return err
 	}
@@ -315,8 +260,6 @@ func traceReleaseSpec(ctx core.Context, spec ReleaseSpec) {
 	if spec.NextVersion != "" {
 		ctx.Trace("next version: " + spec.NextVersion)
 	}
-	// Named as the publish list it is: these refs are what the release pushes
-	// to the registry before it tags the version, not incidental metadata.
 	for _, image := range spec.DockerImages {
 		ctx.Trace("publishing image: " + image.Tag)
 	}
@@ -396,8 +339,6 @@ func RunReleaseCommand(ctx core.Context, spec ReleaseSpec, stage ReleaseStage, c
 	}
 	branchPush := isReleaseBranchPush(stage, command)
 	if branchPush && ctx.DryRun {
-		// Part of the plan rather than the run: a real release says nothing here
-		// unless the push is actually rejected, and then says it as it happens.
 		ctx.Trace(fmt.Sprintf("release: a push rejected by a branch that moved during the release is rebased onto origin/%s and retried (up to %d attempts)", spec.Branch, releasePushRebaseAttempts))
 	}
 	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
@@ -413,17 +354,12 @@ func RunReleaseCommand(ctx core.Context, spec ReleaseSpec, stage ReleaseStage, c
 	return runReleaseStageCommand(ctx, command, runGit)
 }
 
-// runReleaseStageCommand runs one of a stage's git commands. A push captures
-// its own stderr, because that is the only stream GitHub's bypass notice ever
-// appears on; every other stage command streams straight through.
+// runReleaseStageCommand captures a push's stderr, the only stream GitHub's bypass notice uses.
 func runReleaseStageCommand(ctx core.Context, command ReleaseCommandSpec, runGit gitx.GitCommandRunnerFunc) error {
 	if !isGitPushArgs(command.Args) {
 		return runGit(command.Dir, ctx.Stdout, ctx.Stderr, command.Args...)
 	}
-	// The tag push that publishes the version is the release's other push, and
-	// it is a stage command rather than the branch push -- so it takes the same
-	// bypass report from the same capture rather than the plain runner, which
-	// would leave the tag path silent.
+	// The tag push needs the same bypass capture as the branch push.
 	var pushOutput strings.Builder
 	return runReleasePush(ctx, command.Dir, runGit, &pushOutput, command.Args...)
 }

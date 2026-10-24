@@ -8,13 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// TestLoginCloudProviderAliasForce locks in the contract the desktop's
-// "sign in as someone else" action (erun-ui's SwitchCloudProviderIdentity)
-// depends on: LoginCloudProviderAlias short-circuits without running any
-// login flow at all when the stored session is already active, so switching
-// accounts on an already-connected alias is impossible without Force -- not
-// just impolite, structurally impossible, since the desktop has no other way
-// to reach the provider's login flow.
+// Without Force, an active session short-circuits login, so the desktop could never switch identity.
 func TestLoginCloudProviderAliasForce(t *testing.T) {
 	provider := config.CloudProviderConfig{Alias: "me+111111111111@aws", Provider: config.CloudProviderAWS, Profile: "me+111111111111@aws"}
 	store := stubCloudContextStore{config: config.ERunConfig{CloudProviders: []config.CloudProviderConfig{provider}}}
@@ -78,11 +72,7 @@ func TestLoginCloudProviderAliasForce(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected the failed re-login to surface an error")
 		}
-		// Switching identity is a force re-login, not a logout followed by a
-		// login: LoginCloudProviderAlias never calls LogoutCloudProviderAlias
-		// or otherwise clears the prior session before attempting the new one,
-		// so a cancelled or failed attempt leaves the operator signed in as
-		// they were, rather than signed out with nothing to show for it.
+		// A force re-login does not clear the prior session, so a failed attempt keeps the operator signed in.
 		status := CloudProviderTokenStatus(provider, deps)
 		if status.Status != config.CloudTokenStatusActive {
 			t.Fatalf("Status after a failed switch = %q, want the prior session still active", status.Status)

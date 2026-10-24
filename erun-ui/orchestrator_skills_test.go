@@ -14,7 +14,6 @@ func TestOrchestratorSkillsInstalledByDefault(t *testing.T) {
 	app := orchestratorTestApp(t) // confines $HOME to a temp dir
 	defer app.shutdown(context.Background())
 
-	// Fixture skills source standing in for the repo's erun-skills/skills.
 	srcRoot := t.TempDir()
 	for _, name := range []string{"erun-orchestrate", "erun-file-issue"} {
 		dir := filepath.Join(srcRoot, name)
@@ -39,7 +38,7 @@ func TestOrchestratorSkillsInstalledByDefault(t *testing.T) {
 		}
 	}
 
-	// Idempotent + edit-preserving: a hand-edited installed skill survives a re-run.
+	// A hand-edited installed skill survives a re-run.
 	edited := filepath.Join(skillsRoot, "erun-orchestrate", "SKILL.md")
 	if err := os.WriteFile(edited, []byte("EDITED"), 0o644); err != nil {
 		t.Fatal(err)
@@ -52,16 +51,13 @@ func TestOrchestratorSkillsInstalledByDefault(t *testing.T) {
 	}
 }
 
-// installedOrchestrateSkill is the path an installed erun-orchestrate SKILL.md
-// lands at under the test's confined $HOME.
 func installedOrchestrateSkill(t *testing.T) string {
 	t.Helper()
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".claude", "skills", "erun-orchestrate", "SKILL.md")
 }
 
-// singleSkillSource writes a one-skill fixture source (erun-orchestrate) and
-// points ERUN_SKILLS_DIR at it, returning the source SKILL.md path.
+// singleSkillSource points ERUN_SKILLS_DIR at a one-skill fixture and returns its SKILL.md.
 func singleSkillSource(t *testing.T, body string) string {
 	t.Helper()
 	srcRoot := t.TempDir()
@@ -90,7 +86,6 @@ func TestOrchestratorSkillsRefreshWhenSourceChanges(t *testing.T) {
 		t.Fatalf("expected installed v1, got %q", data)
 	}
 
-	// A newer skill ships; an untouched install must track it on next launch.
 	if err := os.WriteFile(srcMD, []byte("# v2 newer\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -112,8 +107,7 @@ func TestOrchestratorSkillsPreserveEditAcrossSourceChange(t *testing.T) {
 	}
 	installed := installedOrchestrateSkill(t)
 
-	// Operator edits the installed skill; then a newer source ships. The edit
-	// must win over the refresh.
+	// The operator's edit must win over a newer source.
 	if err := os.WriteFile(installed, []byte("# operator edit\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -128,19 +122,13 @@ func TestOrchestratorSkillsPreserveEditAcrossSourceChange(t *testing.T) {
 	}
 }
 
-// clearSkillsOverride removes the exact-source override so a test exercises the
-// resolution a desktop actually runs with.
 func clearSkillsOverride(t *testing.T) {
 	t.Helper()
 	t.Setenv("ERUN_SKILLS_DIR", "")
 }
 
-// runFromBareLayout puts the running binary where the desktop actually runs
-// from: a directory with no checkout above it, so nothing but the build stamp
-// can name the skills this build ships. Pinned rather than inherited because a
-// test binary's own location is not the test's to choose — one compiled into the
-// checkout would otherwise resolve the repo's own skills and quietly stop
-// exercising the layout the test is about.
+// runFromBareLayout pins the binary outside any checkout, so only the build stamp
+// can name the skills; a test binary inside the checkout would resolve them anyway.
 func runFromBareLayout(t *testing.T) string {
 	t.Helper()
 	exeDir := filepath.Join(t.TempDir(), "dev-bin")
@@ -154,11 +142,7 @@ func runFromBareLayout(t *testing.T) string {
 	return exeDir
 }
 
-// stampedSkillsCheckout stands in for the checkout a desktop build was produced
-// from, in the layout that motivated the stamp: the running binary sits nowhere
-// near a source tree, so the walk up from the executable resolves nothing and
-// only the build stamp names the skills this build shipped. Returns the source
-// SKILL.md.
+// stampedSkillsCheckout returns the source SKILL.md reachable only via the build stamp.
 func stampedSkillsCheckout(t *testing.T, body string) string {
 	t.Helper()
 	clearSkillsOverride(t)
@@ -176,7 +160,6 @@ func stampedSkillsCheckout(t *testing.T, body string) string {
 	return srcMD
 }
 
-// stampSkillsSource sets the build stamp for one test and restores it after.
 func stampSkillsSource(t *testing.T, dir string) {
 	t.Helper()
 	previous := buildSkillsSource
@@ -184,8 +167,6 @@ func stampSkillsSource(t *testing.T, dir string) {
 	t.Cleanup(func() { buildSkillsSource = previous })
 }
 
-// orchestratorTestAppWithEmits captures the frontend events the app posts, so a
-// test can assert what the operator is actually told.
 func orchestratorTestAppWithEmits(t *testing.T) (*App, *capturedEmits) {
 	t.Helper()
 	app := orchestratorTestApp(t)
@@ -194,11 +175,7 @@ func orchestratorTestAppWithEmits(t *testing.T) (*App, *capturedEmits) {
 	return app, emits
 }
 
-// TestOrchestratorSkillsRefreshFromBuildStampedCheckout covers the layout the
-// desktop is actually built and run from: the bundle is copied out of its
-// checkout, so nothing above the running binary names a source tree and only the
-// build stamp resolves one. An installed copy erun itself wrote must track that
-// source instead of freezing at whatever landed on first install.
+// The bundle is copied out of its checkout, so only the build stamp resolves a source.
 func TestOrchestratorSkillsRefreshFromBuildStampedCheckout(t *testing.T) {
 	app, emits := orchestratorTestAppWithEmits(t)
 	defer app.shutdown(context.Background())
@@ -212,8 +189,6 @@ func TestOrchestratorSkillsRefreshFromBuildStampedCheckout(t *testing.T) {
 		t.Fatalf("expected the stamped checkout's skill installed, got %q", data)
 	}
 
-	// The source changes and the desktop is restarted: the untouched install
-	// must follow it.
 	if err := os.WriteFile(srcMD, []byte("# v2 newer\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -223,8 +198,7 @@ func TestOrchestratorSkillsRefreshFromBuildStampedCheckout(t *testing.T) {
 	if data, _ := os.ReadFile(installed); string(data) != "# v2 newer\n" {
 		t.Fatalf("expected the untouched install refreshed from the stamped checkout, got %q", data)
 	}
-	// The marker moves with the refresh, so the next launch can still tell this
-	// untouched copy from an edited one.
+	// The marker moves with the refresh so later launches can detect edits.
 	marker, err := os.ReadFile(filepath.Join(filepath.Dir(installed), podruntime.AgentSkillMarker))
 	if err != nil {
 		t.Fatalf("read skill marker: %v", err)
@@ -241,9 +215,6 @@ func TestOrchestratorSkillsRefreshFromBuildStampedCheckout(t *testing.T) {
 	}
 }
 
-// TestOrchestratorSkillsPreserveEditFromBuildStampedCheckout keeps the
-// operator's copy theirs in that same layout: resolving a source is not licence
-// to overwrite a skill edited in place.
 func TestOrchestratorSkillsPreserveEditFromBuildStampedCheckout(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -267,18 +238,14 @@ func TestOrchestratorSkillsPreserveEditFromBuildStampedCheckout(t *testing.T) {
 	}
 }
 
-// TestOrchestratorSkillsReportUnresolvableSource locks the second half of the
-// contract: when nothing resolves, the launch still succeeds and the operator is
-// told once — a build that silently stops installing skills reads exactly like
-// one where the skill had not changed.
+// A silent failure to install reads like an unchanged skill, so it is reported once.
 func TestOrchestratorSkillsReportUnresolvableSource(t *testing.T) {
 	app, emits := orchestratorTestAppWithEmits(t)
 	defer app.shutdown(context.Background())
 
 	clearSkillsOverride(t)
 	exeDir := runFromBareLayout(t)
-	// A checkout that is not on this machine, which is what a binary built
-	// elsewhere carries.
+	// A checkout not on this machine, as a binary built elsewhere carries.
 	moved := filepath.Join(t.TempDir(), "checkout-that-moved", "erun-skills", "skills")
 	stampSkillsSource(t, moved)
 
@@ -296,8 +263,6 @@ func TestOrchestratorSkillsReportUnresolvableSource(t *testing.T) {
 	if payload.Kind != "warning" {
 		t.Fatalf("kind = %q, want warning", payload.Kind)
 	}
-	// The report has to be actionable on its own: what the build expected, where
-	// the running binary looked instead, and both recoveries.
 	for _, want := range []string{moved, exeDir, "ERUN_SKILLS_DIR", "build.sh"} {
 		if !strings.Contains(payload.Message, want) {
 			t.Fatalf("report does not name %q:\n%s", want, payload.Message)
@@ -307,8 +272,7 @@ func TestOrchestratorSkillsReportUnresolvableSource(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "erun-orchestrate")); !os.IsNotExist(err) {
 		t.Fatalf("nothing resolvable must install nothing, stat err = %v", err)
 	}
-	// Once: the condition belongs to the build, so a second launch repeats it in
-	// the log only.
+	// Once: a second launch repeats it in the log only.
 	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
 		t.Fatalf("second ensureOrchestratorWorkspace: %v", err)
 	}
@@ -317,9 +281,7 @@ func TestOrchestratorSkillsReportUnresolvableSource(t *testing.T) {
 	}
 }
 
-// TestHostSkillsSourceOverrideWinsOverBuildStamp keeps ERUN_SKILLS_DIR meaning
-// "use exactly this": it beats the build stamp, and an empty directory installs
-// nothing rather than falling back to a source the caller did not name.
+// ERUN_SKILLS_DIR means "use exactly this", even when empty.
 func TestHostSkillsSourceOverrideWinsOverBuildStamp(t *testing.T) {
 	app, emits := orchestratorTestAppWithEmits(t)
 	defer app.shutdown(context.Background())
@@ -348,10 +310,6 @@ func TestHostSkillsSourceOverrideWinsOverBuildStamp(t *testing.T) {
 	}
 }
 
-// TestOrchestratorSkillsResolveFromCheckoutAroundExecutable keeps the layout
-// that already worked working: a binary sitting inside a checkout resolves that
-// checkout's skills even with no build stamp, which is the case a packaged
-// tree — or a binary built by anything other than these scripts — relies on.
 func TestOrchestratorSkillsResolveFromCheckoutAroundExecutable(t *testing.T) {
 	app, emits := orchestratorTestAppWithEmits(t)
 	defer app.shutdown(context.Background())
@@ -367,7 +325,6 @@ func TestOrchestratorSkillsResolveFromCheckoutAroundExecutable(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# from the checkout\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Two levels down, the way a built binary sits under its checkout.
 	exeDir := filepath.Join(checkout, "erun-ui", "bin")
 	if err := os.MkdirAll(exeDir, 0o755); err != nil {
 		t.Fatal(err)

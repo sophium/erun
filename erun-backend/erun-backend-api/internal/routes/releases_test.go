@@ -73,8 +73,6 @@ func TestCreateReleaseQueuesTheCommit(t *testing.T) {
 	}
 }
 
-// TestCreateReleaseAnswers200ForAnAlreadyReleasedCommit lets a caller tell an
-// enqueue apart from "this commit is already released" without minting anything.
 func TestCreateReleaseAnswers200ForAnAlreadyReleasedCommit(t *testing.T) {
 	queue := &stubReleaseQueue{result: service.EnqueueResult{
 		AlreadyReleased: true,
@@ -103,8 +101,6 @@ func TestCreateReleaseRejectsAnInvalidRequest(t *testing.T) {
 	}
 }
 
-// TestListReviewReleasesScopesToTheReview is how a review names why its release
-// failed: the reason the release gave lives on the release row.
 func TestListReviewReleasesScopesToTheReview(t *testing.T) {
 	releases := &stubReleaseRepository{list: []model.Release{{
 		ReleaseID:     "rel-1",

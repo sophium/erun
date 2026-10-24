@@ -12,9 +12,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// The mounted registry credential seeds a host the pod lacks and never replaces
-// one it already has: the pod's own login is more current than what init
-// resolved on the operator's host.
 func TestSyncRuntimeRegistryCredentialAddsOnlyMissingHosts(t *testing.T) {
 	boot := newTestRuntimeBoot(t, nil)
 	if describeRuntimeRegistryCredential(boot) != "" {
@@ -52,9 +49,6 @@ func writePlatformAliasSecret(t *testing.T, boot runtimeBoot) configpkg.CloudPro
 	return provider
 }
 
-// The platform alias joins the root config's provider list beside the
-// infrastructure provider the chart injected, never as a second key, and its
-// token lands at the file name init shipped.
 func TestRuntimeBootSeedsThePlatformAliasBesideTheInfrastructureProvider(t *testing.T) {
 	boot := newTestRuntimeBoot(t, map[string]string{
 		"ERUN_TENANT": "team", "ERUN_ENVIRONMENT": "dev",

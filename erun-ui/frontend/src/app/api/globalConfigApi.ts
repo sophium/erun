@@ -24,15 +24,11 @@ export const globalConfigApi = wailsApi.injectEndpoints({
       ),
       invalidatesTags: ['GlobalConfig', 'AppState'],
     }),
-    // A mutation rather than a query: the list to fetch depends on a base URL
-    // the operator may still be editing, so it is fetched on demand rather than
-    // cached against a value that changes as they type.
+    // A mutation: the base URL may still be changing as the operator types.
     loadGatewayModels: builder.mutation<UIGatewayModel[], string>({
       queryFn: wailsQueryFn<string, UIGatewayModel[]>((baseURL) => LoadGatewayModels(baseURL)),
     }),
-    // Which credential a deploy would deliver: a value saved in ERun settings,
-    // or this machine's own Claude Code key. Read rather than inferred, so the
-    // catalog reports the key that will actually be used.
+    // Read rather than inferred, so the catalog reports the key a deploy will use.
     getGatewayCredentialStatus: builder.query<UIGatewayCredentialStatus, NoValue>({
       queryFn: wailsQueryFn<NoValue, UIGatewayCredentialStatus>(() =>
         LoadGatewayCredentialStatus(),

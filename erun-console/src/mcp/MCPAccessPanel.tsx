@@ -26,12 +26,7 @@ import { hostnameFieldLabel } from './hostnameFieldLabel';
 import { DriveToolResult } from './mcpFormShared';
 import { OperateToolForm } from './OperateToolForm';
 
-// DriveToolForm is the console's first caller of an environment's live MCP
-// edge, not just the token-minting half of it. The hostname prefills from the
-// environment's own ExposedHostname once the platform has actually exposed
-// it; the field stays editable and falls back to plain manual entry for an
-// environment that isn't exposed yet, or if the operator wants to point at a
-// different hostname.
+// The hostname prefills from ExposedHostname once exposed and stays editable.
 function DriveToolForm({
   mcpToken,
   exposedHostname,
@@ -79,30 +74,18 @@ function DriveToolForm({
   );
 }
 
-// sessionFieldLabel mirrors hostnameFieldLabel's discovered-vs-manual wording
-// for the attach session id: the field stays editable either way, the label
-// just says whether this environment has reported any live sessions to pick
-// from.
 function sessionFieldLabel(discovered: boolean): string {
   return discovered
     ? 'Session id (pick a live session below, or edit to attach elsewhere)'
     : 'Session id (none reported yet — enter one from `erun open --ai` or a linked orchestrator)';
 }
 
-// preferredDefaultSession picks the field's initial autofill: an
-// exited/oom-killed session's dtach socket is already gone, so defaulting to
-// it would just start a bare new shell under that id instead of reaching a
-// live process. Returns undefined when nothing live is reported -- the
-// quick-pick buttons still let an operator choose one of the dead sessions
-// explicitly.
+// Skips exited/oom-killed sessions: their dtach socket is gone, so attaching would
+// start a bare new shell under that id.
 function preferredDefaultSession(sessions: AISessionStatus[]): AISessionStatus | undefined {
   return sessions.find((s) => s.state !== 'exited' && s.state !== 'oom-killed');
 }
 
-// useDiscoveredSessions fetches this environment's reported AI sessions and
-// autofills the still-empty session field from the preferred one, once.
-// Split out of AttachSessionForm purely to keep that component under the
-// module's max-lines-per-function budget.
 function useDiscoveredSessions(
   consoleToken: string,
   environmentId: string,
@@ -122,10 +105,6 @@ function useDiscoveredSessions(
   return discoveredSessions;
 }
 
-// SessionIdField keeps the manual-entry input every environment supports,
-// plus one quick-pick button per session this environment has actually
-// reported, so a live session no longer has to be copied in by hand from a
-// separate panel.
 function SessionIdField({
   session,
   onChange,
@@ -173,14 +152,7 @@ function SessionIdField({
   );
 }
 
-// AttachSessionForm mints its own erun:attach-scoped token (never the
-// erun:admin one DriveToolForm above uses) and opens a live WebSocket to an
-// existing dtach session in the environment's pod. The session id field
-// discovers this environment's own reported AI sessions and prefills/
-// quick-picks from them when any exist; an environment with nothing reported
-// yet still falls back to plain manual entry. This is a minimal, line-based
-// view, not a full terminal: see useAttachSessionController's comment for
-// why.
+// Mints its own erun:attach token, never the erun:admin one DriveToolForm uses.
 function AttachSessionForm({
   consoleToken,
   environmentId,
@@ -369,9 +341,6 @@ function EmptyPanel(): React.ReactElement {
   );
 }
 
-// MCPAccessPanel mints a per-env MCP bearer token and surfaces it for the
-// operator to hand to an MCP client. The backend signs the token, so the
-// browser needs no signing key. Driving tools over the live edge is separate.
 export function MCPAccessPanel({
   token,
   environments,
@@ -381,13 +350,8 @@ export function MCPAccessPanel({
 }): React.ReactElement {
   const { state, requestToken } = useMcpTokenController(token);
   const [selected, setSelected] = React.useState(environments[0]?.environmentId ?? '');
-  // Defaults to the narrower tier: requesting erun:admin needs the
-  // delete-environment entitlement (see erun-docs/agent-reference/
-  // api-protocol.md#mint-mcp-token-endpoint), which an ordinary tenant member
-  // does not hold, so defaulting to it would 403 for most operators clicking
-  // this button. erun:operate needs no additional entitlement and covers
-  // deploy/context_start/context_stop/resize; admin stays one selection away
-  // for whoever genuinely needs full capability.
+  // Defaults to erun:operate: erun:admin needs the delete-environment entitlement and
+  // would 403 for most operators.
   const [scope, setScope] = React.useState(MCP_OPERATE_SCOPE);
 
   if (environments.length === 0) {

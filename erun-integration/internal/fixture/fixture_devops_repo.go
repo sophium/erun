@@ -12,24 +12,16 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/env"
 )
 
-// WorkspaceSyncSSHStubSpec answers the several different questions one
-// workspace-sync pass asks the same `ssh` — the pod's file listing, its
-// fingerprints, and the archive its fetch step streams.
+// WorkspaceSyncSSHStubSpec answers the `ssh` calls of one workspace-sync pass.
 type WorkspaceSyncSSHStubSpec struct {
-	// IndexPaths is what `git ls-files -coz` reports: the pod's Git-visible files.
 	IndexPaths []string
-	// StatLines are `stat -c '%s %Y %n'` records (size, mtime, path). They are
-	// what lets a pass skip an unchanged file; with none, everything is fetched.
+	// StatLines are `stat -c '%s %Y %n'` records; with none, everything is fetched.
 	StatLines []string
-	// ArchivePath is a tar file the fetch step receives verbatim, standing in for
-	// the pod's `tar -cf -`. Empty makes the fetch fail.
+	// ArchivePath stands in for the pod's `tar -cf -`; empty makes the fetch fail.
 	ArchivePath string
 }
 
-// StubWorkspaceSyncSSH writes the argv-branching `ssh` stub a real sync pass
-// needs and returns its env routing. The pass's fingerprint listing pipes the
-// index listing into stat, so the stat branch has to be matched before the index
-// listing it contains.
+// StubWorkspaceSyncSSH writes the `ssh` stub; the stat branch must match before the index listing it pipes from.
 func StubWorkspaceSyncSSH(t testing.TB, dir string, spec WorkspaceSyncSSHStubSpec) []string {
 	t.Helper()
 	statBranch := ":"
@@ -44,12 +36,7 @@ func StubWorkspaceSyncSSH(t testing.TB, dir string, spec WorkspaceSyncSSHStubSpe
 	if spec.ArchivePath != "" {
 		archiveBranch = "cat " + shellSingleQuote(filepath.ToSlash(spec.ArchivePath))
 	}
-	// The readiness probe runs a bare `true`. The outputs listing's own script
-	// exits 42 when its `cd` fails (erun-common's remoteOutputsDirAbsentExitCode)
-	// -- the sentinel that tells "the outputs dir does not exist yet" apart from
-	// every other listing failure, so "nothing there yet" must answer with that
-	// exact code rather than the bare non-zero exit a real connection failure
-	// would also produce.
+	// Exit 42 (remoteOutputsDirAbsentExitCode) means "outputs dir absent", distinct from a connection failure.
 	StubBinaryWithScript(t, dir, "ssh", `case "$*" in
   *' true') : ;;
   *'stat -c'*) `+statBranch+` ;;
@@ -65,15 +52,12 @@ exit 0
 	return StubEnv(dir, "ssh")
 }
 
-// TarEntry is one regular file in an archive written by WriteTarArchive.
 type TarEntry struct {
 	Path string
 	Body []byte
 }
 
-// WriteTarArchive writes the archive a stubbed pod streams back. Entries carry
-// an explicit mtime so a scenario can assert what the mirror did with the file
-// it received rather than with whatever the host clock stamped.
+// WriteTarArchive writes entries with an explicit mtime so scenarios do not depend on the host clock.
 func WriteTarArchive(t testing.TB, path string, entries []TarEntry, modTime time.Time) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -102,8 +86,6 @@ func WriteTarArchive(t testing.TB, path string, entries []TarEntry, modTime time
 	mustWrite(t, path, buffer.String())
 }
 
-// RunGit runs git in dir so scenarios can set up branches, tags, or remotes
-// after SeedReleaseRepo.
 func RunGit(t testing.TB, dir string, args ...string) {
 	t.Helper()
 	if err := exec("git", args, dir); err != nil {
@@ -111,17 +93,13 @@ func RunGit(t testing.TB, dir string, args ...string) {
 	}
 }
 
-// SeedDevopsRepo creates a minimal <tenant>-devops chart layout (including a
-// per-environment values file) so deploy/build commands resolve a kubernetes
-// deploy context.
+// SeedDevopsRepo creates a minimal <tenant>-devops chart layout under setup.Cwd.
 func SeedDevopsRepo(t testing.TB, setup env.Setup, tenant, environment string) string {
 	t.Helper()
 	return SeedDevopsRepoAt(t, setup.Cwd, tenant, environment)
 }
 
-// SeedDevopsRepoAt is SeedDevopsRepo with an explicit project root, for
-// scenarios whose tenant project root is not the default setup.Cwd (e.g. a
-// git-initialized repo directory named after the tenant).
+// SeedDevopsRepoAt is SeedDevopsRepo with an explicit project root.
 func SeedDevopsRepoAt(t testing.TB, root, tenant, environment string) string {
 	t.Helper()
 	devops := filepath.Join(root, tenant+"-devops")
@@ -140,9 +118,7 @@ func SeedDevopsRepoAt(t testing.TB, root, tenant, environment string) string {
 	return chart
 }
 
-// SeedDevopsRuntimeDockerfile writes the runtime-image Dockerfile so commands
-// that resolve runtime-image builds (notably open --snapshot for the local
-// environment) reach the docker-build branch in dry-run.
+// SeedDevopsRuntimeDockerfile writes the runtime-image Dockerfile.
 func SeedDevopsRuntimeDockerfile(t testing.TB, setup env.Setup, tenant string) {
 	t.Helper()
 	dir := filepath.Join(setup.Cwd, tenant+"-devops", "docker", tenant+"-devops")
@@ -152,17 +128,13 @@ func SeedDevopsRuntimeDockerfile(t testing.TB, setup env.Setup, tenant string) {
 	mustWrite(t, filepath.Join(dir, "Dockerfile"), "FROM alpine:3.22\n")
 }
 
-// SeedProjectDockerfile writes a minimal Dockerfile under setup.Cwd so
-// commands that key off "current directory contains a Dockerfile" (notably
-// the root `erun push` shorthand) register for the test invocation.
+// SeedProjectDockerfile writes a minimal Dockerfile under setup.Cwd.
 func SeedProjectDockerfile(t testing.TB, setup env.Setup) {
 	t.Helper()
 	mustWrite(t, filepath.Join(setup.Cwd, "Dockerfile"), "FROM alpine\n")
 }
 
-// SeedProjectK8sConfig writes the project .erun/config.yaml so deploy commands
-// pick up the configured deployment plan (ordering + parallel grouping) instead
-// of the hardcoded fallback.
+// SeedProjectK8sConfig writes the project .erun/config.yaml.
 func SeedProjectK8sConfig(t testing.TB, setup env.Setup, body string) {
 	t.Helper()
 	dir := filepath.Join(setup.Cwd, ".erun")
@@ -172,11 +144,8 @@ func SeedProjectK8sConfig(t testing.TB, setup env.Setup, body string) {
 	mustWrite(t, filepath.Join(dir, "config.yaml"), body)
 }
 
-// SeedGitignoredProjectConfig commits a ".erun/" gitignore rule (the exact
-// shape seen in the wild: a blanket directory ignore that also excludes the
-// per-project config it holds) and then writes .erun/config.yaml, so the
-// config resolves from disk but git never tracks it. Requires a git repo
-// already initialized at setup.Cwd (fixture.SeedGitRepo).
+// SeedGitignoredProjectConfig commits a blanket ".erun/" ignore, then writes .erun/config.yaml.
+// Requires a git repo at setup.Cwd.
 func SeedGitignoredProjectConfig(t testing.TB, setup env.Setup, body string) {
 	t.Helper()
 	mustWrite(t, filepath.Join(setup.Cwd, ".gitignore"), ".erun/\n")
@@ -185,19 +154,13 @@ func SeedGitignoredProjectConfig(t testing.TB, setup env.Setup, body string) {
 	SeedProjectK8sConfig(t, setup, body)
 }
 
-// SeedTerraformEnvRoot materializes a platform's per-env Terraform root so erun
-// terraform resolves a folder to run in, mirroring the layout the
-// erun-blueprint-platform skill scaffolds. The per-env common.tf is a real
-// symlink in production trees; the command only needs the folder + tfvars to
-// resolve, so the fixture writes plain files.
+// SeedTerraformEnvRoot writes a per-env Terraform root; common.tf is a plain file, not production's symlink.
 func SeedTerraformEnvRoot(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	SeedTerraformEnvRootAt(t, filepath.Join(setup.Cwd, "terraform-"+tenant), environment)
 }
 
-// SeedTerraformEnvRootAt is SeedTerraformEnvRoot with an explicit base dir, for
-// scenarios that relocate the Terraform base via .erun/config.yaml paths.terraform
-// instead of using the conventional terraform-<tenant>/ root.
+// SeedTerraformEnvRootAt is SeedTerraformEnvRoot with an explicit base dir.
 func SeedTerraformEnvRootAt(t testing.TB, root, environment string) {
 	t.Helper()
 	envDir := filepath.Join(root, environment)
@@ -210,11 +173,7 @@ func SeedTerraformEnvRootAt(t testing.TB, root, environment string) {
 	mustWrite(t, filepath.Join(envDir, environment+".tfvars"), "base_domain = \"erunpaas.com\"\n")
 }
 
-// SeedProjectPathsConfig writes the project .erun/config.yaml paths: block so
-// build/deploy/terraform resolve the docker/, k8s/, terraform, and VERSION
-// locations from config instead of the <tenant>-devops convention. dockerContext
-// sets paths.dockercontext (repo-root|component) to override the build-context
-// heuristic. Empty fields are omitted.
+// SeedProjectPathsConfig writes the .erun/config.yaml paths: block, omitting empty fields.
 func SeedProjectPathsConfig(t testing.TB, setup env.Setup, docker, dockerContext, k8s, terraform, version string) {
 	t.Helper()
 	var b strings.Builder
@@ -233,9 +192,7 @@ func SeedProjectPathsConfig(t testing.TB, setup env.Setup, docker, dockerContext
 	SeedProjectK8sConfig(t, setup, b.String())
 }
 
-// ComponentPathsConfig is one .erun/config.yaml components:<Name> entry —
-// the per-component twin of the fields SeedProjectPathsConfig writes under
-// the project-global paths: block. Empty fields are omitted.
+// ComponentPathsConfig is one components:<Name> entry; empty fields are omitted.
 type ComponentPathsConfig struct {
 	Name          string
 	Docker        string
@@ -245,10 +202,7 @@ type ComponentPathsConfig struct {
 	Version       string
 }
 
-// SeedProjectComponentsConfig writes the project .erun/config.yaml components:
-// map so build/deploy resolve a per-component docker/k8s/version root for a
-// monorepo of independent deployables that do not share one paths: root.
-// Entries are written in the given order for deterministic golden output.
+// SeedProjectComponentsConfig writes the components: map in the given order.
 func SeedProjectComponentsConfig(t testing.TB, setup env.Setup, entries ...ComponentPathsConfig) {
 	t.Helper()
 	var b strings.Builder
@@ -270,9 +224,7 @@ func SeedProjectComponentsConfig(t testing.TB, setup env.Setup, entries ...Compo
 	SeedProjectK8sConfig(t, setup, b.String())
 }
 
-// SeedDockerComponentAt writes <dockerDir>/<component>/Dockerfile so a build
-// resolves a component build context at a caller-chosen docker root. dockerDir
-// must be named "docker" — the standard-layout checks key off the folder name.
+// SeedDockerComponentAt writes <dockerDir>/<component>/Dockerfile; dockerDir must be named "docker".
 func SeedDockerComponentAt(t testing.TB, dockerDir, component string) {
 	t.Helper()
 	dir := filepath.Join(dockerDir, component)
@@ -282,9 +234,7 @@ func SeedDockerComponentAt(t testing.TB, dockerDir, component string) {
 	mustWrite(t, filepath.Join(dir, "Dockerfile"), "FROM alpine:3.22\n")
 }
 
-// SeedK8sChartAt writes <k8sDir>/<chartName>/Chart.yaml (plus values files) so a
-// deploy resolves a chart at a caller-chosen k8s root. k8sDir must be named
-// "k8s" — the chart-discovery checks key off the folder name.
+// SeedK8sChartAt writes a chart under k8sDir, which must be named "k8s".
 func SeedK8sChartAt(t testing.TB, k8sDir, chartName, tenant, environment string) {
 	t.Helper()
 	chart := filepath.Join(k8sDir, chartName)
@@ -296,9 +246,7 @@ func SeedK8sChartAt(t testing.TB, k8sDir, chartName, tenant, environment string)
 	mustWrite(t, filepath.Join(chart, "values."+strings.ToLower(strings.TrimSpace(environment))+".yaml"), "environment: "+environment+"\n")
 }
 
-// SeedDevopsBackendCharts seeds the three opt-in backend charts
-// (erun-backend-postgres, erun-backend-db, erun-backend-api) alongside
-// SeedDevopsRepo's runtime chart so deploy --dry-run can resolve them.
+// SeedDevopsBackendCharts seeds the three opt-in erun-backend-* charts.
 func SeedDevopsBackendCharts(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	envSlug := strings.ToLower(strings.TrimSpace(environment))
@@ -316,10 +264,7 @@ func SeedDevopsBackendCharts(t testing.TB, setup env.Setup, tenant, environment 
 	}
 }
 
-// SeedDevopsComponentChart seeds a single non-opt-in, non-runtime component
-// chart (e.g. a docs chart) to prove opt-in-only resolution does not auto-deploy
-// it. Usable with or without SeedDevopsRepo: without it the tree is
-// component-only and the runtime deploys via the published erun-devops chart.
+// SeedDevopsComponentChart seeds one non-opt-in component chart, with or without SeedDevopsRepo.
 func SeedDevopsComponentChart(t testing.TB, setup env.Setup, tenant, environment, chartName string) {
 	t.Helper()
 	envSlug := strings.ToLower(strings.TrimSpace(environment))
@@ -332,11 +277,7 @@ func SeedDevopsComponentChart(t testing.TB, setup env.Setup, tenant, environment
 	mustWrite(t, filepath.Join(chart, "values."+envSlug+".yaml"), "environment: "+environment+"\n")
 }
 
-// SeedDevopsUmbrellaChart seeds a component chart with an OCI dependency on a
-// published erun-* subchart (the erun-blueprint-platform pattern, e.g.
-// team-backend-api wrapping erun-backend-api). deploy must helm dependency build
-// such a chart before install, so use it to prove the dependency-build step is
-// traced.
+// SeedDevopsUmbrellaChart seeds a chart with an OCI dependency on a published erun-* subchart.
 func SeedDevopsUmbrellaChart(t testing.TB, setup env.Setup, tenant, environment, chartName, dependencyName string) {
 	t.Helper()
 	envSlug := strings.ToLower(strings.TrimSpace(environment))

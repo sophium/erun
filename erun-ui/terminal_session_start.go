@@ -12,10 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// StartSession spawns the ERun tab's `erun open` PTY, queued through the
-// per-(tenant,env) action runner so a parallel AI-tab open for the same env
-// cannot race a duplicate build+deploy. The Wails caller blocks until the
-// session is created or fails.
+// StartSession spawns the ERun tab's `erun open` PTY through the per-env action
+// runner, so a parallel AI-tab open cannot duplicate a build+deploy.
 func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("start ERun session", selection.Tenant, selection.Environment); err != nil {
@@ -52,8 +50,6 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
 		a.mu.Unlock()
 		go a.startWorkspaceSyncForSelection(selection)
-		// Reusing an existing session — already past setup, gate
-		// can release immediately.
 		existing.signalReady(nil)
 		return startSessionResult{
 			SessionID: existing.serial,
@@ -63,9 +59,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	}
 	a.mu.Unlock()
 
-	// open is a pure primitive: the tab opens the shell against the
-	// already-deployed runtime. Deploy is the caller's job (create / Deploy
-	// button), never a side effect of opening a tab.
+	// Opening never deploys; that is the caller's explicit action.
 	a.ensureEnvRuntimeOnce(selection)
 	openParams := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
@@ -109,11 +103,8 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	go a.startWorkspaceSyncForSelection(selection)
 	go a.startCloudCredentialsRefresherForSelection(selection)
 
-	// A fresh open attempt supersedes any stopped/failed flag the row
-	// carried; the reconnect refusal paths re-flag if this open fails too.
-	// Opening is also the deliberate wake for a runtime the operator stopped —
-	// `erun open` scales it back up — so the stop latch is released here or the
-	// reconnect gate would keep refusing against an env that is coming back.
+	// Opening is the deliberate wake for a stopped runtime, so release the stop
+	// latch or the reconnect gate keeps refusing.
 	a.clearRuntimeStopped(selection)
 	a.emitEnvStatus(selection, "")
 	a.logSpawnedCommandToLocal(selection, "erun", formatLocalCommandLog(formatLaunchCommand(openParams), "ERun tab"))
@@ -200,16 +191,9 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 	}, nil
 }
 
-// StartAISession spawns the AI tab's `erun open` PTY under the same per-env
-// queue gating as StartSession, so an AI tab opened alongside an ERun tab
-// cannot trigger a duplicate build+deploy.
-//
-// A fresh (non-reattach) start checks the environment's activity leases first:
-// this desktop's own AI/ERun/Local sessions never take one, so any held lease
-// names a job (an orchestrator or CLI agent) already competing for the same
-// pod's CPU, memory and disk. Unless confirmed is true, that start is reported
-// back as occupied rather than launched, so starting a second agent stays a
-// deliberate choice instead of a silent one.
+// StartAISession spawns the AI tab's `erun open` PTY through the per-env queue.
+// A fresh start held by another agent's activity lease reports occupied unless
+// confirmed.
 func (a *App) StartAISession(selection uiSelection, slot, cols, rows int, confirmed bool) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("start AI session", selection.Tenant, selection.Environment); err != nil {
@@ -260,9 +244,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	params := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
-		// The persistent pod session launches the AI tool itself, once on
-		// create; reopening reattaches to the running tool rather than launching
-		// a parallel one.
+		// The pod session launches the AI tool once on create; reopening reattaches.
 		Args: withAppSession(buildOpenArgs(result.Tenant, result.Environment), "ai", true, false),
 		Env:  []string{appSessionEnvVar + "=1"},
 		Cols: cols,
@@ -308,13 +290,8 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	}, managed, nil
 }
 
-// aiSessionOccupants reuses the same idle-status resolution the titlebar polls
-// (local-vs-remote, merged) to read the environment's held leases. That status
-// also parses every activity snapshot, so when it fails the leases are read on
-// their own: a snapshot the leases do not depend on must not hide a held one.
-// Only a failed lease read fails open — returning no occupants rather than
-// blocking the start — because this is a best-effort notice, not an access
-// check.
+// aiSessionOccupants reads held leases, separately if the status read fails. A
+// failed lease read returns none: this is a notice, not an access check.
 func (a *App) aiSessionOccupants(selection uiSelection) []uiEnvironmentLease {
 	status, err := a.LoadIdleStatus(selection)
 	if err == nil {

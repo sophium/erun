@@ -5,28 +5,9 @@ import * as React from 'react';
 import type { UsageSeverity } from '@/components/app/UsageMeter.helpers';
 import { usageSeverity } from '@/components/app/UsageMeter.helpers';
 
-// UsageMeter renders one "X of Y" reading as a proportional bar plus its text.
-//
-// Why a bar and not just the text it already had: a percentage against a limit
-// is a magnitude, and magnitude is the one thing text is worst at. "7.8 GiB of
-// 10 GiB (78%)" makes the operator read three numbers and do the division; a
-// filled track answers "how close am I" before any of them are read. The text
-// stays beside it, because the exact figure is what a slider decision needs.
-//
-// Severity lives in the FILL, not only in a separate warning line, so a
-// threshold crossing is visible at a glance rather than needing the warnings
-// below to be read. The unfilled track is a lighter step of the same ramp, so
-// the state reads across the whole bar rather than only across the filled part.
-//
-// Colour is never the only signal (WCAG 1.4.1, and the repo's own
-// non-color-only status rule): a crossed threshold also gets an icon, and the
-// accessible name carries the severity as a word. The bar itself is
-// role="meter" with the ARIA value attributes, so it is not decorative markup
-// that a screen reader has to infer meaning from.
-//
-// A percent of `undefined` means "not measured" and renders NO fill at all --
-// never a zero-width bar, which reads as "0%, idle" rather than "unknown".
-// That is the same fail-soft contract the reader itself follows.
+// UsageMeter renders one "X of Y" reading as a role="meter" bar plus its text.
+// Severity also carries an icon and a word (WCAG 1.4.1); an undefined percent
+// renders no fill, never a zero-width bar.
 
 const FILL_CLASS: Record<UsageSeverity, string> = {
   normal: 'bg-primary',
@@ -54,8 +35,6 @@ export function UsageMeter({
   detail,
 }: {
   label: string;
-  // valueText is the exact reading ("7.8 GiB of 10 GiB"), or the stated
-  // unavailability. It is always rendered; the bar is the supplement.
   valueText: string;
   percent: number | undefined;
   warnAt: number | undefined;
@@ -82,8 +61,6 @@ export function UsageMeter({
             />
           )}
         </span>
-        {/* The figure the operator came for: one step up in size and weight from
-            its own label, and tabular so stacked rows align on the decimal. */}
         <span
           className={cn(
             'text-sm leading-[1.35] font-semibold tabular-nums',
@@ -108,8 +85,6 @@ export function UsageMeter({
           className={cn('h-1.5 w-full overflow-hidden rounded-full', TRACK_CLASS[severity])}
         >
           <div
-            // Transition so a refresh reads as the same bar moving rather than
-            // a new one appearing; brief enough not to lag the figure beside it.
             className={cn(
               'h-full rounded-full transition-[width] duration-300 ease-out',
               FILL_CLASS[severity],

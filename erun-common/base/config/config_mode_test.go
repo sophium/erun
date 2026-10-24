@@ -9,12 +9,7 @@ import (
 	"github.com/adrg/xdg"
 )
 
-// The config.yaml files hold cluster admin tokens. Their containing directory
-// is 0700 today, so the file mode is what still protects them once a copy
-// leaves that directory; these tests pin the mode of the files themselves.
-
-// setConfigHomeForModeTest points config resolution at a fresh temp dir and
-// returns a restore func.
+// setConfigHomeForModeTest points config resolution at a temp dir and returns a restore func.
 func setConfigHomeForModeTest(t *testing.T) func() {
 	t.Helper()
 	previous := xdg.ConfigHome
@@ -43,8 +38,7 @@ func assertConfigFileMode(t *testing.T, path string, want os.FileMode) {
 	}
 }
 
-// rewriteAsLegacyModeAndResave proves that a config already on disk at the old
-// 0644 is corrected by the next write rather than left as it is.
+// rewriteAsLegacyModeAndResave checks that a file at the old 0644 mode is corrected by the next write.
 func rewriteAsLegacyModeAndResave(t *testing.T, path string, save func()) {
 	t.Helper()
 	if err := os.Chmod(path, 0o644); err != nil {
@@ -64,9 +58,6 @@ func assertBackupsAreRestricted(t *testing.T, backups []ConfigBackup) {
 	}
 }
 
-// TestRootConfigAndItsBackupsAreWrittenRestricted pins the mode of the root
-// config.yaml and of a generated dated backup, and that an existing file at the
-// old 0644 mode is corrected by the next write.
 func TestRootConfigAndItsBackupsAreWrittenRestricted(t *testing.T) {
 	requirePOSIXFileModes(t)
 	restore := setConfigHomeForModeTest(t)
@@ -93,8 +84,6 @@ func TestRootConfigAndItsBackupsAreWrittenRestricted(t *testing.T) {
 	assertBackupsAreRestricted(t, backups)
 }
 
-// TestEnvConfigAndItsBackupsAreWrittenRestricted covers the per-environment
-// config.yaml and its dated backups under the same contract as the root config.
 func TestEnvConfigAndItsBackupsAreWrittenRestricted(t *testing.T) {
 	requirePOSIXFileModes(t)
 	restore := setConfigHomeForModeTest(t)

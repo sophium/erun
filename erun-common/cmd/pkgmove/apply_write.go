@@ -12,9 +12,6 @@ import (
 	"strings"
 )
 
-// write renders every changed file into its new place and removes the
-// originals that moved away.
-// part is one fragment bound for a file.
 type part struct {
 	sf *sourceFile
 	f  *fragment
@@ -46,8 +43,6 @@ func (r *rewriter) write() (int, error) {
 	return written, nil
 }
 
-// collectParts groups every changed fragment by the file it is written to, and
-// lists the source files no fragment stays in.
 func (r *rewriter) collectParts() (map[string][]part, []string, error) {
 	byTarget := map[string][]part{}
 	var removed []string
@@ -71,9 +66,7 @@ func (r *rewriter) collectParts() (map[string][]part, []string, error) {
 	return byTarget, removed, nil
 }
 
-// withResident orders the parts bound for one file, the file already living
-// at that path first: declarations moved into a file of a package that
-// already has one are appended to it, never written over it.
+// withResident puts the file already at target first, so moved code is appended, never overwrites it.
 func (r *rewriter) withResident(target string, parts []part) ([]part, error) {
 	sort.SliceStable(parts, func(i, j int) bool { return parts[i].sf.path == target && parts[j].sf.path != target })
 	if parts[0].sf.path == target {
@@ -91,8 +84,6 @@ func (r *rewriter) withResident(target string, parts []part) ([]part, error) {
 	return append([]part{{sf: resident, f: whole}}, parts...), nil
 }
 
-// writeParts renders the parts bound for one file into it: the first part's
-// header and package clause, every part's imports, every part's text.
 func (r *rewriter) writeParts(target string, parts []part) error {
 	first := parts[0]
 	for _, p := range parts[1:] {
@@ -179,8 +170,7 @@ func (r *rewriter) packageClause(sf *sourceFile, f *fragment) string {
 	return r.pkgName(f.dir)
 }
 
-// header is everything before the package clause: build constraints and the
-// package's doc comment, which only the primary fragment keeps.
+// header is everything before the package clause; only the primary fragment keeps it.
 func (r *rewriter) header(sf *sourceFile, f *fragment) string {
 	pkgPos := sf.fset.Position(sf.ast.Package).Offset
 	if f.primary || sf.ast.Doc == nil {
@@ -213,9 +203,8 @@ func applyEdits(sf *sourceFile, f *fragment, rg [2]int) string {
 	return b.String()
 }
 
-// importLines are a fragment's imports: every import of the original file its
-// code still names, minus module packages it no longer refers to, plus the
-// module packages it refers to now.
+// importLines are the original imports the fragment still names, plus the
+// module packages it now refers to.
 func (r *rewriter) importLines(sf *sourceFile, f *fragment) (std, other []string) {
 	add := func(line, p string) {
 		if strings.Contains(strings.SplitN(p, "/", 2)[0], ".") {
@@ -254,9 +243,8 @@ func (r *rewriter) specText(sf *sourceFile, spec *ast.ImportSpec) string {
 	return string(sf.src[start:end])
 }
 
-// keepImport says whether a fragment still names an import. Blank and dot
-// imports stay with the primary fragment; a named import stays where its
-// name is used.
+// keepImport keeps blank and dot imports with the primary fragment, and named
+// imports where their name is used.
 func (r *rewriter) keepImport(sf *sourceFile, f *fragment, spec *ast.ImportSpec, p string) bool {
 	if spec.Name != nil && (spec.Name.Name == "_" || spec.Name.Name == ".") {
 		return f.primary
@@ -324,8 +312,6 @@ func usesCgo(sf *sourceFile) bool {
 	return false
 }
 
-// importedAs is the name a file already imports a package by, which a
-// rewrite keeps.
 func importedAs(sf *sourceFile, importPath string) (string, bool) {
 	for _, spec := range sf.ast.Imports {
 		if p, _ := strconv.Unquote(spec.Path.Value); p == importPath && spec.Name != nil {

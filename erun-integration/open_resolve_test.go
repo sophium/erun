@@ -14,10 +14,7 @@ import (
 
 func testOpenSnapshotEnvConfigDrivesLocalBuild(t *testing.T) {
 	t.Parallel()
-	// A local env whose config carries the legacy snapshot=true key
-	// migrates to type=local-agent on read, so BuildsHere() is true and
-	// `erun open` reaches the local-build branch. allowLocalBuilds is
-	// derived from the env type (EnvConfig.BuildsHere()), not a flag.
+	// Legacy snapshot=true migrates to type=local-agent, so open builds locally.
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithSnapshot(t, setup, "team", "local", true)
 	fixture.SeedDevopsRepo(t, setup, "team", "local")
@@ -30,9 +27,7 @@ func testOpenSnapshotEnvConfigDrivesLocalBuild(t *testing.T) {
 
 func testOpenVersionOverrideSkipsLocalBuild(t *testing.T) {
 	t.Parallel()
-	// --version pins the runtime chart to a specific version; the
-	// builder branch must be skipped (no docker build) and the helm
-	// upgrade must reference the override version explicitly.
+	// --version skips the docker build and pins the helm upgrade to the override.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -43,11 +38,7 @@ func testOpenVersionOverrideSkipsLocalBuild(t *testing.T) {
 
 func testOpenRuntimeImageOverrideUsesDefaultChart(t *testing.T) {
 	t.Parallel()
-	// --runtime-image rewrites the runtime release to use the
-	// embedded default-devops chart with the chosen image. There is
-	// no local devops module seeded, so the path exercises
-	// applyRuntimeDeployImageOverride's fallback to the embedded
-	// chart.
+	// No devops module is seeded, so the embedded default-devops chart is used.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := stubKubectlNotFound(t, setup)
@@ -57,9 +48,6 @@ func testOpenRuntimeImageOverrideUsesDefaultChart(t *testing.T) {
 
 func testOpenDefaultTenantEnvironmentResolvesFromRootConfig(t *testing.T) {
 	t.Parallel()
-	// `erun open` without args must pick up defaulttenant +
-	// defaultenvironment from $XDG_CONFIG_HOME/erun. Exercises
-	// resolveOpenParams' "no args" branch and OpenParamsForArgs.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := stubKubectlNotFound(t, setup)
@@ -69,10 +57,7 @@ func testOpenDefaultTenantEnvironmentResolvesFromRootConfig(t *testing.T) {
 
 func testOpenKubectlErrorAssumesNotDeployed(t *testing.T) {
 	t.Parallel()
-	// kubectl stub exits non-zero with a non-NotFound error. In
-	// dry-run, shouldDeployRuntime traces "assuming not deployed" and
-	// proceeds with the helm upgrade. Locks the dry-run fallback in
-	// shouldDeployRuntime (open.go:407-410).
+	// A non-NotFound kubectl error in dry run is treated as not deployed.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := stubKubectlGenericError(t, setup)
@@ -82,12 +67,7 @@ func testOpenKubectlErrorAssumesNotDeployed(t *testing.T) {
 
 func testOpenNotInitializedTriggersInitRetry(t *testing.T) {
 	t.Parallel()
-	// `erun open team dev` with no config triggers
-	// resolveOpenWithInitStopForParams' init-fired branch:
-	// resolveOpen errors with ErrNotInitialized, shouldRunInitForOpenCommand
-	// matches, runInitBeforeOpenForParams runs init in dry-run, and the
-	// command exits via initRan=true (open.go:226-230). The init dry-run
-	// trace is captured in the golden alongside open's audit line.
+	// With no config, open runs init in dry run and exits after it.
 	setup := env.New(t)
 	envVars := stubKubectlNotFound(t, setup)
 	result := erun.Run(t, []string{"open", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -96,16 +76,8 @@ func testOpenNotInitializedTriggersInitRetry(t *testing.T) {
 
 func testOpenTenantCloudProviderIssuersFlowIntoRuntimeDeploy(t *testing.T) {
 	t.Parallel()
-	// Exercises ResolveTenantCloudProviderIssuers +
-	// CloudProviderOIDCIssuerURL: when the tenant config names cloud
-	// provider aliases and the root config carries their OIDC issuer
-	// URLs, the resolved runtime helm plan must pass the deduplicated
-	// issuer list via api.oidcAllowedIssuers (visible in the dry-run
-	// helm trace). Two aliases share one issuer to lock the dedup
-	// branch. The tenant devops chart is seeded because only the
-	// tenant-chart spec path runs configureDeployInputMetadata — the
-	// materialized default-chart path skips it and would leave the
-	// issuer list empty.
+	// Two aliases share one issuer to exercise dedup. The tenant chart is seeded
+	// because only that path passes oidcAllowedIssuers.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -139,17 +111,8 @@ func testOpenTenantCloudProviderIssuersFlowIntoRuntimeDeploy(t *testing.T) {
 
 func testOpenDefaultEnvNotConfiguredRunsInitWithTenant(t *testing.T) {
 	t.Parallel()
-	// `erun open` (no args) against a tenant whose config lacks
-	// defaultenvironment: resolveOpen fails with
-	// ErrDefaultEnvironmentNotConfigured, the init-retry path resolves
-	// init params via initParamsForOpenDefaults — loadOpenDefaultTenant
-	// succeeds, loadOpenDefaultEnvironment reports not-configured — and
-	// init runs in dry-run with the tenant pre-filled. Locks the
-	// tenant-only fallback arm that the fully-seeded scenarios skip.
-	// The handed-off init asks to initialize the default environment;
-	// declining ("n") ends the run after that single prompt (readline
-	// read-ahead allows no second prompt) with init's cancellation
-	// message.
+	// With no defaultenvironment, init runs with the tenant pre-filled. Declining
+	// ends the run after the single prompt readline read-ahead allows.
 	setup := env.New(t)
 	root := filepath.Join(setup.ConfigHome, "erun")
 	if err := os.MkdirAll(filepath.Join(root, "team"), 0o755); err != nil {
@@ -169,12 +132,8 @@ func testOpenDefaultEnvNotConfiguredRunsInitWithTenant(t *testing.T) {
 
 func testOpenTenantFlagOnlyResolvesDefaultEnv(t *testing.T) {
 	t.Parallel()
-	// `erun open --tenant team` (flag, no positional args) lands in
-	// resolveOpenParams' "tenant set, environment empty" switch case
-	// (open.go:172-174), with UseDefaultEnvironment=true so the env
-	// resolves from the tenant config. OpenParamsForArgs treats a
-	// single positional arg as the *environment*, not the tenant, so
-	// the tenant-only branch is only reachable via the --tenant flag.
+	// A single positional arg is the environment, so the tenant-only case is
+	// reachable only via --tenant.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := stubKubectlNotFound(t, setup)
@@ -184,11 +143,6 @@ func testOpenTenantFlagOnlyResolvesDefaultEnv(t *testing.T) {
 
 func testOpenEnvironmentPositionalResolvesDefaultTenant(t *testing.T) {
 	t.Parallel()
-	// `erun open dev` (single positional arg) lands in
-	// resolveOpenParams' "tenant empty, environment set" switch case
-	// (open.go:169-171), with UseDefaultTenant=true so the tenant
-	// resolves from the root config's defaulttenant. Locks the second
-	// switch case which existing 0-arg and 2-arg scenarios skip.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := stubKubectlNotFound(t, setup)
@@ -198,11 +152,6 @@ func testOpenEnvironmentPositionalResolvesDefaultTenant(t *testing.T) {
 
 func testOpenRemoteRuntimeImageOverride(t *testing.T) {
 	t.Parallel()
-	// Remote env + --runtime-image rewrites the runtime release to
-	// use the embedded default-devops chart with the chosen image.
-	// Locks the RemoteRepo() branch in applyRuntimeDeployImageOverride
-	// (open.go:602-603), which the local-env runtime_image scenario
-	// does not reach.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	envVars := stubKubectlNotFound(t, setup)

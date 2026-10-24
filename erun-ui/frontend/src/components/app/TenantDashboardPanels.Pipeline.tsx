@@ -12,30 +12,9 @@ import {
   type TenantDashboardData,
 } from './TenantDashboardMessage';
 
-// PipelinePanel answers "what is going on?" in one read: planned work, work in
-// progress, reviews open, ready to merge, merging, merged -- across the jobs
-// that record planned and in-flight work and the reviews moving through the
-// merge queue, unioned on the issue each belongs to. It is the desktop
-// counterpart to the console's Pipeline section and reads the same
-// GET /v1/pipeline.
-//
-// Three rules shape what this renders, and the console's PipelinePanel holds
-// the same three:
-//
-//   - The rung is the platform's, not this panel's. The name and tone come
-//     from erun-kit's shared pipelineRungs, so a rung this build has never
-//     heard of renders under its own spelling and is toned as an outcome
-//     rather than folded into a rung it resembles.
-//   - A link parsed out of a branch name is a guess about the branch, and it
-//     says so. issueRefSource of INFERRED renders with an explicit marker,
-//     because presenting a guess as something the author declared is the one
-//     claim this provenance exists to refuse.
-//   - A row says which record it came from. A job has no branch; a review has
-//     no scope. A row that could not tell them apart would send an operator
-//     looking for one that does not exist.
-//
-// The panel is read-only. The actors doing the work record it, and the merge
-// queue moves reviews; nothing here advances anything.
+// PipelinePanel renders GET /v1/pipeline read-only, like the console's
+// Pipeline section. Rungs come from erun-kit's pipelineRungs (unknown rungs keep
+// their spelling), and links inferred from branch names are marked as such.
 export function PipelinePanel({ data }: { data: TenantDashboardData }): React.ReactElement {
   const issues = data?.pipeline ?? [];
   return (
@@ -57,11 +36,7 @@ export function PipelinePanel({ data }: { data: TenantDashboardData }): React.Re
   );
 }
 
-// pipelineRows flattens the platform's grouping into the table's rows without
-// reordering anything. The platform groups by issue and orders items by rung,
-// and the render keeps that order: the Issue cell then says, on every row,
-// what the grouping was, so a table can carry the union without a second
-// layout idiom inventing its own idea of which rows belong together.
+// Rows keep the platform's issue grouping and rung order.
 interface PipelineRow {
   issue: UIPipelineIssue;
   item: UIPipelineItem;
@@ -111,15 +86,7 @@ function PipelineRowCells({
   );
 }
 
-// IssueCell renders the canonical owner/repo#number the work is filed under,
-// as text: the desktop has no verified treatment for opening an external
-// issue in the operator's browser, and a link that went nowhere would be a
-// worse answer than the identifier itself, which is copyable as it stands.
-//
-// It is the item's resolved link rather than the item's raw issueRef, because
-// the raw one is exactly what the canonical spelling was joined from -- for a
-// branch-derived link the two differ only in the repository the review
-// recorded, and showing both would state one link twice.
+// Plain text: the desktop has no verified way to open an external issue.
 function IssueCell({
   issueKey,
   item,
@@ -145,10 +112,6 @@ function IssueCell({
   );
 }
 
-// WorkCell names the work and the record it came from. The second line is the
-// console's own subject line, kept the same in both surfaces: a job states
-// what kind of work it is and who holds it, a review states the branches it
-// moves between.
 function WorkCell({ item }: { item: UIPipelineItem }): React.ReactElement {
   const job = item.job;
   if (job !== undefined) {
@@ -165,9 +128,7 @@ function WorkCell({ item }: { item: UIPipelineItem }): React.ReactElement {
   }
   const review = item.review;
   if (review === undefined) {
-    // The platform sends exactly one of the two. Rendering the row anyway,
-    // with no subject, says "this record arrived without a body" instead of
-    // dropping work the operator would then never know was there.
+    // The platform sends exactly one of the two; render the row rather than drop it.
     return <span className="text-muted-foreground">—</span>;
   }
   return (

@@ -52,10 +52,7 @@ func TestCorsMiddlewareAnswersPreflightWithoutReachingTheWrappedHandler(t *testi
 	}
 }
 
-// TestCorsMiddlewareExposesSessionIdOnRealRequest: fetch() hides response
-// headers from the caller's script unless the server lists them in
-// Access-Control-Expose-Headers, and the MCP handshake requires the client to
-// read Mcp-Session-Id off the initialize response.
+// fetch() hides Mcp-Session-Id unless it is in Access-Control-Expose-Headers.
 func TestCorsMiddlewareExposesSessionIdOnRealRequest(t *testing.T) {
 	handler := corsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Mcp-Session-Id", "abc123")
@@ -101,12 +98,8 @@ func TestCorsMiddlewareAddsNothingForNonBrowserCallers(t *testing.T) {
 	}
 }
 
-// TestNewHTTPHandlerAnswersPreflightEvenWhenAuthIsConfigured: a real preflight
-// never carries the Authorization header (that is the whole point of the
-// preflight), so CORS must sit outside auth or every cross-origin caller
-// would be rejected before its real request is ever sent. The real POST
-// behind it must still require the bearer token -- CORS widens who can reach
-// the server, never who is authorized.
+// A preflight carries no Authorization, so CORS must sit outside auth; the real
+// POST still needs the token.
 func TestNewHTTPHandlerAnswersPreflightEvenWhenAuthIsConfigured(t *testing.T) {
 	t.Setenv(sharedpkg.EnvMCPTrustedIssuer, "file:///some/key.pub")
 	t.Setenv(sharedpkg.EnvTenant, "acme")

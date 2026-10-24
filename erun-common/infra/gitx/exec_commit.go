@@ -11,36 +11,16 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// CommitWorkingTreeParams names the commit an orchestrator intends: the
-// branch it believes the working tree is on, and the message to record.
-// Neither is defaulted or assumed — Branch is verified against the tree's
-// actual current branch before anything is staged.
+// CommitWorkingTreeParams names the intended commit; Branch is verified before staging.
 type CommitWorkingTreeParams struct {
 	Branch string
-	// Message is recorded verbatim as the commit message. It is data, not a
-	// shell fragment: nothing in it is interpreted, expanded, or executed.
+	// Message is recorded verbatim; nothing in it is interpreted.
 	Message string
-	// Paths scopes the commit to a known set of paths (relative to root, or
-	// absolute inside it) instead of every change in the tree. When set, the
-	// commit stages only these paths and is refused if the tree has any
-	// other changes outside them — an unrelated writer's edits can then
-	// never be absorbed into a commit the caller did not ask for. Empty
-	// keeps the unscoped `git add -A` behavior. A blank entry is refused
-	// rather than dropped, since a caller-declared scope that resolves to
-	// nothing is far more likely a bug upstream than an intentional no-op,
-	// and silently falling back to "commit everything" is exactly the
-	// failure this scoping exists to prevent.
+	// Paths, when set, scopes staging and refuses changes outside it so unrelated edits
+	// are never absorbed; a blank entry is refused rather than widening to `git add -A`.
 	Paths []string
-	// SkipHooks commits with `git commit --no-verify`, so the repository's own
-	// pre-commit and commit-msg hooks cannot veto it. Reserve it for a
-	// machine-authored commit whose whole purpose is to preserve work that no
-	// other mechanism would save — a job supervisor's checkpoint — or that
-	// lands content another commit already authored and built, as gate-merge's
-	// squash does (commitGateMergeSource). A hook is
-	// authored to police a human's commit; when it rejects a checkpoint it does
-	// not merely refuse one commit, it destroys the in-flight work of a run that
-	// has already ended. A human-authored commit leaves this false, so hook
-	// enforcement is unchanged for every caller that represents a person.
+	// SkipHooks uses --no-verify, only for machine commits (checkpoints, gate-merge squash)
+	// where a hook rejection would destroy work of a run that already ended.
 	SkipHooks bool
 }
 
@@ -51,8 +31,7 @@ type CommitWorkingTreeResult struct {
 	Files  []string `json:"files"`
 }
 
-// CommitWorkingTreeDependencies lets tests replace the git plumbing without a
-// real repository, mirroring the release flow's dependency-injection pattern.
+// CommitWorkingTreeDependencies lets tests replace the git plumbing.
 type CommitWorkingTreeDependencies struct {
 	CurrentBranch GitValueResolverFunc
 	CurrentCommit GitValueResolverFunc
@@ -80,13 +59,8 @@ func normalizeCommitWorkingTreeDependencies(deps CommitWorkingTreeDependencies) 
 	return deps
 }
 
-// CommitWorkingTree stages Paths (or every change in root when Paths is
-// empty) and commits with Message. Branch is verified against the tree's
-// actual current branch, not assumed — a mismatch is refused loudly before
-// anything is staged, rather than landing the commit on whichever branch HEAD
-// happens to be on. When Paths is set, the commit is refused just as loudly
-// if the tree has changes outside the declared paths, rather than silently
-// leaving them out of the commit.
+// CommitWorkingTree stages Paths (or everything) and commits Message, refusing a branch
+// mismatch or out-of-scope changes before staging.
 func CommitWorkingTree(ctx core.Context, root string, params CommitWorkingTreeParams, deps CommitWorkingTreeDependencies) (CommitWorkingTreeResult, error) {
 	branch := strings.TrimSpace(params.Branch)
 	if branch == "" {
@@ -126,8 +100,7 @@ func CommitWorkingTree(ctx core.Context, root string, params CommitWorkingTreePa
 	return stageAndCommitWorkingTree(ctx, root, params.Message, addArgs, params.SkipHooks, deps)
 }
 
-// CommitVerbArgs builds the `git commit` argv, so the dry-run trace and the
-// real invocation cannot drift apart on whether hooks are bypassed.
+// CommitVerbArgs is shared by the dry-run trace and the real invocation.
 func CommitVerbArgs(skipHooks bool, message string) []string {
 	args := []string{"commit"}
 	if skipHooks {
@@ -136,13 +109,8 @@ func CommitVerbArgs(skipHooks bool, message string) []string {
 	return append(args, "-m", message)
 }
 
-// resolveCommitPreview reports the files a commit would include, and — when
-// scopedPaths is set — refuses before anything is staged if the tree has
-// changes outside them. The read only runs when it is load-bearing: a scoped
-// commit needs it to enforce the refusal, and a dry-run needs it so the
-// preview names files rather than just the git verbs. An unscoped real commit
-// skips it — the post-stage read-back in stageAndCommitWorkingTree already
-// reports what actually landed.
+// resolveCommitPreview lists files to commit and enforces the scope; unscoped real
+// commits skip it because the post-stage read-back reports what landed.
 func resolveCommitPreview(ctx core.Context, root string, scopedPaths []string, deps CommitWorkingTreeDependencies) ([]string, error) {
 	if len(scopedPaths) == 0 && !ctx.DryRun {
 		return nil, nil
@@ -159,14 +127,8 @@ func resolveCommitPreview(ctx core.Context, root string, scopedPaths []string, d
 	return changed, nil
 }
 
-// commitAddArgs is the `git add` argv for the resolved scope: every change,
-// or only the declared paths. Each scoped path is prefixed with "./" so a
-// path that happens to start with ":" is never reinterpreted as git pathspec
-// magic (":/foo" means "foo relative to the top of the working tree",
-// regardless of what filesystem path the string otherwise looks like) — the
-// filesystem-level containment check in normalizeCommitWorkingTreePaths would
-// otherwise be silently bypassed by git resolving the very same string
-// against a different, unbounded root.
+// commitAddArgs prefixes scoped paths with "./" so a leading ":" is not git pathspec
+// magic, which would bypass the containment check.
 func commitAddArgs(scopedPaths []string) []string {
 	if len(scopedPaths) == 0 {
 		return []string{"-A"}
@@ -179,8 +141,6 @@ func commitAddArgs(scopedPaths []string) []string {
 	return args
 }
 
-// traceCommitPreview names, in a dry run, exactly what a real run would
-// commit — the property the preview previously lacked.
 func traceCommitPreview(ctx core.Context, preview []string) {
 	if len(preview) == 0 {
 		ctx.Trace("commit: no changes to commit")
@@ -189,9 +149,6 @@ func traceCommitPreview(ctx core.Context, preview []string) {
 	ctx.Trace("commit: would commit " + strings.Join(preview, ", "))
 }
 
-// stageAndCommitWorkingTree runs the mutating half of CommitWorkingTree,
-// isolated so the branch-verification and dry-run branching above it don't
-// inflate that function's complexity.
 func stageAndCommitWorkingTree(ctx core.Context, root, message string, addArgs []string, skipHooks bool, deps CommitWorkingTreeDependencies) (CommitWorkingTreeResult, error) {
 	var addStderr bytes.Buffer
 	if err := deps.RunGit(root, io.Discard, &addStderr, append([]string{"add"}, addArgs...)...); err != nil {
@@ -215,10 +172,7 @@ func stageAndCommitWorkingTree(ctx core.Context, root, message string, addArgs [
 	if err != nil {
 		return CommitWorkingTreeResult{}, fmt.Errorf("resolve new commit: %w", err)
 	}
-	// Read back the branch the commit actually landed on rather than trusting
-	// the declared one: the pre-stage check already refused a mismatch, but
-	// reporting what git verified up front instead of what git has now is the
-	// same read-after-write discipline the commit id and Files already follow.
+	// Report the branch git has now, not the declared one.
 	landedBranch, err := deps.CurrentBranch(ctx, root)
 	if err != nil {
 		return CommitWorkingTreeResult{}, fmt.Errorf("resolve committed branch: %w", err)
@@ -227,11 +181,8 @@ func stageAndCommitWorkingTree(ctx core.Context, root, message string, addArgs [
 	return CommitWorkingTreeResult{Branch: landedBranch, Commit: commit, Files: files}, nil
 }
 
-// normalizeCommitWorkingTreePaths validates and canonicalizes caller-declared
-// paths against root, reusing the same escape check as WriteWorkingTreeFile
-// so a scoped commit can never be pointed outside the working tree. Returns
-// sorted, deduplicated, slash-separated paths relative to root, matching the
-// form git itself reports them in.
+// normalizeCommitWorkingTreePaths rejects paths escaping root and returns sorted,
+// deduplicated, slash-separated root-relative paths.
 func normalizeCommitWorkingTreePaths(root string, paths []string) ([]string, error) {
 	if len(paths) == 0 {
 		return nil, nil
@@ -262,10 +213,7 @@ func normalizeCommitWorkingTreePaths(root string, paths []string) ([]string, err
 	return normalized, nil
 }
 
-// filesOutsideScope returns the entries of changed that are not present in,
-// or nested under, any of scoped — so a caller can scope a commit to a
-// directory and not have every file inside it reported as "outside" the very
-// scope that names their parent.
+// filesOutsideScope returns changed paths not equal to or nested under a scoped path.
 func filesOutsideScope(changed, scoped []string) []string {
 	var extra []string
 	for _, path := range changed {
@@ -276,8 +224,6 @@ func filesOutsideScope(changed, scoped []string) []string {
 	return extra
 }
 
-// pathWithinScope reports whether path is exactly one of scoped, or lives
-// underneath a directory named in scoped.
 func pathWithinScope(path string, scoped []string) bool {
 	for _, candidate := range scoped {
 		if path == candidate || strings.HasPrefix(path, candidate+"/") {
@@ -287,12 +233,7 @@ func pathWithinScope(path string, scoped []string) bool {
 	return false
 }
 
-// GitStagedFiles lists what is about to be committed, read back after staging
-// rather than assumed, so Files always reflects what git actually staged.
-// NUL-separated output (-z) sidesteps git's default quoting of non-ASCII and
-// otherwise-special path bytes, and --relative reports paths relative to root
-// rather than the top of the enclosing repository, matching the basis Paths
-// is declared and compared in.
+// GitStagedFiles lists staged paths; -z avoids git's quoting and --relative matches the basis of Paths.
 func GitStagedFiles(ctx core.Context, root string) ([]string, error) {
 	args := []string{"-C", root, "diff", "--cached", "--relative", "--name-only", "-z"}
 	ctx.TraceCommand("", "git", args...)
@@ -306,16 +247,8 @@ func GitStagedFiles(ctx core.Context, root string) ([]string, error) {
 	return splitNULSeparatedPaths(output), nil
 }
 
-// GitChangedWorkingTreeFiles lists every path with an uncommitted change —
-// staged, unstaged, or untracked — so a scoped commit can be checked against
-// the caller's declared paths, and an unscoped dry-run can name what would be
-// committed, before anything is staged. All three reads are scoped to root
-// via --relative (ls-files is already root-relative by default) so a runtime
-// repo root that is not the git top-level still gets a guard that reasons
-// about root's own subtree, in the same basis Paths is declared in — without
-// it, changes elsewhere in the enclosing repository either never surface (the
-// guard is blind to them) or never match the declared paths (every scoped
-// commit is refused).
+// GitChangedWorkingTreeFiles lists staged, unstaged, and untracked paths relative to
+// root, which may be below the git top-level.
 func GitChangedWorkingTreeFiles(ctx core.Context, root string) ([]string, error) {
 	changed := make(map[string]struct{})
 	collect := func(args ...string) error {
@@ -352,10 +285,7 @@ func GitChangedWorkingTreeFiles(ctx core.Context, root string) ([]string, error)
 	return result, nil
 }
 
-// splitNULSeparatedPaths parses the output of a git invocation run with -z,
-// which separates entries with NUL and never quotes them — unlike the
-// newline-separated default, which C-quotes non-ASCII and other special path
-// bytes and so cannot round-trip every valid filename.
+// splitNULSeparatedPaths parses -z output, which unlike the default is never C-quoted.
 func splitNULSeparatedPaths(output []byte) []string {
 	trimmed := bytes.Trim(output, "\x00")
 	if len(trimmed) == 0 {

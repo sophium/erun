@@ -9,9 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/doctor"
 )
 
-// runRuntimeConfigSync reconciles the in-pod erun config with the helm-injected
-// env vars. The --sync-config flag is itself the operator's confirmation, so it
-// applies without a further prompt.
+// runRuntimeConfigSync applies without a prompt; --sync-config is the confirmation.
 func runRuntimeConfigSync(ctx core.Context, promptRunner shared.PromptRunner, options doctorOptions, configHome string) error {
 	_ = promptRunner
 	_ = options

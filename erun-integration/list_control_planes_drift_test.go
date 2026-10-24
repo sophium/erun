@@ -41,10 +41,7 @@ func testListControlPlanesFailOnDriftUpToDateExitsZero(t *testing.T) {
 }
 
 func testListControlPlanesFailOnDriftConsoleBehindPublishedExitsNonZero(t *testing.T) {
-	// The plane itself is at the published version -- only its linked
-	// console is behind. --fail-on-drift must catch console drift the
-	// same as plane drift, since a console has no version surface of its
-	// own to notice this without the check.
+	// Only the console is behind; --fail-on-drift must still catch it.
 	t.Parallel()
 	setup := env.New(t)
 	console := versionJSONStub(t, "1.0.245")
@@ -61,10 +58,7 @@ func testListControlPlanesFailOnDriftConsoleBehindPublishedExitsNonZero(t *testi
 }
 
 func testListControlPlanesFailOnDriftDocsSiteBehindPublishedExitsNonZero(t *testing.T) {
-	// The same one surface over: the plane and its console are both at the
-	// published version and the docs site a deploy left behind is the only
-	// thing stale. Nothing else in erun reads the docs site's version, so
-	// without this leg the drift is invisible.
+	// Only the docs site is behind.
 	t.Parallel()
 	setup := env.New(t)
 	console := versionJSONStub(t, "1.0.247")
@@ -99,8 +93,7 @@ func testListControlPlanesFailOnDriftUnreachablePlaneExitsNonZero(t *testing.T) 
 }
 
 func testListControlPlanesFailOnDriftDryRunNeverFails(t *testing.T) {
-	// Nothing was actually probed, so there is nothing to fail on --
-	// --fail-on-drift must not turn a dry-run preview into a failure.
+	// Nothing was probed, so a dry run must not fail.
 	t.Parallel()
 	setup := env.New(t)
 	plane := controlPlaneStub(t, "1.0.245")

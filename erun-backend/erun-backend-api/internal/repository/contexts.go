@@ -18,12 +18,10 @@ func NewContextRepository(txs *TxManager) *ContextRepository {
 	return &ContextRepository{txs: txs}
 }
 
-// DefaultContextMaxEnvironments mirrors the contexts.max_environments column
-// default, applied when a create request names no explicit capacity.
+// DefaultContextMaxEnvironments mirrors the contexts.max_environments column default.
 const DefaultContextMaxEnvironments = 20
 
-// Create persists a new cloud context; the database owns the identifiers and
-// timestamps and binds the row to the caller's tenant.
+// Create persists a new cloud context bound to the caller's tenant.
 func (r *ContextRepository) Create(ctx context.Context, cloudContext model.Context) (model.Context, error) {
 	created := cloudContext
 	if created.MaxEnvironments <= 0 {
@@ -39,10 +37,8 @@ func (r *ContextRepository) Create(ctx context.Context, cloudContext model.Conte
 	return created, err
 }
 
-// List returns the caller's tenant's cloud contexts, filtered explicitly by
-// the security context's TenantID: erun_operations' RLS policy is
-// unconditional, so an OPERATIONS caller would otherwise see every tenant's
-// contexts.
+// List returns the tenant's cloud contexts. tenant_id is filtered explicitly
+// because erun_operations' RLS policy is unconditional.
 func (r *ContextRepository) List(ctx context.Context) ([]model.Context, error) {
 	var contexts []model.Context
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -60,12 +56,8 @@ func (r *ContextRepository) List(ctx context.Context) ([]model.Context, error) {
 	return contexts, err
 }
 
-// Get returns the context owned by tenantID. The owning tenant is an explicit
-// argument and an explicit predicate, not something read back from the
-// security context: the delete reconciler reads a context on behalf of the
-// tenant that owns the environment it found, while running with no tenant in
-// context at all, and erun_operations' unconditional RLS policy means nothing
-// but this WHERE clause scopes the row.
+// Get returns the context owned by tenantID; the delete reconciler calls it
+// with no tenant in context, so the owner is an explicit predicate.
 func (r *ContextRepository) Get(ctx context.Context, tenantID, contextID string) (model.Context, error) {
 	var cloudContext model.Context
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -80,10 +72,8 @@ func (r *ContextRepository) Get(ctx context.Context, tenantID, contextID string)
 	return cloudContext, err
 }
 
-// UpdateProvisioningResult records a provisioning run's outcome: the executor
-// passes status="running" with the resolved instance_id/public_ip on success, or
-// status="failed" with the reason otherwise. A failed run clears the instance id
-// and IP so no stale identity is left behind.
+// UpdateProvisioningResult records a provisioning outcome; a failed run clears
+// the instance id and IP.
 func (r *ContextRepository) UpdateProvisioningResult(ctx context.Context, contextID, status, instanceID, publicIP, provisionError string) error {
 	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		_, err := tx.NewRaw(`

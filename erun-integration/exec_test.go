@@ -49,14 +49,9 @@ func captureGit(t testing.TB, dir string, args ...string) string {
 	return string(out)
 }
 
-// execDangerousContent carries the constructs a shell would reinterpret —
-// backticks, command substitution, embedded quotes, a trailing newline — so a
-// round trip through `exec write` / `exec commit` demonstrates the property
-// that justifies bypassing raw for these two operations: content and message
-// travel as data and are never shell-parsed.
+// execDangerousContent holds shell constructs that must round-trip as data, never shell-parsed.
 const execDangerousContent = "line one\n`echo pwned` $(echo pwned) \"quoted\" 'quoted'\ntrailing\n\n"
 
-// execScenarios lists TestExec's subtests in the order they run.
 var execScenarios = []struct {
 	name string
 	run  func(*testing.T)
@@ -206,8 +201,7 @@ func testExecRawDryRun(t *testing.T) {
 }
 
 func testExecRawHelp(t *testing.T) {
-	// raw disables flag parsing, so --help must be intercepted explicitly
-	// and render help rather than being run as a binary named "--help".
+	// raw disables flag parsing, so --help is intercepted explicitly.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"exec", "raw", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode != 0 {
@@ -231,9 +225,7 @@ func testExecRawDryRunRedactsSensitiveArgs(t *testing.T) {
 }
 
 func testExecRawDryRunDoubleDashPassesFlagsThrough(t *testing.T) {
-	// raw disables flag parsing, yet erun's own --dry-run=true before --
-	// is still consumed while everything after -- passes through verbatim,
-	// including the wrapped command's own --dry-run and --help.
+	// erun's own flags before -- are consumed; everything after passes through verbatim.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	result := erun.Run(t, []string{"exec", "raw", "--dry-run=true", "--", "echo", "--dry-run", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -252,31 +244,15 @@ func testExecDryRunWithTimeFlagPrintsElapsedOnError(t *testing.T) {
 	golden.Equal(t, "exec/dry_run_with_time_flag_prints_elapsed_on_error", normalize.Apply(result.Combined))
 }
 
-// githubRulesetStubServer runs a minimal GitHub REST double covering every
-// call `exec reconcile-bypass` and `exec plan-ruleset-bypass` make. It is
-// reached through ERUN_GITHUB_API_BASE_URL_OVERRIDE, the seam that lets these
-// scenarios drive the real wire path -- pagination, per-ruleset filtering,
-// push-range expansion, tag lookup, payload construction -- from the compiled
-// binary instead of only the dry-run trace.
-//
-// The fixture models one real window of this repository's own history: a
-// queued merge (its tip is a successfully built merge commit), a release push
-// (three commits, the middle one carrying the release tag, and a tip no
-// recorded build ever built), a push whose bypass belongs to a different ruleset (must
-// be filtered out entirely), and a push nothing accounts for.
+// githubRulesetStubOptions configures a GitHub REST double for reconcile-bypass and plan-ruleset-bypass,
+// reached through ERUN_GITHUB_API_BASE_URL_OVERRIDE.
 type githubRulesetStubOptions struct {
-	// RulesetStatus, when non-zero, forces the ruleset read to fail with it.
-	RulesetStatus int
-	// RuleSuitesStatus, when non-zero, forces the rule-suites list to fail.
+	RulesetStatus    int
 	RuleSuitesStatus int
-	// HideBypassActors drops bypass_actors from the ruleset response, the
-	// shape GitHub returns to a token without write access to the ruleset.
+	// HideBypassActors mimics GitHub's response to a token without write access.
 	HideBypassActors bool
-	// RefInclude overrides the ruleset's own ref_name include list.
-	RefInclude string
-	// QueuePermission is what the queue identity's collaborator permission
-	// reads as.
-	QueuePermission string
+	RefInclude       string
+	QueuePermission  string
 }
 
 func githubRulesetStubServer(t testing.TB, opts githubRulesetStubOptions) *httptest.Server {
@@ -356,10 +332,7 @@ func githubRulesetStubServer(t testing.TB, opts githubRulesetStubOptions) *httpt
 	mux.HandleFunc("GET /repos/sophium/erun/collaborators/{login}/permission", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"permission":"` + opts.QueuePermission + `"}`))
 	})
-	// Assign the URL before Start: httptest.NewServer begins serving before it
-	// returns, so writing server.URL afterwards has no happens-before edge with
-	// the handler goroutines that read it. The listener address is fixed when it
-	// is allocated, so this is the same URL NewServer would report.
+	// Assign the URL before Start so handler goroutines read it with a happens-before edge.
 	server := httptest.NewUnstartedServer(mux)
 	serverURL = "http://" + server.Listener.Addr().String()
 	server.Start()
@@ -367,38 +340,9 @@ func githubRulesetStubServer(t testing.TB, opts githubRulesetStubOptions) *httpt
 	return server
 }
 
-// TestGithubRulesetStubServerAssignsItsURLBeforeItServes pins the ordering
-// githubRulesetStubServer's page-1 handler depends on: it builds the Link header
-// out of the captured serverURL, and httptest.NewServer returns only after its
-// serving goroutine exists, so assigning serverURL from server.URL afterwards
-// has no happens-before edge to that handler's read.
-//
-// The ordering that fixes is not observable without -race, and no gated venue
-// runs -race for this module: the erun-devops image's cli-test stage runs it with
-// -count=1 and -timeout and nothing else, and -race is wired for erun-common
-// alone. So this test is green in the gate on the pre-fix tree as well as the
-// post-fix one, and a green gate is evidence for its behavioral half only. Run
-// the ordering half explicitly with:
-//
-//	cd erun-integration && go test -race -count=1 -run \
-//	  '^TestGithubRulesetStubServerAssignsItsURLBeforeItServes$' .
-//
-// which reports the pair as a data race -- read at the Link header line,
-// previous write at the assignment -- on the pre-fix tree, and is silent after.
-//
-// The probe's client is deliberately a process of its own. An in-process client
-// is ordered by the netpoll round trip that carries the request -- the test
-// goroutine writes serverURL and then blocks in the same poller that wakes the
-// server's accept -- and every in-process shape of this probe is silent, which
-// is why the scenarios that use this stub never surfaced the race either. A
-// foreign process shares no such edge.
-//
-// The pair of requests is deliberate too: as the first stub a process builds
-// the probe is silent even with an out-of-process client, and from the second
-// on it reports the pair deterministically. Both requests are asserted, so the
-// probe cannot pass by never reaching the read, and pinning the Link header to
-// the server's own URL is also what establishes that the address the fix
-// assigns from is the URL NewServer would have reported.
+// TestGithubRulesetStubServerAssignsItsURLBeforeItServes checks the ordering only under -race, which the gate
+// does not run. It needs an out-of-process client (in-process requests are ordered by netpoll) and a second
+// stub (the first is silent).
 func TestGithubRulesetStubServerAssignsItsURLBeforeItServes(t *testing.T) {
 	curl, err := osexec.LookPath("curl")
 	if err != nil {
@@ -416,11 +360,7 @@ func TestGithubRulesetStubServerAssignsItsURLBeforeItServes(t *testing.T) {
 	}
 }
 
-// successfulBuildsStubServer answers the one platform read reconcile-bypass
-// makes per landed commit: the successful builds recorded for exactly that
-// commit. Only the queue's merge commit has one; every other commit reads
-// empty, so the release push must be accounted for by its tag and the
-// unaccounted push by nothing.
+// successfulBuildsStubServer reports a successful build only for the queue's merge commit.
 func successfulBuildsStubServer(t testing.TB) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -443,14 +383,9 @@ func successfulBuildsStubServer(t testing.TB) *httptest.Server {
 	return server
 }
 
-// stubServerRule collapses one stub server's own base URL to a stable token.
-// The kernel assigns its port per run, so a trace naming the URL it called
-// could not otherwise have a stable golden -- and doing it per server, rather
-// than as a blanket port rule, keeps the deliberately-pinned ports other
-// scenarios assert (the port-forward ranges) visible in theirs.
+// stubServerRule collapses one stub server's base URL to token, leaving pinned ports elsewhere visible.
 func stubServerRule(server *httptest.Server, token string) normalize.Replacement {
-	// The default rules run first and have already turned the host into
-	// <LOOPBACK>, so match that form rather than the raw URL.
+	// The default rules have already rewritten the host to <LOOPBACK>.
 	normalized := strings.Replace(server.URL, "127.0.0.1", "<LOOPBACK>", 1)
 	return normalize.Replacement{Pattern: regexp.MustCompile(regexp.QuoteMeta(normalized)), Token: token}
 }

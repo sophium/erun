@@ -15,28 +15,17 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-// The sidebar lets an environment's own answer stop a row spinning, which makes
-// the difference between "it answered, and reports no work" and "nobody got an
-// answer" load-bearing. Both leave busy false, so the observation has to carry
-// the distinction itself — otherwise an edge that has wedged behind a port that
-// still accepts connections would clear a latch on the environment's behalf and
-// hide work that is still running.
+// "Answered with no work" and "nobody got an answer" both leave busy false, so
+// observed must carry the distinction.
 
 func seedMCPForward(t *testing.T, tenant, environment string, port int) {
 	t.Helper()
-	// Redirect both roots os.UserConfigDir consults, so the seeded forward is
-	// found on every host rather than only the ones that honour XDG.
+	// Redirect both roots os.UserConfigDir consults.
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", root)
 	t.Setenv("HOME", root)
-	// LoadPortForwardState's environmentIsConfigured guard reads
-	// through the real on-disk ConfigStore, not any App-injected store stub — on
-	// purpose, so a stale record for a deleted environment reads as "no forward"
-	// rather than a live one. adrg/xdg caches ConfigHome at process init instead
-	// of re-reading the environment per call, so the Setenv calls above alone do
-	// not redirect it; Reload is what makes it honour this test's temp root, and
-	// SaveEnvConfig is what makes the guard see this tenant/environment as
-	// configured there.
+	// adrg/xdg caches ConfigHome at init, so Reload is needed; the
+	// environmentIsConfigured guard reads the real on-disk ConfigStore.
 	xdg.Reload()
 	t.Cleanup(xdg.Reload)
 	if err := config.SaveEnvConfig(tenant, config.EnvConfig{Name: environment}); err != nil {
@@ -83,8 +72,6 @@ func TestObserveEnvironmentActivityWedgedEdgeGivesNoVerdict(t *testing.T) {
 	if !got.reachable {
 		t.Fatal("a port that accepts connections is still reachable")
 	}
-	// The claim that matters: nobody asked the environment anything, so the
-	// observation must not read as the environment reporting no work.
 	if got.observed {
 		t.Fatal("a wedged edge must not be reported as an answered idle question")
 	}
@@ -107,11 +94,6 @@ func TestObserveEnvironmentActivityIdleEnvironmentAnswers(t *testing.T) {
 	}
 }
 
-// A dropped forward is a repair, not a verdict: the environment cannot be asked
-// anything through a port nothing holds, so the observation stays empty while
-// the repair runs beside it. What the repair then does with it — and the
-// distinction between an environment that had a forward and one that never did
-// — belongs to environment_forward_repair_test.go.
 func TestObserveEnvironmentActivityUnreachableGivesNoVerdict(t *testing.T) {
 	got := observeWith(t, false, func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
 		t.Fatal("the idle question must not be asked when the port does not answer")
@@ -122,9 +104,6 @@ func TestObserveEnvironmentActivityUnreachableGivesNoVerdict(t *testing.T) {
 	}
 }
 
-// A transition in the verdict alone has to reach the sidebar: an environment
-// that stops answering while still holding its port changes nothing else about
-// the observation, and that is exactly the moment the row must stop trusting it.
 func TestEnvActivityStateComparesTheVerdict(t *testing.T) {
 	answered := environmentActivityState{reachable: true, observed: true}
 	silent := environmentActivityState{reachable: true}
@@ -133,13 +112,7 @@ func TestEnvActivityStateComparesTheVerdict(t *testing.T) {
 	}
 }
 
-// An environment not open in this desktop is not the same as an environment
-// nobody is using. The activity lease this poller looks for is
-// environment-side state, held by whatever is driving the environment — a CLI
-// orchestrator, an agent over MCP from another machine — not by whoever
-// happened to open a local forward to it. These tests lock in the fallback
-// that asks such an environment directly, over its own runtime pod, instead
-// of reporting "not open here" about one that might be busy right now.
+// An environment not open in this desktop may still be busy.
 
 func observeViaPodWith(
 	t *testing.T,
@@ -156,9 +129,6 @@ func observeViaPodWith(
 	return app.observeEnvironmentActivityViaPod(selection, environmentActivity{selection: selection}).state
 }
 
-// TestObserveEnvironmentActivityViaPodReportsAHeldLease is the exact case that
-// was broken: an environment this desktop never opened, but that another
-// session is holding busy right now, must read as busy — not as unreachable.
 func TestObserveEnvironmentActivityViaPodReportsAHeldLease(t *testing.T) {
 	got := observeViaPodWith(t, "ctx", func(context.Context, uiSelection, string) (string, error) {
 		status := activity.EnvironmentIdleStatus{
@@ -184,8 +154,6 @@ func TestObserveEnvironmentActivityViaPodReportsAHeldLease(t *testing.T) {
 	}
 }
 
-// TestObserveEnvironmentActivityViaPodReportsIdle is the other real answer: the
-// pod is reachable and genuinely has nothing running.
 func TestObserveEnvironmentActivityViaPodReportsIdle(t *testing.T) {
 	got := observeViaPodWith(t, "ctx", func(context.Context, uiSelection, string) (string, error) {
 		data, err := json.Marshal(activity.EnvironmentIdleStatus{
@@ -201,9 +169,6 @@ func TestObserveEnvironmentActivityViaPodReportsIdle(t *testing.T) {
 	}
 }
 
-// TestObserveEnvironmentActivityViaPodNamesAFailedCheckDistinctly is the third
-// state this fallback introduces: a real attempt that did not come back must
-// not collapse into "nobody asked" — see checkFailed's own comment.
 func TestObserveEnvironmentActivityViaPodNamesAFailedCheckDistinctly(t *testing.T) {
 	got := observeViaPodWith(t, "ctx", func(context.Context, uiSelection, string) (string, error) {
 		return "", errors.New("kubectl exec: the connection to the server was refused")
@@ -216,9 +181,6 @@ func TestObserveEnvironmentActivityViaPodNamesAFailedCheckDistinctly(t *testing.
 	}
 }
 
-// TestObserveEnvironmentActivityViaPodNamesAFailedCheckOnGarbledOutput covers
-// the other failure shape: the exec succeeded but what came back cannot be
-// trusted as the environment's answer.
 func TestObserveEnvironmentActivityViaPodNamesAFailedCheckOnGarbledOutput(t *testing.T) {
 	got := observeViaPodWith(t, "ctx", func(context.Context, uiSelection, string) (string, error) {
 		return "not json", nil
@@ -231,10 +193,6 @@ func TestObserveEnvironmentActivityViaPodNamesAFailedCheckOnGarbledOutput(t *tes
 	}
 }
 
-// TestObserveEnvironmentActivityViaPodSkipsEnvironmentsWithNoCluster is the
-// cheap-common-case guard: an environment that has never named a cluster it
-// could run in has nothing to probe, so it must not pay for an exec attempt
-// that could only ever fail.
 func TestObserveEnvironmentActivityViaPodSkipsEnvironmentsWithNoCluster(t *testing.T) {
 	got := observeViaPodWith(t, "", func(context.Context, uiSelection, string) (string, error) {
 		t.Fatal("an environment with no kubernetes context must never be exec'd into")

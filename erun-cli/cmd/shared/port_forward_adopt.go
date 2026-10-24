@@ -9,21 +9,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// PreviewAdoptOrConflict mirrors in dry-run what the live path would do
-// when the local port is already held: adopt the existing kubectl
-// port-forward, replace it because it has gone stale, or refuse. previewed=true
-// means a holder was found and the caller should short-circuit on the returned
-// port; previewed=false means fall back to the normal kubectl-args trace.
-// Without lsof no holder is ever found, so those platforms keep the old
-// assumed-fresh-start plan.
-//
-// carriesTraffic is the service's own reachability probe. It is what stops the
-// preview from promising an adoption of a forward whose far end is gone — the
-// holder's argv proves only that it is the right shape, never that it works.
+// PreviewAdoptOrConflict mirrors in dry-run the live adopt/replace/refuse decision for a
+// held port; previewed=false means no holder was found. carriesTraffic is required
+// because argv proves only the holder's shape, not that it works.
 func PreviewAdoptOrConflict(ctx core.Context, kind string, localPort int, expectedArgs []string, carriesTraffic func(int) bool) (bool, int) {
-	// Don't add a canConnectLocalPort/Dial gate here: lsof alone is
-	// authoritative for "is anything listening", and a separate Dial would
-	// make the probe sensitive to transient connect races.
+	// No Dial gate: lsof is authoritative, and a Dial adds connect races.
 	pid, argv, ok := FindLocalPortHolder(localPort)
 	if !ok {
 		return false, 0
@@ -41,20 +31,14 @@ func PreviewAdoptOrConflict(ctx core.Context, kind string, localPort int, expect
 	return true, 0
 }
 
-// holderCarriesTraffic asks the service's probe whether the holder is more than
-// a listener. A caller that supplies no probe cannot tell, and "cannot tell"
-// must not read as "broken" — that would turn every adoption into a restart.
+// holderCarriesTraffic treats a missing probe as working, so adoption is not turned into a restart.
 func holderCarriesTraffic(localPort int, carriesTraffic func(int) bool) bool {
 	return carriesTraffic == nil || carriesTraffic(localPort)
 }
 
-// ReplaceStalePortForwardHolder stops a holder that is the very forward erun
-// would start but no longer carries traffic, so the caller can start a fresh
-// one, and reports whether the port actually came free. The kill is safe only
-// because the caller has already matched the holder's argv against erun's own
-// port-forward shape and stopPortForwardProcess re-checks that the PID is a
-// kubectl port-forward: a port some other process legitimately holds is a
-// conflict to report, never something to kill.
+// ReplaceStalePortForwardHolder stops an argv-matched holder that no longer carries traffic
+// and reports whether the port came free. Callers must have matched the argv first: a port
+// held by any other process is a conflict to report, never something to kill.
 func ReplaceStalePortForwardHolder(ctx core.Context, kind string, pid, localPort int) bool {
 	if _, err := stopPortForwardProcess(pid); err != nil {
 		return false
@@ -67,11 +51,8 @@ func ReplaceStalePortForwardHolder(ctx core.Context, kind string, pid, localPort
 	return true
 }
 
-// kubectlPortForwardArgv is a parsed view of a `kubectl ... port-forward ...`
-// invocation, carrying only the fields used for adopt-or-conflict identity.
-// Context is deliberately excluded from that comparison: a different
-// `--context` alias can resolve to the same cluster, and adoption should
-// still succeed.
+// kubectlPortForwardArgv holds the fields used for adoption identity. Context is excluded:
+// different aliases can name the same cluster.
 type kubectlPortForwardArgv struct {
 	Binary    string
 	Context   string
@@ -81,10 +62,7 @@ type kubectlPortForwardArgv struct {
 	Address   string
 }
 
-// parseKubectlPortForwardArgv interprets an argv slice as a
-// `kubectl port-forward` invocation. The binary token matches any path
-// whose basename starts with "kubectl" so version-managed launchers
-// (`kuberlr`'s `kubectl1.32.0`, `kubectx` wrappers) still adopt.
+// parseKubectlPortForwardArgv accepts any binary whose basename starts with "kubectl", so versioned launchers adopt.
 func parseKubectlPortForwardArgv(argv []string) (kubectlPortForwardArgv, bool) {
 	if len(argv) == 0 || !strings.HasPrefix(filepath.Base(argv[0]), "kubectl") {
 		return kubectlPortForwardArgv{}, false
@@ -156,11 +134,7 @@ func matchKubectlFlag(argv []string, i int, names []string) (value string, advan
 	return "", 0, false
 }
 
-// ArgvMatchesExpectedKubectlPortForward decides whether a foreign
-// `kubectl port-forward` describes the same target erun would start itself.
-// Namespace, target, or port-pair drift means a different tenant,
-// environment, or service, so it is a hard "do not adopt". Context and
-// address are intentionally excluded; see kubectlPortForwardArgv.Context.
+// ArgvMatchesExpectedKubectlPortForward reports whether a foreign port-forward has erun's namespace, target, and ports.
 func ArgvMatchesExpectedKubectlPortForward(actual []string, expected []string) bool {
 	a, ok := parseKubectlPortForwardArgv(actual)
 	if !ok {
@@ -173,9 +147,7 @@ func ArgvMatchesExpectedKubectlPortForward(actual []string, expected []string) b
 	return a.Namespace == e.Namespace && a.Target == e.Target && a.PortPair == e.PortPair
 }
 
-// FormatHolderForError describes the process holding a port erun wanted to
-// bind, so the "already in use" error tells the user what to kill instead
-// of a bare port number.
+// FormatHolderForError describes the process holding a port for an "already in use" error.
 func FormatHolderForError(pid int, argv []string) string {
 	command := strings.Join(argv, " ")
 	if command == "" {
@@ -184,15 +156,8 @@ func FormatHolderForError(pid int, argv []string) string {
 	return "PID " + strconv.Itoa(pid) + ": " + command
 }
 
-// ReapRecordedPortForwardProcess stops the process an environment's own
-// state file last recorded, whether that forward is bound-but-dead or was
-// never reached far enough to bind at all: bound state alone cannot tell a
-// corpse that exited cleanly from one still running with nobody left to
-// reap it, so the caller no longer gates this on the port being held.
-// stopPortForwardProcess re-verifies the PID is still a kubectl port-forward
-// before touching it, so a PID the OS has since reused is left alone.
-// Returns whether a live process was actually found (and thus killed), so
-// the caller can trace only when there was something to reap.
+// ReapRecordedPortForwardProcess stops the recorded forward whether or not it bound its port,
+// re-verifying the PID first; it reports whether a live process was found.
 func ReapRecordedPortForwardProcess(matches bool, processID, localPort int) bool {
 	if !matches || processID <= 0 {
 		return false
@@ -202,12 +167,7 @@ func ReapRecordedPortForwardProcess(matches bool, processID, localPort int) bool
 	return found
 }
 
-// PreviewClearRecordedPortForward traces the --dry-run equivalent of
-// reapRecordedPortForward: naming a recorded PID that would be cleared
-// because it never bound its port, without touching it. A bound port is a
-// different decision the caller's own holder probe already owns (adopt or
-// refuse), and is silent when there is nothing to report — the ordinary case
-// of a state file whose process already exited cleanly.
+// PreviewClearRecordedPortForward traces, for --dry-run, a recorded PID that would be cleared because it never bound.
 func PreviewClearRecordedPortForward(ctx core.Context, kind string, matches bool, processID, localPort int) {
 	if !matches || processID <= 0 || CanConnectLocalPort(localPort) || !isPortForwardProcess(processID) {
 		return
@@ -215,16 +175,8 @@ func PreviewClearRecordedPortForward(ctx core.Context, kind string, matches bool
 	ctx.Trace(fmt.Sprintf("%s: would clear the recorded port-forward for 127.0.0.1:%d (PID %d) — it never bound its port", kind, localPort, processID))
 }
 
-// SweepDeadPortForwardsMatching kills every kubectl port-forward process on
-// the host whose argv names this exact target/port pair but whose port is
-// not currently bound. The state-file reap above only clears the PID the
-// file itself remembers; two overlapping opens for the same environment can
-// each read the file before either overwrites it, so the invocation that
-// loses that race leaves a kubectl process with no state entry left pointing
-// at it. Argv identity — the same shape adoption already matches on — is
-// what still finds that one. Best-effort and unix-only
-// (kubectlPortForwardProcessIDs is empty on Windows): a caller that cannot
-// enumerate processes just skips the sweep, it does not fail the open.
+// SweepDeadPortForwardsMatching kills port-forwards matching this target whose port is unbound,
+// catching ones orphaned when overlapping opens overwrote the state file. Best-effort, unix-only.
 func SweepDeadPortForwardsMatching(ctx core.Context, kind string, expectedArgs []string, localPort int) {
 	if localPort <= 0 || CanConnectLocalPort(localPort) {
 		return
@@ -240,8 +192,7 @@ func SweepDeadPortForwardsMatching(ctx core.Context, kind string, expectedArgs [
 	}
 }
 
-// PreviewSweepDeadPortForwardsMatching mirrors sweepDeadPortForwardsMatching
-// for --dry-run: it names any zombie it would clear without touching it.
+// PreviewSweepDeadPortForwardsMatching names, for --dry-run, the processes the sweep would kill.
 func PreviewSweepDeadPortForwardsMatching(ctx core.Context, kind string, expectedArgs []string, localPort int) {
 	if localPort <= 0 || CanConnectLocalPort(localPort) {
 		return
@@ -255,14 +206,9 @@ func PreviewSweepDeadPortForwardsMatching(ctx core.Context, kind string, expecte
 	}
 }
 
-// FindLocalPortHolder identifies which process holds a port the caller has
-// already confirmed is held. (0, nil, false) means the holder could not be
-// determined — lsof/ps absent, or a Windows host, since adopting foreign
-// port-forwards is a unix-only feature — not that the port is free; the caller
-// then falls back to the legacy "already in use" plan. The host OS is resolved
-// through common.DetectHost (not build tags) so the probe is a single
-// command-based implementation on every platform and the ERUN_HOST_OS_OVERRIDE
-// test seam can exercise the unix path on any host.
+// FindLocalPortHolder identifies the process holding an already-held port. false means
+// undetermined (no lsof/ps, or Windows), not free. The OS comes from DetectHost, not build
+// tags, so ERUN_HOST_OS_OVERRIDE can exercise the unix path anywhere.
 func FindLocalPortHolder(port int) (int, []string, bool) {
 	if port <= 0 || core.DetectHost().OS == core.HostOSWindows {
 		return 0, nil, false
@@ -275,8 +221,6 @@ func FindLocalPortHolder(port int) (int, []string, bool) {
 	if pidStr == "" {
 		return 0, nil, false
 	}
-	// If multiple processes share the listener (rare for TCP listeners but
-	// possible after a fork before bind teardown), keep the first.
 	if newline := strings.IndexAny(pidStr, "\n\r"); newline > 0 {
 		pidStr = pidStr[:newline]
 	}
@@ -303,7 +247,6 @@ func readProcessArgv(pid int) ([]string, bool) {
 	if command == "" {
 		return nil, false
 	}
-	// kubectl port-forward never embeds spaces in its args (paths can, but
-	// namespaces/contexts/deployments cannot), so a plain whitespace split is safe.
+	// kubectl port-forward args never contain spaces, so a whitespace split is safe.
 	return strings.Fields(command), true
 }

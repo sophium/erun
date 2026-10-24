@@ -10,11 +10,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
-// desktopIdentity is the desktop's persistent Ed25519 identity: it signs the
-// per-env MCP bearer tokens each env's edge verifies, and supplies the public
-// key the deploy injects into the pod so that edge can trust them. Where the
-// identity lives, and how a token for an env is shaped, is owned by
-// `erun-common` so the CLI mints tokens the same deployed edges already trust.
+// desktopIdentity is the desktop's Ed25519 identity that signs per-env MCP tokens;
+// its storage and token shape are owned by erun-common so CLI tokens match.
 type desktopIdentity struct {
 	dir        string
 	mu         sync.Mutex
@@ -77,8 +74,7 @@ func (d *desktopIdentity) writePublicKeyLocked() error {
 	return nil
 }
 
-// Returns "" with no error when no identity dir is configured, so a deploy from
-// such a desktop stays unauthenticated rather than failing.
+// Returns "" with no error when no identity dir is configured: the deploy stays unauthenticated.
 func (d *desktopIdentity) ensurePublicKeyPath() (string, error) {
 	if d == nil || strings.TrimSpace(d.dir) == "" {
 		return "", nil

@@ -14,49 +14,29 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// The runtime entrypoint is what the erun-devops image runs as PID 1. It prepares
-// the container from the environment the runtime chart injects -- kubeconfig,
-// credentials, erun config, agent configuration -- starts the long-lived services
-// the pod needs (sshd and its activity proxy, the activity monitor, the go build
-// cache bound, the MCP edge), and then does what an init does: reaps orphans,
-// forwards termination signals to what it started, and exits with the code of the
-// work it was running.
-//
-// Every preparation step is best-effort. A step that fails is reported on the
-// container log and the boot continues, because a pod that comes up partly
-// configured can still be repaired from inside (`erun doctor`), while one that
-// crash-loops cannot be reached at all.
+// The runtime entrypoint is PID 1 of the erun-devops image. Every preparation step is
+// best-effort: a partly configured pod can be repaired from inside, a crash-looping one cannot.
 
-// ErrRuntimeEntrypointUnsupported is returned off Linux: the entrypoint is an init
-// for the runtime container, and reaping and signal handling are Linux process
-// semantics.
+// ErrRuntimeEntrypointUnsupported is returned off Linux, where init semantics do not apply.
 var ErrRuntimeEntrypointUnsupported = errors.New("erun runtime-init runs only as the init of a Linux runtime container")
 
 const (
 	RuntimeBakedAgentsDir = "/etc/erun/agents"
 )
 
-// RuntimeEntrypointDevopsMode is the image's default command: boot the
-// environment and keep serving it until the container is stopped.
+// RuntimeEntrypointDevopsMode boots the environment and serves it until stopped.
 const RuntimeEntrypointDevopsMode = "devops"
 
 // RuntimeEntrypointParams is one entrypoint invocation.
 type RuntimeEntrypointParams struct {
-	// Command is the container's command. Empty or "devops" boots the
-	// environment; anything else runs after the common preparation as the
-	// supervised foreground process whose exit code the container exits with.
-	Command []string
-	// ERunPath is the erun executable the long-lived services invoke.
+	// Command other than empty or "devops" runs as the supervised foreground process.
+	Command  []string
 	ERunPath string
-	// Env reads the container environment; nil means os.Getenv.
-	Env func(string) string
-	// HomeDir is the erun user's home.
+	// Env nil means os.Getenv.
+	Env     func(string) string
 	HomeDir string
 }
 
-// runtimeBoot is the container as the entrypoint sees it: the injected
-// environment, the home directory, and the fixed paths the image and chart
-// share. Tests point the paths at fixtures.
 type runtimeBoot struct {
 	env      func(string) string
 	home     string
@@ -134,8 +114,7 @@ func (b runtimeBoot) path(rel ...string) string {
 	return filepath.Join(append([]string{b.home}, rel...)...)
 }
 
-// runtimeEnvFlagEnabled reads the chart's boolean variables the way the shell
-// entrypoint always did: 1, true, yes and on, in any case.
+// runtimeEnvFlagEnabled accepts 1, true, yes and on, in any case.
 func runtimeEnvFlagEnabled(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "1", "true", "yes", "on":
@@ -152,15 +131,13 @@ func runtimeEnvFlagDisabled(value string) bool {
 	return false
 }
 
-// runtimeBootStep is one preparation step. describe says what the step would do
-// for this container, or "" when it has nothing to do; run does it.
+// describe returns "" when the step has nothing to do.
 type runtimeBootStep struct {
 	name     string
 	describe func(runtimeBoot) string
 	run      func(core.Context, runtimeBoot, *runtimeSupervisor) error
 }
 
-// runtimePreambleSteps run in every mode, before the container's command.
 func runtimePreambleSteps() []runtimeBootStep {
 	return []runtimeBootStep{
 		{name: "kubeconfig", describe: describeRuntimeKubeconfig, run: writeRuntimeKubeconfig},
@@ -173,8 +150,7 @@ func runtimePreambleSteps() []runtimeBootStep {
 	}
 }
 
-// runtimeDevopsSteps boot the environment. The MCP edge starts last, so it never
-// serves a half-prepared environment.
+// The MCP edge starts last so it never serves a half-prepared environment.
 func runtimeDevopsSteps() []runtimeBootStep {
 	return []runtimeBootStep{
 		{name: "go build cache bound", describe: describeRuntimeCacheTrim, run: startRuntimeCacheTrim},
@@ -207,8 +183,6 @@ func traceRuntimeBootSteps(ctx core.Context, boot runtimeBoot, steps []runtimeBo
 	}
 }
 
-// runtimeEntrypointCommand returns the command to supervise, or nil for the
-// devops boot.
 func runtimeEntrypointCommand(args []string) []string {
 	if len(args) == 0 || (len(args) == 1 && args[0] == RuntimeEntrypointDevopsMode) {
 		return nil
@@ -216,8 +190,7 @@ func runtimeEntrypointCommand(args []string) []string {
 	return args
 }
 
-// RunRuntimeEntrypoint boots the runtime container and returns the exit code the
-// container should end with.
+// RunRuntimeEntrypoint boots the runtime container and returns its exit code.
 func RunRuntimeEntrypoint(ctx core.Context, params RuntimeEntrypointParams) (int, error) {
 	boot := newRuntimeBoot(params)
 	command := runtimeEntrypointCommand(params.Command)
@@ -228,8 +201,6 @@ func RunRuntimeEntrypoint(ctx core.Context, params RuntimeEntrypointParams) (int
 	if hostOS := core.ResolveDetectedHostOS(); hostOS != core.HostOSLinux {
 		return 1, fmt.Errorf("%w; this host is %s", ErrRuntimeEntrypointUnsupported, hostOS)
 	}
-	// Only the real boot asks the instance metadata service; a dry run traces
-	// the plan from what the chart injected.
 	boot.env = runtimeEnvWithCloudMetadata(boot.env, func() runtimeCloudMetadata {
 		return lookupRuntimeIMDS(runtimeIMDSEndpoint, runtimeIMDSTimeout)
 	})
@@ -255,10 +226,8 @@ func traceRuntimeEntrypointPlan(ctx core.Context, boot runtimeBoot, command []st
 	ctx.Trace("runtime-init: serve until the container is stopped, reaping orphans and forwarding termination signals")
 }
 
-// RuntimeGoBuildCacheTrimSettings reads the go build cache bound the runtime
-// chart renders: the cache directory, its cap, and how often the boot re-applies
-// it. A cap of 0, or one that is not a number, means no bound rather than a
-// bound of zero, which would clear the cache and make every build cold.
+// RuntimeGoBuildCacheTrimSettings reads the chart's cache bound. A zero or invalid cap means
+// no bound, not a bound of zero.
 func RuntimeGoBuildCacheTrimSettings(env func(string) string, homeDir string) (dir string, maxBytes int64, interval time.Duration) {
 	get := func(key string) string { return strings.TrimSpace(env(key)) }
 	dir = get("GOCACHE")
@@ -294,11 +263,7 @@ func describeRuntimeCacheTrim(boot runtimeBoot) string {
 	return fmt.Sprintf("bound the go build cache at %s to %d bytes now and every %s", dir, maxBytes, interval)
 }
 
-// startRuntimeCacheTrim bounds the go build cache for as long as the container
-// lives. The first pass runs in the background because it is the migration: an
-// environment already holding tens of gigabytes is brought under the cap by it,
-// and the boot must not wait on that. It repeats because a container outlives
-// the boot that started it.
+// The first pass runs in the background so the boot never waits on a large initial eviction.
 func startRuntimeCacheTrim(ctx core.Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
 	dir, maxBytes, interval := boot.runtimeCacheTrimSettings()
 	supervisor.goLoop(func() bool {

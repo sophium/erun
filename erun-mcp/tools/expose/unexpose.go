@@ -12,25 +12,15 @@ import (
 )
 
 type UnexposeInput struct {
-	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant name; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
-	Environment string `json:"environment,omitempty" jsonschema:"environment name; defaults to the server environment context, and must match it: this server only acts on its own environment"`
-	ProjectRoot string `json:"projectRoot,omitempty" jsonschema:"project root holding the platform config (.erun/config.yaml); defaults to the runtime repo path"`
-	Preview     bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned action without executing it"`
-	Verbosity   int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
-	// SkipIfUnconfigured mirrors the CLI's --skip-if-unconfigured: succeed as a
-	// no-op instead of failing when the project declares no platform block,
-	// for an Agent composing unexpose after delete without knowing whether the
-	// target was ever exposed at all.
-	SkipIfUnconfigured bool `json:"skipIfUnconfigured,omitempty" jsonschema:"succeed as a no-op instead of failing when the project declares no platform block"`
-	// ServicesZone/PlatformNamespace mirror the CLI's --services-zone/
-	// --platform-namespace: an explicit override for the platform coordinates
-	// unexpose would otherwise read from ProjectRoot, for a caller with no
-	// project to resolve.
-	ServicesZone      string `json:"servicesZone,omitempty" jsonschema:"override the platform services zone tenant hostnames live under, so unexpose needs no project (requires platformNamespace too)"`
-	PlatformNamespace string `json:"platformNamespace,omitempty" jsonschema:"override the namespace running the platform's PowerDNS singleton, so unexpose needs no project (requires servicesZone too)"`
-	// ErunAlias mirrors ExposeInput.ErunAlias for the delete-side platform
-	// route.
-	ErunAlias string `json:"erunAlias,omitempty" jsonschema:"erun platform cloud alias to route the DNS delete through when direct PowerDNS access is unavailable (defaults to the sole configured erun-type alias)"`
+	Tenant             string `json:"tenant,omitempty" jsonschema:"tenant name; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment        string `json:"environment,omitempty" jsonschema:"environment name; defaults to the server environment context, and must match it: this server only acts on its own environment"`
+	ProjectRoot        string `json:"projectRoot,omitempty" jsonschema:"project root holding the platform config (.erun/config.yaml); defaults to the runtime repo path"`
+	Preview            bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned action without executing it"`
+	Verbosity          int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	SkipIfUnconfigured bool   `json:"skipIfUnconfigured,omitempty" jsonschema:"succeed as a no-op instead of failing when the project declares no platform block"`
+	ServicesZone       string `json:"servicesZone,omitempty" jsonschema:"override the platform services zone tenant hostnames live under, so unexpose needs no project (requires platformNamespace too)"`
+	PlatformNamespace  string `json:"platformNamespace,omitempty" jsonschema:"override the namespace running the platform's PowerDNS singleton, so unexpose needs no project (requires servicesZone too)"`
+	ErunAlias          string `json:"erunAlias,omitempty" jsonschema:"erun platform cloud alias to route the DNS delete through when direct PowerDNS access is unavailable (defaults to the sole configured erun-type alias)"`
 	shared.JobEnvelopeInput
 }
 

@@ -1,20 +1,10 @@
-// The Reviews tab's own filter chip pair, split out of
-// TenantDashboardPanels.Reviews.tsx to keep that file inside eslint's
-// lines-budget. Behaviour is unchanged: two independently-toggling chips in
-// one grouped pill.
 import { cn } from 'erun-kit';
 import * as React from 'react';
 
 import { reviewStatuses } from '../../app/reviewDetailState';
 
-// ReviewFilterSegmentedControl is one grouped control, not two independent
-// buttons: Mine and Waiting-on-me visually merge into a single pill,
-// matching the DiffSourceButton segmented-toggle pattern the review panel's
-// Env/ERun source switch already uses (Nielsen #4, consistency). Each side
-// still toggles independently — a review can be both — so this is a grouped
-// filter chip pair, not a mutually-exclusive tab strip. The count on each
-// side is the discovery signal itself: which pile has work in it is visible
-// before either is clicked, rather than only after.
+// ReviewFilterSegmentedControl groups the Mine and Waiting-on-me chips; each
+// still toggles independently, since a review can be both.
 export function ReviewFilterSegmentedControl({
   mine,
   waitingOnMe,
@@ -43,19 +33,8 @@ export function ReviewFilterSegmentedControl({
   );
 }
 
-// ReviewStatusFilterControl narrows the list by status, in the same grouped
-// pill idiom as the authorship chips so the two filters read as one surface.
-//
-// It exists because an unfiltered list is mostly finished work: a tenant
-// accumulates MERGED and CLOSED reviews forever, so the rows that need someone
-// are buried under rows that need nobody — one tenant was at 155 reviews of
-// which 87 were merged and 68 closed. OPEN+MERGE opens by default (see
-// defaultReviewStatuses) and each chip carries the count it would show, so the
-// distribution is legible before anything is clicked.
-//
-// Turning every chip off means "show everything" rather than "show nothing":
-// that is how the unfiltered list is reached, so the control needs no separate
-// reset affordance and can never strand the operator on an empty panel.
+// ReviewStatusFilterControl narrows the list by status. All chips off means
+// show everything, so the panel can never be stranded empty.
 export function ReviewStatusFilterControl({
   statuses,
   counts,
@@ -86,10 +65,7 @@ export function ReviewStatusFilterControl({
   );
 }
 
-// ReviewFilterToggle is a one-click discovery affordance, not a form field:
-// clicking answers "which are mine" or "which are waiting on me" directly.
-// The count renders inside the button's own accessible name (e.g. "Mine 2")
-// so a screen reader announces the same distribution a sighted operator sees.
+// ReviewFilterToggle keeps the count in the accessible name so screen readers hear it.
 export function ReviewFilterToggle({
   label,
   count,

@@ -10,9 +10,7 @@ import (
 	"strings"
 )
 
-// RegistryForwarder owns the port-forwards that reach an in-cluster registry
-// from the host (ClusterRegistryForwards): Start opens one and reports the local
-// port, Close ends every one it opened.
+// RegistryForwarder owns the port-forwards to an in-cluster registry.
 type RegistryForwarder interface {
 	Start(ctx Context, kubeContext, namespace, service string, remotePort int) (int, error)
 	Close()
@@ -22,72 +20,36 @@ type Context struct {
 	Logger    Logger
 	Verbosity int
 	DryRun    bool
-	// Output selects how a command renders its machine-readable result. JSON mode
-	// puts the structured result on Stdout while logging stays on Stderr, so an
-	// orchestrator captures an uncorrupted payload.
+	// Output selects the result format; JSON goes to Stdout, logging stays on Stderr.
 	Output OutputMode
-	// BuildJobs caps how many images build at once. Concurrency is execution
-	// policy, so it rides the context rather than the docker command target,
-	// which flows into the env-agnostic resolvers where policy must not leak.
-	// Zero means "resolve it" (see resolveBuildJobs); one is strictly sequential.
+	// BuildJobs caps concurrent image builds; zero means resolve it, one is sequential.
+	// It lives here because policy must not leak into the env-agnostic resolvers.
 	BuildJobs int
-	// PlatformAlias is the operator's own choice of which configured erun-type
-	// cloud provider alias this run should act as, set by a transport from its
-	// selection flag (`erun deploy --erun-alias`) and empty when they made no
-	// choice. It rides the context so a shared step deep behind a transport's
-	// own wiring can honour an explicit pick without a new parameter threaded
-	// through every caller in between -- the consumer today is the platform
-	// alias retrofit in platform_alias_secret.go. Empty is the default every
-	// consumer already had, so a caller that never sets it is unaffected.
+	// PlatformAlias is the operator's explicit erun cloud alias choice; empty means none.
 	PlatformAlias string
 	Stdin         io.Reader
 	Stdout        io.Writer
 	Stderr        io.Writer
-	// Command is the operator-facing invocation of the command that is running
-	// (for example "erun usage", "erun outputs list"), set once at command
-	// entry. Resolution failures name the command's own recovery from it, so a
-	// failure names the operation the operator actually ran rather than a fixed
-	// one. Empty for callers that are not a CLI command (the desktop app, MCP),
-	// which get the command-free wording instead of a borrowed name.
+	// Command is the operator-facing invocation (e.g. "erun usage") that recovery
+	// messages name; empty outside the CLI.
 	Command string
-	// CommandScopesTenantByFlag reports whether Command takes a --tenant flag
-	// that scopes resolution (rather than, say, `list`'s --tenant, which selects
-	// version-drift reporting). It gates whether the recovery may name that flag
-	// as the fix: offering a flag that does not do what the operator wants is the
-	// same defect as naming the wrong command, so a command with no such flag
-	// (build and push take the tenant positionally) gets a recovery that names
-	// the command without asserting a flag it does not have.
+	// CommandScopesTenantByFlag reports whether Command's --tenant scopes resolution,
+	// so a recovery never suggests a flag that does something else.
 	CommandScopesTenantByFlag  bool
 	KubernetesContextPreflight KubernetesContextPreflightFunc
-	// RegistryForwards owns any kubectl port-forwards a cluster registry needs.
-	// It is set once at command entry so the forward's lifetime spans registry
-	// resolution and the build/deploy that uses it; the entry defers its Close.
-	// Nil when no command-level forward lifecycle has been established (tests,
-	// pure resolution) — concretization then forwards on demand into a throwaway.
+	// RegistryForwards spans registry resolution and the build/deploy using it. Nil
+	// means forwards are opened on demand.
 	RegistryForwards RegistryForwarder
-	// Timing is the active step-timing root for a long command (build, release,
-	// push, deploy), set by that command's umbrella and nil everywhere else —
-	// see timing.go. Unexported: only erun-common's own umbrellas start one.
+	// Timing is the step-timing root of a long command; nil elsewhere.
 	Timing *stepTiming
-	// Progress is the live heartbeat for the command's active build run, set by
-	// RunDockerBuilds (or RunDockerBuild for a lone image) and nil everywhere
-	// else. Every image the run builds registers with it, so one ticker names
-	// whatever is still building however the run is scheduled — see
-	// build_heartbeat.go.
+	// Progress is the active build run's heartbeat; nil elsewhere.
 	Progress *BuildHeartbeat
-	// MCPTool names the MCP tool that initiated this call, set only by
-	// erun-mcp's tool handlers before they call into shared execution.
-	// newPlatformClientForAlias forwards it to erun-backend-api as an audit
-	// caller hint (see PlatformClient.WithMCPTool), so a platform-backed call
-	// an MCP tool triggers is audited as type MCP with this tool name instead
-	// of the generic API classification every other bearer-token caller gets.
-	// Empty means "not an MCP call" (CLI, tests, pure resolution) and changes
-	// nothing about the request. erun-cli does not populate this field yet.
+	// MCPTool names the initiating MCP tool so platform calls are audited as MCP.
+	// Empty means not an MCP call.
 	MCPTool string
 }
 
-// WriteResult emits v as the command's structured result; callers invoke it on
-// success, after the human trace has streamed to Stderr.
+// WriteResult emits v as the command's structured result.
 func (c Context) WriteResult(v any) error {
 	if c.Output != OutputJSON {
 		return nil
@@ -104,23 +66,8 @@ func (c Context) WriteResult(v any) error {
 	return err
 }
 
-// normalizeResultSlices replaces a top-level nil slice with an empty one, so a
-// result that resolved to no rows marshals as [] rather than null. The two are
-// not interchangeable for the orchestrators --output json exists for: null
-// conflates "we queried and nothing matched" with "this was not determined",
-// while [] can only mean the former. A consumer that iterates the result or
-// reads .length otherwise has to null-guard every command whose cardinality it
-// cannot predict from the surface.
-//
-// Only the top level is rewritten. A nil field inside a struct is left alone:
-// there, absence is part of the declared shape (omitempty marks a value that is
-// genuinely not part of this result), and filling it in would turn a reported
-// absence into a claim -- "refreshFailures": [] asserts the refresh ran and
-// nothing failed, which is false when it was never attempted.
-//
-// Maps are deliberately out of scope: the defect this normalises is a list
-// shape, and widening the rewrite to every container kind is a larger change
-// than the reported evidence supports.
+// normalizeResultSlices turns a top-level nil slice into [], because null would
+// mean "not determined". Nested fields keep nil: there absence is meaningful.
 func normalizeResultSlices(v any) any {
 	if v == nil {
 		return v
@@ -134,21 +81,13 @@ func normalizeResultSlices(v any) any {
 
 type KubernetesContextPreflightFunc func(Context, string) error
 
-// StderrOnlyContext is for internal status checks that have no caller-supplied
-// Context to thread through (e.g. a background token-verify probe) but still
-// call into code that traces via Context.Trace. A zero-value Context leaves
-// Logger's stdout writer unset, which falls back to the real os.Stdout -- so a
-// diagnostic line lands ahead of a command's own stdout result instead of
-// beside its other diagnostics on stderr. This mirrors how a real transport
-// context is wired (Logger's stdout pointed at stderr) without requiring a
-// caller-supplied Context to exist yet.
+// StderrOnlyContext is a Context with stdout pointed at stderr, for internal
+// checks that trace without a caller Context.
 func StderrOnlyContext() Context {
 	return Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr)}
 }
 
-// Trace is the audit channel for decisions, inputs, and outputs; it stays
-// visible at default verbosity so a user can audit a command's plan without
-// flags. Raw argv goes through TraceCommand, gated to -vv.
+// Trace logs decisions at default verbosity; raw argv goes through TraceCommand (-vv).
 func (c Context) Trace(message string) {
 	c.Logger.Info(message)
 }
@@ -161,16 +100,8 @@ func (c Context) TraceCommand(dir, name string, args ...string) {
 	c.Logger.Trace(FormatShellCommand(dir, name, args...))
 }
 
-// ToolCapture wires stdout/stderr for an external tool subprocess so a clean run
-// stays silent while captured output can replay on error; at Debug verbosity or
-// higher the output also streams live to the user's terminal.
-//
-// stdout and stderr each get their own buffer rather than sharing one: os/exec
-// runs one copier goroutine per stream, and a single shared *bytes.Buffer
-// reachable from both would be written by both goroutines with no
-// synchronization (the same shape deploy.go's helmOutputCapture exists to
-// avoid for helm deploy). Output()/Apply() only read the buffers after the
-// command has finished, which is the only time every caller reads them.
+// ToolCapture silences a tool's output but replays it on error, streaming live at
+// Debug. Separate buffers per stream: os/exec writes them from separate goroutines.
 func (c Context) ToolCapture() *ToolCapture {
 	capture := &ToolCapture{verbosity: c.Verbosity}
 	if c.Verbosity >= VerbosityDebug {
@@ -197,9 +128,7 @@ func (c *ToolCapture) Stderr() io.Writer { return c.stderr }
 
 func (c *ToolCapture) Output() string { return c.stdoutBuf.String() + c.stderrBuf.String() }
 
-// Apply folds captured tool output into a returned error so a silenced run's
-// failure stays debuggable, and avoids duplicating output Debug already streamed
-// live.
+// Apply folds captured output into err unless Debug already streamed it.
 func (c *ToolCapture) Apply(err error) error {
 	if err == nil {
 		return nil
@@ -227,17 +156,8 @@ func TeeWriter(primary io.Writer, capture io.Writer) io.Writer {
 	}
 }
 
-// CommandOutputCapture keeps stdout and stderr in separate buffers rather than
-// one shared *bytes.Buffer. os/exec runs one copier goroutine per stream, so a
-// single buffer reachable from both cmd.Stdout and cmd.Stderr — built via two
-// separate teeWriter/io.MultiWriter calls, which defeats os/exec's
-// same-writer dedup (interfaceEqual) even when the two calls share the same
-// underlying capture — is written by both goroutines with no synchronization.
-// This is the same shape deploy.go's helmOutputCapture exists to avoid for
-// helm deploy; build_docker_commands.go, helm_chart_publish.go, and
-// published_artifact_verify.go all had the unguarded version of it.
-// combined() must only be read after the command has finished, which is the
-// only time any caller here reads it.
+// CommandOutputCapture keeps stdout and stderr in separate buffers because os/exec
+// copies each stream on its own goroutine. Read combined() only after the command exits.
 type CommandOutputCapture struct {
 	Stdout bytes.Buffer
 	Stderr bytes.Buffer
@@ -255,11 +175,8 @@ func (c Context) EnsureKubernetesContext(contextName string) error {
 	return c.KubernetesContextPreflight(c, contextName)
 }
 
-// RequireKubernetesContext is the mutating-action variant of
-// EnsureKubernetesContext: it errors on an empty context instead of letting
-// kubectl/helm fall through to the dev machine's current-context (usually a
-// local orbstack/minikube cluster, not the env's target). EnsureKubernetesContext
-// stays advisory for callers that legitimately have no context yet.
+// RequireKubernetesContext errors on an empty context so mutating actions never
+// fall through to the machine's current-context.
 func (c Context) RequireKubernetesContext(contextName string) error {
 	contextName = strings.TrimSpace(contextName)
 	if contextName == "" {
@@ -271,9 +188,7 @@ func (c Context) RequireKubernetesContext(contextName string) error {
 	return c.KubernetesContextPreflight(c, contextName)
 }
 
-// TraceBlock logs a labeled multi-line block (a file body, a remote script) for
-// audit; it shows on --dry-run or -vv and stays silent otherwise so real runs do
-// not spam full script bodies.
+// TraceBlock logs a multi-line block only on --dry-run or -vv.
 func (c Context) TraceBlock(label, body string) {
 	if !c.DryRun && c.Verbosity < VerbosityTrace {
 		return

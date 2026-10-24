@@ -11,16 +11,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// RegistryBasicAuth is a username/secret pair used to Basic-authenticate a
-// registry token request, so version listing can read private images the
-// operator is already logged into rather than falling back to anonymous access.
+// RegistryBasicAuth lets version listing read private images the operator is logged into.
 type RegistryBasicAuth struct {
 	Username string
 	Secret   string
 }
 
-// Seams so tests exercise the resolution logic without a real docker config, a
-// live credential keychain, or the gh CLI. Mirrors the aws_sso_config.go style.
+// Test seams.
 var (
 	DockerConfigDir             = defaultDockerConfigDir
 	dockerCredentialHelperPaths = defaultDockerCredentialHelperPaths
@@ -39,21 +36,9 @@ type dockerAuthEntry struct {
 	Auth string `json:"auth"`
 }
 
-// resolveGHCRBasicAuth resolves a pull credential for ghcr.io, preferring the
-// credential docker itself pulls with (so "if docker can pull it, the picker
-// lists it"), then a gh-issued token, then an explicit GH_TOKEN/GITHUB_TOKEN.
-// The env-var path is last but load-bearing: it needs no credential-helper or gh
-// subprocess, so it stays reachable when a desktop app's subprocess or keychain
-// access is intermittently blocked (endpoint security, a locked keychain) — the
-// failure that otherwise strands the picker on anonymous access. owner scopes the
-// credential to the account that owns the namespace.
-//
-// A deploy running inside the target env's own runtime pod adds one route below
-// all three: the dockerconfigjson Secret that env declared as its imagePullSecret
-// (configureInPodDeclaredRegistryAuth). It is appended rather than preferred so
-// every existing route keeps its precedence exactly, and it fires only when the
-// pod genuinely has none of the three — the state the pod boots in, and the one
-// that otherwise leaves a private read anonymous and therefore inconclusive.
+// resolveGHCRBasicAuth tries docker's own credential, gh, GH_TOKEN/GITHUB_TOKEN,
+// then the in-pod declared Secret. The env-var route needs no subprocess or
+// keychain, so it survives when those are blocked.
 func resolveGHCRBasicAuth(owner string) (RegistryBasicAuth, bool) {
 	if auth, ok := resolveRegistryBasicAuth("ghcr.io"); ok {
 		return auth, true
@@ -70,9 +55,7 @@ func resolveGHCRBasicAuth(owner string) (RegistryBasicAuth, bool) {
 	return RegistryBasicAuth{}, false
 }
 
-// ghcrTokenEnvVars are the token env vars honored for ghcr.io, in gh's own
-// precedence order, so an operator's existing GitHub token authenticates the
-// picker with no keychain or subprocess dependency.
+// ghcrTokenEnvVars are in gh's own precedence order.
 var ghcrTokenEnvVars = []string{"GH_TOKEN", "GITHUB_TOKEN"}
 
 func GhcrTokenFromEnv() (string, bool) {
@@ -84,9 +67,7 @@ func GhcrTokenFromEnv() (string, bool) {
 	return "", false
 }
 
-// ghcrTokenBasicAuth pairs a bearer token with the namespace owner as the basic-
-// auth username; GHCR ignores the username on a token exchange but requires one,
-// so an empty owner uses the conventional token placeholder.
+// ghcrTokenBasicAuth uses the owner as username; GHCR ignores it but requires one.
 func ghcrTokenBasicAuth(owner, token string) RegistryBasicAuth {
 	user := strings.TrimSpace(owner)
 	if user == "" {
@@ -95,9 +76,7 @@ func ghcrTokenBasicAuth(owner, token string) RegistryBasicAuth {
 	return RegistryBasicAuth{Username: user, Secret: token}
 }
 
-// resolveRegistryBasicAuth looks up a host's credential the way docker does: a
-// per-host credential helper (or the global creds store) first, then an inline
-// base64 auth entry. Returns false when no usable credential is configured.
+// resolveRegistryBasicAuth looks up a credential the way docker does.
 func resolveRegistryBasicAuth(host string) (RegistryBasicAuth, bool) {
 	cfg, ok := loadDockerConfig()
 	if !ok {
@@ -138,8 +117,6 @@ func defaultDockerConfigDir() string {
 	return filepath.Join(home, ".docker")
 }
 
-// dockerCredentialHelperFor picks the credential helper for a host: a per-host
-// credHelpers entry overrides the global credsStore.
 func dockerCredentialHelperFor(cfg dockerConfig, host string) string {
 	for _, key := range hostLookupKeys(host) {
 		if helper := strings.TrimSpace(cfg.CredHelpers[key]); helper != "" {
@@ -149,11 +126,8 @@ func dockerCredentialHelperFor(cfg dockerConfig, host string) string {
 	return strings.TrimSpace(cfg.CredsStore)
 }
 
-// credentialFromHelper tries every docker-credential-<helper> binary it can find
-// until one returns a credential. Multiple container runtimes (Rancher Desktop,
-// OrbStack, Docker Desktop) each ship a helper of the same name, but only the one
-// holding the login keychain item returns a secret — the others return empty — so
-// stopping at the first found binary can miss the working credential.
+// credentialFromHelper tries every same-named helper binary: several runtimes
+// ship one, but only the one holding the keychain item returns a secret.
 func credentialFromHelper(helper, host string) (RegistryBasicAuth, bool) {
 	for _, bin := range dockerCredentialHelperPaths(helper) {
 		for _, server := range hostLookupKeys(host) {
@@ -206,9 +180,7 @@ func decodeInlineDockerAuth(encoded string) (RegistryBasicAuth, bool) {
 	return RegistryBasicAuth{Username: strings.TrimSpace(user), Secret: secret}, true
 }
 
-// hostLookupKeys returns the config/keychain keys docker may have stored a
-// host's credential under, most specific first. Docker Hub is keyed by its
-// legacy v1 index URL.
+// hostLookupKeys returns docker's possible keys for host; Docker Hub uses the legacy v1 URL.
 func hostLookupKeys(host string) []string {
 	host = strings.TrimSpace(host)
 	keys := []string{host, "https://" + host, "https://" + host + "/"}
@@ -224,11 +196,8 @@ func execDockerCredentialHelper(binaryPath, serverURL string) ([]byte, error) {
 	return cmd.Output()
 }
 
-// defaultDockerCredentialHelperPaths lists docker-credential-<helper> binaries to
-// try, in priority order: the one on PATH first, then well-known install dirs. The
-// dir search is what lets a macOS GUI app launched from Finder/Dock — which starts
-// with a stripped PATH, or a login-shell PATH that resolves the wrong runtime's
-// helper — still reach the helper binary that actually holds the credential.
+// defaultDockerCredentialHelperPaths also searches well-known dirs, because a
+// macOS GUI app starts with a stripped or wrong PATH.
 func defaultDockerCredentialHelperPaths(helper string) []string {
 	bin := "docker-credential-" + helper
 	seen := make(map[string]struct{}, 4)
@@ -288,9 +257,6 @@ func ghAuthToken(owner string) (string, bool) {
 	return "", false
 }
 
-// ecrRegionFromHost returns the region embedded in an ECR registry host
-// (<account>.dkr.ecr.<region>.amazonaws.com), so a credential can be minted for
-// the right region without the caller passing one.
 func ecrRegionFromHost(host string) (string, bool) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if !strings.HasSuffix(host, ".amazonaws.com") {
@@ -307,20 +273,10 @@ func ecrRegionFromHost(host string) (string, bool) {
 	return "", false
 }
 
-// ResolveOCIRegistryBasicAuth resolves a pull credential for any registry host,
-// preferring the credential docker itself pulls with, then — for a deploy inside
-// the target env's own runtime pod — the dockerconfigjson Secret that env
-// declared as its imagePullSecret (see configureInPodDeclaredRegistryAuth).
-// For ECR it falls back to the AWS CLI, mirroring the gh fallback for ghcr: an ECR authorization token
-// expires after twelve hours, so the docker credential is routinely stale or
-// absent, and without this fallback version listing degrades to anonymous and
-// the registry reports the image as unreadable.
+// ResolveOCIRegistryBasicAuth resolves a pull credential for any registry host.
 func ResolveOCIRegistryBasicAuth(host string) (RegistryBasicAuth, bool) {
-	// ECR first, because its authorization token expires after twelve hours: the
-	// credential docker stored is routinely expired, and an expired credential is
-	// worse than none — it is found, so it shadows the fallback, and the registry
-	// then rejects the listing as unauthorized. A freshly minted token cannot be
-	// stale, and minting one is a local call.
+	// ECR first: stored ECR tokens expire after 12 hours and an expired one would
+	// shadow the fallback.
 	if region, ok := ecrRegionFromHost(host); ok {
 		if token, ok := RunECRLoginPassword(region); ok {
 			return RegistryBasicAuth{Username: "AWS", Secret: token}, true

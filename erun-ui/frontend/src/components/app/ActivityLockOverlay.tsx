@@ -10,14 +10,8 @@ interface ActivityLockOverlayProps {
   onProceedAnyway?: () => void;
 }
 
-// ActivityLockOverlay flags a terminal whose session is waiting on an activity
-// (deploy/build/release) touching the runtime hosting it. It is intentionally
-// non-blocking so the terminal stays interactive: the in-pod CLI may prompt for
-// input (helm pending-release recovery, etc.) and the user must be able to
-// answer without first dismissing the overlay.
-//
-// "Hide" dismisses the overlay only for this session; it does not touch the
-// activity record on the backend.
+// ActivityLockOverlay is non-blocking so the operator can still answer prompts
+// from the in-pod CLI. Hide is per-session and leaves the backend record alone.
 export function ActivityLockOverlay({
   lock,
   onOpenQueue,
@@ -25,8 +19,6 @@ export function ActivityLockOverlay({
 }: ActivityLockOverlayProps): React.ReactElement {
   return (
     <div
-      // Cap the card at the pane width so a narrow/starved terminal pane shrinks
-      // it to fit instead of clipping its right edge behind the pane's overflow-hidden.
       className="pointer-events-none absolute top-3 right-3 z-10 flex max-w-[min(360px,calc(100%_-_1.5rem))] flex-col items-end gap-1"
       role="status"
       aria-live="polite"

@@ -60,18 +60,13 @@ func TestBuildDeleteJobSpec(t *testing.T) {
 		t.Fatalf("name = %q, want erun-delete-acme-prod", job.Name)
 	}
 	pod := job.Spec.Template.Spec
-	// -y skips the CLI's interactive confirmation: the Job has no terminal to
-	// answer a prompt on.
+	// -y: the Job has no terminal to answer a prompt.
 	assertLifecycleBootstrapScript(t, "delete", pod.Containers[0].Command, "'erun' 'delete' 'acme' 'prod' '-y' '--output' 'json'")
 	if strings.Contains(pod.Containers[0].Command[2], "unexpose") {
 		t.Fatalf("script %q should not chain unexpose without platform coordinates", pod.Containers[0].Command[2])
 	}
 }
 
-// TestBuildDeleteJobSpecWithUnexpose: when the control plane supplies the
-// platform coordinates it already knows, the delete Job chains a best-effort
-// `erun unexpose` after a successful delete, so the per-env wildcard DNS
-// record `erun expose` created does not outlive the namespace it pointed at.
 func TestBuildDeleteJobSpecWithUnexpose(t *testing.T) {
 	params := testDeleteParams()
 	params.ExposeServicesZone = "services.erunpaas.com"
@@ -94,7 +89,6 @@ func TestBuildDeleteJobSpecWithUnexpose(t *testing.T) {
 		t.Fatalf("script %q must short-circuit unexpose on a failed delete", script)
 	}
 
-	// Half the pair configured is the same as neither.
 	partial := testDeleteParams()
 	partial.ExposeServicesZone = "services.erunpaas.com"
 	partialScript := buildDeleteCommand(partial)[2]
@@ -103,10 +97,6 @@ func TestBuildDeleteJobSpecWithUnexpose(t *testing.T) {
 	}
 }
 
-// TestUnexposeChainScriptIsBestEffort mirrors TestExposeChainScriptIsBestEffort:
-// the chained unexpose step must never fail the delete Job it rides on — the
-// namespace already tore down successfully — and on failure prints a marker
-// line UnexposeFailureFromOutput reads back out of the Job's captured output.
 func TestUnexposeChainScriptIsBestEffort(t *testing.T) {
 	params := testDeleteParams()
 	params.ExposeServicesZone = "services.erunpaas.com"
@@ -129,13 +119,8 @@ func TestUnexposeFailureFromOutput(t *testing.T) {
 	}
 }
 
-// TestNamespaceDeleteFailureFromOutput pins that `erun delete` exits 0 (and
-// prints "deleted") even when the remote namespace teardown itself failed, so
-// the API cannot trust the Job's own exit code — it has to read the
-// --output json result back out of the captured output.
-// core.Context.WriteResult pretty-prints (json.MarshalIndent), and the
-// Job's combined stdout+stderr log carries the plain-text audit/trace lines
-// around it, so the fixture mirrors both: multi-line JSON, not a single line.
+// `erun delete` exits 0 when teardown fails; the fixture mirrors its
+// pretty-printed JSON surrounded by log lines.
 func TestNamespaceDeleteFailureFromOutput(t *testing.T) {
 	blocked := `namespace "acme-prod" did not finish terminating within 20m0s:` + "\n" +
 		"NamespaceContentRemaining=True     challenges.acme.cert-manager.io has 1 resource instances\n" +
@@ -165,10 +150,6 @@ func TestNamespaceDeleteFailureFromOutput(t *testing.T) {
 	}
 }
 
-// assertLifecycleBootstrapScript checks a lifecycle Job's command seeds the
-// in-cluster kubeconfig and the environment's config before running the real
-// command — the same prelude assertDeployBootstrapScript checks for deploy,
-// since a missing prelude on stop and delete was exactly this kind of gap.
 func assertLifecycleBootstrapScript(t *testing.T, name string, command []string, wantCommand string) {
 	t.Helper()
 	assertCommand(t, command[:2], []string{"sh", "-c"})
@@ -190,11 +171,6 @@ func assertLifecycleBootstrapScript(t *testing.T, name string, command []string,
 	}
 }
 
-// TestAllLifecycleJobsShareTheBootstrapPrelude ensures every Job builder's
-// command is `sh -c` carrying the
-// bootstrap prelude, checked generically over the builders rather than one
-// hand-written assertion per Job, so a lifecycle Job added later cannot ship
-// without it.
 func TestAllLifecycleJobsShareTheBootstrapPrelude(t *testing.T) {
 	builders := []struct {
 		name    string
@@ -213,21 +189,12 @@ func TestAllLifecycleJobsShareTheBootstrapPrelude(t *testing.T) {
 		if !strings.Contains(script, "$HOME/.kube/config") || !strings.Contains(script, "$HOME/.config/erun/acme/prod/config.yaml") {
 			t.Fatalf("%s script %q missing the bootstrap prelude", b.name, script)
 		}
-		// The seed script carries no version: nothing it seeds a config for
-		// reads RuntimeVersion back, so it stays out to avoid a second,
-		// unused place to keep in sync.
 		if strings.Contains(script, "runtimeversion") {
 			t.Fatalf("%s script %q should not seed a runtime version", b.name, script)
 		}
 	}
 }
 
-// TestLauncherRunsStopAndDelete holds the launcher to creating and watching
-// each lifecycle Job under its own Kind/Container; the watch and
-// failure-read-back machinery itself is jobexec's, covered there. The delete
-// side is given an explicit attempt id (as every real caller supplies one),
-// so this exercises the same DeleteJobName path a live delete takes rather
-// than the bare tenant+environment name.
 func TestLauncherRunsStopAndDelete(t *testing.T) {
 	stopParams := testStopParams()
 	deleteParams := testDeleteParams()
@@ -262,12 +229,7 @@ func TestLauncherRunsStopAndDelete(t *testing.T) {
 	}
 }
 
-// TestLauncherDeleteAttemptsGetDistinctJobs checks that two delete attempts
-// against the same environment land on two distinct Jobs, and the second
-// surfaces its own outcome rather than a prior attempt's cached terminal
-// result. Each attempt's Job is seeded with a different outcome so a
-// wrongly-shared name is caught by the result assertion, not just the name
-// comparison.
+// Each attempt is seeded with a different outcome so a shared name fails the result check.
 func TestLauncherDeleteAttemptsGetDistinctJobs(t *testing.T) {
 	params := testDeleteParams()
 	firstID := "3f2a91cc-1111-2222-3333-444455556666"
@@ -321,17 +283,12 @@ func TestLauncherDeleteAttemptsGetDistinctJobs(t *testing.T) {
 	}
 }
 
-// TestDeleteJobNameSeparatesAttempts mirrors TestDeployJobNameSeparatesAttempts:
-// a retried delete must be a new Job, otherwise it would re-read the previous
-// attempt's terminal outcome instead of running.
 func TestDeleteJobNameSeparatesAttempts(t *testing.T) {
 	first := DeleteJobName("acme", "prod", "3f2a91cc-1111-2222-3333-444455556666")
 	second := DeleteJobName("acme", "prod", "9b7d40aa-1111-2222-3333-444455556666")
 	if first == second {
 		t.Fatalf("two attempts share the job name %q", first)
 	}
-	// The create path passes no attempt id and keeps its stable name, so a
-	// resumed workflow still re-watches the Job it already created.
 	if got := DeleteJobName("acme", "prod", ""); got != "erun-delete-acme-prod" {
 		t.Fatalf("name without an attempt id = %q", got)
 	}
@@ -340,9 +297,6 @@ func TestDeleteJobNameSeparatesAttempts(t *testing.T) {
 	}
 }
 
-// TestDeleteJobNameFitsKubernetesLimit mirrors TestDeployJobNameFitsKubernetesLimit:
-// names are trimmed in the descriptive middle, never in the attempt suffix
-// that keeps two deletes apart.
 func TestDeleteJobNameFitsKubernetesLimit(t *testing.T) {
 	longEnv := strings.Repeat("e", 63)
 	first := DeleteJobName("verylongtenantname", longEnv, "3f2a91cc-aaaa")
@@ -369,14 +323,8 @@ func TestLifecycleJobNameSanitizesAndTruncates(t *testing.T) {
 	}
 }
 
-// admitAndCompleteJobReactors installs the same pair of fake-clientset
-// reactors TestRunCreatesWhenAbsent uses: "create" admits the Job Active
-// (standing in for the cluster's own Job controller) and records what was
-// created, then "get" flips it to Succeeded once it has been observed
-// running at least once — driving the transition off the client calls
-// themselves keeps the test free of any timing assumption. Only reacts to
-// Jobs named watchName, so a pre-seeded, unrelated Job already in the fake
-// clientset is left alone.
+// admitAndCompleteJobReactors admits a Job Active on create and completes it on a
+// later get, avoiding timing assumptions; it ignores Jobs not named watchName.
 func admitAndCompleteJobReactors(t *testing.T, kube *fake.Clientset, watchName, namespace string) (created func() *batchv1.Job) {
 	t.Helper()
 	jobsResource := batchv1.SchemeGroupVersion.WithResource("jobs")
@@ -413,11 +361,7 @@ func admitAndCompleteJobReactors(t *testing.T, kube *fake.Clientset, watchName, 
 	return func() *batchv1.Job { return createdJob }
 }
 
-// TestRunStopAfterPreviousTerminalJobCreatesANewJobAndStops checks that a
-// stop issued after a previous stop Job already went terminal must run a fresh Job to a fresh outcome, never replay the
-// old one's cached result. The old Job is seeded Failed specifically so a
-// wrongly-replayed outcome is caught by the outcome assertion, not just by
-// the job count.
+// The old Job is seeded Failed so a replayed outcome is caught.
 func TestRunStopAfterPreviousTerminalJobCreatesANewJobAndStops(t *testing.T) {
 	params := testStopParams()
 	oldID := "3f2a91cc-1111-2222-3333-444455556666"
@@ -457,10 +401,6 @@ func TestRunStopAfterPreviousTerminalJobCreatesANewJobAndStops(t *testing.T) {
 	}
 }
 
-// TestRunStopWhileStopJobStillRunningReWatchesIt pins the dedup: a stop issued
-// while a previous stop Job is still in flight must re-watch that same Job
-// rather than starting a second one. The "create" reactor fails the test
-// outright if a second Job is ever created.
 func TestRunStopWhileStopJobStillRunningReWatchesIt(t *testing.T) {
 	params := testStopParams()
 	inFlightID := "3f2a91cc-1111-2222-3333-444455556666"
@@ -498,10 +438,6 @@ func TestRunStopWhileStopJobStillRunningReWatchesIt(t *testing.T) {
 
 	launcher := NewLauncher(kube)
 	launcher.PollEvery(0)
-	// A fresh explicit stop request still mints its own attempt id, exactly
-	// as routes.EnvironmentRoutes.stopEnvironment does — the point of this
-	// test is that RunStop finds the in-flight Job before that id is ever
-	// used to build a Job name.
 	params.StopID = "9b7d40aa-1111-2222-3333-444455556666"
 	result, err := launcher.RunStop(context.Background(), params)
 	if err != nil {
@@ -523,11 +459,7 @@ func TestRunStopWhileStopJobStillRunningReWatchesIt(t *testing.T) {
 	}
 }
 
-// TestStopAfterRedeploySequenceEndsStopped runs stop, redeploy, stop again. The redeploy's own Job shares
-// the identical tenant+environment labels every lifecycle Job carries (and
-// is left running, to prove it), so this also pins that activeStopJobName's
-// name-prefix filter tells a deploy Job apart from a stop Job rather than
-// mistaking one for an in-flight stop.
+// The running redeploy Job shares the stop Job's labels, so this also pins the name-prefix filter.
 func TestStopAfterRedeploySequenceEndsStopped(t *testing.T) {
 	stopParams := testStopParams()
 	firstStopID := "3f2a91cc-1111-2222-3333-444455556666"
@@ -538,13 +470,7 @@ func TestStopAfterRedeploySequenceEndsStopped(t *testing.T) {
 	deployParams := testParams()
 	deployName := DeployJobName(deployParams.Tenant, deployParams.Environment, deployParams.Version, "")
 
-	// The first stop already ran to completion; the environment was then
-	// redeployed and that Job is still active when the second stop runs. The
-	// first stop is seeded Failed, not Succeeded: a genuine second stop must
-	// end up Succeeded, so if it instead replayed the first attempt's cached
-	// outcome, the outcome assertion below would catch it — seeding the first
-	// attempt Succeeded too would let a replay slip through undetected, since
-	// "succeeded" is what both the replay and a real run would report.
+	// The first stop is seeded Failed so a replay cannot pass as a real Succeeded run.
 	kube := fake.NewSimpleClientset(
 		&batchv1.Job{
 			ObjectMeta: metav1.ObjectMeta{Name: firstStopName, Namespace: stopParams.Namespace, Labels: lifecycleJobLabels(stopParams.Tenant, stopParams.Environment)},
@@ -580,7 +506,6 @@ func TestStopAfterRedeploySequenceEndsStopped(t *testing.T) {
 	}
 }
 
-// reactorCreatedJob is the Job a "create jobs" reactor was handed.
 func reactorCreatedJob(t *testing.T, action k8stesting.Action) *batchv1.Job {
 	t.Helper()
 	create, ok := action.(k8stesting.CreateAction)
@@ -594,7 +519,6 @@ func reactorCreatedJob(t *testing.T, action k8stesting.Action) *batchv1.Job {
 	return job
 }
 
-// jobGetAction is the GetAction a "get jobs" reactor was handed.
 func jobGetAction(t *testing.T, action k8stesting.Action) k8stesting.GetAction {
 	t.Helper()
 	getAction, ok := action.(k8stesting.GetAction)

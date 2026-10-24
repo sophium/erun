@@ -23,27 +23,11 @@ type UsageInput struct {
 	Verbosity       int     `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
-// UsageOutput carries the live reading plus the environment's standing sizing
-// recommendation -- the same verdict and evidence `erun list` reports under
-// `runtime-pod:` -- so a caller checking on an environment's health learns
-// both numbers in one call instead of a separate `resize --preview` just to
-// see the reasoning. Embeds RuntimeUsage so every existing field stays at the
-// top level; Sizing is additive.
-//
-// It is an alias of the shared report rather than a parallel struct so the
-// pairing, and the recommendation inside it, is produced by one call from one
-// body of evidence. A warning that named the problem while a separately
-// computed recommendation named a different one would be worse than either
-// alone, and two structs is exactly how that starts.
+// UsageOutput aliases the shared report so the reading and the sizing
+// recommendation come from one body of evidence.
 type UsageOutput = podruntime.RuntimeUsageReport
 
-// UsageSizingSurfaces names the surfaces that render the standing sizing
-// recommendation from the same retained history this tool reads. The `usage`
-// tool's description embeds the enumeration rather than restating it, because
-// a hand-written one is how the description came to deny a `sizing` block that
-// `erun usage` had already started printing: prose that enumerates surfaces
-// drifts from the surfaces, and a guard that pins one absent sentence cannot
-// see the next wrong one arrive.
+// UsageSizingSurfaces is embedded in the tool description so it cannot drift from the surfaces.
 var UsageSizingSurfaces = []string{
 	"this tool",
 	"`erun usage`",
@@ -51,10 +35,7 @@ var UsageSizingSurfaces = []string{
 	"`erun list`'s `runtime-pod:` block",
 }
 
-// UsageSizingClaim is the sentence the `usage` tool's description uses to say
-// where the recommendation can be read. Exported so the guard that checks the
-// description against the tool's actual behaviour compares against the same
-// text the description was built from, rather than against a copy of it.
+// UsageSizingClaim is the description sentence; exported so the guard compares the same text.
 func UsageSizingClaim() string {
 	joined := strings.Join(UsageSizingSurfaces[:len(UsageSizingSurfaces)-1], ", ")
 	joined += ", and " + UsageSizingSurfaces[len(UsageSizingSurfaces)-1]
@@ -62,18 +43,9 @@ func UsageSizingClaim() string {
 		" all render the one recommendation resolved from the one body of evidence"
 }
 
-// UsageTool reads CPU quota utilisation, memory against the container's own
-// cgroup limit, and disk usage for the workspace mount, straight from the
-// runtime container's cgroup v2 files -- no metrics-server required, unlike
-// `kubectl top`. It carries the erun:read capability (see mcpReadOnlyTools):
-// the exec runs a single fixed diagnostic script, never caller-supplied argv,
-// so it is safe to grant an orchestrator that must never reach `exec raw`.
-//
-// On a build-capable environment, `excludesBuilds` is true because every
-// image build actually runs in the erun-dind sidecar, a separate cgroup, not
-// a descendant of this container's -- but podruntime.RunRuntimeUsage also
-// execs the same reading into that sidecar and returns it as `dind`, so the
-// output states the sidecar's own usage instead of only naming the gap.
+// UsageTool reads cgroup v2 usage directly (no metrics-server). It runs a fixed
+// script, never caller argv, so it is erun:read. Builds run in the erun-dind
+// sidecar, reported separately as `dind`.
 func UsageTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UsageInput) (*mcp.CallToolResult, UsageOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input UsageInput) (*mcp.CallToolResult, UsageOutput, error) {
 		target, err := resolveUsageOpenResult(runtime, input)
@@ -87,9 +59,6 @@ func UsageTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallT
 		if err != nil {
 			return nil, UsageOutput{}, err
 		}
-		// The reading is paired with the recommendation in one call, so the
-		// warnings in `result` and the sizing advice beside them are derived
-		// from the same evidence and cannot contradict each other.
 		return nil, podruntime.ResolveRuntimeUsageReport(target.Tenant, target.EnvConfig, result), nil
 	}
 }
@@ -101,11 +70,8 @@ func usageIntervalFromSeconds(seconds float64) time.Duration {
 	return time.Duration(seconds * float64(time.Second))
 }
 
-// resolveUsageOpenResult resolves tenant/environment through
-// resolveLocalTarget -- the same refusal every other typed MCP tool in this
-// module applies -- before asking the store to resolve the rest of the
-// OpenResult, so `usage` can never be pointed at a different environment than
-// the one this server's pod actually runs in.
+// resolveUsageOpenResult applies ResolveLocalTarget's refusal first so usage
+// cannot target another environment.
 func resolveUsageOpenResult(runtime sharedpkg.RuntimeConfig, input UsageInput) (config.OpenResult, error) {
 	tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {

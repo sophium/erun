@@ -13,25 +13,9 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// A stopped environment is one whose runtime Deployment is scaled to zero. That
-// returns both the runtime container's limits and its dind sidecar's
-// real consumption to the node, so the environments an operator is actually
-// using can be offered the capacity. Every PVC survives — the home tree, the
-// docker/buildkit state, and a local-agent env's hostPath worktree — so waking
-// is a pod start, not a cold rebuild.
-//
-// The intent is durable in two places that must agree: the env config's
-// Stopped flag (what the operator asked for) and the chart's `stopped` value
-// deploy renders from it (so a helm upgrade reconciles replicas instead of
-// silently undoing the scale patch). The cluster stays the source of truth for
-// what is displayed; the config only records intent.
-//
-// Starting an environment again is an operator gesture — opening it — and that
-// is the whole reason the wake below takes a reconnect flag. A stop drops every
-// session attached to the pod, and whatever supervises those sessions will try
-// to re-establish them; if that reattach counted as an open, it would scale the
-// runtime back up and erase the recorded intent within a second of the stop,
-// for as long as anything stayed attached. So the wake asks who is calling.
+// A stopped environment's runtime Deployment is scaled to zero; PVCs survive. The intent is
+// recorded in env config so helm upgrades keep replicas at 0, and only an operator open, never a
+// session reconnect, wakes it, or reattach would undo the stop that dropped the session.
 
 // RuntimeScaleTarget identifies one environment's runtime Deployment.
 type RuntimeScaleTarget struct {
@@ -42,8 +26,7 @@ type RuntimeScaleTarget struct {
 	KubernetesContext string
 }
 
-// RuntimeScaleTargetForResult derives the scale target from a resolved open
-// target, so stop, wake, and the shell launcher all address the same Deployment.
+// RuntimeScaleTargetForResult derives the scale target from a resolved open target.
 func RuntimeScaleTargetForResult(result config.OpenResult) RuntimeScaleTarget {
 	return RuntimeScaleTarget{
 		Tenant:            result.Tenant,
@@ -54,38 +37,28 @@ func RuntimeScaleTargetForResult(result config.OpenResult) RuntimeScaleTarget {
 	}
 }
 
-// RuntimeRunState is what the cluster reports about an environment's runtime
-// Deployment. Absent is the undeployed case, distinct from a deployed
-// Deployment asking for zero replicas.
+// RuntimeRunState is the cluster's view of the runtime Deployment; Present is false when undeployed.
 type RuntimeRunState struct {
 	Present bool
-	// DesiredReplicas is the Deployment's spec.replicas. When kubectl answers
-	// with something that is not a replica count it stays at the API server's own
-	// default of 1: an unreadable answer must never be mistaken for a deliberate
-	// stop, which would scale a healthy environment away.
+	// DesiredReplicas defaults to 1 on an unreadable answer so it is never mistaken for a stop.
 	DesiredReplicas int
 	ReadyReplicas   int
 }
 
-// Stopped reports the scaled-to-zero state: the Deployment exists and asks for
-// no pods. Deliberately distinct from "pods exist but are not ready", which is
-// an unhealthy environment, not a stopped one.
+// Stopped reports a present Deployment asking for zero pods, distinct from an unhealthy one.
 func (s RuntimeRunState) Stopped() bool {
 	return s.Present && s.DesiredReplicas == 0
 }
 
-// RuntimeStopDecision is what a stop would do, resolved from the cluster state
-// and the recorded intent before anything is executed.
+// RuntimeStopDecision is what a stop would do.
 type RuntimeStopDecision struct {
 	Scale          bool
 	PersistIntent  bool
 	AlreadyStopped bool
 }
 
-// DecideRuntimeStop resolves a stop against the cluster state and the intent the
-// env config already records. An environment that is already scaled to zero
-// needs no scale patch, but still needs the intent persisted when the config
-// does not carry it yet — otherwise the next helm upgrade brings it back.
+// DecideRuntimeStop still persists intent for an already-scaled-down environment, or the next
+// helm upgrade would bring it back.
 func DecideRuntimeStop(state RuntimeRunState, stoppedIntent bool) RuntimeStopDecision {
 	return RuntimeStopDecision{
 		Scale:          !state.Stopped(),
@@ -94,11 +67,7 @@ func DecideRuntimeStop(state RuntimeRunState, stoppedIntent bool) RuntimeStopDec
 	}
 }
 
-// RuntimeWakeDecision is what a wake would do. ClearIntent is separate from
-// Scale because `open --deploy` clears the intent before helm renders the
-// chart, and lets the rollout itself bring the pod up. RefuseStopped is the
-// reconnect answer: nothing to do, and the caller must not proceed as if the
-// environment were up.
+// RuntimeWakeDecision is what a wake would do. RefuseStopped tells a reconnect not to proceed.
 type RuntimeWakeDecision struct {
 	Scale          bool
 	ClearIntent    bool
@@ -106,16 +75,8 @@ type RuntimeWakeDecision struct {
 	RefuseStopped  bool
 }
 
-// DecideRuntimeWake resolves a wake. An environment that is already running and
-// carries no stop intent needs neither a scale call nor a config write, which is
-// what keeps `erun open` quiet on the common path.
-//
-// reconnect marks the caller as a supervisor re-establishing a dropped session
-// rather than an operator asking for the environment. Only the operator's
-// gesture starts a stopped environment or retires the recorded stop: a stop is
-// precisely what drops every attached session, so a reconnect that woke would
-// undo the stop that triggered it, on a loop, and erase the intent meant to
-// outlive it.
+// DecideRuntimeWake resolves a wake. A reconnect never wakes a stopped environment or clears its
+// intent, since the stop itself dropped the session.
 func DecideRuntimeWake(state RuntimeRunState, stoppedIntent, reconnect bool) RuntimeWakeDecision {
 	if reconnect {
 		return RuntimeWakeDecision{
@@ -130,75 +91,40 @@ func DecideRuntimeWake(state RuntimeRunState, stoppedIntent, reconnect bool) Run
 	}
 }
 
-// StopEnvironmentParams is a stop request: the resolved target plus the writer
-// that records the operator's intent on the env config.
+// StopEnvironmentParams is a stop request.
 type StopEnvironmentParams struct {
 	Result        config.OpenResult
 	SaveEnvConfig func(string, config.EnvConfig) error
 }
 
-// StopEnvironmentResult is the transport-neutral outcome of `erun stop`.
+// StopEnvironmentResult is the outcome of `erun stop`.
 type StopEnvironmentResult struct {
 	Tenant            string `json:"tenant"`
 	Environment       string `json:"environment"`
 	Namespace         string `json:"namespace"`
 	Release           string `json:"release"`
 	KubernetesContext string `json:"kubernetesContext"`
-	// Stopped is the state after this run; AlreadyStopped distinguishes the
-	// no-op from the run that actually reclaimed the node's capacity.
-	Stopped        bool `json:"stopped"`
-	AlreadyStopped bool `json:"alreadyStopped"`
-	// EndedSessions names the desktop terminal sessions the stop took down with
-	// the pod, so the outcome for attached tabs is stated rather than left for
-	// the operator to infer from tabs going dark.
+	Stopped           bool   `json:"stopped"`
+	AlreadyStopped    bool   `json:"alreadyStopped"`
+	// EndedSessions names the desktop terminal sessions the stop took down.
 	EndedSessions []string `json:"endedSessions,omitempty"`
-	// RemainingComponents names the platform components this stop deliberately
-	// left running — see StopRemainingComponents. A stop scales one Deployment,
-	// so a caller that does not say which components it left holding their
-	// capacity leaves the operator to read the surviving pods as a stop that did
-	// not finish.
+	// RemainingComponents names platform components the stop deliberately left running.
 	RemainingComponents []string `json:"remainingComponents,omitempty"`
 }
 
-// StopRemainingComponents names the platform components a stop leaves alone:
-// the environment's saved deploy selection (EnvConfig.Deploy.Components) minus
-// every runtime alias. `erun stop` scales the runtime Deployment and nothing
-// else — the component charts rolled out alongside it (`erun deploy
-// --components`: the platform's own API, its database, the ingress and DNS
-// pieces) keep running and keep holding their capacity.
-//
-// That is deliberate rather than an omission: on the environment that hosts a
-// platform those components ARE the platform, and scaling them away to free a
-// node's headroom would take it down. So the honest thing a stop can do is name
-// them, which is what this is for.
-//
-// It reads the config rather than listing pods. Stop's plan is already resolved
-// from the config and the runtime Deployment's replica count; a namespace-wide
-// pod query would put a second cluster read on every stop to answer a question
-// the operator configured here.
-//
-// Exported because the surfaces that warn before the click need the same
-// answer as the result that reports after it: the desktop's Stop control names
-// these components so the operator learns what is left holding capacity there,
-// rather than by reading the surviving pods afterwards and concluding the stop
-// failed.
+// StopRemainingComponents names the env's deployed components other than the runtime, which a
+// stop leaves running since on a platform-hosting env they are the platform. Read from config to
+// avoid a second cluster query.
 func StopRemainingComponents(result config.OpenResult) []string {
 	names := deploy.SelectedPublishableComponents(result.EnvConfig.Deploy.Components, result.Tenant, config.ProjectK8sConfig{})
-	// Nil, not an empty slice: every caller branches on len() and none of them
-	// can tell the two apart, while an empty-but-present slice is what makes a
-	// struct comparison in a test fail for a reason that has nothing to say
-	// about the stop.
+	// Nil, not empty, so struct comparisons in tests stay meaningful.
 	if len(names) == 0 {
 		return nil
 	}
 	return names
 }
 
-// RunStopEnvironment scales the environment's runtime Deployment to zero and
-// records the intent so a later helm upgrade re-renders replicas: 0 instead of
-// quietly restarting the pod. The intent is written last and only once the
-// cluster has confirmed the scale, so the config never records a stop that did
-// not happen.
+// RunStopEnvironment scales the runtime to zero and, only once the cluster confirms, records the stop intent.
 func RunStopEnvironment(ctx core.Context, params StopEnvironmentParams) (StopEnvironmentResult, error) {
 	target := RuntimeScaleTargetForResult(params.Result)
 	result := StopEnvironmentResult{
@@ -222,9 +148,7 @@ func RunStopEnvironment(ctx core.Context, params StopEnvironmentParams) (StopEnv
 	result.Stopped = true
 	result.AlreadyStopped = decision.AlreadyStopped
 	result.RemainingComponents = StopRemainingComponents(params.Result)
-	// Traced on both paths: the components left holding capacity are the reason
-	// an already-stopped environment still shows running pods, which is the
-	// state an operator pressing Stop on it is trying to make sense of.
+	// They explain why a stopped environment still shows running pods.
 	if len(result.RemainingComponents) > 0 {
 		ctx.Trace(fmt.Sprintf("stop: platform component(s) in namespace %s are not touched and keep running: %s",
 			target.Namespace, strings.Join(result.RemainingComponents, ", ")))
@@ -250,11 +174,7 @@ func RunStopEnvironment(ctx core.Context, params StopEnvironmentParams) (StopEnv
 	return result, nil
 }
 
-// confirmRuntimeStopped re-reads the Deployment after the scale so a stop that
-// did not take effect is reported as a failure. Returning capacity is the whole
-// point of the command, and a replica count that bounced back is the one
-// outcome the operator cannot see for themselves — the config write that
-// follows must never claim a stop the cluster did not keep.
+// confirmRuntimeStopped fails a stop whose replica count bounced back.
 func confirmRuntimeStopped(ctx core.Context, target RuntimeScaleTarget) error {
 	if ctx.DryRun {
 		ctx.Trace(fmt.Sprintf("stop: would re-read %s to confirm it wants 0 replicas before reporting success", target.ReleaseName))
@@ -271,10 +191,6 @@ func confirmRuntimeStopped(ctx core.Context, target RuntimeScaleTarget) error {
 	return nil
 }
 
-// traceAttachedAppSessions names the desktop terminal sessions living in the
-// pod that is about to go away, and returns their ids for the structured
-// result. Stopping ends them, so saying which turns tabs going dark into a
-// stated consequence of the operator's own command.
 func traceAttachedAppSessions(ctx core.Context, target RuntimeScaleTarget) []string {
 	sessions, err := readAttachedAppSessions(ctx, target)
 	if err != nil {
@@ -299,9 +215,7 @@ func traceAttachedAppSessions(ctx core.Context, target RuntimeScaleTarget) []str
 	return ids
 }
 
-// readAttachedAppSessions runs the same in-pod heartbeat probe the desktop uses
-// to count live sessions. Like the run-state read it performs no mutation, so
-// it runs under --dry-run too and the plan can show what a real stop would end.
+// Read-only, so it also runs under --dry-run.
 func readAttachedAppSessions(ctx core.Context, target RuntimeScaleTarget) ([]activity.RemoteAppSessionHeartbeat, error) {
 	args := kubectlRuntimeTargetArgs(target)
 	args = append(args, "exec", "deployment/"+target.ReleaseName, "--", "/bin/sh", "-lc",
@@ -318,10 +232,8 @@ func readAttachedAppSessions(ctx core.Context, target RuntimeScaleTarget) ([]act
 	return activity.ParseRemoteAppSessionHeartbeats(string(output)), nil
 }
 
-// ClearEnvironmentStopIntent records that the operator wants the environment
-// running again, without touching the cluster. `open --deploy` calls it before
-// helm renders the chart, so the rollout brings the pod up instead of
-// re-applying the stop the config still remembered.
+// ClearEnvironmentStopIntent clears the recorded stop without touching the cluster; `open --deploy`
+// calls it before helm renders so the rollout brings the pod up.
 func ClearEnvironmentStopIntent(ctx core.Context, result config.OpenResult, saveEnvConfig func(string, config.EnvConfig) error) (config.EnvConfig, error) {
 	if !result.EnvConfig.Stopped {
 		return result.EnvConfig, nil
@@ -334,43 +246,27 @@ func ClearEnvironmentStopIntent(ctx core.Context, result config.OpenResult, save
 	return updated, nil
 }
 
-// WakeEnvironmentParams is a wake request: the resolved target plus the writer
-// that clears the recorded stop intent. Reconnect marks the request as a
-// supervisor reattaching a dropped session rather than an operator opening the
-// environment, which is the difference between waking and leaving it stopped.
+// WakeEnvironmentParams is a wake request; Reconnect marks a supervisor reattaching a session.
 type WakeEnvironmentParams struct {
 	Result        config.OpenResult
 	SaveEnvConfig func(string, config.EnvConfig) error
 	Reconnect     bool
 }
 
-// WakeEnvironmentResult reports what the wake did. EnvConfig carries the config
-// forward when the stop intent was cleared, so the caller keeps working with the
-// current values.
+// WakeEnvironmentResult reports what the wake did.
 type WakeEnvironmentResult struct {
 	EnvConfig      config.EnvConfig
 	Woken          bool
 	AlreadyRunning bool
 }
 
-// EnsureEnvironmentAwake brings a stopped environment back before anything that
-// needs a running pod. `kubectl port-forward deployment/…` cannot attach to zero
-// replicas, so this is what makes "start it when the operator opens it" work —
-// and it is host-side, so an orchestrator that finds an environment stopped
-// wakes it with `erun open` and no in-pod component is involved.
-//
-// A reconnecting caller gets the opposite answer for a stopped environment: an
-// error, so the reattach fails plainly instead of quietly resurrecting what the
-// operator stopped.
+// EnsureEnvironmentAwake starts a stopped environment, since port-forward cannot attach to zero
+// replicas. A reconnecting caller gets an error instead.
 func EnsureEnvironmentAwake(ctx core.Context, params WakeEnvironmentParams) (WakeEnvironmentResult, error) {
 	target := RuntimeScaleTargetForResult(params.Result)
 	result := WakeEnvironmentResult{EnvConfig: params.Result.EnvConfig}
 
-	// An unreadable run state must not abort the open. The wake exists to make
-	// a stopped environment usable, so it can never be more fragile than the
-	// open it precedes: presume the environment is running (the safe direction —
-	// it never scales a healthy runtime away) and let the port-forwards and the
-	// shell report the real problem, exactly as they did before the wake existed.
+	// An unreadable state must not abort the open: presume running, which never scales anything away.
 	state, err := ReadRuntimeRunState(ctx, target)
 	if err != nil {
 		ctx.Trace("open: could not read the runtime's replica count (" + err.Error() + "); assuming it is running and continuing")
@@ -398,8 +294,6 @@ func EnsureEnvironmentAwake(ctx core.Context, params WakeEnvironmentParams) (Wak
 		return result, nil
 	}
 
-	// Say so before the wait: a cold wake pulls the pod back and can take a
-	// minute, and a silent command looks hung.
 	ctx.Info(fmt.Sprintf("==> Waking stopped environment %s/%s", target.Tenant, target.Environment))
 	if err := scaleRuntimeDeployment(ctx, target, 1); err != nil {
 		return WakeEnvironmentResult{}, err
@@ -412,10 +306,7 @@ func EnsureEnvironmentAwake(ctx core.Context, params WakeEnvironmentParams) (Wak
 	return result, nil
 }
 
-// persistEnvironmentStopIntent records the operator's run/stop intent on the env
-// config. It is what survives helm reconciliation: deploy renders the chart's
-// `stopped` value from it, so an upgrade of a stopped env re-applies replicas: 0
-// rather than restarting the pod behind the operator's back.
+// Deploy renders the chart's `stopped` value from this, so it survives helm reconciliation.
 func persistEnvironmentStopIntent(ctx core.Context, result config.OpenResult, saveEnvConfig func(string, config.EnvConfig) error, stopped bool) error {
 	updated := result.EnvConfig
 	updated.Stopped = stopped
@@ -433,13 +324,10 @@ func persistEnvironmentStopIntent(ctx core.Context, result config.OpenResult, sa
 	return nil
 }
 
-// runtimeRunStateSeparator joins the two jsonpath fields in one kubectl read so
-// desired and ready replicas cannot be observed a moment apart.
+// Both fields are read in one call so they cannot be observed a moment apart.
 const runtimeRunStateSeparator = "/"
 
-// ReadRuntimeRunState reads the environment's runtime Deployment. Like
-// CheckKubernetesDeployment it runs even under --dry-run: it performs no
-// mutation, and stop/wake need the answer to resolve the plan they trace.
+// ReadRuntimeRunState is read-only, so it runs under --dry-run too.
 func ReadRuntimeRunState(ctx core.Context, target RuntimeScaleTarget) (RuntimeRunState, error) {
 	args := kubectlRuntimeTargetArgs(target)
 	args = append(args, "get", "deployment", target.ReleaseName, "-o",
@@ -460,9 +348,7 @@ func ReadRuntimeRunState(ctx core.Context, target RuntimeScaleTarget) (RuntimeRu
 	return state, nil
 }
 
-// parseRuntimeRunState reads the `<desired>/<ready>` jsonpath pair. An empty
-// ready field is kubectl's rendering of an unset value (a freshly-scaled
-// Deployment reports no readyReplicas at all), which is zero, not an error.
+// An empty ready field means unset, which is zero.
 func parseRuntimeRunState(output string) RuntimeRunState {
 	desiredRaw, readyRaw, _ := strings.Cut(strings.TrimSpace(output), runtimeRunStateSeparator)
 	state := RuntimeRunState{Present: true, DesiredReplicas: 1}
@@ -482,17 +368,13 @@ func isKubernetesNotFoundMessage(output string) bool {
 		strings.Contains(message, "no resources found")
 }
 
-// scaleRuntimeDeployment is the one mutation stop and wake share. It is traced
-// before it runs and short-circuits under --dry-run, so the dry-run plan shows
-// the exact command.
 func scaleRuntimeDeployment(ctx core.Context, target RuntimeScaleTarget, replicas int) error {
 	args := kubectlRuntimeTargetArgs(target)
 	args = append(args, "scale", "deployment/"+target.ReleaseName, "--replicas="+strconv.Itoa(replicas))
 	return core.RunRawCommand(ctx, core.RawCommandSpec{Args: append([]string{"kubectl"}, args...)}, nil)
 }
 
-// WaitRuntimeAvailable blocks until the runtime Deployment reports Available,
-// reusing the same rollout wait `erun open` performs before it execs a shell.
+// WaitRuntimeAvailable blocks until the runtime Deployment reports Available.
 func WaitRuntimeAvailable(ctx core.Context, target RuntimeScaleTarget) error {
 	args := kubectlRuntimeTargetArgs(target)
 	args = append(args, "wait", "--for=condition=Available", "--timeout", cloud.DefaultShellLaunchWaitTimeout, "deployment/"+target.ReleaseName)

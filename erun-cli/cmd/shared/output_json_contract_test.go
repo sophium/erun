@@ -10,16 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/build"
 )
 
-// TestEmptyListingCommandsEmitAnArrayNotNull pins every command whose whole
-// structured result is a slice it builds by appending. These reached
-// --output json as the literal document `null` when the list was empty, while
-// `exec job status` answered `[]` for the same condition and `review list`
-// answered a JSON array whenever anything matched -- so one command's result
-// changed type with cardinality, and a caller had no way to tell which shape
-// it would get.
-//
-// The nil slices below are what those handlers hand to WriteResult unchanged,
-// which is exactly the value the reproduction measured.
+// TestEmptyListingCommandsEmitAnArrayNotNull: empty listings must serialize as [], not null.
 func TestEmptyListingCommandsEmitAnArrayNotNull(t *testing.T) {
 	cases := []struct {
 		command string
@@ -60,11 +51,6 @@ func TestEmptyListingCommandsEmitAnArrayNotNull(t *testing.T) {
 	}
 }
 
-// TestReviewListKeepsOneTypeAcrossCardinalities is the axis the report called
-// the sharper form of the defect: not two tools disagreeing, but one command
-// disagreeing with itself. A populated list always serialised as an array, so
-// a caller that developed against it and iterated the result worked until the
-// list came back empty. Both are arrays now.
 func TestReviewListKeepsOneTypeAcrossCardinalities(t *testing.T) {
 	render := func(t *testing.T, reviews []platformclient.PlatformReview) []json.RawMessage {
 		t.Helper()

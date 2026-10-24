@@ -100,12 +100,8 @@ type BootstrapInitDependencies struct {
 	FindProjectRoot shared.ProjectFinderFunc
 	GetWorkingDir   WorkDirFunc
 	SelectTenant    SelectTenantFunc
-	// TenantSelectionUnavailable tells the tenant-selection policy that this
-	// run's transport has no way to ask anyone which tenant to use -- stdin is
-	// not a terminal and carries no answer, an agent is running unattended. One
-	// tenant is not a choice, so it is used without asking; a real choice is
-	// refused with an error naming the flag that resolves it, instead of
-	// printing a menu nobody can answer and failing on EOF.
+	// TenantSelectionUnavailable means nobody can be asked: a single tenant is
+	// used, and a real choice is refused naming the flag that resolves it.
 	TenantSelectionUnavailable bool
 	Confirm                    ConfirmFunc
 	PromptKubernetesContext    PromptValueFunc
@@ -119,10 +115,7 @@ type BootstrapInitDependencies struct {
 	RunRemoteCommand           kube.RemoteCommandRunnerFunc
 	DeployHelmChart            deploy.HelmChartDeployerFunc
 	Sleep                      core.SleepFunc
-	// ProbeHostedRegistry answers whether erun's hosted registry can be pushed
-	// to. Unset defaults to a real probe, so a caller that wires nothing still
-	// refuses an unreachable registry instead of writing config whose pushes
-	// fail later, far from the choice that caused it.
+	// ProbeHostedRegistry defaults to a real probe when unset.
 	ProbeHostedRegistry HostedRegistryProbeFunc
 	Context             core.Context
 }
@@ -195,10 +188,8 @@ func (s *bootstrapRunState) run() error {
 	return nil
 }
 
-// emitInitializingTrace records the in-flight init activity: the desktop's
-// activity-queue trace handler parses this `==> Initializing` line (mirrors
-// RunHelmDeploy's `==> Deploying`). No-op before tenant/env resolve, when there
-// is nothing to register.
+// emitInitializingTrace's `==> Initializing` line is parsed by the desktop's
+// activity-queue trace handler.
 func (s *bootstrapRunState) emitInitializingTrace() {
 	if s.tenant == "" || s.envName == "" {
 		return
@@ -206,8 +197,6 @@ func (s *bootstrapRunState) emitInitializingTrace() {
 	s.runner.Context.Info("==> Initializing " + s.tenant + "/" + s.envName)
 }
 
-// emitInitializationFailedTrace finalizes the umbrella activity entry when init
-// fails after the Initializing line was emitted; no-op otherwise.
 func (s *bootstrapRunState) emitInitializationFailedTrace() {
 	if s.tenant == "" || s.envName == "" {
 		return
@@ -292,11 +281,8 @@ func (s *bootstrapRunState) projectRoot() string {
 	return strings.TrimSpace(s.params.ProjectRoot)
 }
 
-// ensureDevopsAssets no longer scaffolds a per-tenant devops module: environments
-// deploy the published erun-devops chart, and custom toolchains are a user-authored
-// Dockerfile FROM the published runtime image (see the erun-build-env skill).
-// Tenants with an existing scaffolded module keep working — deploy prefers a
-// local chart when one exists.
+// ensureDevopsAssets scaffolds no devops module: envs deploy the published
+// erun-devops chart, though deploy still prefers an existing local one.
 func (s *bootstrapRunState) ensureDevopsAssets() error {
 	if s.envConfig.ResolvedType() == configpkg.EnvironmentTypeHost {
 		s.runner.Context.Trace("init: host environment has no pod; no devops scaffold is written")
@@ -315,8 +301,7 @@ func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
 	if err != nil {
 		return err
 	}
-	// Persist what this run resolved so a later `erun deploy` carries the same
-	// secret name forward instead of losing it on the next helm upgrade.
+	// Persist so the next helm upgrade keeps the secret name.
 	if provisioned.registryCredential != s.envConfig.RegistryCredentialSecretName {
 		s.envConfig.RegistryCredentialSecretName = provisioned.registryCredential
 		s.envConfigChanged = true
@@ -409,9 +394,8 @@ func normalizeBootstrapParams(params open.BootstrapInitParams) open.BootstrapIni
 	params.RuntimeVersionDefault = strings.TrimSpace(params.RuntimeVersionDefault)
 	params.RuntimeImage = strings.TrimSpace(params.RuntimeImage)
 	params.RuntimeRegistry = strings.TrimSpace(params.RuntimeRegistry)
-	// Trimmed, not normalized: a defaulted limit here would be indistinguishable
-	// from an operator asking for that limit, and the reconcile needs to tell an
-	// omitted flag from a supplied one.
+	// Trimmed, not normalized: reconcile must tell an omitted flag from a supplied
+	// default.
 	params.RuntimePod = configpkg.RuntimePodResources{CPU: strings.TrimSpace(params.RuntimePod.CPU), Memory: strings.TrimSpace(params.RuntimePod.Memory)}
 	params.RuntimeDindPod = configpkg.RuntimePodResources{CPU: strings.TrimSpace(params.RuntimeDindPod.CPU), Memory: strings.TrimSpace(params.RuntimeDindPod.Memory)}
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)

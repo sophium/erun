@@ -14,10 +14,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/env"
 )
 
-// seedCachedERunAccessToken writes a cached, unexpired access token directly
-// (bypassing the OIDC device flow cloud_test.go's real-run scenarios already
-// cover) so a platform scenario can hit the real erun-backend-api stub
-// authenticated from its first request.
+// seedCachedERunAccessToken bypasses the device flow so the first request is authenticated.
 func seedCachedERunAccessToken(t testing.TB, setup env.Setup, alias, token string) {
 	t.Helper()
 	dir := filepath.Join(setup.ConfigHome, "erun", "cloud-secrets")
@@ -32,9 +29,7 @@ func seedCachedERunAccessToken(t testing.TB, setup env.Setup, alias, token strin
 	}
 }
 
-// platformAlias seeds a minimal erun-type cloud alias pointed at server, with
-// a cached access token already in place — the alias `erun platform`
-// commands resolve by default when exactly one erun-type alias is configured.
+// platformAlias seeds the single erun-type alias that `erun platform` resolves by default.
 func platformAlias(t testing.TB, setup env.Setup, server *httptest.Server) string {
 	t.Helper()
 	alias := "erun+test@erun"
@@ -43,8 +38,7 @@ func platformAlias(t testing.TB, setup env.Setup, server *httptest.Server) strin
 	return alias
 }
 
-// requireBearer answers 401 unless the request carries the seeded test token,
-// so a scenario proves the CLI actually attached the bearer it minted.
+// requireBearer answers 401 unless the request carries the seeded test token.
 func requireBearer(w http.ResponseWriter, r *http.Request) bool {
 	if r.Header.Get("Authorization") != "Bearer test-access-token" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -53,10 +47,7 @@ func requireBearer(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// platformAPIStubServer runs a minimal erun-backend-api double covering every
-// route `erun platform` drives, so real-run scenarios exercise
-// platformclient's request/response handling end to end
-// rather than only its --dry-run trace branch.
+// platformAPIStubServer is an erun-backend-api double for every `erun platform` route.
 func platformAPIStubServer(t testing.TB) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -77,10 +68,7 @@ func registerPlatformIdentityStubRoutes(mux *http.ServeMux) {
 		if !requireBearer(w, r) {
 			return
 		}
-		// tenantName ("acme") deliberately matches GET /v1/tenants' own name for
-		// tenant-1 below, and deliberately differs from username ("test-user") --
-		// The defect was an operator reading whoami's username as if it were the
-		// tenant's name, so this scenario proves the two stay visibly distinct.
+		// tenantName must differ from username: operators confused whoami's username for the tenant.
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"tenantId": "tenant-1", "tenantName": "acme", "userId": "user-1", "username": "test-user", "issuer": "https://idp.example", "subject": "sub-1",
 		})
@@ -94,10 +82,7 @@ func registerPlatformIdentityStubRoutes(mux *http.ServeMux) {
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "org-" + body["name"], "name": body["name"]})
 	})
-	// GET /v1/platform is unauthenticated on the real API (routes.RegisterPlatformRoute),
-	// so this stub never calls requireBearer -- a scenario proving `platform
-	// version` works even with no/expired credentials would otherwise pass for
-	// the wrong reason if the stub itself demanded a bearer.
+	// The real route is unauthenticated, so the stub must not demand a bearer either.
 	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"issuer": "https://idp.example", "apiUrl": "https://api.example.test", "version": "1.2.3",
@@ -125,12 +110,8 @@ func registerPlatformIdentityStubRoutes(mux *http.ServeMux) {
 }
 
 func registerPlatformTenantStubRoutes(mux *http.ServeMux) {
-	// orgScopedIssuers mirrors the real backend's issuers.org_field_key: once
-	// an issuer is registered org-scoped (the first POST /v1/tenants that
-	// names an orgFieldKey for it), every later tenant on that issuer needs a
-	// real orgFieldValue or it can never resolve. This is what lets the
-	// identity-org-create scenarios prove the reachable path actually
-	// produces a tenant that would resolve, not merely one that was accepted.
+	// Mirrors issuers.org_field_key: once an issuer is org-scoped, later tenants on it
+	// need an orgFieldValue to resolve.
 	var mu sync.Mutex
 	orgScopedIssuers := map[string]string{}
 
@@ -150,9 +131,6 @@ func registerPlatformTenantStubRoutes(mux *http.ServeMux) {
 		orgFieldKey := orgScopedIssuers[body["issuer"]]
 		mu.Unlock()
 
-		// Mirrors assertResolvableIssuerMapping: an org-scoped issuer with no
-		// org value on this mapping can never resolve any token, so the real
-		// backend refuses it rather than minting a dead tenant.
 		if orgFieldKey != "" && body["orgFieldValue"] == "" {
 			w.WriteHeader(http.StatusConflict)
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -170,10 +148,7 @@ func registerPlatformTenantStubRoutes(mux *http.ServeMux) {
 		if !requireBearer(w, r) {
 			return
 		}
-		// probeco stands in for a tenant whose issuer mapping no token can
-		// resolve through: it exists, it lists, and nobody can ever sign in to
-		// it. The listing has to say so, or the only way to find out is a
-		// sign-in that lands somewhere else.
+		// probeco's issuer mapping can never resolve a token, so the listing must say so.
 		_ = json.NewEncoder(w).Encode([]map[string]any{
 			{"tenantId": "tenant-1", "name": "acme", "type": "COMPANY", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z", "resolvable": true},
 			{"tenantId": "tenant-3", "name": "probeco", "type": "COMPANY", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z", "resolvable": false},
@@ -262,10 +237,7 @@ func registerPlatformEnvironmentStubRoutes(mux *http.ServeMux) {
 }
 
 func registerPlatformDefinitionStubRoutes(mux *http.ServeMux) {
-	// The definition store. Both handlers authenticate, so a scenario
-	// proves the CLI actually attached the bearer it minted. The stored payload
-	// is passed through verbatim and the revision advances on every upload,
-	// exactly as environment_definitions' upsert does.
+	// The payload passes through verbatim and the revision advances per upload, like the real upsert.
 	var definitionMu sync.Mutex
 	type storedDefinition struct {
 		revision   int

@@ -10,23 +10,16 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// updateExistingEnvSettings reconciles an already-initialized env against the
-// settings this invocation supplied. Every setting here describes the runtime
-// pod, which an env of any type has, so it is applied on the strength of having
-// been supplied — not on the type the invocation happens to resolve to. A
-// setting the invocation left out is left alone rather than reset to a default,
-// so re-running init to change one thing never rewrites the rest.
-//
-// A freshly created env needs none of this: createEnvConfig wrote it from these
-// same params moments ago, so there is nothing to reconcile and nothing to keep.
+// updateExistingEnvSettings applies only supplied settings, whatever the
+// resolved type; omitted ones are left alone, never reset to defaults.
 func (s *bootstrapRunState) updateExistingEnvSettings() error {
 	if s.result.CreatedEnvConfig {
 		return nil
 	}
 	s.applyEnvRuntimeVersion()
 	s.applyEnvSetting("runtime image", deploy.StripRuntimeImageTag(s.params.RuntimeImage), &s.envConfig.RuntimeImage)
-	// Re-running init is how an env deadlocked on chart resolution gets out: the
-	// registry lands on the config before this run's own deploy resolves a chart.
+	// Recording the registry before this run's deploy is how re-init breaks a
+	// chart-resolution deadlock.
 	s.applyEnvSetting("runtime registry", s.params.RuntimeRegistry, &s.envConfig.RuntimeRegistry)
 	s.applyEnvImagePullSecrets()
 	s.applyEnvRuntimePod()
@@ -35,9 +28,6 @@ func (s *bootstrapRunState) updateExistingEnvSettings() error {
 	return s.applyEnvType()
 }
 
-// applyEnvSetting records a supplied value for one string setting, tracing the
-// decision either way so a dry run shows what a re-init would touch and what it
-// would deliberately leave as it found it.
 func (s *bootstrapRunState) applyEnvSetting(name, param string, recorded *string) {
 	value := strings.TrimSpace(param)
 	if value == "" {
@@ -53,9 +43,6 @@ func (s *bootstrapRunState) applyEnvSetting(name, param string, recorded *string
 	s.runner.Context.Trace("init: " + name + " set to " + value)
 }
 
-// traceEnvSettingKept records that a stored setting survived this run untouched
-// because the invocation never named it. It is the line that tells an operator
-// reading a dry run the difference between "unchanged" and "silently dropped".
 func (s *bootstrapRunState) traceEnvSettingKept(name, recorded string) {
 	if strings.TrimSpace(recorded) == "" {
 		return
@@ -63,10 +50,8 @@ func (s *bootstrapRunState) traceEnvSettingKept(name, recorded string) {
 	s.runner.Context.Trace("init: " + name + " not given; keeping " + recorded)
 }
 
-// applyEnvRuntimeVersion honours --version, and otherwise leaves the env on the
-// version it is running: an env is upgraded by deploying a version, not by an
-// init that was about something else. The transport's fallback fills in only for
-// an env carrying no version at all, which has nothing to deploy without one.
+// applyEnvRuntimeVersion leaves the env's version alone unless --version is
+// given or the env has none: upgrading is deploy's job.
 func (s *bootstrapRunState) applyEnvRuntimeVersion() {
 	s.applyEnvSetting("runtime version", s.params.RuntimeVersion, &s.envConfig.RuntimeVersion)
 	if strings.TrimSpace(s.envConfig.RuntimeVersion) != "" {
@@ -96,11 +81,8 @@ func (s *bootstrapRunState) applyEnvImagePullSecrets() {
 	s.runner.Context.Trace("init: image pull secrets set to " + strings.Join(pullSecrets, ","))
 }
 
-// applyEnvRuntimePod merges the supplied limits onto the recorded ones so
-// naming only the CPU leaves the env's memory where it was. Params carry the
-// raw flags here, unnormalized, because normalized defaults are indistinguishable
-// from an operator asking for the defaults — and that is how a re-init meant to
-// add a pull secret used to reset an env's pod resources.
+// applyEnvRuntimePod merges raw flags: normalized defaults would look like an
+// operator asking for them and reset unrelated limits.
 func (s *bootstrapRunState) applyEnvRuntimePod() {
 	desired := s.envConfig.RuntimePod
 	if cpu := strings.TrimSpace(s.params.RuntimePod.CPU); cpu != "" {
@@ -118,10 +100,6 @@ func (s *bootstrapRunState) applyEnvRuntimePod() {
 	s.runner.Context.Trace("init: runtime pod resources set to " + formatRuntimePodResources(s.envConfig.RuntimePod))
 }
 
-// applyEnvRuntimeDindPod mirrors applyEnvRuntimePod for the erun-dind sidecar:
-// merge the supplied limits onto the recorded ones, using the raw
-// (unnormalized) flag values so a re-init that only touches an unrelated
-// setting cannot reset the sidecar's resources to their defaults.
 func (s *bootstrapRunState) applyEnvRuntimeDindPod() {
 	desired := s.envConfig.RuntimeDindPod
 	if cpu := strings.TrimSpace(s.params.RuntimeDindPod.CPU); cpu != "" {
@@ -139,10 +117,8 @@ func (s *bootstrapRunState) applyEnvRuntimeDindPod() {
 	s.runner.Context.Trace("init: erun-dind sidecar resources set to " + formatRuntimeDindPodResources(s.envConfig.RuntimeDindPod))
 }
 
-// applyEnvDeployComponents honours --components on an existing env: given, it
-// overwrites the saved selection outright — including with an empty list,
-// which clears it and returns the env to its repo k8s.deployments plan;
-// not given, the saved selection (if any) is left exactly as it was.
+// applyEnvDeployComponents overwrites the saved selection when --components is
+// given, even with an empty list.
 func (s *bootstrapRunState) applyEnvDeployComponents() {
 	components, given := initComponentsOverride(s.params)
 	if !given {
@@ -158,11 +134,7 @@ func (s *bootstrapRunState) applyEnvDeployComponents() {
 	s.runner.Context.Trace("init: deploy components set to " + describeComponentsSetting(components))
 }
 
-// applyEnvType moves an existing env between types, in either direction and
-// between any two of them — an env that cannot be retyped can only be deleted
-// and rebuilt. It moves only when the operator named a type: the default an
-// omitted --type resolves to is not a request, and acting on it would retype an
-// env for saying nothing about it.
+// applyEnvType retypes only when --type was named; the default is not a request.
 func (s *bootstrapRunState) applyEnvType() error {
 	requested, explicit := s.params.RequestedType()
 	current := s.envConfig.ResolvedType()
@@ -183,13 +155,8 @@ func (s *bootstrapRunState) applyEnvType() error {
 	return nil
 }
 
-// adoptLocalRepoPathForType re-resolves the host repo path when an env becomes
-// a local-agent (whose worktree is hostPath-mounted from it) or a host env
-// (whose worktree IS it, with no pod to mount it into). The path a remote env
-// carries names an in-pod directory that does not exist on this machine, so
-// without one to adopt the retype is refused rather than written: an env
-// recorded as local-agent or host with nothing to use would fail later with a
-// message about the missing path rather than about the flag that caused it.
+// adoptLocalRepoPathForType refuses a retype to local-agent or host with no host
+// path to adopt: a remote env's path exists only in its pod.
 func (s *bootstrapRunState) adoptLocalRepoPathForType(requested configpkg.EnvironmentType) error {
 	if requested != configpkg.EnvironmentTypeLocalAgent && requested != configpkg.EnvironmentTypeHost {
 		return nil

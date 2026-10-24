@@ -13,11 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
-// The readiness indicator has to tell three conditions apart: running, stopped,
-// and unhealthy. A scaled-to-zero environment is the operator's own doing and
-// must never render as a failure, while pods that exist but are not ready must
-// keep rendering as one. These tests lock that mapping and the Stop action that
-// produces the stopped condition.
+// Scaled-to-zero is stopped, never a failure; pods wanted but not ready stay unhealthy.
 
 func stopTestApp(t *testing.T, emits *capturedEmits, deps erunUIDeps) *App {
 	t.Helper()
@@ -52,20 +48,12 @@ func TestRuntimeStoppedForSelectionMapsClusterStateToTheIndicator(t *testing.T) 
 			want:  true,
 		},
 		{
-			// The termination window the reconnect gate used to lose. The scale
-			// has landed and every attached session has already dropped, but the
-			// old pod stays Ready for the length of its grace period. Reading that
-			// as "running" let the respawn through, and the respawned `erun open`
-			// — reading the same Deployment — scaled the environment straight back
-			// up about a second after the stop.
+			// The old pod stays Ready through its grace period after the scale lands.
 			name:  "scaled to zero while the old pod drains is stopped",
 			state: lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 1},
 			want:  true,
 		},
 		{
-			// The distinction the issue turns on: a pod that exists but is not
-			// ready is an unhealthy environment, and softening it into "stopped"
-			// would hide a real failure behind a benign-looking indicator.
 			name:  "pods wanted but not ready is not stopped",
 			state: lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 0},
 			want:  false,
@@ -76,16 +64,11 @@ func TestRuntimeStoppedForSelectionMapsClusterStateToTheIndicator(t *testing.T) 
 			want:  false,
 		},
 		{
-			// An undeployed environment is a deploy problem, not a stopped one;
-			// the runtime health check is what reports it.
 			name:  "absent deployment is not stopped",
 			state: lifecycle.RuntimeRunState{},
 			want:  false,
 		},
 		{
-			// An unreadable cluster is a diagnostic problem. Reporting it as
-			// stopped would tell the operator to start something that is already
-			// running.
 			name: "unreadable cluster is not stopped",
 			err:  errors.New("connection refused"),
 			want: false,
@@ -106,10 +89,7 @@ func TestRuntimeStoppedForSelectionMapsClusterStateToTheIndicator(t *testing.T) 
 	}
 }
 
-// The latch closes a race the cluster read cannot: dropping the pod wakes every
-// open tab's reconnect loop at once, well before a `kubectl get` could observe
-// the new replica count. Until it does, the desktop's own stop must still read
-// as stopped.
+// The latch covers the window before kubectl sees the new replica count.
 func TestRuntimeStoppedForSelectionHonoursTheLatchBeforeTheClusterCatchesUp(t *testing.T) {
 	emits := newCapturedEmits()
 	app := stopTestApp(t, emits, erunUIDeps{
@@ -165,13 +145,6 @@ func TestStopEnvironmentFlagsTheRowStoppedAndTargetsTheRuntimeDeployment(t *test
 	}
 }
 
-// LoadRuntimeRunState is what the Runtime tab's Stop control reads before it
-// decides whether to offer the action at all. The reported defect was a control
-// that never asked: pressing Stop on an already-stopped runtime produced a
-// correct no-op whose only feedback was a terminal line, so the button read as
-// broken. These cases pin the three answers that control has to tell apart —
-// stopped, not deployed, and unreadable — because an unreadable cluster folded
-// into "not deployed" would state a fact nobody observed.
 func TestLoadRuntimeRunStateReportsTheAlreadyStoppedRuntime(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -179,7 +152,6 @@ func TestLoadRuntimeRunStateReportsTheAlreadyStoppedRuntime(t *testing.T) {
 		want  uiRuntimeRunState
 	}{
 		{
-			// The state the report describes.
 			name:  "scaled to zero is stopped with nothing to stop",
 			state: lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 0},
 			want:  uiRuntimeRunState{Present: true, DesiredReplicas: 0, Stopped: true},
@@ -190,8 +162,6 @@ func TestLoadRuntimeRunStateReportsTheAlreadyStoppedRuntime(t *testing.T) {
 			want:  uiRuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1},
 		},
 		{
-			// Wants a pod, has none: unhealthy, and still a legitimate thing to
-			// stop. It must not read as stopped.
 			name:  "running but not ready is not stopped",
 			state: lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 1},
 			want:  uiRuntimeRunState{Present: true, DesiredReplicas: 1},
@@ -216,10 +186,7 @@ func TestLoadRuntimeRunStateReportsTheAlreadyStoppedRuntime(t *testing.T) {
 	}
 }
 
-// loadRunStateReading drives LoadRuntimeRunState through one stubbed cluster
-// read. A read that surfaces as an error rather than a fail-soft reading fails
-// the test, because that is what would turn the Runtime tab into a failure
-// surface.
+// loadRunStateReading fails the test on an error: the reading must be fail-soft.
 func loadRunStateReading(t *testing.T, state lifecycle.RuntimeRunState, readErr error) uiRuntimeRunState {
 	t.Helper()
 	app := stopTestApp(t, newCapturedEmits(), erunUIDeps{
@@ -234,9 +201,6 @@ func loadRunStateReading(t *testing.T, state lifecycle.RuntimeRunState, readErr 
 	return got
 }
 
-// An unreadable cluster is a third answer, and folding it into "not deployed"
-// would state a fact nobody observed — with a recovery ("deploy it") that is
-// wrong for the environment in front of the operator.
 func TestLoadRuntimeRunStateStatesAFailedReadRatherThanGuessing(t *testing.T) {
 	got := loadRunStateReading(t, lifecycle.RuntimeRunState{}, errors.New("connection refused"))
 	if got.Present || got.Stopped {
@@ -247,9 +211,6 @@ func TestLoadRuntimeRunStateStatesAFailedReadRatherThanGuessing(t *testing.T) {
 	}
 }
 
-// A stop this desktop just issued is latched: the pod is already dropping while
-// the cluster read still reports the old replica count, so without the latch the
-// panel would flash "running" at the operator who just stopped it.
 func TestLoadRuntimeRunStateAnswersFromTheStopLatchBeforeTheClusterCatchesUp(t *testing.T) {
 	app := stopTestApp(t, newCapturedEmits(), erunUIDeps{
 		readRuntimeRunState: func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error) {
@@ -267,9 +228,6 @@ func TestLoadRuntimeRunStateAnswersFromTheStopLatchBeforeTheClusterCatchesUp(t *
 	}
 }
 
-// The notice is the whole visible outcome of a stop for the tabs it ends: they
-// go dark a moment later, and without being told they went dark *because of
-// this*, the operator reads their own command as the environment breaking.
 func TestStopEnvironmentNoticeNamesTheEndedSessionsAndTheWayBack(t *testing.T) {
 	notice := stopEnvironmentNotice(lifecycle.StopEnvironmentResult{
 		Tenant:        "erun",
@@ -291,10 +249,6 @@ func TestStopEnvironmentNoticeNamesTheEndedSessionsAndTheWayBack(t *testing.T) {
 	}
 }
 
-// A stop scales one Deployment. The platform components rolled out alongside it
-// keep running and keep holding their capacity, so the outcome has to name
-// them: they are the pods still standing afterwards, and on an already-stopped
-// environment they are the entire explanation for why nothing changed.
 func TestStopEnvironmentNoticeNamesTheComponentsItLeftRunning(t *testing.T) {
 	result := lifecycle.StopEnvironmentResult{
 		Tenant:              "erun",
@@ -314,8 +268,6 @@ func TestStopEnvironmentNoticeNamesTheComponentsItLeftRunning(t *testing.T) {
 		t.Fatalf("the notice must not claim the whole environment's capacity came back: %q", notice)
 	}
 
-	// The already-stopped outcome changed nothing at all, so it needs the
-	// explanation most.
 	alreadyStopped := stopEnvironmentNotice(lifecycle.StopEnvironmentResult{
 		Tenant:              "erun",
 		Environment:         "local",
@@ -327,8 +279,6 @@ func TestStopEnvironmentNoticeNamesTheComponentsItLeftRunning(t *testing.T) {
 	}
 }
 
-// A failed stop must leave nothing behind: the latch would otherwise suppress
-// reconnect for an environment that is still running.
 func TestStopEnvironmentClearsTheLatchWhenTheStopFails(t *testing.T) {
 	emits := newCapturedEmits()
 	app := stopTestApp(t, emits, erunUIDeps{
@@ -349,10 +299,7 @@ func TestStopEnvironmentClearsTheLatchWhenTheStopFails(t *testing.T) {
 	}
 }
 
-// A stopped runtime must refuse the automatic respawn and flag the row stopped
-// rather than failed: `erun open` now wakes a stopped env, so respawning would
-// undo the operator's own stop, and the deploy-failure guards further down would
-// otherwise claim the env is broken.
+// `erun open` wakes a stopped env, so a respawn would undo the operator's stop.
 func TestReconnectRefusedFlagsStoppedRuntimeInsteadOfFailed(t *testing.T) {
 	var sessionsMu sync.Mutex
 	var sessions []*stubTerminalSession

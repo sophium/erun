@@ -13,9 +13,6 @@ import (
 )
 
 func testListRuntimeVersionLineAlignedTenantLine(t *testing.T) {
-	// The tenant's own devops release runs the tenant's own image at the
-	// same name (team-devops release, team-devops image) -- the ordinary,
-	// unsurprising case. The line reads as "team", not "erun".
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -32,10 +29,6 @@ func testListRuntimeVersionLineAlignedTenantLine(t *testing.T) {
 }
 
 func testListRuntimeVersionLineStockErunLine(t *testing.T) {
-	// The tenant literally named "erun" rides the stock erun-devops image
-	// by construction (RuntimeReleaseName("erun") == "erun-devops"), so
-	// the release name and the image agree and the line reads "erun"
-	// with no disagreement flag.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "erun", "build")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "erun", "build", "config.yaml")
@@ -52,12 +45,8 @@ func testListRuntimeVersionLineStockErunLine(t *testing.T) {
 }
 
 func testListRuntimeVersionLineReleaseNameDisagreesWithImage(t *testing.T) {
-	// The trap: the tenant's own frs-devops release is
-	// running the stock erun-devops image (a leftover explicit override,
-	// or a deploy that never needed a tenant-specific image). The line is
-	// still "erun" -- that is genuinely what is running -- but flagged
-	// distinctly because it is the row most likely to be misread as
-	// "frs's own line".
+	// The tenant's own release running the stock erun-devops image is flagged,
+	// since it is easily misread as the tenant's own line.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "frs", "build")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "frs", "build", "config.yaml")
@@ -74,9 +63,7 @@ func testListRuntimeVersionLineReleaseNameDisagreesWithImage(t *testing.T) {
 }
 
 func testListRuntimeVersionLineUndeterminedOnMalformedRecordedImage(t *testing.T) {
-	// A hand-edited or corrupted runtimerunningimage that doesn't parse as
-	// a real image reference (no tag) must still read as undetermined,
-	// not crash and not guess a line from the tenant name.
+	// An unparseable image reference reads as undetermined, never guessed.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -93,12 +80,8 @@ func testListRuntimeVersionLineUndeterminedOnMalformedRecordedImage(t *testing.T
 }
 
 func testListErunVersionReadsOffAStatedRuntimeChartReference(t *testing.T) {
-	// When an env's runtime chart rides its own version line (rather than
-	// following runtimeversion), ResolveErunVersion reads the version off
-	// the stated runtimechart reference via SplitChartReference. The
-	// chart's version (1.0.201) must render distinctly from the runtime
-	// image's own version (1.0.0, from SeedTenantEnv's default
-	// runtimeversion).
+	// A runtime chart on its own version line renders its version separately from
+	// the runtime image's.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -116,15 +99,9 @@ func testListErunVersionReadsOffAStatedRuntimeChartReference(t *testing.T) {
 	golden.Equal(t, "list/erun_version_reads_off_a_stated_runtime_chart_reference", normalize.Apply(result.Combined))
 }
 
-// seedTenantEnvOnErunLine seeds tenant/environment (calling this again for a
-// second environment under an already-seeded tenant is fine -- each call
-// only writes its own env directory, plus the tenant/root config every
-// SeedTenantEnv call already rewrites identically) with a resolved
-// erun-devops runtime image recorded at version, which is what makes
-// ResolveErunVersion read version off RuntimeVersion rather than reporting
-// the environment as unresolved. Rewrites the env config wholesale rather
-// than appending, since SeedTenantEnv already writes a runtimeversion of its
-// own and yaml.v3 refuses a duplicate mapping key.
+// seedTenantEnvOnErunLine seeds an environment running the erun-devops image at
+// version. It rewrites the env config wholesale because yaml.v3 refuses the
+// duplicate runtimeversion key SeedTenantEnv already wrote.
 func seedTenantEnvOnErunLine(t testing.TB, setup env.Setup, tenant, environment, version string) {
 	t.Helper()
 	fixture.SeedTenantEnv(t, setup, tenant, environment)

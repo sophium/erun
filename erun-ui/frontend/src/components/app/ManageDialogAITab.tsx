@@ -23,8 +23,7 @@ import type { UIEnvironmentConfig } from '@/types';
 
 type ManageDialog = AppState['manageDialog'];
 
-// Must list every per-env Claude override the AI tab edits, or "Reset all to
-// defaults" leaves some behind.
+// Must list every per-env Claude override, or "Reset all to defaults" misses some.
 const claudeOverrideResetValues: Partial<UIEnvironmentConfig['claude']> = {
   useMantle: undefined,
   useBedrock: undefined,
@@ -156,8 +155,7 @@ function ClaudeVerboseDebugField({
   disabled?: boolean;
   onChange: (value: true | undefined) => void;
 }): React.ReactElement {
-  // No global default to inherit, so off persists as absent (absent ≡ off)
-  // rather than as a tri-state override like the sibling *bool fields.
+  // No global default to inherit, so off persists as absent.
   return (
     <CheckboxField
       id="environment-config-claude-verbose-debug"

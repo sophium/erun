@@ -8,14 +8,7 @@ import (
 	"time"
 )
 
-// A cancelled job's whole process group can contain a zombie -- a process
-// that already exited and is only waiting for its parent to reap it -- left
-// behind when an intermediate wrapper the job's command ran dies before it
-// can wait() on its own child. environmentJobProcessGroupSurvivors must read
-// that as "nothing left running", not as a survivor: a real regression this
-// pins (erun-integration's job cancel scenario caught a first version of this
-// check answering true for a zombie, misreporting a clean cancel as
-// abandoned work).
+// A zombie left in the group must not count as a survivor.
 func TestEnvironmentJobProcessGroupSurvivorsIgnoresAZombie(t *testing.T) {
 	cmd := exec.Command("sh", "-c", "exit 0")
 	DetachEnvironmentJobChild(cmd)

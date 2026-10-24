@@ -21,9 +21,6 @@ type dindRun struct {
 	execed bool
 }
 
-// newDindRun builds an empty procfs/sysfs pair under a temp root and a host
-// whose exec records the argv dockerd-entrypoint.sh would receive instead of
-// starting a daemon.
 func newDindRun(t *testing.T) *dindRun {
 	t.Helper()
 	run := &dindRun{root: t.TempDir()}
@@ -58,9 +55,7 @@ func (r *dindRun) run(t *testing.T, dryRun bool, args ...string) {
 	}
 }
 
-// stubNet writes a routing table whose default route is on iface, plus a
-// non-default route on a decoy interface with a larger MTU, so a resolver that
-// took the first row would be caught.
+// A decoy route with a larger MTU catches a resolver that takes the first row.
 func (r *dindRun) stubNet(t *testing.T, iface, mtu string) {
 	t.Helper()
 	table := "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n" +
@@ -71,8 +66,6 @@ func (r *dindRun) stubNet(t *testing.T, iface, mtu string) {
 	mustWriteFile(t, filepath.Join(r.root, "sys", "class", "net", "decoy0", "mtu"), "9000\n")
 }
 
-// stubOwnCgroup simulates the cgroup the kubelet already assigned this
-// container, with the quota it enforces.
 func (r *dindRun) stubOwnCgroup(t *testing.T, cpuMax string) {
 	t.Helper()
 	cgroupPath := "/kubepods.slice/cri-containerd-test.scope"
@@ -80,8 +73,6 @@ func (r *dindRun) stubOwnCgroup(t *testing.T, cpuMax string) {
 	mustWriteFile(t, filepath.Join(r.root, "sys", "fs", "cgroup", filepath.FromSlash(cgroupPath), "cpu.max"), cpuMax+"\n")
 }
 
-// stubCapParent declares which controllers the kernel offers docker/ and which
-// it already delegates to docker/'s children.
 func (r *dindRun) stubCapParent(t *testing.T, controllers, subtree string) {
 	t.Helper()
 	mustWriteFile(t, filepath.Join(r.capParent(), "cgroup.controllers"), controllers+"\n")
@@ -109,9 +100,6 @@ func (r *dindRun) assertArgv(t *testing.T, want ...string) {
 	}
 }
 
-// assertUncappedReported checks a run that could not apply the cap warned
-// exactly once and never announced a cap it did not set: the silent no-op that
-// reads as a working fix is the defect this coverage exists for.
 func (r *dindRun) assertUncappedReported(t *testing.T, reason string) {
 	t.Helper()
 	out := r.output.String()
@@ -134,8 +122,7 @@ func TestDindEntrypointPassesTheDefaultRouteMTU(t *testing.T) {
 }
 
 func TestDindEntrypointLeadsTheChartArgsWithTheMTU(t *testing.T) {
-	// The derived MTU leads so the stock entrypoint still sees a leading '-'
-	// and prepends dockerd.
+	// The derived MTU leads so the stock entrypoint still prepends dockerd.
 	run := newDindRun(t)
 	run.stubNet(t, "eth0", "1450")
 	run.run(t, false, "--insecure-registry", "10.1.2.3:5000")
@@ -191,8 +178,6 @@ func TestDindEntrypointAcceptsExactlyTheIPv6Minimum(t *testing.T) {
 }
 
 func TestDindEntrypointMirrorsItsOwnQuotaIntoThePodCapCgroup(t *testing.T) {
-	// cpu has to be delegated to the cap cgroup's parent first: until then
-	// the child has no cpu.max to write at all.
 	run := newDindRun(t)
 	run.stubNet(t, "eth0", "1450")
 	run.stubOwnCgroup(t, "400000 100000")
@@ -234,7 +219,6 @@ func TestDindEntrypointWithoutAReadableOwnCgroupCreatesNothing(t *testing.T) {
 }
 
 func TestDindEntrypointLeavesAnAlreadyDelegatedParentAlone(t *testing.T) {
-	// The steady state from the second boot on.
 	run := newDindRun(t)
 	run.stubNet(t, "eth0", "1450")
 	run.stubOwnCgroup(t, "400000 100000")
@@ -259,8 +243,6 @@ func TestDindEntrypointReportsAParentThatDoesNotOfferCPU(t *testing.T) {
 }
 
 func TestDindEntrypointReportsARefusedDelegation(t *testing.T) {
-	// The kernel's no-internal-process constraint surfaces as a failed write
-	// here; the write has to be checked, not trusted.
 	run := newDindRun(t)
 	run.stubNet(t, "eth0", "1450")
 	run.stubOwnCgroup(t, "400000 100000")

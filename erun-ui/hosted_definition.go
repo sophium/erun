@@ -8,19 +8,10 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
-// hostedDefinitionDriftTimeout bounds the marker panel's own read. It matches
-// tenantDashboardTimeout: the same platform, the same read-only shape.
 const hostedDefinitionDriftTimeout = tenantDashboardTimeout
 
-// hostedDefinitionDriftFor reads the environment's own hosted marker and
-// compares it against the revision the platform holds. It says how far behind
-// the local copy is and names the command that brings it down, and it writes
-// nothing.
-//
-// It answers a question the operator asked — the marker panel's own refresh.
-// The other half of the panel, the local divergence, needs no platform read
-// and so is resolved in the read model rather than here; and the upload half
-// is `uploadHostedDefinition`, which the config watcher drives.
+// hostedDefinitionDriftFor compares the hosted marker with the platform's
+// revision; it writes nothing.
 func (a *App) hostedDefinitionDriftFor(ctx context.Context, tenant, environment string) uiHostedDefinitionDrift {
 	config, _, err := configpkg.LoadEnvConfig(tenant, environment)
 	if err != nil {
@@ -49,9 +40,7 @@ func (a *App) hostedDefinitionDriftFor(ctx context.Context, tenant, environment 
 			Error:         fmt.Sprintf("Cannot read %s/%s's platform definition: %s", tenant, environment, err),
 		}
 	}
-	// The row the platform resolved has to be the row the marker names, or the
-	// comparison would answer about a different environment's definition — the
-	// same refusal an upload and a pull make, applied to the read.
+	// Refuse a resolved row that is not the one the marker names.
 	if err := configpkg.CheckHostedMarkerTarget(marker, client.APIHost(), record.TenantID, record.EnvironmentID); err != nil {
 		return uiHostedDefinitionDrift{
 			LocalRevision:    marker.DefinitionRevision,
@@ -72,9 +61,8 @@ func (a *App) hostedDefinitionDriftFor(ctx context.Context, tenant, environment 
 	}
 }
 
-// CheckHostedDefinitionDrift answers the marker panel's own refresh: whether
-// the platform's copy of this environment has moved past what this machine
-// last pulled. It reads and reports; it never writes, and it never uploads.
+// CheckHostedDefinitionDrift reports whether the platform's copy moved past
+// what this machine last pulled; it never writes.
 func (a *App) CheckHostedDefinitionDrift(tenant, environment string) (uiHostedDefinitionDrift, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -87,9 +75,6 @@ func (a *App) CheckHostedDefinitionDrift(tenant, environment string) (uiHostedDe
 	return a.hostedDefinitionDriftFor(ctx, tenant, environment), nil
 }
 
-// hostedEnvironmentToUI renders the marker for the environment's details
-// panel, or nil when the environment carries none — the common case, which the
-// frontend renders as absence rather than as an empty marker.
 func hostedEnvironmentToUI(config configpkg.EnvConfig) *uiHostedEnvironment {
 	marker, ok := configpkg.HostedEnvironmentFromConfig(config)
 	if !ok {
@@ -105,9 +90,7 @@ func hostedEnvironmentToUI(config configpkg.EnvConfig) *uiHostedEnvironment {
 	}
 }
 
-// hostedDefinitionLocalChangeToUI mirrors the shared type. The sentence is
-// carried across rather than re-worded here, so the panel and the CLI cannot
-// describe one state two ways.
+// The sentence is carried, not reworded, so the panel and CLI agree.
 func hostedDefinitionLocalChangeToUI(change configpkg.HostedDefinitionLocalChange) uiHostedDefinitionLocalChange {
 	return uiHostedDefinitionLocalChange{
 		Available: change.Available,

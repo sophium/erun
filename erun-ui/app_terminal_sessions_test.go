@@ -86,10 +86,7 @@ func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	if started.Executable != "/tmp/erun" {
 		t.Fatalf("expected erun executable, got %q", started.Executable)
 	}
-	// The AI tab runs a pure `erun open --ai`: claude launches pod-side (once on
-	// create), so a reopen reconnects to the running tool and the desktop pipes no
-	// initial input. open is pure — no --skip-ensure — so deploy stays the
-	// caller's job.
+	// Claude launches pod-side on create, so a reopen pipes no initial input.
 	wantArgs := []string{"open", "erun", "remote", "--app-session", "ai", "--ai"}
 	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
 		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
@@ -105,15 +102,8 @@ func swapAIRepaintNudgeTimings(delay, settle time.Duration) func() {
 	return func() { aiRepaintNudgeDelay, aiRepaintNudgeSettle = prevDelay, prevSettle }
 }
 
-// TestAISessionRepaintNudgeFiresOnAttachMarker pins the fix: an AI tab
-// reattaching to a running Claude renders blank because Claude (a main-screen
-// TUI) only repaints on a real geometry change, and a same-size reattach
-// raises none. The desktop forces the repaint by briefly resizing the pty one
-// row shorter then back. The attach is detected by the bootstrap's window-title
-// escape (OSC 0), emitted right before `dtach -A` — nudging on the first output
-// overall would fire too early (it is the `erun open` audit trace). Verified
-// end-to-end against a live pod via the headless app + DOM read; this locks the
-// backend contract.
+// Claude repaints only on a geometry change, so a same-size reattach renders blank
+// until the pty is nudged. The OSC 0 title set right before `dtach -A` marks the attach.
 func TestAISessionRepaintNudgeFiresOnAttachMarker(t *testing.T) {
 	defer swapAIRepaintNudgeTimings(time.Millisecond, time.Millisecond)()
 
@@ -145,14 +135,12 @@ func TestAISessionRepaintNudgeFiresOnAttachMarker(t *testing.T) {
 	app.mu.Unlock()
 
 	var lastActivity time.Time
-	// Output without the attach marker (the open audit trace) must not nudge.
 	app.handleSessionOutput(managed, []byte("audit: erun open --ai --app-session ai erun remote\n"), &lastActivity)
 	time.Sleep(20 * time.Millisecond)
 	if got := session.Resizes(); len(got) != 0 {
 		t.Fatalf("non-marker output must not nudge; got resizes %v", got)
 	}
 
-	// The attach marker (OSC 0 window-title set) triggers shrink-then-restore.
 	app.handleSessionOutput(managed, []byte("\x1b]0;erun-remote\x07"), &lastActivity)
 	want := [][2]int{{80, 23}, {80, 24}}
 	deadline := time.Now().Add(2 * time.Second)
@@ -170,7 +158,6 @@ func TestAISessionRepaintNudgeFiresOnAttachMarker(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// The nudge is once per attach: a second marker chunk must not re-fire it.
 	app.handleSessionOutput(managed, []byte("\x1b]0;erun-remote\x07"), &lastActivity)
 	time.Sleep(30 * time.Millisecond)
 	if got := session.Resizes(); len(got) != 2 {
@@ -233,12 +220,7 @@ func TestStartSessionAutoReconnectsOnExit(t *testing.T) {
 }
 
 func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
-	// The respawn loop used to re-launch `erun open` on every PTY exit,
-	// even when the env's cloud context had just been auto-stopped. Each
-	// respawn re-ran CloudContextPreflight, which immediately undid the
-	// stop. Gate the respawn on cloud-context state so the auto-stop is
-	// not fought by the desktop's own reconnect machinery; the user
-	// recovers via the titlebar start button.
+	// A respawn reruns CloudContextPreflight, which would undo an auto-stop.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &configpkg.ERunConfig{
@@ -286,9 +268,6 @@ func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
 	mu.Unlock()
 	_ = first.Close()
 
-	// Wait long enough that a respawn would have shown up if the gate
-	// were broken; the existing reconnect test races for ~2s, so the
-	// same window here would surface a regression.
 	deadline := time.Now().Add(1 * time.Second)
 	for time.Now().Before(deadline) {
 		mu.Lock()
@@ -302,14 +281,8 @@ func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
 }
 
 func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
-	// When the linked cloud context auto-stops while a Claude/codex AI
-	// session is attached, `tryReconnect` refuses to fight the stop and
-	// `streamSession` cleans up the managed session (closed=true, removed
-	// from a.sessions). The desktop's tab-respawn flow then calls
-	// StartAISession again from the user's click on the dead AI tab; the
-	// backend must respond with a brand new session instead of returning
-	// the stale serial. This pins that contract so the click-driven
-	// recovery in tabRespawnThunks does not regress into a no-op.
+	// After an auto-stop tears down the AI session, StartAISession must return a new
+	// serial so the dead tab's click-to-respawn works.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &configpkg.ERunConfig{
@@ -359,10 +332,6 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 	mu.Unlock()
 	_ = deadSession.Close()
 
-	// Wait until streamSession finishes cleaning up the dead managed
-	// terminal. The shouldRespawnForCloudContext gate is what makes this
-	// observable: it sees the stopped context, refuses to respawn, and
-	// drops the entry from a.sessions.
 	key := aiSessionKey(selection, 0)
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -472,7 +441,6 @@ func TestStartSessionDoesNotLogWhenLocalAbsent(t *testing.T) {
 	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
-	// Should not crash. No assertion required beyond that.
 }
 
 func TestStartLocalSessionDoesNotAutoReconnect(t *testing.T) {

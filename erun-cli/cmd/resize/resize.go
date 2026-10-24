@@ -94,22 +94,9 @@ func NewResizeCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver,
 	return cmd
 }
 
-// resizeActivityLeaseLoader gives RunRuntimeResize's occupancy check a lease
-// reader that actually reaches the target environment. LoadEnvironmentActivityLeases
-// reads whatever filesystem the calling process itself runs on; a resize invoked
-// from the operator's own machine against a remote environment runs on a
-// different filesystem than that environment's own lease store (the same
-// "two homes" split environment_call.go documents for activity/job/idle), so
-// reading locally there always finds nothing and the guard never fires. When
-// this process is not itself the target environment, dispatch through the
-// environment's own MCP edge instead, exactly like `erun activity lease list`
-// already does off-environment.
-//
-// The dispatch runs even under --dry-run, unlike callEnvironmentTool's normal
-// dry-run behavior of only tracing the call: resize's own dry-run exists to
-// answer "would this be refused", and a stale "no leases" answer would silently
-// defeat that. Reading leases has no side effect, so forcing the real call here
-// costs nothing dry-run is meant to avoid.
+// resizeActivityLeaseLoader reads leases from the target environment's own store,
+// via its MCP edge when off-environment. It runs even under --dry-run, since
+// dry-run must still answer "would this be refused".
 func resizeActivityLeaseLoader(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver) func(string, string, time.Time) ([]activity.EnvironmentActivityLease, error) {
 	probeCtx := commandCtx
 	probeCtx.DryRun = false

@@ -40,11 +40,6 @@ func TestScopedTenantEnv(t *testing.T) {
 	}
 }
 
-// TestScopedTenantEnvRefusalNamesBothScopesAndTheRemedy guards the message
-// quality this fix depends on: a caller reading the error must be able to
-// tell which environment the pod actually serves, which one it asked for
-// instead, and what to do about it (call that environment's own edge), not
-// just that something was refused.
 func TestScopedTenantEnvRefusalNamesBothScopesAndTheRemedy(t *testing.T) {
 	pod := RuntimeConfig{Context: RuntimeContext{Tenant: "erun", Environment: "code1"}}
 	_, _, err := ScopedTenantEnv("erun", "build", pod)

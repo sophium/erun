@@ -10,9 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// fakeDockerStoreForDindResources is the minimal DockerStore double
-// resolveDockerBuildDindPodResources needs: one tenant with one environment
-// whose LocalRepoPath matches the project root under test.
 type fakeDockerStoreForDindResources struct {
 	tenant config.TenantConfig
 	envs   []config.EnvConfig
@@ -36,9 +33,6 @@ func (f fakeDockerStoreForDindResources) ListEnvConfigs(tenant string) ([]config
 	return f.envs, nil
 }
 
-// storeWithDindConfig builds a store whose one environment matches projectRoot
-// and carries the given RuntimeDindPod, so resolveDockerBuildEnvConfigForProject
-// resolves it as the "config present" case.
 func storeWithDindConfig(t *testing.T, projectRoot string, resources config.RuntimePodResources) shared.DockerStore {
 	t.Helper()
 	return fakeDockerStoreForDindResources{
@@ -51,11 +45,7 @@ func storeWithDindConfig(t *testing.T, projectRoot string, resources config.Runt
 	}
 }
 
-// clearInjectedRuntimeEnv strips the real process's own ERUN_TENANT/
-// ERUN_ENVIRONMENT and the downward-API DindCPULimitEnvVar/
-// DindMemoryLimitMiBEnvVar so resolveDockerBuildDindPodResources' resolution
-// is deterministic under `go test` regardless of whether the test binary
-// happens to run inside a real runtime pod (which sets all four).
+// clearInjectedRuntimeEnv makes resolution deterministic when tests run inside a runtime pod.
 func clearInjectedRuntimeEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("ERUN_TENANT", "")
@@ -64,10 +54,7 @@ func clearInjectedRuntimeEnv(t *testing.T) {
 	t.Setenv(shared.DindMemoryLimitMiBEnvVar, "")
 }
 
-// Both env vars set and valid: they win even though the config store also
-// resolves a real environment with different values, because they reflect the
-// sidecar's live limit and the config store's projection can be stale or (in
-// the in-pod case this exists to fix) simply absent.
+// Env vars reflect the sidecar's live limit; the config store can be stale or absent.
 func TestResolveDockerBuildDindPodResourcesPrefersEnvVarsOverConfig(t *testing.T) {
 	clearInjectedRuntimeEnv(t)
 	t.Setenv(shared.DindCPULimitEnvVar, "8")
@@ -83,9 +70,6 @@ func TestResolveDockerBuildDindPodResourcesPrefersEnvVarsOverConfig(t *testing.T
 	}
 }
 
-// A malformed env var must not mask a real config-store value with a bad
-// literal, and the two fields resolve independently: CPU falls back to the
-// config store while memory still takes the (valid) env var.
 func TestResolveDockerBuildDindPodResourcesIgnoresMalformedEnvVarPerField(t *testing.T) {
 	clearInjectedRuntimeEnv(t)
 	t.Setenv(shared.DindCPULimitEnvVar, "not-a-cpu-quantity")
@@ -101,8 +85,6 @@ func TestResolveDockerBuildDindPodResourcesIgnoresMalformedEnvVarPerField(t *tes
 	}
 }
 
-// A malformed env var with no config-store environment to fall back to lands
-// on the hardcoded default for that field only.
 func TestResolveDockerBuildDindPodResourcesIgnoresMalformedEnvVarWithNoConfig(t *testing.T) {
 	clearInjectedRuntimeEnv(t)
 	t.Setenv(shared.DindCPULimitEnvVar, "8")
@@ -116,10 +98,6 @@ func TestResolveDockerBuildDindPodResourcesIgnoresMalformedEnvVarWithNoConfig(t 
 	}
 }
 
-// applyDindResourceBuildArgs is the caller that actually threads the resolved
-// resources into the real --build-arg values docker build receives; prove the
-// env-var path reaches it end to end through a Dockerfile that declares both
-// ARGs, the same shape as erun-devops/docker/erun-devops/Dockerfile.
 func TestApplyDindResourceBuildArgsUsesEnvVarsInPod(t *testing.T) {
 	clearInjectedRuntimeEnv(t)
 	t.Setenv(shared.DindCPULimitEnvVar, "8")

@@ -54,8 +54,7 @@ func testCloudInitAwsDryRunTracesSsoSetupAndOidcPersistence(t *testing.T) {
 }
 
 func testCloudInitAwsPromptsMissingRegionViaStdin(t *testing.T) {
-	// Provides every AWS init param except --region because the prompt
-	// reader buffers ahead — one interactive prompt per subprocess.
+	// --region is omitted: the prompt reader buffers ahead, so one prompt per run.
 	setup := env.New(t)
 	args := []string{
 		"cloud", "init", "aws",
@@ -110,12 +109,7 @@ func testCloudInitAwsRealRunPersistsAliasAndIssuer(t *testing.T) {
 }
 
 func testCloudInitAwsDryRunUnaffectedByLibraryExecutionMode(t *testing.T) {
-	// Locks the dry-run/audit contract: the `aws sts get-caller-identity`
-	// trace line the CLI hand-renders under --dry-run must stay
-	// byte-identical to the subprocess-mode golden even when
-	// execution.modes.aws-sts opts into the library path, because
-	// ResolveAWSIdentity/CheckAWSStatus are never invoked during this
-	// command's dry-run path at all (see init_aws_dry_run.txt).
+	// Library mode must not change the dry-run trace: STS is never called on a dry run.
 	setup := env.New(t)
 	seedExecutionMode(t, setup, "aws-sts", "library")
 	args := []string{
@@ -132,8 +126,6 @@ func testCloudInitAwsDryRunUnaffectedByLibraryExecutionMode(t *testing.T) {
 }
 
 func testCloudInitAwsRealRunIdentityFailureFails(t *testing.T) {
-	// Dry-run cannot reach this: the failure is the aws CLI's real exit
-	// status. `sts get-caller-identity` fails, so init must exit non-zero.
 	setup := env.New(t)
 	stubs := setup.Cwd + "/stubs"
 	script := strings.Join([]string{
@@ -163,9 +155,6 @@ func testCloudInitAwsRealRunIdentityFailureFails(t *testing.T) {
 }
 
 func testCloudInitAwsRealRunUnresolvableAliasFails(t *testing.T) {
-	// An empty identity ({}) leaves no derivable alias; the command must
-	// fail with "cloud provider alias cannot be resolved" rather than
-	// persist a nameless provider.
 	setup := env.New(t)
 	stubs := setup.Cwd + "/stubs"
 	script := strings.Join([]string{
@@ -193,8 +182,7 @@ func testCloudInitAwsRealRunUnresolvableAliasFails(t *testing.T) {
 }
 
 func testCloudInitAwsRealRunRootArnUsernameFallback(t *testing.T) {
-	// A root-account ARN has no "/" segment, so the username falls back to
-	// the last ":" segment ("root"); the persisted alias must reflect it.
+	// A root ARN has no "/", so the alias falls back to the last ":" segment.
 	setup := env.New(t)
 	stubs := setup.Cwd + "/stubs"
 	identityJSON := `{"UserId":"123456789012","Account":"123456789012","Arn":"arn:aws:iam::123456789012:root"}`
@@ -260,10 +248,7 @@ func testCloudInitAwsRealRunConfigureSetFailureFails(t *testing.T) {
 	golden.Equal(t, "cloud/init_aws_real_run_configure_set_failure_fails", normalize.Apply(result.Combined))
 }
 
-// stsCallerIdentityStubServer fakes the STS GetCallerIdentity endpoint the
-// aws-sdk-go-v2 library path calls, honored via the SDK's own
-// AWS_ENDPOINT_URL env var — no daemon, no real AWS account, no "aws" stub
-// binary needed on PATH.
+// stsCallerIdentityStubServer fakes STS GetCallerIdentity via AWS_ENDPOINT_URL.
 func stsCallerIdentityStubServer(t testing.TB) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

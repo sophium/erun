@@ -15,9 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
-// A transient (Investigate) session has no background agent: it is a fresh
-// session in the PTY, on the default ultracode Opus launch, never a resume of
-// anything.
+// A transient session is always fresh, never a resume.
 func TestBuildOrchestratorLaunchStartsAFreshTransientSession(t *testing.T) {
 	for _, goos := range []string{"linux", "windows"} {
 		_, launch := buildOrchestratorLaunch(goos, defaultOrchestratorLaunch(), "", "")
@@ -39,9 +37,7 @@ func TestBuildOrchestratorLaunchStartsAFreshTransientSession(t *testing.T) {
 	}
 }
 
-// A persisted orchestrator's PTY only ever attaches to its agent by id, and an
-// id is spliced into a shell line, so anything that is not an agent id is
-// refused rather than run.
+// The agent id is spliced into a shell line, so non-ids are refused.
 func TestOrchestratorLaunchCommandAttachesOnlyToAnAgentID(t *testing.T) {
 	if _, err := exec.LookPath(defaultAITool); err != nil {
 		dir := t.TempDir()
@@ -64,12 +60,7 @@ func TestOrchestratorLaunchCommandAttachesOnlyToAnAgentID(t *testing.T) {
 	}
 }
 
-// An orchestrator is contracted to resolve ambiguity itself and carry a task to
-// a verified end, so stopping to ask is a defect — and one asked while the
-// operator is away stalls the work until they come back. The harness cannot ask
-// if it does not have the tool, which makes that structural rather than a matter
-// of the agent's own judgement about its instructions. Both a transient launch
-// and a background agent are denied it.
+// Orchestrators must not stop to ask; the harness denies the tool outright.
 func TestBuildOrchestratorLaunchCannotStopToAsk(t *testing.T) {
 	for _, goos := range []string{"linux", "windows"} {
 		_, launch := buildOrchestratorLaunch(goos, defaultOrchestratorLaunch(), "", "")
@@ -83,12 +74,7 @@ func TestBuildOrchestratorLaunchCannotStopToAsk(t *testing.T) {
 	}
 }
 
-// A prompt is ordinary operator task text — code spans, `$`, backslashes and
-// quotes — and the harness has to receive it as one argument, unchanged. Two
-// independent things break that, so this drives both: the positional prompt is
-// consumed by the preceding multi-value --mcp-config unless option parsing ends
-// first, and the host shell executes the metacharacters unless the value is
-// quoted for the shell that re-parses the command line.
+// The prompt must reach the harness as one unchanged argument: after `--` and shell-quoted.
 func TestBuildOrchestratorLaunchHandsThePromptOverVerbatim(t *testing.T) {
 	const prompt = "Run `erun-ui/build.sh`, read $HOME, keep C:\\tmp\\x and \"quotes\" and 'apostrophes'"
 
@@ -101,8 +87,6 @@ func TestBuildOrchestratorLaunchHandsThePromptOverVerbatim(t *testing.T) {
 		return
 	}
 
-	// Let a real POSIX shell parse what we composed and report the argv it
-	// produces: anything it expands, executes or drops shows up here.
 	dir := t.TempDir()
 	stub := filepath.Join(dir, defaultAITool)
 	if err := os.WriteFile(stub, []byte("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done\n"), 0o755); err != nil {
@@ -120,9 +104,7 @@ func TestBuildOrchestratorLaunchHandsThePromptOverVerbatim(t *testing.T) {
 	}
 }
 
-// The same guarantee on the other host shell: PowerShell expands `$` and treats
-// the backtick as its escape character inside double quotes, so the prompt and
-// the config path are single-quoted there, with embedded apostrophes doubled.
+// PowerShell expands `$` and backticks inside double quotes, so values are single-quoted.
 func TestBuildOrchestratorLaunchQuotesThePromptForPowerShell(t *testing.T) {
 	_, launch := buildOrchestratorLaunch("windows", defaultOrchestratorLaunch(), "keep $HOME and `code` and it's fine", `C:\cfg\mcp.json`)
 	command := launch[len(launch)-1]
@@ -134,11 +116,7 @@ func TestBuildOrchestratorLaunchQuotesThePromptForPowerShell(t *testing.T) {
 	}
 }
 
-// TestOrchestratorReconnectRefusedGuards is the standalone unit test for the
-// two bounds tryReconnect's orchestrator-specific guard exists to enforce: a
-// clean exit (no reason — the operator quit the TUI, not a crash) is always
-// refused, and a torn-down registration is refused even carrying a real crash
-// reason — which is what makes an operator's Stop refuse its own respawn.
+// A clean exit or a torn-down registration refuses respawn.
 func TestOrchestratorReconnectRefusedGuards(t *testing.T) {
 	app := NewApp(erunUIDeps{})
 	id := "agent"
@@ -161,10 +139,7 @@ func TestOrchestratorReconnectRefusedGuards(t *testing.T) {
 	}
 }
 
-// TestOrchestratorRespawnsAfterCrashOntoTheSameAgent is the end-to-end path for
-// crash recovery: a terminal that exits non-zero is reattached automatically to
-// the SAME background agent, which kept its conversation throughout, so it is
-// handed no prompt -- nothing stopped that would need telling to carry on.
+// A crash reattaches to the same agent without a prompt.
 func TestOrchestratorRespawnsAfterCrashOntoTheSameAgent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)
@@ -224,9 +199,6 @@ func TestOrchestratorRespawnsAfterCrashOntoTheSameAgent(t *testing.T) {
 	}
 }
 
-// TestOrchestratorCleanExitDoesNotRespawn is the counterpart: an exit with no
-// reason (Wait returned nil — the operator quit the TUI from inside) must end
-// the session rather than relaunch it.
 func TestOrchestratorCleanExitDoesNotRespawn(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)
@@ -283,8 +255,6 @@ func TestOrchestratorCleanExitDoesNotRespawn(t *testing.T) {
 	}
 }
 
-// TestStopOrchestratorRefusesItsOwnRespawn locks the bound end to end: an
-// operator's Stop must never be undone by an in-flight crash respawn.
 func TestStopOrchestratorRefusesItsOwnRespawn(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)

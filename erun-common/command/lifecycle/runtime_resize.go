@@ -13,32 +13,12 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// A resize turns the standing sizing recommendation (runtime_sizing.go) into
-// an action: it moves the runtime container's own resource *limits* — the
-// throttle/OOM ceiling and the namespace ResourceQuota draw those limits count
-// against — never the scheduler *request*, which erun pins to a small fixed
-// default (runtime_resources.go) independent of RuntimePod. --dind-cpu/
-// --dind-memory move the same kind of limit on the erun-dind sidecar
-// container instead (RuntimeDindPod); the two are independent knobs that may
-// be resized together or separately in one call. It reuses the
-// existing deploy path (ResolveCurrentDeploySpecs/RunDeploySpecs) to roll the
-// pod exactly once, the same way `erun open`'s drift redeploy and `erun
-// upgrade` already do — a resize is not a new rollout mechanism, only a new
-// way to decide the value that one already threads through.
-//
-// Because a resize restarts the runtime pod, it is the first mutating
-// operation to consult the environment's activity leases before running: any
-// held lease (build, deploy, or an agent session) is evidence of a worker this
-// resize would interrupt, so it refuses unless explicitly overridden — the
-// same predicate the desktop's own AI-session spawn already uses
-// (erun-ui/terminal_sessions.go's aiSessionOccupants).
+// A resize moves the runtime and dind containers' limits, never the scheduler request, and rolls
+// the pod once through the normal deploy path. Since it restarts the pod, any held activity
+// lease refuses it unless overridden.
 
-// RuntimeResizeInput is what a resize request resolves from: either an
-// explicit CPU/memory pair (merged onto the current value, so naming only one
-// leaves the other where it was) or a request to size from the environment's
-// own standing recommendation. DindCPU/DindMemory size the erun-dind sidecar
-// instead, the same merge-onto-current shape as CPU/Memory; there is no
-// apply-recommendation equivalent for the sidecar (see resolveRuntimeDindResizeTarget).
+// RuntimeResizeInput is explicit values merged onto the current size, or the standing
+// recommendation; the dind sidecar has no recommendation path.
 type RuntimeResizeInput struct {
 	CPU                 string
 	Memory              string
@@ -54,10 +34,7 @@ type RuntimeResizeAction struct {
 	To       string `json:"to"`
 }
 
-// RuntimeResizePlan is the resolved, side-effect-free outcome of a resize
-// request. NoOp is true when the resolved target equals the current recorded
-// size, so a caller reports "already sized" rather than rolling a pod for
-// nothing.
+// RuntimeResizePlan is the resolved outcome of a resize; NoOp means already sized.
 type RuntimeResizePlan struct {
 	Tenant      string
 	Environment string
@@ -69,20 +46,7 @@ type RuntimeResizePlan struct {
 	NoOp        bool
 }
 
-// ResolveRuntimeResizePlan is pure: it never reads a lease, writes config, or
-// deploys. Given the environment's current recorded size, its namespace
-// ceiling, and the caller's request, it resolves the target size and
-// validates it against the namespace quota (a ResourceQuota counts every
-// container in the pod, so the erun-dind sidecar's own limit is spent before
-// the runtime container gets anything — the same accounting
-// boundRuntimeMemorySuggestion already applies to a recommendation's own
-// suggested value).
-// validateRuntimeResizeInput rejects the two input shapes a resize can never
-// act on: naming the standing recommendation and explicit runtime pod values
-// at once, and naming nothing at all. apply-recommendation only ever sizes
-// the runtime pod (see resolveRuntimeDindResizeTarget), so it is never in
-// conflict with an explicit dind-cpu/dind-memory — those may be combined with
-// it freely.
+// apply-recommendation sizes only the runtime pod, so it combines freely with dind values.
 func validateRuntimeResizeInput(input RuntimeResizeInput, explicitCPU, explicitMemory, explicitDindCPU, explicitDindMemory string) error {
 	if input.ApplyRecommendation && (explicitCPU != "" || explicitMemory != "") {
 		return fmt.Errorf("resize: pass either apply-recommendation or explicit cpu/memory values, not both")
@@ -93,16 +57,8 @@ func validateRuntimeResizeInput(input RuntimeResizeInput, explicitCPU, explicitM
 	return nil
 }
 
-// liveRuntimePodResources prefers the live cgroup limits a recommendation's
-// verdicts already read over the configured value, for the same reason
-// RecommendRuntimeSizing itself reasons from cgroups rather than config (see
-// its comment): the in-pod config carries no runtimepod at all when it is
-// silent, so treating the configured value as "current" scores a resize
-// against NormalizeRuntimePodResources' package defaults instead of the size
-// the container is actually running under — the resource a verdict says to
-// hold would then be silently reset to that default. A resource with no
-// verdict reading (no history yet) falls back to the configured value, the
-// only source available for it.
+// The in-pod config carries no runtimepod when silent, so prefer live cgroup limits; otherwise a
+// held resource would be reset to package defaults.
 func liveRuntimePodResources(configured config.RuntimePodResources, recommendation *deploy.RuntimeSizingRecommendation) config.RuntimePodResources {
 	if recommendation == nil {
 		return configured
@@ -122,9 +78,6 @@ func liveRuntimePodResources(configured config.RuntimePodResources, recommendati
 	return live
 }
 
-// resolveRuntimeResizeTarget applies either the standing recommendation or the
-// explicit values on top of the current sizing, leaving whatever the input does
-// not name unchanged.
 func resolveRuntimeResizeTarget(tenant, environment string, current config.RuntimePodResources, input RuntimeResizeInput, recommendation *deploy.RuntimeSizingRecommendation, explicitCPU, explicitMemory string) (config.RuntimePodResources, error) {
 	target := current
 	if !input.ApplyRecommendation {
@@ -153,8 +106,6 @@ func resolveRuntimeResizeTarget(tenant, environment string, current config.Runti
 	return target, nil
 }
 
-// runtimeResizeActions lists only the resources whose limit actually moves, so
-// an unchanged one never reads as a change.
 func runtimeResizeActions(current, target config.RuntimePodResources) []RuntimeResizeAction {
 	var actions []RuntimeResizeAction
 	if target.CPU != current.CPU {
@@ -166,18 +117,8 @@ func runtimeResizeActions(current, target config.RuntimePodResources) []RuntimeR
 	return actions
 }
 
-// resolveRuntimeDindResizeTarget merges the caller's explicit --dind-cpu/
-// --dind-memory onto the sidecar's current sizing, leaving whatever the input
-// does not name unchanged. Unlike the runtime pod there is no
-// apply-recommendation path here: RecommendRuntimeSizing derives its verdicts
-// from cgroup counters read out of the container it runs inside
-// (RecommendRuntimeSizing's own doc comment, ReadLocalRuntimeUsage in
-// runtime_usage.go), which is the erun-devops container, not the erun-dind
-// sidecar next to it in the same pod -- a different container's cgroup is not
-// reachable that way, so there is no retained usage history to recommend from
-// today. Covering the sidecar would mean exec'ing into it specifically and
-// retaining a second history, which is real design work left out rather than
-// half-wired.
+// No recommendation path for the sidecar: usage history comes from the erun-devops container's
+// own cgroups, and the sidecar's are not reachable from there.
 func resolveRuntimeDindResizeTarget(current config.RuntimePodResources, explicitDindCPU, explicitDindMemory string) config.RuntimePodResources {
 	target := current
 	if explicitDindCPU != "" {
@@ -189,9 +130,7 @@ func resolveRuntimeDindResizeTarget(current config.RuntimePodResources, explicit
 	return target
 }
 
-// runtimeDindResizeActions mirrors runtimeResizeActions for the sidecar, using
-// distinct resource names ("dind-cpu"/"dind-memory") so a rendered plan never
-// confuses a sidecar change with a runtime-container one.
+// Distinct resource names keep sidecar changes apart from runtime-container ones.
 func runtimeDindResizeActions(current, target config.RuntimePodResources) []RuntimeResizeAction {
 	var actions []RuntimeResizeAction
 	if target.CPU != current.CPU {
@@ -203,6 +142,7 @@ func runtimeDindResizeActions(current, target config.RuntimePodResources) []Runt
 	return actions
 }
 
+// ResolveRuntimeResizePlan resolves and quota-checks a resize target without side effects.
 func ResolveRuntimeResizePlan(tenant, environment string, current, currentDind config.RuntimePodResources, ceiling config.NamespaceResourceQuota, input RuntimeResizeInput, recommendation *deploy.RuntimeSizingRecommendation) (RuntimeResizePlan, error) {
 	current = config.NormalizeRuntimePodResources(liveRuntimePodResources(current, recommendation))
 	currentDind = config.NormalizeRuntimeDindPodResources(currentDind)
@@ -247,14 +187,7 @@ func ResolveRuntimeResizePlan(tenant, environment string, current, currentDind c
 	}, nil
 }
 
-// validateRuntimeResizeAgainstQuota refuses a target the namespace
-// ResourceQuota could never admit, naming the resource and the overage —
-// mirroring the shape of the hosted platform's own quota 409s (root
-// AGENTS.md's "same question, same shape" precedent) rather than letting the
-// operator discover it as a stuck helm rollout. dindTarget is the sidecar's
-// own resolved target rather than DefaultRuntimeDindCPU/Memory, since a
-// resize's own --dind-cpu/--dind-memory can move it away from that default in
-// the same call.
+// A ResourceQuota counts every container, so the sidecar's target is spent first.
 func validateRuntimeResizeAgainstQuota(target, dindTarget config.RuntimePodResources, ceiling config.NamespaceResourceQuota) error {
 	if ceiling.IsZero() {
 		return nil
@@ -282,13 +215,7 @@ func validateRuntimeResizeAgainstQuota(target, dindTarget config.RuntimePodResou
 	return nil
 }
 
-// formatAvailableCPUMilli renders how much CPU a refused resize leaves the
-// runtime container. FormatKubernetesCPUFromMilli returns an empty string for
-// a zero, which is right when there is no value to state and wrong here:
-// "would exceed the quota of 10 CPU ( available for the runtime container)"
-// drops the figure the sentence exists to report, and a reader cannot tell a
-// zero from a message that lost its number. A sidecar sized at or above the
-// whole quota is the ordinary way to reach it, not a corner.
+// FormatKubernetesCPUFromMilli renders zero as "", which would drop the figure here.
 func formatAvailableCPUMilli(milli int64) string {
 	if milli <= 0 {
 		return "0"
@@ -296,10 +223,7 @@ func formatAvailableCPUMilli(milli int64) string {
 	return config.FormatKubernetesCPUFromMilli(milli)
 }
 
-// RuntimeResizeOccupancyError is returned when a resize is refused because the
-// environment is not idle: a resize rolls the runtime pod (Recreate strategy),
-// which would kill any live session inside it, so it is refused, naming every
-// holder, unless the caller explicitly overrides it.
+// RuntimeResizeOccupancyError refuses a resize while leases are held, since the pod roll kills sessions.
 type RuntimeResizeOccupancyError struct {
 	Holders []activity.EnvironmentActivityLease
 }
@@ -308,25 +232,8 @@ func (e *RuntimeResizeOccupancyError) Error() string {
 	return fmt.Sprintf("resize refused: this environment is held by %s — a resize restarts the runtime pod and would interrupt that work; pass the override to resize anyway, or wait until it finishes", activity.FormatLeaseHolders(e.Holders))
 }
 
-// checkRuntimeResizeOccupancy loads every currently held lease (plain and
-// exclusive alike — the same predicate erun-ui's aiSessionOccupants already
-// uses to decide whether starting a second agent is a foreign occupancy) and
-// refuses unless the caller overrides. It does not itself claim anything: the
-// caller takes its own exclusive lease afterward, which is what actually
-// guards against a second, concurrent resize racing this one.
-//
-// load is the caller's own lease reader rather than always calling
-// LoadEnvironmentActivityLeases directly: that function reads whatever
-// filesystem this process itself is running on, which is only the
-// environment's own lease store when this process runs inside that
-// environment's pod (the MCP resize tool always does). A host-side CLI
-// invocation runs on the operator's own machine, a different filesystem
-// entirely — reading locally there always finds zero leases regardless of
-// what the environment actually holds, which is what let a resize roll a
-// leased pod silently. RuntimeResizeDependencies.LoadActivityLeases lets the
-// CLI transport supply a loader that dispatches to the environment's own
-// edge instead; RunRuntimeResize falls back to the direct, in-pod-correct
-// read when the caller leaves it nil.
+// load must read the environment's own lease store: a host-side CLI reading its local
+// filesystem always sees zero leases. The caller's own exclusive lease guards concurrent resizes.
 func checkRuntimeResizeOccupancy(load func(tenant, environment string, now time.Time) ([]activity.EnvironmentActivityLease, error), tenant, environment string, now time.Time, override bool) ([]activity.EnvironmentActivityLease, error) {
 	if load == nil {
 		load = activity.LoadEnvironmentActivityLeases
@@ -341,8 +248,7 @@ func checkRuntimeResizeOccupancy(load func(tenant, environment string, now time.
 	return nil, &RuntimeResizeOccupancyError{Holders: leases}
 }
 
-// RuntimeResizeParams is the resize operation's whole input, shared by both
-// transports.
+// RuntimeResizeParams is the resize input shared by both transports.
 type RuntimeResizeParams struct {
 	Tenant        string
 	Environment   string
@@ -351,9 +257,7 @@ type RuntimeResizeParams struct {
 	Holder        activity.EnvironmentActivityLeaseHolder
 }
 
-// RuntimeResizeDependencies mirrors the shape `erun deploy` already injects
-// (ResolveCurrentDeploySpecs/RunDeploySpecs's own parameters), so resize
-// reuses that exact composition instead of a second one.
+// RuntimeResizeDependencies reuses the composition `erun deploy` injects.
 type RuntimeResizeDependencies struct {
 	Store                          deploy.DeployStore
 	SaveEnvConfig                  deploy.EnvConfigSaver
@@ -362,30 +266,16 @@ type RuntimeResizeDependencies struct {
 	ResolveKubernetesDeployContext deploy.DeployContextResolverFunc
 	Now                            shared.NowFunc
 	DeployHelmChart                deploy.HelmChartDeployerFunc
-	// LoadActivityLeases reads the leases currently held on the target
-	// environment. Nil means "read the local lease store directly", correct
-	// for the MCP resize tool (always running inside the environment's own
-	// pod); the CLI transport supplies a dispatching implementation for a
-	// host-side invocation targeting a remote environment (see
-	// checkRuntimeResizeOccupancy).
+	// LoadActivityLeases nil reads the local store, correct only inside the environment's pod.
 	LoadActivityLeases func(tenant, environment string, now time.Time) ([]activity.EnvironmentActivityLease, error)
 }
 
-// RuntimeResizeResult reports what a resize did (or would do), for both
-// transports to render.
+// RuntimeResizeResult reports what a resize did or would do.
 type RuntimeResizeResult struct {
 	Plan             RuntimeResizePlan
 	OverriddenLeases []activity.EnvironmentActivityLease
 }
 
-// RunRuntimeResize resolves the target size, checks occupancy, and — outside
-// dry-run — persists EnvConfig.RuntimePod/RuntimeDindPod and rolls the runtime
-// pod through the same deploy composition `erun deploy` uses. Dry-run traces every
-// decision (current/target per resource, held leases, whether an override was
-// needed) and performs no write, per the repository's dry-run contract.
-// traceRuntimeResizePlanActions narrates each limit that moves, then states
-// plainly what a resize does and does not touch, so a ceiling change is never
-// mistaken for a scheduler reservation or for resizing a PVC.
 func traceRuntimeResizePlanActions(ctx core.Context, tenant, environment string, plan RuntimeResizePlan) {
 	for _, action := range plan.Actions {
 		ctx.Trace(fmt.Sprintf("resize: %s/%s %s %s -> %s", tenant, environment, action.Resource, action.From, action.To))
@@ -393,13 +283,7 @@ func traceRuntimeResizePlanActions(ctx core.Context, tenant, environment string,
 	ctx.Trace(fmt.Sprintf("resize: %s/%s this moves the runtime container's throttle/OOM ceiling (and the erun-dind sidecar's, when --dind-cpu/--dind-memory are set) and their namespace quota draw; it does not change what the scheduler reserves (a fixed request independent of runtimepod/runtimedindpod) and it does not resize any PVC", tenant, environment))
 }
 
-// traceRuntimeSizingRecommendation surfaces the standing recommendation resize
-// already loaded to resolve its target, before it acts on it. Without this, a
-// verdict resize computed but did not act on (e.g. a resource left at `hold`
-// while another raises) was invisible, and a no-op reported "already sized"
-// with no way to see why -- the same reasoning `erun list` already prints
-// under `runtime-pod:`, repeated here because resize is where an operator or
-// the desktop's Runtime tab actually watches this recommendation resolve.
+// Shows the recommendation resize acts on, so a no-op or held resource is explainable.
 func traceRuntimeSizingRecommendation(ctx core.Context, tenant, environment string, recommendation *deploy.RuntimeSizingRecommendation) {
 	if recommendation == nil {
 		return
@@ -410,8 +294,6 @@ func traceRuntimeSizingRecommendation(ctx core.Context, tenant, environment stri
 	ctx.Trace(fmt.Sprintf("resize: %s/%s sizing-evidence: %s", tenant, environment, deploy.FormatRuntimeSizingEvidence(*recommendation)))
 }
 
-// traceRuntimeResizeOverriddenLeases names every holder the resize is about to
-// roll through, so an override is never silent.
 func traceRuntimeResizeOverriddenLeases(ctx core.Context, tenant, environment string, leases []activity.EnvironmentActivityLease) {
 	if len(leases) == 0 {
 		return
@@ -419,7 +301,6 @@ func traceRuntimeResizeOverriddenLeases(ctx core.Context, tenant, environment st
 	ctx.Trace(fmt.Sprintf("resize: %s/%s overriding %d held lease(s): %s", tenant, environment, len(leases), activity.FormatLeaseHolders(leases)))
 }
 
-// applyRuntimeResize persists the new sizing and rolls the runtime pod onto it.
 func applyRuntimeResize(ctx core.Context, deps RuntimeResizeDependencies, tenant, environment string, target config.OpenResult, plan RuntimeResizePlan) error {
 	updatedConfig := target.EnvConfig
 	updatedConfig.RuntimePod = plan.Target
@@ -442,6 +323,7 @@ func applyRuntimeResize(ctx core.Context, deps RuntimeResizeDependencies, tenant
 	return deploy.PersistRuntimeVersionFromDeploySpecs(ctx, specs, deps.SaveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
 }
 
+// RunRuntimeResize checks occupancy and, outside dry-run, persists the sizing and rolls the pod once.
 func RunRuntimeResize(ctx core.Context, deps RuntimeResizeDependencies, params RuntimeResizeParams) (RuntimeResizeResult, error) {
 	target, err := open.ResolveOpen(deps.Store, shared.OpenParams{
 		Tenant:                    strings.TrimSpace(params.Tenant),

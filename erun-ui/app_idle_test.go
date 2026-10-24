@@ -267,11 +267,6 @@ func assertIdleStatusMarkers(t *testing.T, markers []uiIdleMarker) {
 }
 
 func TestIdleStatusToUIProjectsMarkerClients(t *testing.T) {
-	// Locks the bridge between the per-IP marker data resolved by
-	// erun-common and the JSON shape the desktop tooltip consumes. The
-	// SSH proxy is the only kind that populates Clients today, but the
-	// projection is generic so any future per-client surface gets the
-	// same treatment without re-plumbing.
 	status := idleStatusToUI(activity.EnvironmentIdleStatus{
 		Policy: configpkg.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
 		Markers: []activity.EnvironmentIdleMarker{
@@ -306,8 +301,7 @@ func TestIdleStatusToUIProjectsMarkerClients(t *testing.T) {
 	}
 }
 
-// TestIdleStatusToUICarriesLeases: the UI projection must keep the leases idle
-// status resolves, because the AI tab occupancy notice reads this field.
+// The AI tab occupancy notice reads Leases.
 func TestIdleStatusToUICarriesLeases(t *testing.T) {
 	now := time.Now()
 	status := idleStatusToUI(activity.EnvironmentIdleStatus{
@@ -329,14 +323,8 @@ func TestIdleStatusToUICarriesLeases(t *testing.T) {
 }
 
 func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T) {
-	// idleStops latches on the first successful stop so the desktop
-	// does not re-fire a stop while one is in flight. When the context
-	// gets restarted externally (CLI preflight, manual titlebar Play,
-	// `erun context start`), the desktop's flag turns stale and a
-	// second auto-stop can never fire. maybeStopIdleCloudEnvironment
-	// reconciles by clearing the flag whenever it observes a running
-	// context. This test exercises the reconcile via the public
-	// LoadIdleStatus path so the merge + recompute chain stays honest.
+	// idleStops must clear when the context is observed running again, or a second
+	// auto-stop can never fire after an external restart.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &configpkg.ERunConfig{
@@ -391,12 +379,7 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 }
 
 func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
-	// idle-stop.log lives on the pod's home PVC and survives pod and host
-	// restarts. The runtime entrypoint truncates it on monitor start, but a
-	// freshly-restarted env can still surface a poll-window racing the
-	// truncate. The desktop guards against the stale error by suppressing
-	// StopError whenever the linked cloud context is observably running —
-	// a "stop failed" badge next to a healthy env is always wrong.
+	// idle-stop.log survives restarts; a stale StopError beside a running context must be suppressed.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &configpkg.ERunConfig{
@@ -441,10 +424,6 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 }
 
 func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
-	// Counterpart to the running-context test: when the linked cloud
-	// context is not running, the stop error is still the desktop's only
-	// surface for telling the user "the last auto-stop failed", so the
-	// projection must pass it through unchanged.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &configpkg.ERunConfig{

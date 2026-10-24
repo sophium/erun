@@ -7,24 +7,14 @@ import (
 
 var ErrMissingContext = errors.New("missing security context")
 
-// ErrTenantUnresolved marks a tenant-resolution failure that is not "not
-// enrolled": the token's issuer could not be mapped to a tenant at all, most
-// commonly because an org-scoped (shared) issuer's token carries no matching
-// org claim. This is deliberately distinct from a resolution that succeeds in
-// naming a tenant but finds no user for the caller's external identity in
-// it — that caller may be a genuine member of some tenant this exact token
-// simply cannot resolve to, so telling them to "ask an operator to enrol you"
-// would be advice that cannot work. Implementations of the identity
-// resolution contract wrap this so a caller can classify the failure with
-// errors.Is(err, ErrTenantUnresolved).
+// ErrTenantUnresolved means the token's issuer mapped to no tenant (e.g. missing org claim), unlike "not enrolled".
 var ErrTenantUnresolved = errors.New("tenant could not be resolved from token")
 
 type Claims struct {
 	Issuer   string
 	Subject  string
 	Username string
-	// Raw keeps the full token claims because the org claim used for
-	// (issuer, org) -> tenant resolution is named per-issuer and unknown at verify time.
+	// Raw keeps all claims because the org claim name is per-issuer and unknown at verify time.
 	Raw map[string]any
 }
 
@@ -34,9 +24,7 @@ type Context struct {
 	ErunUserID     string
 	ExternalIssuer string
 	ExternalUserID string
-	// ExternalOrgID is the org/resource-owner claim value that, together with
-	// ExternalIssuer, resolved the tenant for an org-scoped (shared) issuer.
-	// Empty for single-tenant issuers, where the issuer alone resolves the tenant.
+	// ExternalOrgID is the org claim that resolved the tenant; empty for single-tenant issuers.
 	ExternalOrgID string
 }
 

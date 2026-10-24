@@ -70,8 +70,6 @@ func testUpgradeHelp(t *testing.T) {
 }
 
 func testUpgradeDryRunNoMembers(t *testing.T) {
-	// An env that is not opted in (no autoupgrade) produces an empty plan
-	// and the "no environments opted in" message — never a deploy.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "dev")
 	seedUpgradeEnv(t, setup, "team", "dev",
@@ -81,22 +79,16 @@ func testUpgradeDryRunNoMembers(t *testing.T) {
 }
 
 func testUpgradeDryRunVersionOverrideLagging(t *testing.T) {
-	// One opted-in env lagging behind an explicit --version override:
-	// the plan marks it (will upgrade) and the deploy dry-run for it is
-	// traced. --version pins the target so no registry lookup is needed.
+	// --version pins the target so no registry lookup is needed.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "dev")
 	seedUpgradeEnv(t, setup, "team", "dev",
 		"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\ntype: runtime\nautoupgrade: true\nupgradechannel: stable\n")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
-	// The upgrade's own deploy resolves the runtime chart ladder; the seam
-	// confirms erun-devops published so it upgrades instead of refusing.
+	// Confirm erun-devops published so the deploy upgrades instead of refusing.
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
 	result := erun.Run(t, []string{"upgrade", "team", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-	// A dry run must be unmistakable from a real rollout. The
-	// terminal summary must carry an explicit "Dry run:" marker and speak
-	// in the conditional ("would upgrade"), and no line may claim a
-	// deploy/rollout/watch action as already performed.
+	// A dry run must read as conditional, never as a performed rollout.
 	if !strings.Contains(result.Combined, "Dry run: erun upgrade planned.") {
 		t.Fatalf("expected an explicit dry-run marker, got:\n%s", result.Combined)
 	}
@@ -119,7 +111,6 @@ func testUpgradeDryRunVersionOverrideLagging(t *testing.T) {
 }
 
 func testUpgradeDryRunUpToDate(t *testing.T) {
-	// An opted-in env already at the target version is skipped — no deploy.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "dev")
 	seedUpgradeEnv(t, setup, "team", "dev",
@@ -129,15 +120,8 @@ func testUpgradeDryRunUpToDate(t *testing.T) {
 }
 
 func testUpgradeDryRunChannelTargetsViaRegistrySeam(t *testing.T) {
-	// Two opted-in envs tracking different channels. The channel each
-	// tracks is resolved (runtime->stable default, remote-agent->snapshot
-	// default), and the target for each channel comes from the registry —
-	// supplied here via the ERUN_UPGRADE_VERSIONS_OVERRIDE test seam so the
-	// registry-resolution path is deterministic without network. The
-	// snapshot stream's base (2.1.0) outranks the stable (2.0.0), so the
-	// snapshot stays the snapshot channel's target. Both envs
-	// are seeded already at their channel target, so the plan shows the
-	// resolved channels + targets with no deploy.
+	// Channels resolve from defaults (runtime->stable, remote-agent->snapshot); targets come
+	// from ERUN_UPGRADE_VERSIONS_OVERRIDE. Both envs are already at target.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "prod")
 	seedUpgradeEnv(t, setup, "team", "prod",
@@ -150,26 +134,18 @@ func testUpgradeDryRunChannelTargetsViaRegistrySeam(t *testing.T) {
 }
 
 func testUpgradeDryRunSnapshotChannelStableSupersedesSnapshot(t *testing.T) {
-	// A snapshot-channel env at the latest snapshot while a stable release
-	// with the same base version exists: the snapshot is a pre-release of
-	// that stable, so the stable supersedes it and becomes the snapshot
-	// channel's target — the supersede decision is traced and
-	// the member upgrades to the stable, with the deploy dry-run traced.
+	// A stable with the same base supersedes the snapshot as the snapshot channel's target.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "dev")
 	seedUpgradeEnv(t, setup, "team", "dev",
 		"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\ncontainerregistry: registry.example/test\nruntimeversion: 2.0.0-snapshot-20260101000000\ntype: runtime\nautoupgrade: true\nupgradechannel: snapshot\n")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
-	// The upgrade's own deploy resolves the runtime chart ladder; the seam
-	// confirms erun-devops published at the superseding stable so it
-	// upgrades instead of refusing.
+	// Confirm erun-devops published so the deploy upgrades instead of refusing.
 	envVars := append(setup.Env(),
 		"ERUN_UPGRADE_VERSIONS_OVERRIDE=stable=2.0.0,snapshot=2.0.0-snapshot-20260101000000",
 		"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
 	result := erun.Run(t, []string{"upgrade", "team", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-	// Normalization collapses both the stable and the snapshot tag to
-	// <VERSION>, so the golden alone cannot prove the stable was chosen
-	// over the snapshot — assert the un-normalized plan line for that.
+	// Normalization masks stable vs snapshot, so assert the raw plan line.
 	if !strings.Contains(result.Combined, "[snapshot] 2.0.0-snapshot-20260101000000 -> 2.0.0  (will upgrade)") {
 		t.Fatalf("expected the snapshot-channel member to target the superseding stable 2.0.0, got: %s", result.Combined)
 	}
@@ -177,18 +153,14 @@ func testUpgradeDryRunSnapshotChannelStableSupersedesSnapshot(t *testing.T) {
 }
 
 func testUpgradeDryRunSnapshotChannelConvergedOnStable(t *testing.T) {
-	// A snapshot-channel env that already adopted the superseding stable
-	// must stay up to date — the channel target remains the stable, so the
-	// member never flaps back to the older snapshot tag.
+	// The member must not flap back to the older snapshot tag.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "agent")
 	seedUpgradeEnv(t, setup, "team", "agent",
 		"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\nruntimeversion: 2.0.0\ntype: remote-agent\nautoupgrade: true\n")
 	envVars := append(setup.Env(), "ERUN_UPGRADE_VERSIONS_OVERRIDE=stable=2.0.0,snapshot=2.0.0-snapshot-20260101000000")
 	result := erun.Run(t, []string{"upgrade", "team", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-	// Normalization masks stable-vs-snapshot in the golden; the
-	// un-normalized line proves the up-to-date comparison ran against the
-	// stable target, not the older snapshot.
+	// Normalization masks stable vs snapshot, so assert the raw plan line.
 	if !strings.Contains(result.Combined, "[snapshot] 2.0.0 -> 2.0.0  (up to date)") {
 		t.Fatalf("expected the converged member to stay up to date at the stable 2.0.0, got: %s", result.Combined)
 	}
@@ -196,11 +168,7 @@ func testUpgradeDryRunSnapshotChannelConvergedOnStable(t *testing.T) {
 }
 
 func testUpgradeDryRunTargetUnresolvedReportsReason(t *testing.T) {
-	// An opted-in env whose tenant's registry resolution fails (staged via
-	// the seam's error= form) is never treated as up to date:
-	// the plan line carries "(target unresolved: <reason>)", the run skips
-	// it with the same reason, and the completion accounting counts it as
-	// unresolved — distinct from upgraded / up to date / failed.
+	// An unresolved target is never treated as up to date.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "dev")
 	seedUpgradeEnv(t, setup, "team", "dev",
@@ -211,21 +179,12 @@ func testUpgradeDryRunTargetUnresolvedReportsReason(t *testing.T) {
 }
 
 func testUpgradeDryRunSnapshotChannelWithoutPublishedSnapshot(t *testing.T) {
-	// A snapshot-channel env whose tenant has a resolvable stable but no
-	// published snapshot: the channel target comes back empty without a
-	// recorded failure, so ResolveUpgradePlan must fall back to the
-	// default "no snapshot version found in the registry" reason and the
-	// run must skip the member as unresolved. The seam supplies only
-	// stable=; the dangling "ignored" segment (no '=') additionally locks
-	// the seam parser's skip-malformed-segment branch without changing
-	// the output.
+	// The dangling "ignored" segment also covers the seam parser's malformed-segment skip.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "agent")
 	seedUpgradeEnv(t, setup, "team", "agent",
 		"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\nruntimeversion: 2.0.0-snapshot-20260101000000\ntype: remote-agent\nautoupgrade: true\n")
-	// The upgrade's own deploy resolves the runtime chart ladder; the seam
-	// confirms erun-devops published at whichever version this member
-	// resolves to so it upgrades instead of refusing.
+	// Confirm erun-devops published so the deploy upgrades instead of refusing.
 	envVars := append(setup.Env(),
 		"ERUN_UPGRADE_VERSIONS_OVERRIDE=stable=2.0.0,ignored",
 		"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0,erun-devops:2.0.0-snapshot-20260101000000")
@@ -234,16 +193,8 @@ func testUpgradeDryRunSnapshotChannelWithoutPublishedSnapshot(t *testing.T) {
 }
 
 func testUpgradeDryRunFailedDeployReportsFailure(t *testing.T) {
-	// A lagging member whose deploy fails — the env has no
-	// kubernetescontext, so the deploy's env resolution rejects it
-	// (ErrKubernetesContextNotConfigured) before any cluster-facing
-	// action — must be recorded as failed: the run continues, the
-	// completion accounting counts it under "failed", and the command
-	// exits non-zero naming the member. The env carries no runtimeversion so the plan line
-	// renders the "(unset)" current version. A second tenant and a
-	// second env are seeded but out of scope: the positional team/dev
-	// scope must filter both (the tenant-scope and env-scope walker
-	// branches) without a trace.
+	// No kubernetescontext makes the deploy fail before touching a cluster. The extra tenant
+	// and env cover the scope filters.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "other", "prod")
 	seedUpgradeEnv(t, setup, "other", "prod",
@@ -261,8 +212,6 @@ func testUpgradeDryRunFailedDeployReportsFailure(t *testing.T) {
 }
 
 func testUpgradeDryRunNoMembersScopedToEnvironment(t *testing.T) {
-	// Scoping to one env that is not opted in yields the empty-plan
-	// message with the tenant/environment suffix, never a deploy.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "dev")
 	seedUpgradeEnv(t, setup, "team", "dev",
@@ -272,8 +221,6 @@ func testUpgradeDryRunNoMembersScopedToEnvironment(t *testing.T) {
 }
 
 func testUpgradeDryRunNoMembersScopedToTenant(t *testing.T) {
-	// Scoping to a tenant with no opted-in envs yields the empty-plan
-	// message with the "for tenant" suffix.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "dev")
 	seedUpgradeEnv(t, setup, "team", "dev",
@@ -283,10 +230,7 @@ func testUpgradeDryRunNoMembersScopedToTenant(t *testing.T) {
 }
 
 func testUpgradeDryRunCorruptTenantConfigFails(t *testing.T) {
-	// A tenant config.yaml that fails to parse must fail the whole
-	// plan resolution with the "plan resolution failed" trace — the
-	// upgrade fan-out cannot safely guess which envs are opted in when
-	// the tenant listing itself is broken.
+	// A broken tenant listing cannot say which envs are opted in.
 	setup := env.New(t)
 	tenantDir := seedUpgradeTenant(t, setup, "team", "dev")
 	mustWriteFile(t, filepath.Join(tenantDir, "config.yaml"), "{notyaml\n")
@@ -298,8 +242,6 @@ func testUpgradeDryRunCorruptTenantConfigFails(t *testing.T) {
 }
 
 func testUpgradeFlagsEnvironmentWithoutTenantErrors(t *testing.T) {
-	// --environment without --tenant (or a positional tenant) is
-	// ambiguous; the command must fail before resolving anything.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"upgrade", "--environment", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode == 0 {
@@ -309,25 +251,19 @@ func testUpgradeFlagsEnvironmentWithoutTenantErrors(t *testing.T) {
 }
 
 func testUpgradeDryRunScopedFlagsLagging(t *testing.T) {
-	// The --tenant/--environment flag form scopes the run to one env —
-	// the shape the desktop's per-env Upgrade-all fan-out uses,
-	// equivalent to the positional form.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "dev")
 	seedUpgradeEnv(t, setup, "team", "dev",
 		"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\ntype: runtime\nautoupgrade: true\nupgradechannel: stable\n")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
-	// The upgrade's own deploy resolves the runtime chart ladder; the seam
-	// confirms erun-devops published so it upgrades instead of refusing.
+	// Confirm erun-devops published so the deploy upgrades instead of refusing.
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
 	result := erun.Run(t, []string{"upgrade", "--tenant", "team", "--environment", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	golden.Equal(t, "upgrade/dry_run_scoped_flags_lagging", normalize.Apply(result.Combined))
 }
 
 func testUpgradeFlagsFleetRequiresTenant(t *testing.T) {
-	// --fleet with no tenant in scope is refused outright: rolling every
-	// environment across every tenant is far too high a blast radius to
-	// resolve implicitly.
+	// Rolling every tenant is too large a blast radius to resolve implicitly.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"upgrade", "--fleet", "--version", "1.2.3", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode == 0 {
@@ -337,9 +273,6 @@ func testUpgradeFlagsFleetRequiresTenant(t *testing.T) {
 }
 
 func testUpgradeFlagsGateEnvironmentRequiresTenant(t *testing.T) {
-	// Mirrors `erun list --gate-environment`'s own "requires --tenant"
-	// refusal for the same reason: naming a gate makes no sense without
-	// naming whose fleet it gates.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"upgrade", "--gate-environment", "build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode == 0 {
@@ -349,9 +282,6 @@ func testUpgradeFlagsGateEnvironmentRequiresTenant(t *testing.T) {
 }
 
 func testUpgradeDryRunGateEnvironmentNotFoundFails(t *testing.T) {
-	// A typo'd --gate-environment must fail loudly rather than silently
-	// resolving a plan with no gate verdict -- the same contract `erun
-	// list --gate-environment` already enforces for drift detection.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "dev")
 	seedUpgradeEnv(t, setup, "team", "dev",
@@ -364,14 +294,8 @@ func testUpgradeDryRunGateEnvironmentNotFoundFails(t *testing.T) {
 }
 
 func testUpgradeDryRunFleetRollsGateEnvironmentFirst(t *testing.T) {
-	// The fleet-remediation shape: a tenant with envs that never opted
-	// into Upgrade all (autoupgrade=false) still all roll under --fleet,
-	// and --gate-environment forces the merge-queue gate to the front of
-	// the resolved order regardless of where it sorts alphabetically --
-	// "zzz-build" would otherwise resolve last. This is the release
-	// cadence policy's "immediate, unconditional" gate redeploy: the gate
-	// must never be the last environment rolled, since it validates
-	// every change landing on the others.
+	// --fleet ignores autoupgrade; --gate-environment rolls the gate first even though
+	// "zzz-build" sorts last, since it validates every other change.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "aaa-dev")
 	seedUpgradeEnv(t, setup, "team", "aaa-dev",
@@ -391,10 +315,7 @@ func testUpgradeDryRunFleetRollsGateEnvironmentFirst(t *testing.T) {
 }
 
 func testUpgradeDryRunHeldLeaseRefusesAndNamesHolder(t *testing.T) {
-	// A roll must never yank an environment out from under a running
-	// agent session: a held activity lease (the same signal `erun
-	// resize` already refuses on) refuses the deploy and names the
-	// holder, even under --dry-run.
+	// A held activity lease refuses the roll, even under --dry-run.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "dev")
 	seedUpgradeEnv(t, setup, "team", "dev",
@@ -413,9 +334,6 @@ func testUpgradeDryRunHeldLeaseRefusesAndNamesHolder(t *testing.T) {
 }
 
 func testUpgradeDryRunHeldLeaseWithOverrideProceeds(t *testing.T) {
-	// --override-lease is explicit and recorded: the same held lease as
-	// above must let the dry-run plan through, tracing the override
-	// rather than staying silent about it.
 	setup := env.New(t)
 	seedUpgradeTenant(t, setup, "team", "dev")
 	seedUpgradeEnv(t, setup, "team", "dev",

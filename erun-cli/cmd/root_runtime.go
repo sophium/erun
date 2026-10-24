@@ -54,24 +54,12 @@ func newRootCommand(runRoot func(*cobra.Command, []string) error) *cobra.Command
 	return cmd
 }
 
-// tenantSelectionUnavailableExitCode marks a run that needed a tenant chosen
-// but had no way to ask for one: stdin is not a terminal and holds no answer to
-// read, so the prompt would print its menu, read EOF, and fail. Distinct from
-// the ordinary failure code so a caller that discards stderr can tell "this run
-// is waiting on a choice only I can make" apart from "the command ran and
-// failed" -- and distinct from platformAliasUnusableExitCode (127), which
-// answers a different question, so neither condition can be mistaken for the
-// other. Continues the sequence jobAwaitTimeoutExitCode (124),
-// jobAwaitUnknownExitCode (125), and mcpChannelUnreachableExitCode (126) set.
+// tenantSelectionUnavailableExitCode marks a run that needed a tenant choice but had no
+// terminal to ask on; distinct from failure and from the 124-127 codes.
 const tenantSelectionUnavailableExitCode = 128
 
-// bootstrapInitExitError preserves the exit-code contract of a bootstrap-init
-// failure for a caller that only reads the code. An unresolvable platform alias
-// is untouched here: it keeps the sentinel main maps to its own code (127), so
-// the tenant-selection refusal below can never impersonate it. The refusal gets
-// a code of its own for the same reason -- "this run needs a tenant from you" is
-// a different outcome from "the command ran and failed", and from "the platform
-// alias cannot be resolved".
+// bootstrapInitExitError preserves a bootstrap-init failure's exit code. An unresolvable
+// platform alias keeps its own sentinel (127).
 func bootstrapInitExitError(err error) error {
 	if errors.Is(err, config.ErrNotInGitRepository) {
 		return internal.MarkReported(config.ErrNotInGitRepository)
@@ -195,10 +183,7 @@ func hasOptionalBuildCmd(findProjectRoot sharedpkg.ProjectFinderFunc, resolveBui
 
 	buildContexts, err := buildpkg.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, sharedpkg.DockerCommandTarget{})
 	if err != nil {
-		// A misconfigured build setup (e.g. a paths.docker override pointing at a
-		// non-docker directory) is a hard error, not "no build here": attach the
-		// command so `erun build` surfaces the error instead of the root printing
-		// "unknown command". Only a genuine not-found means no build command.
+		// A misconfigured build setup is a hard error that `erun build` must surface; only not-found means no build.
 		return !errors.Is(err, sharedpkg.ErrDockerBuildContextNotFound)
 	}
 	return len(buildContexts) > 0
@@ -209,9 +194,7 @@ func hasOptionalPushCmd(findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuil
 	if err == nil && strings.TrimSpace(buildContext.DockerfilePath) != "" {
 		return true
 	}
-	// Register push wherever build attaches — the same context resolution, so the
-	// two primitives stay symmetric (both work from the project root, and both
-	// work from any cwd once a paths.docker override resolves the build root).
+	// push attaches wherever build does so the two stay symmetric.
 	buildContexts, contextErr := buildpkg.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, sharedpkg.DockerCommandTarget{})
 	if contextErr != nil {
 		return !errors.Is(contextErr, sharedpkg.ErrDockerBuildContextNotFound)
@@ -219,8 +202,7 @@ func hasOptionalPushCmd(findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuil
 	return len(buildContexts) > 0
 }
 
-// buildShortTarget honours an env's build.sh opt-out so the build command's short
-// help advertises docker builds instead of a build script.
+// buildShortTarget honours an env's build.sh opt-out in the build command's short help.
 func buildShortTarget(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc) sharedpkg.DockerCommandTarget {
 	target := sharedpkg.DockerCommandTarget{}
 	if env := buildpkg.ResolveDockerBuildEnvConfig(store, findProjectRoot, target); env != nil && env.DisableBuildScript {

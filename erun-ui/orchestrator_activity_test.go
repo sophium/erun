@@ -24,9 +24,6 @@ func writeOrchestratorActivity(t *testing.T, id string, activity orchestratorAct
 	}
 }
 
-// The whole point of the report: an orchestrator's row must be able to stop
-// spinning while its terminal is still talking. The old output-driven latch
-// could not, because an agent TUI repaints forever.
 func TestOrchestratorActivityIsReadFromTheReportNotTheTerminal(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -49,10 +46,6 @@ func TestOrchestratorActivityIsReadFromTheReportNotTheTerminal(t *testing.T) {
 	}
 }
 
-// A session killed mid-turn never writes its end. Without a bound its row would
-// spin for as long as the desktop ran — the same failure by another route. The
-// desktop can no longer see that session, which is what puts it on the short
-// bound.
 func TestOrchestratorActivityExpiresAStaleWorkingReport(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -67,8 +60,6 @@ func TestOrchestratorActivityExpiresAStaleWorkingReport(t *testing.T) {
 	}
 }
 
-// Unreadable input answers "not working": the report may keep a row spinning,
-// never invent a spin.
 func TestOrchestratorActivityTreatsUnreadableInputAsIdle(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -89,9 +80,6 @@ func TestOrchestratorActivityTreatsUnreadableInputAsIdle(t *testing.T) {
 	}
 }
 
-// The orchestrators workspace is shared, so one settings file serves every
-// orchestrator. A hook with an id baked in would have them all reporting as
-// whichever wrote last, so it resolves its own id at run time.
 func TestOrchestratorActivityHooksResolveTheirOwnOrchestrator(t *testing.T) {
 	busyHook, idleHook := orchestratorActivityHooks()
 	busy := hookCommandText(t, busyHook)
@@ -101,8 +89,6 @@ func TestOrchestratorActivityHooksResolveTheirOwnOrchestrator(t *testing.T) {
 		if !strings.Contains(command, "process.env.ERUN_ORCHESTRATOR_ID") {
 			t.Fatalf("the hook must resolve its orchestrator at run time: %q", command)
 		}
-		// A transient session carries no id and must write nothing rather than a
-		// file named for nobody.
 		if !strings.Contains(command, "if(id)") {
 			t.Fatalf("the hook must skip a session with no id: %q", command)
 		}
@@ -118,8 +104,6 @@ func TestOrchestratorActivityHooksResolveTheirOwnOrchestrator(t *testing.T) {
 	}
 }
 
-// An orchestrator must not drive the output-derived latch: that is the signal
-// that could never clear for a repainting TUI.
 func TestOrchestratorSessionsDoNotDriveTheOutputLatch(t *testing.T) {
 	if aiActivityKind(sessionKindOrchestrator) {
 		t.Fatal("an orchestrator's spinner must come from its own report, not from terminal output")
@@ -150,10 +134,6 @@ func hookCommandText(t *testing.T, hook []any) string {
 	return text
 }
 
-// The bug this pair exists for: a turn is as long as the work is, and the report
-// is written once at its start. Ageing a live session's report out on the short
-// bound answered "not working" for an orchestrator that was still working — the
-// most ordinary case there is.
 func TestOrchestratorActivitySurvivesATurnLongerThanTheShortBound(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -169,15 +149,12 @@ func TestOrchestratorActivitySurvivesATurnLongerThanTheShortBound(t *testing.T) 
 		t.Fatalf("a live session's turn may outlast the short bound, got %+v %v", activity, ok)
 	}
 
-	// The same report, from a session the desktop can no longer see, is the
-	// killed-mid-turn case and must not keep the row spinning.
+	// A session the desktop cannot see is the killed-mid-turn case.
 	if _, ok := readOrchestratorActivity("erun", now, false); ok {
 		t.Fatal("a session we can no longer see must not keep its working report")
 	}
 }
 
-// The live bound is long, not absent. A report that stops being written at all
-// still ages out, so reporting that has died cannot pin a row spinning forever.
 func TestOrchestratorActivityStillBoundsALiveSession(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -192,11 +169,6 @@ func TestOrchestratorActivityStillBoundsALiveSession(t *testing.T) {
 	}
 }
 
-// A turn renews its report from the thing a working orchestrator does
-// constantly. Without this the busy report exists only at the turn's first
-// instant, which is the whole defect.
-// orchestratorSettingsHooks composes the workspace settings the desktop writes
-// and returns its hook events, so a test can assert about one thing at a time.
 func orchestratorSettingsHooks(t *testing.T) (map[string][]any, []byte) {
 	t.Helper()
 	root := t.TempDir()
@@ -219,7 +191,6 @@ func orchestratorSettingsHooks(t *testing.T) (map[string][]any, []byte) {
 	return settings.Hooks, data
 }
 
-// eventCarriesActivityReport reports whether one hook event carries ours.
 func eventCarriesActivityReport(blocks []any) bool {
 	for _, block := range blocks {
 		if isOrchestratorActivityHookBlock(block) {
@@ -229,8 +200,6 @@ func eventCarriesActivityReport(blocks []any) bool {
 	return false
 }
 
-// eventRunsCommand reports whether one hook event runs a specific command, which
-// is how the idle report is recognised among the hooks bound to SessionStart.
 func eventRunsCommand(blocks []any, command string) bool {
 	for _, group := range blocks {
 		block, _ := group.(map[string]any)
@@ -245,9 +214,6 @@ func eventRunsCommand(blocks []any, command string) bool {
 	return false
 }
 
-// A turn renews its report from the thing a working orchestrator does
-// constantly. Without this the busy report exists only at the turn's first
-// instant, which is the whole defect.
 func TestOrchestratorActivityRenewsFromToolCalls(t *testing.T) {
 	hooks, data := orchestratorSettingsHooks(t)
 
@@ -258,8 +224,6 @@ func TestOrchestratorActivityRenewsFromToolCalls(t *testing.T) {
 	}
 }
 
-// SessionStart clears an inherited "working": a session killed mid-turn never
-// wrote its end, and the next one must not arrive already spinning.
 func TestOrchestratorActivityClearsAnInheritedWorkingReport(t *testing.T) {
 	hooks, data := orchestratorSettingsHooks(t)
 
@@ -268,8 +232,6 @@ func TestOrchestratorActivityClearsAnInheritedWorkingReport(t *testing.T) {
 	}
 }
 
-// Installing our report on an event must not delete what the operator already
-// bound to it, and must stay idempotent across restarts.
 func TestOrchestratorActivityHookMergePreservesOtherHooks(t *testing.T) {
 	theirs := map[string]any{
 		"matcher": "Bash",

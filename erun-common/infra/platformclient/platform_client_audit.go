@@ -9,15 +9,8 @@ import (
 	"time"
 )
 
-// platform_client_audit.go extends PlatformClient with the audit read path, so
-// the surfaces that render a tenant's activity trail — the desktop's tenant
-// dashboard today — reach it through the one shared client rather than
-// hand-rolling HTTP against erun-backend-api.
-
-// PlatformAuditEvent mirrors model.AuditEvent's JSON shape. The parameter
-// payloads (cliParameters, mcpToolParameters) are deliberately absent: the API
-// never returns them, because a tool such as cloud_inject_aws_credentials
-// takes credentials as arguments.
+// PlatformAuditEvent mirrors model.AuditEvent. Parameter payloads are never
+// returned because some tools take credentials as arguments.
 type PlatformAuditEvent struct {
 	AuditEventID     string    `json:"auditEventId,omitempty"`
 	TenantID         string    `json:"tenantId"`
@@ -33,8 +26,7 @@ type PlatformAuditEvent struct {
 	CreatedAt        time.Time `json:"createdAt"`
 }
 
-// PlatformAuditEventFilter narrows GET /v1/audit-events. Cursor continues a
-// previous page, whose NextCursor it comes from.
+// PlatformAuditEventFilter narrows GET /v1/audit-events; Cursor is a prior NextCursor.
 type PlatformAuditEventFilter struct {
 	ErunUserID string
 	Type       string
@@ -63,8 +55,7 @@ func (f PlatformAuditEventFilter) queryString() string {
 	return values.Encode()
 }
 
-// PlatformAuditEventPage mirrors the GET /v1/audit-events response. NextCursor
-// is empty on the last page.
+// PlatformAuditEventPage is one audit page; NextCursor is empty on the last.
 type PlatformAuditEventPage struct {
 	Events     []PlatformAuditEvent `json:"events"`
 	NextCursor string               `json:"nextCursor,omitempty"`

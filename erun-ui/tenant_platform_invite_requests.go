@@ -10,40 +10,24 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// tenant_platform_invite_requests.go is the desktop half of the
-// invite-requests queue (erun-backend-api's model.InviteRequest): a
-// newcomer's "request an invitation" submission, an operator/admin's queue,
-// and the sidebar's per-tenant enrollment status glyph. The write path
-// (approve/decline) requires TenantAdminOnly on the platform; submit and the
-// caller's own status read need only a verified bearer, never tenant
-// membership — the same resolveTenantPlatform client used everywhere else,
-// since a bearer that mints successfully is exactly what "signed in, not yet
-// enrolled" means (tenantPlatformStateNotEnrolled).
+// Invite requests need only a verified bearer, never tenant membership;
+// approve/decline require TenantAdminOnly on the platform.
 
-// Per-tenant platform-enrollment states the sidebar status icon renders.
-// Unlike tenantPlatformState* above (which describes *why the dashboard
-// cannot load*), these describe where a local tenant with no platform
-// registration stands in the request/approve loop.
+// Enrollment states for a local tenant the sidebar status icon renders.
 const (
 	tenantEnrollmentLocalOnly = "local-only"
 	tenantEnrollmentPending   = "pending"
 	tenantEnrollmentDeclined  = "declined"
 	tenantEnrollmentEnrolled  = "enrolled"
-	// tenantEnrollmentUnknown is a genuine platform round-trip failure (not
-	// "never requested"), so it must never collapse into the confident
-	// local-only answer — the sidebar icon renders it as its own state.
+	// tenantEnrollmentUnknown is a failed round trip and must never collapse into
+	// local-only.
 	tenantEnrollmentUnknown = "unknown"
-	// tenantEnrollmentTenantMismatch is the platform answering the row's own
-	// credential with a tenant that is not the row's: the credential
-	// authenticated and resolved, just somewhere else. It is deliberately the
-	// same verdict, and the same value, the dashboard's own load reaches
-	// (tenantPlatformStateTenantMismatch) — the row and the dashboard it opens
-	// describe one situation and must not be able to drift apart.
+	// tenantEnrollmentTenantMismatch shares the dashboard's value so the row and
+	// the dashboard cannot drift apart.
 	tenantEnrollmentTenantMismatch = tenantPlatformStateTenantMismatch
 )
 
-// uiInviteRequest is the JSON-safe mirror of platformclient.PlatformInviteRequest
-// the frontend renders (request dialog status, operator queue rows).
+// uiInviteRequest mirrors platformclient.PlatformInviteRequest for the frontend.
 type uiInviteRequest struct {
 	InviteRequestID   string `json:"inviteRequestId"`
 	Issuer            string `json:"issuer"`
@@ -80,9 +64,7 @@ func inviteRequestToUI(request platformclient.PlatformInviteRequest) uiInviteReq
 	}
 }
 
-// uiSubmitInviteRequestInput is "Request an invitation"'s input: names and
-// note only, since the requester's identity comes from the verified bearer,
-// never a form field (root AGENTS.md's onboarding rule).
+// uiSubmitInviteRequestInput omits identity: it comes from the verified bearer.
 type uiSubmitInviteRequestInput struct {
 	Tenant          string `json:"tenant"`
 	Kind            string `json:"kind"`
@@ -91,10 +73,7 @@ type uiSubmitInviteRequestInput struct {
 	Note            string `json:"note,omitempty"`
 }
 
-// uiInviteRequestRateLimited is what SubmitTenantInviteRequest returns instead
-// of a raw error when the platform's per-identity submission window has not
-// elapsed yet — a state to render (disable submit, show the countdown), not
-// a fault (root AGENTS.md's "blocked, not broken" distinction).
+// uiInviteRequestRateLimited is a state to render, not a fault.
 type uiInviteRequestRateLimited struct {
 	RetryAfterSeconds int `json:"retryAfterSeconds"`
 }
@@ -105,8 +84,7 @@ type uiSubmitInviteRequestOutcome struct {
 	RateLimited *uiInviteRequestRateLimited `json:"rateLimited,omitempty"`
 }
 
-// SubmitTenantInviteRequest submits (or updates, if one is already pending
-// for this identity) a request to join or create a tenant.
+// SubmitTenantInviteRequest submits, or updates a pending, invite request.
 func (a *App) SubmitTenantInviteRequest(input uiSubmitInviteRequestInput) (uiSubmitInviteRequestOutcome, error) {
 	tenant, err := requireTenant("requesting an invitation", input.Tenant)
 	if err != nil {
@@ -145,19 +123,12 @@ func (a *App) SubmitTenantInviteRequest(input uiSubmitInviteRequestInput) (uiSub
 	return uiSubmitInviteRequestOutcome{Request: &ui}, nil
 }
 
-// defaultInviteRequestRetryAfterSeconds is the fallback used when a 429's
-// Retry-After cannot be resolved to a duration at all (missing header, or
-// the RFC 9110 HTTP-date form this client does not parse). The caller was
-// genuinely rate limited; reporting 0 seconds would read as "try again now"
-// and hide that outcome entirely, which is worse than an approximate wait.
+// defaultInviteRequestRetryAfterSeconds applies when Retry-After is unparseable;
+// reporting 0 would hide that the caller was rate limited.
 const defaultInviteRequestRetryAfterSeconds = 60
 
-// inviteRequestRetryAfterSeconds resolves how long to tell the caller to
-// wait: the header's own value when it parsed, otherwise the platform's
-// configured submission window (best effort), otherwise the fallback above.
-// A parsed value of exactly zero (the backend rounds a sub-second remainder
-// down to "0") is trusted as-is -- that case is a real ok=true, not a
-// missing header, and an almost-immediate retry is the correct answer.
+// inviteRequestRetryAfterSeconds trusts a parsed zero: the backend rounds a
+// sub-second remainder down.
 func inviteRequestRetryAfterSeconds(ctx context.Context, client *platformclient.PlatformClient, statusErr *platformclient.PlatformStatusError) int {
 	if retryAfter, ok := statusErr.RetryAfter(); ok {
 		return int(retryAfter.Seconds())
@@ -168,15 +139,12 @@ func inviteRequestRetryAfterSeconds(ctx context.Context, client *platformclient.
 	return defaultInviteRequestRetryAfterSeconds
 }
 
-// uiTenantInput is the minimal shape shared by the read-only invite-request
-// calls below: just which local tenant's resolved platform identity to use.
+// uiTenantInput selects which local tenant's platform identity to use.
 type uiTenantInput struct {
 	Tenant string `json:"tenant"`
 }
 
-// GetMyTenantInviteRequest returns the caller's own most recent invite
-// request, or a zero value when none has ever been submitted — the one
-// status a requester with no tenant membership can check while waiting.
+// GetMyTenantInviteRequest returns the caller's latest invite request, or nil.
 func (a *App) GetMyTenantInviteRequest(input uiTenantInput) (*uiInviteRequest, error) {
 	tenant, err := requireTenant("checking your invitation request", input.Tenant)
 	if err != nil {
@@ -199,21 +167,15 @@ func (a *App) GetMyTenantInviteRequest(input uiTenantInput) (*uiInviteRequest, e
 	return &ui, nil
 }
 
-// noInviteRequest is the answer for a caller with no request on file: the
-// frontend reads it as null, not as a failure.
 var noInviteRequest *uiInviteRequest
 
-// uiDecideInviteRequestInput identifies which request an operator/admin is
-// deciding on.
+// uiDecideInviteRequestInput identifies the request being decided.
 type uiDecideInviteRequestInput struct {
 	Tenant          string `json:"tenant"`
 	InviteRequestID string `json:"inviteRequestId"`
 }
 
-// ApproveTenantInviteRequest issues an invitation for a pending request:
-// enrolls the requester (into the caller's tenant for JOIN_TENANT, into a
-// newly registered tenant for CREATE_TENANT), and mints the invite the
-// requester's own next dashboard load resolves against.
+// ApproveTenantInviteRequest enrolls the requester and mints their invite.
 func (a *App) ApproveTenantInviteRequest(input uiDecideInviteRequestInput) (uiInviteRequest, error) {
 	tenant, err := requireTenant("issuing an invitation", input.Tenant)
 	if err != nil {
@@ -239,16 +201,14 @@ func (a *App) ApproveTenantInviteRequest(input uiDecideInviteRequestInput) (uiIn
 	return inviteRequestToUI(request), nil
 }
 
-// uiDeclineInviteRequestInput requires a non-empty reason: a decline with no
-// reason reaches nobody, and root AGENTS.md forbids that dead end.
+// uiDeclineInviteRequestInput requires a reason so the decline reaches the requester.
 type uiDeclineInviteRequestInput struct {
 	Tenant          string `json:"tenant"`
 	InviteRequestID string `json:"inviteRequestId"`
 	Reason          string `json:"reason"`
 }
 
-// DeclineTenantInviteRequest declines a pending request with a reason the
-// requester will see on their own next status check.
+// DeclineTenantInviteRequest declines a pending request with a reason.
 func (a *App) DeclineTenantInviteRequest(input uiDeclineInviteRequestInput) (uiInviteRequest, error) {
 	tenant, err := requireTenant("declining an invitation request", input.Tenant)
 	if err != nil {
@@ -278,43 +238,24 @@ func (a *App) DeclineTenantInviteRequest(input uiDeclineInviteRequestInput) (uiI
 	return inviteRequestToUI(request), nil
 }
 
-// uiTenantPlatformEnrollmentStatus is one sidebar tenant row's platform
-// enrollment status: the single signal the row's status icon renders.
+// uiTenantPlatformEnrollmentStatus drives one sidebar row's status icon.
 type uiTenantPlatformEnrollmentStatus struct {
 	Tenant        string `json:"tenant"`
 	State         string `json:"state"`
 	DeclineReason string `json:"declineReason,omitempty"`
-	// PlatformHost names the platform this row's credential actually reached,
-	// empty when it reached none. The icon's copy speaks of whichever platform
-	// answered rather than a fixed hostname: a machine can be configured
-	// against more than one, and the one that did not answer is not the one to
-	// name.
+	// PlatformHost is the platform that answered; a machine may have several.
 	PlatformHost string `json:"platformHost,omitempty"`
-	// PlatformTenant names the tenant the platform resolved this row's
-	// credential to, set only on tenantEnrollmentTenantMismatch. "This row is
-	// not the tenant your credential reaches" is a dead end without it; the
-	// name is what makes the state actionable.
+	// PlatformTenant is set only on tenantEnrollmentTenantMismatch.
 	PlatformTenant string `json:"platformTenant,omitempty"`
 }
 
-// uiListTenantPlatformEnrollmentStatusesInput names which local tenants to
-// resolve — the caller (the sidebar) already holds the tenant list and its
-// per-tenant environment counts, so this does not re-enumerate local config;
-// it only resolves each named tenant's platform state.
+// uiListTenantPlatformEnrollmentStatusesInput names the tenants to resolve.
 type uiListTenantPlatformEnrollmentStatusesInput struct {
 	Tenants []string `json:"tenants"`
 }
 
-// ListTenantPlatformEnrollmentStatuses resolves each named tenant's platform
-// enrollment state for the sidebar's status icon. Best effort per tenant: one
-// tenant's resolution failure does not drop the others. A tenant with no
-// platform connection at all, or one whose identity has not requested
-// anything, reports tenantEnrollmentLocalOnly; a tenant whose platform round
-// trip genuinely failed reports tenantEnrollmentUnknown instead — the two
-// must never be conflated, or a real outage silently reads as "not on the
-// platform yet". A tenant whose credential resolves on the platform to a
-// *different* tenant reports tenantEnrollmentTenantMismatch: every answer the
-// platform can give about this row would be that other tenant's.
+// ListTenantPlatformEnrollmentStatuses resolves each tenant best effort; a
+// failed round trip reports unknown, never local-only.
 func (a *App) ListTenantPlatformEnrollmentStatuses(input uiListTenantPlatformEnrollmentStatusesInput) []uiTenantPlatformEnrollmentStatus {
 	statuses := make([]uiTenantPlatformEnrollmentStatus, 0, len(input.Tenants))
 	for _, tenant := range input.Tenants {
@@ -327,10 +268,7 @@ func (a *App) ListTenantPlatformEnrollmentStatuses(input uiListTenantPlatformEnr
 	return statuses
 }
 
-// tenantPlatformHost names the host of a platform resolution's API URL, or ""
-// when there is none to name. It exists so the enrollment copy can say which
-// platform actually answered instead of asserting one: a machine can be
-// configured against several.
+// tenantPlatformHost returns the API URL's host, or "".
 func tenantPlatformHost(apiURL string) string {
 	parsed, err := url.Parse(strings.TrimSpace(apiURL))
 	if err != nil {
@@ -343,8 +281,6 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 	status := uiTenantPlatformEnrollmentStatus{Tenant: tenant, State: tenantEnrollmentLocalOnly}
 	resolution, err := a.resolveTenantPlatform(tenant, "")
 	if err != nil || resolution.state != tenantPlatformStateReady {
-		// Not connected, choose-alias, or not-signed-in: no bearer to check an
-		// invite request against, so there is no route onto the platform yet.
 		return status
 	}
 
@@ -359,14 +295,7 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 
 	whoami, whoamiErr := resolution.client.Whoami(requestCtx)
 	if whoamiErr == nil {
-		// The answer is the point, not the call's success: whoami carries the
-		// platform's own statement of *which* tenant this credential resolved
-		// to, and a credential that authenticates and resolves elsewhere
-		// satisfies a nil error exactly as one resolving here does. Reading
-		// only the error is how this row came to claim enrolment for a tenant
-		// the platform was never asked about — the same correspondence check
-		// the dashboard makes (tenantDashboardTenantMismatch), on the same
-		// value, so the row and the dashboard it opens agree.
+		// A nil error is not enough: the credential may resolve to another tenant.
 		if mismatched := tenantDashboardTenantMismatch(tenant, whoami.TenantName); mismatched != "" {
 			status.State = tenantEnrollmentTenantMismatch
 			status.PlatformTenant = mismatched
@@ -375,23 +304,8 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 		status.State = tenantEnrollmentEnrolled
 		return status
 	}
-	// This is the same whoami read tenantDashboardIdentityFailure classifies
-	// (tenant_dashboard.go): a 403 means the identity already resolved to a
-	// tenant user and only the read itself was refused for lacking
-	// permissions, which is enrolled, not "not yet" — collapsing it into the
-	// invite-request check below would render the not-enrolled glyph for an
-	// identity the platform already recognizes.
-	//
-	// It stays enrolled here, and not because the mismatch check above does
-	// not apply to it: that check compares the name whoami answered with, and
-	// a 403 answers with none. The 403 body is a bare status string --
-	// PlatformAuthErrorCode decodes 401 envelopes only -- so while the platform
-	// did resolve *a* tenant for this credential, it declines to say which,
-	// and there is nothing to hold against this row. Refusing it would render
-	// "not enrolled" for an identity the platform already recognizes (see
-	// TestListTenantPlatformEnrollmentStatusesEnrolledOnWhoamiForbidden). This branch is therefore a "no answer to compare", not a skipped
-	// comparison; a platform that learns to name the tenant on 403 gets the
-	// mismatch check for free by answering here instead of failing.
+	// A 403 means the identity resolved but whoami was refused, so it is enrolled.
+	// The 403 body names no tenant, so there is nothing to mismatch against.
 	if errors.Is(whoamiErr, platformclient.ErrPlatformForbidden) {
 		status.State = tenantEnrollmentEnrolled
 		return status
@@ -399,32 +313,23 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 	if errors.Is(whoamiErr, platformclient.ErrPlatformUnauthorized) {
 		switch platformclient.PlatformAuthErrorCode(whoamiErr) {
 		case "TENANT_UNRESOLVED", "RESOLUTION_FAILED":
-			// Neither is an enrollment answer (same line tenantDashboardIdentityFailure
-			// and enrollERunPlatformUserError draw): the state genuinely could
-			// not be determined, so it must not fall through to "never
-			// requested" -> local-only.
+			// Not an enrollment answer: report unknown, not local-only.
 			status.State = tenantEnrollmentUnknown
 			return status
 		}
-		// NOT_ENROLLED, or an older platform's unclassified 401: the expected
-		// shape of "not enrolled yet, go check the invite request".
+		// NOT_ENROLLED, or an older platform's unclassified 401.
 		return tenantPlatformEnrollmentStatusFromInviteRequest(requestCtx, resolution.client, status)
 	}
-	// A network fault or 5xx: the state genuinely could not be determined.
 	status.State = tenantEnrollmentUnknown
 	return status
 }
 
-// tenantPlatformEnrollmentStatusFromInviteRequest fills in status.State from
-// the caller's own invite request, once Whoami has already established that
-// the identity is verified but not yet enrolled — split out of
-// tenantPlatformEnrollmentStatus purely to keep that function's own branch
-// count under the module's complexity budget.
+// tenantPlatformEnrollmentStatusFromInviteRequest runs once whoami showed the
+// identity is verified but not enrolled.
 func tenantPlatformEnrollmentStatusFromInviteRequest(ctx context.Context, client *platformclient.PlatformClient, status uiTenantPlatformEnrollmentStatus) uiTenantPlatformEnrollmentStatus {
 	request, err := client.MyInviteRequest(ctx)
 	if err != nil {
 		if errors.Is(err, platformclient.ErrPlatformNotFound) {
-			// Signed in, never requested: genuinely local-only.
 			return status
 		}
 		status.State = tenantEnrollmentUnknown
@@ -437,23 +342,15 @@ func tenantPlatformEnrollmentStatusFromInviteRequest(ctx context.Context, client
 		status.State = tenantEnrollmentDeclined
 		status.DeclineReason = request.DeclineReason
 	case platformclient.PlatformInviteRequestStatusApproved:
-		// The service enrolls the requester's identity the moment it approves
-		// (ApproveJoin/ApproveCreateTenant insert the users row directly), so
-		// the Whoami call above will already have succeeded on the very next
-		// poll — this branch is the brief window before that happens.
+		// Approval enrolls immediately; this is the window before the next poll.
 		status.State = tenantEnrollmentPending
 	}
 	return status
 }
 
-// loadTenantDashboardMyInviteRequest is LoadTenantDashboard's best-effort
-// read of the caller's own invite request, plus the platform's current
-// submission window (for the request dialog's pre-submit hint) — both need
-// only the bearer already minted for this resolution, not tenant membership,
-// so this runs regardless of what loadTenantDashboardData classified
-// PlatformState as. A genuine round-trip failure is reported via
-// MyInviteRequestError rather than left indistinguishable from "never
-// submitted one" (both would otherwise collapse to a nil MyInviteRequest).
+// loadTenantDashboardMyInviteRequest needs only the bearer, so it runs
+// regardless of PlatformState; failures go to MyInviteRequestError rather than
+// reading as never submitted.
 func loadTenantDashboardMyInviteRequest(ctx context.Context, client *platformclient.PlatformClient, dashboard *uiTenantDashboard) {
 	request, err := client.MyInviteRequest(ctx)
 	switch {
@@ -461,7 +358,6 @@ func loadTenantDashboardMyInviteRequest(ctx context.Context, client *platformcli
 		ui := inviteRequestToUI(request)
 		dashboard.MyInviteRequest = &ui
 	case errors.Is(err, platformclient.ErrPlatformNotFound):
-		// Genuinely never submitted one.
 	default:
 		dashboard.MyInviteRequestError = err.Error()
 	}
@@ -470,12 +366,8 @@ func loadTenantDashboardMyInviteRequest(ctx context.Context, client *platformcli
 	}
 }
 
-// tenantPlatformClientForIdentityCall resolves tenant's platform client for a
-// call that needs only a verified bearer, not tenant membership — invite
-// request submit/mine. Unlike tenantPlatformClient, a not-enrolled or
-// no-permission identity is not an error here: those are exactly the states
-// this call exists to serve. Only a resolution that never got a bearer at
-// all (not connected, choose-alias, not signed in) is refused.
+// tenantPlatformClientForIdentityCall accepts not-enrolled and no-permission
+// identities; only a resolution without a bearer is refused.
 func (a *App) tenantPlatformClientForIdentityCall(tenant string) (*platformclient.PlatformClient, context.Context, context.CancelFunc, error) {
 	resolution, err := a.resolveTenantPlatform(tenant, "")
 	if err != nil {

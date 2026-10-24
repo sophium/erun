@@ -1,8 +1,5 @@
-// Package headlessserver hosts the ERun desktop frontend over plain HTTP so
-// headless clients (Playwright, scripts, CI) can drive the same React bundle
-// without a Wails window. It mirrors the runtime Wails injects into the WebView
-// — a shim makes window.runtime and window.go.main.App resolve before the main
-// bundle loads — so the unmodified bundle runs headless.
+// Package headlessserver serves the desktop frontend over HTTP with a shim for
+// the Wails runtime, so headless clients can drive the unmodified bundle.
 package headlessserver
 
 import (
@@ -21,8 +18,7 @@ import (
 	"sync/atomic"
 )
 
-// Server is the HTTP transport for headless mode. The zero value is not usable;
-// construct with New.
+// Server is the HTTP transport for headless mode; construct it with New.
 type Server struct {
 	target reflect.Value
 	bundle fs.FS
@@ -39,9 +35,6 @@ type Server struct {
 	clip   string
 }
 
-// subscriber pairs a subscriber's SSE channel with its own drop counter so a
-// full channel can be reported back to that subscriber rather than silently
-// discarded.
 type subscriber struct {
 	ch     chan event
 	missed atomic.Int64
@@ -52,14 +45,10 @@ type event struct {
 	Args []any  `json:"args"`
 }
 
-// eventsDroppedName is the reserved event name Emit sends in place of an
-// event a full subscriber channel could not hold, so the subscriber learns it
-// missed something instead of reading silence as "nothing happened".
+// eventsDroppedName replaces an event a full subscriber channel could not hold.
 const eventsDroppedName = "erun:events-dropped"
 
-// New builds a Server whose target — typically *main.App — is bound by exact
-// method name the same way Wails binds window.go.main.App.<Name>, so the
-// headless RPC surface matches the desktop one.
+// New builds a Server binding target's methods by exact name, as Wails does.
 func New(target any, bundle fs.FS) *Server {
 	s := &Server{
 		target: reflect.ValueOf(target),
@@ -71,17 +60,8 @@ func New(target any, bundle fs.FS) *Server {
 	return s
 }
 
-// Emit fans an event out to every active SSE subscriber; the headless main
-// wires it in as the App's emitter so EventsEmit-style calls reach the browser
-// without Wails.
-//
-// A subscriber that falls behind never has an event silently discarded: a
-// full channel would leave the subscriber unable to tell "nothing happened"
-// apart from "I missed it", which is unacceptable for a transport whose only
-// job is Playwright/CI test reliability. Instead the emitter evicts the
-// oldest queued event to make room and replaces it with an explicit
-// eventsDroppedName marker carrying the subscriber's running miss count, so
-// the subscriber always has a trace that a gap occurred and can resync.
+// Emit fans an event out to every SSE subscriber. A full subscriber loses its
+// oldest event to an eventsDroppedName marker, never silently.
 func (s *Server) Emit(name string, args ...any) {
 	ev := event{Name: name, Args: args}
 	s.subsMu.Lock()
@@ -94,9 +74,7 @@ func (s *Server) Emit(name string, args ...any) {
 		}
 		missed := sub.missed.Add(1)
 		log.Printf("headlessserver: subscriber channel full, dropped event %q (missed=%d)", name, missed)
-		// Evict the oldest queued event to guarantee room for the gap
-		// marker below — Emit is the sole producer and holds subsMu for the
-		// whole call, so no concurrent send can refill the slot this frees.
+		// Emit is the sole producer and holds subsMu, so the freed slot stays free.
 		select {
 		case <-sub.ch:
 		default:
@@ -110,8 +88,7 @@ func (s *Server) Emit(name string, args ...any) {
 	}
 }
 
-// Close drains every SSE subscriber so net/http can shut the listener down
-// without leaking goroutines. Safe to call multiple times.
+// Close drains every SSE subscriber; safe to call multiple times.
 func (s *Server) Close() {
 	s.subsMu.Lock()
 	defer s.subsMu.Unlock()
@@ -138,8 +115,7 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 		s.serveIndex(w, r)
 		return
 	}
-	// Missing files fall back to index.html so SPA deep links still load and the
-	// React router can resolve them.
+	// SPA fallback so deep links load.
 	if data, err := fs.ReadFile(s.bundle, path); err == nil {
 		writeStatic(w, path, data)
 		return
@@ -167,7 +143,7 @@ func writeStatic(w http.ResponseWriter, path string, data []byte) {
 	_, _ = w.Write(data)
 }
 
-// Order matters: ".woff2" must precede ".woff" so the longer suffix wins.
+// ".woff2" must precede ".woff" so the longer suffix wins.
 var contentTypeBySuffix = []struct {
 	suffix      string
 	contentType string
@@ -192,8 +168,6 @@ func contentTypeForPath(path string) string {
 	return ""
 }
 
-// invokeRequest keeps args as raw JSON so each is unmarshalled into the exact
-// Go type its target method parameter expects.
 type invokeRequest struct {
 	Method string            `json:"method"`
 	Args   []json.RawMessage `json:"args"`
@@ -240,8 +214,7 @@ func callMethod(method reflect.Value, rawArgs []json.RawMessage) (any, error) {
 	return mapMethodResults(method.Call(in))
 }
 
-// A missing or null arg leaves the parameter at its zero value, matching Wails'
-// lenient call convention.
+// A missing or null arg stays zero, matching Wails' lenient convention.
 func decodeMethodArgs(mt reflect.Type, rawArgs []json.RawMessage) ([]reflect.Value, error) {
 	in := make([]reflect.Value, mt.NumIn())
 	for i := 0; i < mt.NumIn(); i++ {
@@ -256,8 +229,6 @@ func decodeMethodArgs(mt reflect.Type, rawArgs []json.RawMessage) ([]reflect.Val
 	return in, nil
 }
 
-// mapMethodResults maps a Wails method's return values — one of (), (T),
-// (error), or (T, error) — back to a {data, error?} envelope.
 func mapMethodResults(results []reflect.Value) (any, error) {
 	var (
 		data any
@@ -386,11 +357,8 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	}
 }
 
-// Serve serves the handler on an already-bound listener and blocks until ctx is
-// cancelled, returning any non-graceful shutdown error. The caller binds, so it
-// can announce the address actually bound rather than the one it asked for —
-// which is what lets a --port of 0, or a port that turned out to be taken,
-// still hand every client a usable address.
+// Serve serves on an already-bound listener until ctx is cancelled; the caller
+// binds so it can announce the actual address.
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	server := &http.Server{Handler: s.Handler()}
 	errCh := make(chan error, 1)

@@ -4,13 +4,8 @@ import type { UITenant, UITenantDashboard, UITenantDashboardPanel } from '@/type
 
 import type { TenantDashboardTab } from './state';
 
-// tenantDashboardEnvironmentName resolves which of tenant's local
-// environments the dashboard header (and the request-invitation dialog's
-// prefill) names: the environment the dashboard actually loaded against when
-// set, else the first one with a resolvable apiUrl (preferring the tenant's
-// own default). Lives here (not in a component file) so both
-// TenantDashboardView.tsx and TenantPlatformState.tsx can import it without
-// creating a circular dependency between the two.
+// tenantDashboardEnvironmentName picks the env the dashboard loaded against,
+// else the first with an apiUrl (default first). Here to avoid a component import cycle.
 export function tenantDashboardEnvironmentName(
   tenant: UITenant | undefined,
   loadedEnvironment: string | undefined,
@@ -30,16 +25,8 @@ export function tenantDashboardEnvironmentName(
   return environment?.name.trim() ?? '';
 }
 
-// tenantDashboardPlatformTenantName is the platform's own name for the tenant
-// whose reviews, queue, users and audit the dashboard is rendering, from
-// whoami on the caller's own row. A local tenant is bound to a platform tenant
-// only by whichever alias its credential happens to reach, so this is the one
-// value that can say whose rows these are when the two are not the same.
-//
-// It is rendered whenever the platform reported one, not only when it differs
-// from the local tenant's own name: an absent line then means "this platform
-// reported no name", never "the two agreed", which is the reading that let the
-// mismatch go unnoticed in the first place. Empty for a nameless platform.
+// tenantDashboardPlatformTenantName is whoami's platform tenant name, shown
+// even when it matches the local name so absence means "not reported".
 export function tenantDashboardPlatformTenantName(
   data: UITenantDashboard | null | undefined,
 ): string {
@@ -51,8 +38,7 @@ export interface TenantDashboardTabDescriptor {
   label: string;
 }
 
-// The API log is read over the environment's MCP edge rather than the platform
-// API, so it carries no permission of its own.
+// The API log is read over the MCP edge, so it carries no permission of its own.
 export const tenantDashboardTabs: readonly TenantDashboardTabDescriptor[] = [
   { tab: 'users', label: 'Users' },
   { tab: 'reviews', label: 'Reviews' },
@@ -72,9 +58,7 @@ export function tenantDashboardPanel(
   return data?.panels?.find((panel) => panel.tab === tab);
 }
 
-// visibleTenantDashboardTabs drops the tabs the signed-in user may not open. A
-// dashboard that reported no panels at all has not answered yet, so every tab
-// stays — an unknown permission is not a denied one.
+// visibleTenantDashboardTabs keeps every tab until permissions are known.
 export function visibleTenantDashboardTabs(
   data: UITenantDashboard | null | undefined,
 ): TenantDashboardTabDescriptor[] {
@@ -84,8 +68,6 @@ export function visibleTenantDashboardTabs(
   });
 }
 
-// restrictedTenantDashboardReads names the access the signed-in user is missing,
-// so the reason a tab is absent can be shown rather than guessed.
 export function restrictedTenantDashboardReads(
   data: UITenantDashboard | null | undefined,
 ): string[] {
@@ -99,8 +81,6 @@ export function restrictedTenantDashboardReads(
   return [...reads];
 }
 
-// activeTenantDashboardTab keeps the selected tab on one the user can open, so a
-// restricted tab never renders as a blank panel.
 export function activeTenantDashboardTab(
   data: UITenantDashboard | null | undefined,
   selected: TenantDashboardTab,
@@ -112,17 +92,8 @@ export function activeTenantDashboardTab(
   return visible[0]?.tab ?? selected;
 }
 
-// mergeQueueAddress reports the one queue a panel's "Advance queue" action
-// may act on, only when the whole visible queue names one. Advancing is a
-// single-queue-head write, so a panel spanning branches, or repositories, has
-// no single unambiguous head to name.
-//
-// A queue whose reviews all record no repository — what a tenant whose reviews
-// all predate repository identity looks like — still has one address, with an
-// empty repository: every one of those reviews is in the same one queue, and
-// the platform promotes it exactly as it always did. Only a genuine mixture is
-// refused here, and the platform refuses the same mixture again if this ever
-// let one through.
+// mergeQueueAddress returns the single queue a panel may advance, or none when
+// it spans branches or repositories; an all-empty repository is one queue.
 export function mergeQueueAddress(
   mergeQueue: readonly { repository?: string; targetBranch: string }[],
 ): { repository: string; targetBranch: string } | null {
@@ -139,18 +110,14 @@ export function mergeQueueAddress(
   return { repository, targetBranch };
 }
 
-// mergeQueueHeadLabel names the head an "Advance queue" confirm is about. A
-// queue whose reviews record no repository is named by its branch alone rather
-// than by an empty string, which would read as a missing value.
+// A queue with no repository is named by its branch alone.
 export function mergeQueueHeadLabel(queue: { repository: string; targetBranch: string }): string {
   return queue.repository
     ? `${queue.repository}'s head into ${queue.targetBranch}`
     : queue.targetBranch;
 }
 
-// reviewStatusTones maps the collaboration API's review status vocabulary to
-// a StatusBadge tone. WCAG 1.4.1 requires status not be conveyed by colour
-// alone, so every tone still carries the status word as its label.
+// Every tone keeps the status word as its label (WCAG 1.4.1).
 const reviewStatusTones: Record<string, StatusBadgeTone> = {
   OPEN: 'muted',
   READY: 'success',
@@ -164,11 +131,7 @@ export function reviewStatusTone(status: string): StatusBadgeTone {
   return reviewStatusTones[status.trim().toUpperCase()] ?? 'warning';
 }
 
-// registrationStatusTones maps the Registration tab's two status vocabularies
-// (hosted environments and cloud contexts share the same
-// registered/provisioning/running/failed/deleting/deletion-blocked shape) to
-// a StatusBadge tone. WCAG 1.4.1 again: every tone still shows the status
-// word, never colour alone.
+// Hosted environments and cloud contexts share one status vocabulary.
 const registrationStatusTones: Record<string, StatusBadgeTone> = {
   registered: 'muted',
   provisioning: 'in-progress',
@@ -182,9 +145,6 @@ export function registrationStatusTone(status: string): StatusBadgeTone {
   return registrationStatusTones[status.trim().toLowerCase()] ?? 'warning';
 }
 
-// inviteRequestStatusTones maps the invite-request queue's status vocabulary
-// (PENDING/APPROVED/DECLINED) to a StatusBadge tone. WCAG 1.4.1: every tone
-// still shows the status word, never colour alone.
 const inviteRequestStatusTones: Record<string, StatusBadgeTone> = {
   PENDING: 'in-progress',
   APPROVED: 'success',
@@ -195,17 +155,12 @@ export function inviteRequestStatusTone(status: string): StatusBadgeTone {
   return inviteRequestStatusTones[status.trim().toUpperCase()] ?? 'muted';
 }
 
-// requestsTabLabel is the tab strip's own label for the Requests tab: the
-// pending count is visible before the operator opens the panel at all — an
-// unattended queue nobody sees is the failure this exists to prevent.
+// The pending count is shown on the tab so an unattended queue is visible.
 export function requestsTabLabel(data: UITenantDashboard | null | undefined): string {
   const count = data?.pendingInviteRequestCount;
   return count ? `Requests (${String(count)})` : 'Requests';
 }
 
-// unresolvedThreadsTone renders the count as a quantity, not just a colour:
-// zero reads as done (success), any other count as still-open (warning) —
-// WCAG 1.4.1 again, so the label carries the fact even without colour.
 export function unresolvedThreadsTone(count: number): StatusBadgeTone {
   return count === 0 ? 'success' : 'warning';
 }
@@ -217,43 +172,29 @@ export function unresolvedThreadsLabel(count: number): string {
   return count === 1 ? '1 unresolved' : `${String(count)} unresolved`;
 }
 
-// threadRootComment is the minimal shape unresolvedThreadCount needs: a
-// thread's status lives entirely on its root, and replies never carry their
-// own, which is the same rule erun-common's CountUnresolvedThreads applies.
+// A thread's status lives on its root; replies carry none.
 export interface ThreadRootComment {
   parentCommentId?: string;
   status?: string;
 }
 
-// unresolvedThreadCount derives the count from a review's own comment list,
-// mirroring erun-common's CountUnresolvedThreads. Surfaces that have the
-// threads must derive from them rather than from a summary field: the two
-// producers of this number (the dashboard row's enrichment and the detail
-// dialog's comment read) could otherwise disagree about the same review, and
-// a list row reading "-" beside a dialog reading "1 unresolved" is exactly
-// that disagreement.
+// unresolvedThreadCount mirrors erun-common's CountUnresolvedThreads; prefer it
+// over a summary field so the list and the detail dialog agree.
 export function unresolvedThreadCount(comments: readonly ThreadRootComment[] | undefined): number {
   return (comments ?? []).filter(
     (comment) => !comment.parentCommentId?.trim() && comment.status === 'OPEN',
   ).length;
 }
 
-// reviewRowUnresolvedThreads is the reviews list's read of a row's
-// unresolved-thread count: the Go dashboard's own per-review enrichment, or
-// undefined when that enrichment could not compute it for this row.
+// reviewRowUnresolvedThreads is undefined when the Go enrichment could not compute it.
 export function reviewRowUnresolvedThreads(row: {
   unresolvedThreads?: number;
 }): number | undefined {
   return row.unresolvedThreads;
 }
 
-// reviewDetailUnresolvedThreads is the review detail dialog's read of the
-// same quantity. The dialog holds the review's comment threads, so it derives
-// the count from them — the same derivation erun-common's
-// CountUnresolvedThreads applies — instead of trusting a summary field that
-// can drift from the list's. It falls back to the summary only when no
-// comment list was loaded at all, and never guesses zero: a review whose
-// count is unknown is not a review with nothing left open.
+// reviewDetailUnresolvedThreads derives from loaded comments, else the summary,
+// and never guesses zero.
 export function reviewDetailUnresolvedThreads(detail: {
   comments?: readonly ThreadRootComment[];
   unresolvedThreads?: number;
@@ -264,18 +205,12 @@ export function reviewDetailUnresolvedThreads(detail: {
   return detail.unresolvedThreads;
 }
 
-// unresolvedThreadsCountLabel renders either surface's count. Unknown is
-// spelled out rather than shown as a bare dash, because a dash beside a
-// dialog that reports a count is indistinguishable from "none".
+// Unknown is spelled out, since a dash reads as "none".
 export function unresolvedThreadsCountLabel(count: number | undefined): string {
   return count === undefined ? 'Unknown' : unresolvedThreadsLabel(count);
 }
 
-// formatDashboardDate renders a timestamp in the operator's own locale, and
-// falls back to the raw value rather than hiding one the API sent in a shape
-// this build does not recognise. Used as the absolute value behind
-// relativeDashboardDate's hover/title, and directly wherever a full
-// timestamp (not a scannable relative one) is what's needed.
+// formatDashboardDate falls back to the raw value for unrecognised shapes.
 export function formatDashboardDate(value: string | undefined): string {
   if (!value) {
     return '-';
@@ -297,10 +232,6 @@ const relativeTimeUnits: { unit: Intl.RelativeTimeFormatUnit; ms: number }[] = [
   { unit: 'minute', ms: 60 * 1000 },
 ];
 
-// relativeDashboardDate renders "2 days ago" instead of a raw locale string —
-// nobody scans absolute timestamps in a column of rows. Callers pair
-// this with formatDashboardDate as the hover/title value so the exact moment
-// is still one hover away, never lost.
 export function relativeDashboardDate(value: string | undefined): string {
   if (!value) {
     return '-';
@@ -318,9 +249,6 @@ export function relativeDashboardDate(value: string | undefined): string {
   return relativeTimeFormatter.format(Math.round(diffMs / 1000), 'second');
 }
 
-// reviewAuthorInitials derives an avatar's letters from a display name (a
-// resolved username, "You", or a raw id fallback) — up to two characters, so
-// the avatar is still a meaningful scan key when no username resolved.
 export function reviewAuthorInitials(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) {
@@ -336,9 +264,6 @@ export function reviewAuthorInitials(name: string): string {
   return initials || '?';
 }
 
-// middleEllipsis keeps both ends of an identifier visible — a branch name's
-// prefix and suffix both carry meaning, unlike prose, where a trailing "…"
-// would drop the more identifying half.
 export function middleEllipsis(value: string, keep = 20): string {
   const trimmed = value.trim();
   if (trimmed.length <= keep * 2 + 1) {

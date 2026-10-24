@@ -78,18 +78,12 @@ func TestListAuditEventsRejectsAnUnparsableTimeRange(t *testing.T) {
 	}
 }
 
-// TestListAuditEventsResponseNeverSerializesParameterPayloads guards the
-// response shape even if a future bug ever got a parameter payload as far as
-// an in-memory model.AuditEvent: a tool such as cloud_inject_aws_credentials
-// takes credentials as arguments, and the JSON the caller receives must not
-// carry them regardless of how they got into the struct.
 func TestListAuditEventsResponseNeverSerializesParameterPayloads(t *testing.T) {
 	stub := &stubAuditEventRepository{page: repository.AuditEventPage{Events: []model.AuditEvent{{
 		AuditEventID: "e1",
 		Type:         model.AuditEventTypeMCP,
 		MCPTool:      "cloud_inject_aws_credentials",
-		// Set directly on the struct (bypassing the DB) to prove the JSON
-		// encoding itself is the guard, not just "List never populates it".
+		// Set directly to prove the JSON encoding itself is the guard.
 		MCPToolParameters: `{"secretAccessKey":"super-secret"}`,
 		CLIParameters:     `{"token":"also-secret"}`,
 	}}}}

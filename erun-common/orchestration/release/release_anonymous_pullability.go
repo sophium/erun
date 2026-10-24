@@ -16,23 +16,11 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// moduleReferencedImagePattern matches an erun image reference a Terraform
-// module names by repository shape (ghcr.io/sophium/erun-<component>:),
-// independent of what follows the colon. The cluster-edge module's
-// dns01_webhook_image resolves its version from a Terraform interpolation
-// (${local.dns01_webhook_chart_app_version}) rather than a literal, so a
-// pattern anchored on a literal version -- like pin.go's own
-// erunImageReferencePattern -- would never see it; this one only needs the
-// repository name, which is enough to know what a module references.
+// moduleReferencedImagePattern matches on repository only: a module may interpolate the version.
 var moduleReferencedImagePattern = regexp.MustCompile(`ghcr\.io/sophium/(erun-[a-zA-Z0-9_-]+):`)
 
-// DiscoverModuleReferencedImageNames scans every Terraform file under root for
-// an erun image a published module references, so the release-time
-// anonymous-pullability check tracks whatever a module actually names instead
-// of a hand-maintained list that can silently fall behind. A root that does
-// not exist (a tenant's own release, or a checkout with no
-// erun-devops/terraform-erun of its own) yields no names rather than an
-// error: this check only ever has something to do for erun's own release.
+// DiscoverModuleReferencedImageNames scans Terraform under root for erun images; a
+// missing root yields no names.
 func DiscoverModuleReferencedImageNames(root string) ([]string, error) {
 	if _, err := os.Stat(root); err != nil {
 		if os.IsNotExist(err) {
@@ -70,37 +58,12 @@ func DiscoverModuleReferencedImageNames(root string) ([]string, error) {
 	return names, nil
 }
 
-// AnonymousPullabilityBaseline is a shrink-only baseline -- the same shape as
-// KnownUnsurfacedRoutes (erun-backend-api/internal/routes/route_audit.go) and
-// issueReferenceBaseline (erun-integration/issue_reference_test.go) -- for an
-// erun image a Terraform module references that is known not to be
-// anonymously pullable yet. It is a record of a known gap, not a design
-// decision: an entry here means the ghcr.io package is currently private, a
-// visibility setting on the sophium org this repository cannot flip on its
-// own, not that the image is meant to stay private.
-//
-// This baseline retires itself at release time, not at test time.
-// TestAnonymousPullabilityBaselineIsCurrent only checks that a baselined name
-// still corresponds to an image some module references -- it never touches
-// the network, so it cannot see whether the underlying package went public.
-// verifyImageAnonymouslyPullable does: when a baselined image's release-time
-// probe comes back pullable, the release fails and names the stale entry to
-// delete, instead of reporting success while a baseline that no longer
-// describes reality quietly disables the very check it exists to perform.
-//
-// Empty right now: ghcr.io/sophium/erun-dns01-webhook was the only entry and
-// the package has since been made public, so it was removed rather than left
-// as a stale example.
+// AnonymousPullabilityBaseline is a shrink-only list of module-referenced images whose
+// ghcr package is still private. A release fails when a baselined image probes pullable.
 var AnonymousPullabilityBaseline = map[string]bool{}
 
-// verifyModuleReferencedImagesAnonymouslyPullable asserts that every erun
-// image a Terraform module references resolves with no credential at all, at
-// the version this release just published. A name absent from
-// anonymousPullabilityBaseline must resolve anonymously or the release fails;
-// a baselined name is reported and let through instead, so a known-private
-// image does not block every release until the sophium org's package
-// visibility changes -- unless it turns out to already be pullable, in which
-// case the baseline entry itself is the defect (see verifyImageAnonymouslyPullable).
+// verifyModuleReferencedImagesAnonymouslyPullable requires every module-referenced image
+// to pull without credentials at this version, unless baselined.
 func verifyModuleReferencedImagesAnonymouslyPullable(ctx core.Context, projectRoot string, execution shared.BuildExecutionSpec, probe shared.AnonymousPullProbeFunc) error {
 	names, err := DiscoverModuleReferencedImageNames(filepath.Join(strings.TrimSpace(projectRoot), "erun-devops", "terraform-erun"))
 	if err != nil {
@@ -127,12 +90,6 @@ func verifyModuleReferencedImagesAnonymouslyPullable(ctx core.Context, projectRo
 	return nil
 }
 
-// verifyImageAnonymouslyPullable is the per-image half of
-// verifyModuleReferencedImagesAnonymouslyPullable: probe name's tag with no
-// credential at all, then apply anonymousPullabilityBaseline to the result.
-// A baselined name that probes as pullable fails the release rather than
-// passing silently -- see anonymousPullabilityBaseline's doc comment for why
-// this enforcement has to live here and not in a unit test.
 func verifyImageAnonymouslyPullable(ctx core.Context, name string, image helm.DockerImageReference, probe shared.AnonymousPullProbeFunc) error {
 	tag := strings.TrimSpace(image.Tag)
 	if !registry.IsGHCRRegistry(registry.DockerRegistryFromImageTag(tag)) {
@@ -145,12 +102,8 @@ func verifyImageAnonymouslyPullable(ctx core.Context, name string, image helm.Do
 	repoPath := registry.DockerNamespaceFromTag(tag) + "/" + name
 	pullable, probeErr := probe(context.Background(), nil, repoPath, image.Version)
 	if probeErr != nil {
-		// A genuine failure to reach the registry (not a refusal -- those come
-		// back as pullable=false, no error) tells us nothing new about an
-		// image already recorded as known-not-anonymously-pullable, so it
-		// must not block a release over network flakiness alone. For any
-		// other image, whether the probe could even run is exactly what this
-		// check exists to answer, so the release still fails loudly.
+		// An unreachable registry says nothing new about a baselined image, so only
+		// unbaselined images fail on it.
 		if AnonymousPullabilityBaseline[name] {
 			ctx.Info("==> Anonymous-pullability probe for " + tag + " could not run (" + probeErr.Error() + "), but it is already baselined as not anonymously pullable (see anonymousPullabilityBaseline) -- proceeding")
 			return nil

@@ -8,12 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// RuntimeSizingLines render the standing recommendation under `runtime-pod:`,
-// which is the setting an operator would change to act on it. Two lines: the
-// verdicts, then the evidence they rest on. The evidence line is not optional
-// detail — a recommendation whose window and counters are invisible cannot be
-// argued with, and this one has to be argued with before anyone shrinks an
-// environment.
+// RuntimeSizingLines renders the sizing recommendation as two lines: verdicts, then their evidence.
 func RuntimeSizingLines(sizing *deploy.RuntimeSizingRecommendation, indent string) []string {
 	if sizing == nil {
 		return nil

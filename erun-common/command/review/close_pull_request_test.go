@@ -12,17 +12,9 @@ import (
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// The wire shape of the GitHub requests (list/comment/close) and GitHub's own
-// failure response surfacing have no integration-suite equivalent, the same
-// reasoning report_commit_status_test.go documents: validation, dry-run,
-// remote-url parsing, and the no-token refusal are exercised end-to-end from
-// the binary in erun-integration/exec_test.go instead.
+// Validation, dry-run and the no-token refusal are covered end-to-end in
+// erun-integration/exec_test.go; only the GitHub wire shape is tested here.
 
-// recordClosePullRequestComment and recordClosePullRequestClose capture
-// method, path, auth header, and the one field each request body carries,
-// isolated into their own helpers so the httptest handler composing the
-// three call sites below stays under the module's cyclomatic complexity
-// limit.
 func recordClosePullRequestComment(dst *capturedRequest, r *http.Request) {
 	dst.method, dst.path, dst.auth = r.Method, r.URL.Path, r.Header.Get("Authorization")
 	var parsed struct {

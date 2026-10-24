@@ -15,15 +15,9 @@ interface ClipboardChords {
   readonly copy: ReadonlySet<string>;
 }
 
-// Which modifier owns the clipboard is a platform contract, not a preference,
-// and getting it wrong loses the selection entirely: on macOS the copy chord is
-// Cmd+C and Ctrl+C stays the interrupt the shell needs, while Windows/Linux
-// follow Windows Terminal (Ctrl+C copies only when something is selected).
-//
-// Paste is intercepted only for the embedding that fails to deliver the browser
-// paste event to xterm's hidden textarea (WebView2). The macOS WebView does
-// deliver it, so Cmd+V is deliberately left to that path — it already works and
-// it is the path that carries pasted files.
+// macOS copies with Cmd+C so Ctrl+C stays the interrupt; Windows/Linux follow
+// Windows Terminal. Paste is intercepted only on WebView2, which does not
+// deliver paste events to xterm; macOS keeps the native path, which carries files.
 const CLIPBOARD_CHORDS: Record<ClipboardPlatform, ClipboardChords> = {
   mac: {
     paste: new Set<string>(),
@@ -37,10 +31,7 @@ const CLIPBOARD_CHORDS: Record<ClipboardPlatform, ClipboardChords> = {
 
 const hostClipboardPlatform: ClipboardPlatform = isMacPlatform ? 'mac' : 'other';
 
-// Canonical modifier+key signature (modifiers in a fixed order) so chords can be
-// matched by lookup instead of a wall of boolean combinations. Meta is part of
-// the signature: omitting it reduced Cmd+C to a bare "c", which is why the
-// macOS copy chord never reached the copy path.
+// Meta must be part of the signature, or Cmd+C reduces to a bare "c".
 function keyChord(event: KeyboardEvent): string {
   const parts: string[] = [];
   if (event.ctrlKey) {
@@ -59,10 +50,7 @@ function keyChord(event: KeyboardEvent): string {
   return parts.join('+');
 }
 
-// Classifies a terminal keydown into a clipboard intent for the host platform.
-// A 'copy' intent is only the chord match; whether a copy actually happens is
-// terminalCopyOutcome's call, so a copy chord with nothing selected can still
-// fall through to the session.
+// A 'copy' intent is only the chord match; terminalCopyOutcome decides the copy.
 export function classifyTerminalClipboardKey(
   event: KeyboardEvent,
   platform: ClipboardPlatform = hostClipboardPlatform,
@@ -83,10 +71,8 @@ export function classifyTerminalClipboardKey(
 
 export type TerminalCopyOutcome = 'copy' | 'swallow' | 'fallthrough';
 
-// What a copy chord does to the key event. With a selection it copies. Without
-// one, a chord that carries Shift (Ctrl+Shift+C) is unambiguously a copy request
-// and is still consumed, while a plain copy chord falls through so Ctrl+C keeps
-// reaching the session as ^C.
+// Without a selection, Ctrl+Shift+C is still consumed but plain Ctrl+C reaches
+// the session as ^C.
 export function terminalCopyOutcome(
   event: KeyboardEvent,
   hasSelection: boolean,
@@ -97,28 +83,18 @@ export function terminalCopyOutcome(
   return event.shiftKey ? 'swallow' : 'fallthrough';
 }
 
-// OSC 52 is how a program inside the session asks the terminal to put text on
-// the clipboard — what an in-pod agent's "(c to copy)" affordance emits. Its
-// payload arrives from the pod, so it is treated as untrusted: the write is
-// bounded before it is decoded and anything malformed is dropped rather than
-// thrown.
+// OSC 52 payloads come from the pod and are untrusted: bounded before decoding,
+// malformed ones dropped.
 export const OSC_CLIPBOARD_IDENT = 52;
 
-// Far more than the URLs and snippets the affordance exists for, and small
-// enough that a runaway sequence cannot build a huge string on the host.
 const MAX_CLIPBOARD_TEXT_BYTES = 64 * 1024;
 const MAX_CLIPBOARD_BASE64_LENGTH = Math.ceil(MAX_CLIPBOARD_TEXT_BYTES / 3) * 4;
 
-// The host has a single clipboard, so a write aimed only at the X primary
-// selection or a cut buffer is ignored: a program mirroring its mouse selection
-// into `p` would otherwise overwrite whatever the operator had copied. An empty
-// target is the spec's default selection.
+// Writes aimed only at the primary selection or cut buffers are ignored so a
+// program mirroring its mouse selection cannot overwrite the host clipboard.
 const HOST_CLIPBOARD_SELECTIONS = ['c', 's'];
 
-// Decodes an OSC 52 payload ("<selection>;<base64>") into the text to place on
-// the host clipboard, or null when there is nothing to write. A read request
-// ("?") returns null by design: answering it would let the pod read the host
-// clipboard, which is a trust decision the copy direction does not require.
+// Read requests ("?") return null: the pod must not read the host clipboard.
 export function parseOscClipboardWrite(data: string): string | null {
   const separator = data.indexOf(';');
   if (separator < 0) {
@@ -139,9 +115,8 @@ export function parseOscClipboardWrite(data: string): string | null {
   }
 }
 
-// pastedFiles returns clipboard files for upload; plain-text paste is left to
-// the terminal's own paste path, and files with no MIME type are still returned
-// because their name carries the extension the backend uses for the remote name.
+// Files without a MIME type are kept; the backend derives the remote name from
+// the file name.
 export function pastedFiles(event: ClipboardEvent): File[] {
   const items = event.clipboardData?.items;
   if (!items) {

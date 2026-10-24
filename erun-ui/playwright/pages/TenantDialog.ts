@@ -1,7 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
 
-// TenantDialog POM. The dialog title is "Manage tenant" with the tenant
-// name in the description.
 export class TenantDialog {
   constructor(public readonly page: Page) {}
 

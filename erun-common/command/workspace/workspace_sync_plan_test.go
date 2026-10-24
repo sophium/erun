@@ -29,8 +29,6 @@ func workspaceSyncPlanEnv(kind config.EnvironmentType, sshd, sync bool, localPat
 	}
 }
 
-// Every refusal is a distinct value, because "the mirror did not change" is the
-// one symptom they share and the operator's fix differs for each.
 func TestResolveWorkspaceSyncParamsNamesEachRefusal(t *testing.T) {
 	for _, testCase := range []struct {
 		name   string
@@ -65,8 +63,7 @@ func TestResolveWorkspaceSyncParamsAddressesThePodWorktree(t *testing.T) {
 	}
 }
 
-// An unparseable reply is passed through rather than dropped: losing the edge's
-// answer is worse than not advertising a local tool.
+// Losing the edge's answer is worse than not advertising a local tool.
 func TestAppendLocalToolsPassesThroughWhatItCannotParse(t *testing.T) {
 	reply := []byte(`not json`)
 	if got := mcp.McpAppendLocalTools(reply, []mcp.MCPLocalTool{{Name: "workspace_sync"}}); string(got) != string(reply) {
@@ -74,8 +71,6 @@ func TestAppendLocalToolsPassesThroughWhatItCannotParse(t *testing.T) {
 	}
 }
 
-// A failing tool answers in-band, so the caller reads why instead of seeing the
-// session fault.
 func TestLocalToolReplyCarriesFailureAsContent(t *testing.T) {
 	reply, err := mcp.McpLocalToolReply(json.RawMessage(`3`), "", errors.New("the SSH channel to the pod is not up"))
 	if err != nil {

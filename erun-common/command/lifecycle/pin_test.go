@@ -12,11 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// seedPinnedTenantRepo lays down the shape a real tenant repo has: a Terraform
-// module wrapping an erun module by ref, an umbrella chart mixing erun
-// dependencies with the tenant's own, and a build-env Dockerfile on the runtime
-// image. The drift is deliberate — this is the reported case of one repo pinned
-// to three versions at once.
+// seedPinnedTenantRepo lays down a tenant repo pinned to three erun versions at once.
 func seedPinnedTenantRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -54,22 +50,18 @@ dependencies:
 	write("acme-devops/docker/erun-devops/Dockerfile", `FROM ghcr.io/sophium/erun-devops:1.0.102
 RUN apt-get update
 `)
-	// The reported gap: a tenant's own terraform variables set an erun-published
-	// image directly (the cluster-edge module's dns01_webhook_image), not just a
-	// module ref — and it names an erun release just as much as the ref above it.
+	// Tenant terraform variables can set an erun image directly.
 	write("terraform-acme/prod/prod.tfvars", `dns01_webhook_image = "ghcr.io/sophium/erun-dns01-webhook:1.0.102"
 broker_url          = "https://api.acme-prod.services.example.com/v1/dns01"
 `)
-	// The reported corruption: a variable's own description mentions an erun
-	// image reference only as documentation prose, with the reference wrapped in
-	// an HCL-escaped inner quote. This must not be read as a configured site.
+	// Description prose with an HCL-escaped reference must not be read as a site.
 	write("terraform-acme/dev/variables.tf", `variable "dns01_webhook_image" {
   description = "Container image (repository:tag) for the DNS-01 webhook shim, e.g. \"ghcr.io/sophium/erun-dns01-webhook:1.0.150\". Optional: left empty (the default), it resolves automatically."
   type        = string
   default     = ""
 }
 `)
-	// A vendored copy of a pulled chart: a build artifact of a pin, not a pin.
+	// A vendored chart: a build artifact, not a pin.
 	write("acme-api/charts/erun-backend-api/Chart.yaml", `apiVersion: v2
 name: erun-backend-api
 version: 1.0.106
@@ -81,12 +73,7 @@ dependencies:
 	return root
 }
 
-// The reported corruption: an erun image reference mentioned only as
-// an example inside a variable's description prose is not a configured site,
-// and must never be reported or rewritten — reporting it as changed on an
-// already-aligned tree contradicts the "aligned tree reports no changes"
-// contract, and rewriting it would eat the HCL escape backslash right before
-// it and break the surrounding string.
+// Rewriting the prose would also eat the HCL escape backslash before it.
 func TestResolvePinPlanDoesNotTreatDescriptionProseAsAnImageReferenceSite(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
 	before := readPinFile(t, root, "terraform-acme/dev/variables.tf")
@@ -110,8 +97,6 @@ func TestResolvePinPlanDoesNotTreatDescriptionProseAsAnImageReferenceSite(t *tes
 	}
 }
 
-// A vendored chart under charts/ is a build artifact of a pin, not a pin —
-// rewriting it would edit what the next `helm dependency update` regenerates.
 func TestResolvePinPlanSkipsVendoredCharts(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
 	plan, err := ResolvePinPlan(root, "acme", "dev", config.EnvConfig{Name: "dev"}, "1.0.175")
@@ -125,8 +110,6 @@ func TestResolvePinPlanSkipsVendoredCharts(t *testing.T) {
 	}
 }
 
-// applyPinnedRepo re-pins the seeded repo and hands back its root, so each
-// rewrite contract can be checked on its own rather than in one long test.
 func applyPinnedRepo(t *testing.T) string {
 	t.Helper()
 	root := seedPinnedTenantRepo(t)
@@ -143,8 +126,7 @@ func applyPinnedRepo(t *testing.T) string {
 	return root
 }
 
-// The chart's own version and the tenant's own dependencies are versioned
-// independently of erun, so only the erun dependency moves.
+// The chart's own version and the tenant's dependencies are versioned independently of erun.
 func TestApplyPinPlanRewritesErunChartDependenciesOnly(t *testing.T) {
 	chart := readPinFile(t, applyPinnedRepo(t), "acme-api/Chart.yaml")
 	if !strings.Contains(chart, "version: 1.0.175") {
@@ -165,9 +147,7 @@ func TestApplyPinPlanRewritesTheBuildEnvImageWithoutDisturbingTheDockerfile(t *t
 	}
 }
 
-// erun-devops already has its own dedicated runtime-image site; a
-// registry-qualified reference to it in a tfvars file must not also be
-// reported as a second, redundant image-reference site.
+// erun-devops already has its own runtime-image site.
 func TestResolvePinPlanDoesNotDoubleCountAnErunDevopsImageReferenceInTerraformVariables(t *testing.T) {
 	root := t.TempDir()
 	full := filepath.Join(root, "terraform-acme", "prod", "prod.tfvars")
@@ -189,13 +169,9 @@ func TestResolvePinPlanDoesNotDoubleCountAnErunDevopsImageReferenceInTerraformVa
 	}
 }
 
-// A rewritten Chart.yaml and the lock beside it must agree: `helm dependency
-// build`, which deploy runs, refuses a lock that disagrees with its chart. So
-// every chart the re-pin moved gets refreshed — once, however many of its
-// dependencies changed.
+// `helm dependency build` refuses a lock that disagrees with its chart.
 func TestRefreshPinnedChartLocksVisitsEachMovedChartOnce(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	// A second erun dependency in the same chart must not mean two refreshes.
 	chart := filepath.Join(root, "acme-api", "Chart.yaml")
 	existing, err := os.ReadFile(chart)
 	if err != nil {
@@ -227,8 +203,6 @@ func TestRefreshPinnedChartLocksVisitsEachMovedChartOnce(t *testing.T) {
 	}
 }
 
-// A tree with some locks refreshed and others stale is worse than the one we
-// started from, so a failure names the chart and stops rather than carrying on.
 func TestRefreshPinnedChartLocksStopsAtTheFailingChart(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
 	plan, err := ResolvePinPlan(root, "acme", "dev", config.EnvConfig{Name: "dev"}, "1.0.175")
@@ -243,8 +217,7 @@ func TestRefreshPinnedChartLocksStopsAtTheFailingChart(t *testing.T) {
 	}
 }
 
-// Nothing to refresh when no chart dependency moved — a terraform-only re-pin
-// must not shell out to helm at all.
+// A terraform-only re-pin must not shell out to helm.
 func TestRefreshPinnedChartLocksSkipsWhenNoChartMoved(t *testing.T) {
 	root := t.TempDir()
 	plan := PinPlan{ProjectRoot: root, Target: "1.0.175", Sites: []PinSite{
@@ -262,8 +235,6 @@ func TestRefreshPinnedChartLocksSkipsWhenNoChartMoved(t *testing.T) {
 	}
 }
 
-// Reverting has to reach the version you came from. Recording on a no-op re-pin
-// would overwrite that with the version you are already on, stranding you.
 func TestPinPreviousSurvivesARepeatedRePin(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
 
@@ -295,8 +266,6 @@ func TestResolvePinPlanRefusesWithoutATarget(t *testing.T) {
 	if _, err := ResolvePinPlan("", "acme", "dev", config.EnvConfig{}, "1.0.175"); err == nil {
 		t.Fatal("a re-pin needs a project root")
 	}
-	// A leading v is how the tags are written; the pins are not all written that
-	// way, so the target is normalised once rather than at each site.
 	plan, err := ResolvePinPlan(root, "acme", "dev", config.EnvConfig{}, "v1.0.175")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -306,11 +275,6 @@ func TestResolvePinPlanRefusesWithoutATarget(t *testing.T) {
 	}
 }
 
-// The reported bug: an unresolved tenant/environment must never reach
-// a plan. Before this guard, ResolvePinPlan happily built one with tenant and
-// environment both "", which then emitted a runtime-version site with
-// current: "" and detail: "/" -- an unresolved reading dressed up as a real
-// row a caller could apply.
 func TestResolvePinPlanRefusesAnUnresolvedTenantOrEnvironment(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
 	for _, tc := range []struct {

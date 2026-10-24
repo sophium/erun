@@ -7,11 +7,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// These cover the join orchestratorInfoFor performs against the
-// environment-activity poller's own state (environment_activity.go) and
-// against an orchestrator session's pacing state (orchestrator_pacing.go) —
-// the two sources the hover card renders without collecting anything new.
-
 func TestEnvInfosJoinsActivityByTenantAndEnvironment(t *testing.T) {
 	envs := []config.OrchestratorEnvConfig{
 		{Tenant: "petios", Environment: "rihards-review"},

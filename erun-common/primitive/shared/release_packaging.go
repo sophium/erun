@@ -18,14 +18,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// requiredScoopBinaries are the executables the Windows Scoop install must put
-// on PATH. erun-app.exe is load-bearing: `erun app`, Homebrew, and Scoop
-// launcher wiring all depend on that artifact name.
+// erun-app.exe is load-bearing: `erun app`, Homebrew and Scoop launchers depend on the name.
 var requiredScoopBinaries = []string{"erun.exe", "emcp.exe", "eapi.exe", "erun-app.exe"}
 
-// Catches a drifted checked-in Scoop manifest before the release publishes it,
-// rather than at a user's `scoop install`. Runs during release resolution so
-// the bailout precedes any git mutation.
+// Runs during release resolution, so a drifted Scoop manifest fails before any git mutation.
 func validateStableScoopManifest(ctx core.Context, projectRoot string) error {
 	scoopPath := filepath.Join(projectRoot, "bucket", "erun.json")
 	if !FileExists(scoopPath) {
@@ -35,8 +31,7 @@ func validateStableScoopManifest(ctx core.Context, projectRoot string) error {
 	return checkScoopManifestInvariants(scoopPath)
 }
 
-// Reports every manifest-invariant violation at once, so a single failed
-// release names everything that needs fixing instead of stopping at the first.
+// Reports every violation at once.
 func checkScoopManifestInvariants(scoopPath string) error {
 	data, err := os.ReadFile(scoopPath)
 	if err != nil {
@@ -324,9 +319,7 @@ func syncScoopReleaseChecksum(ctx core.Context, spec ReleasePackagingSyncSpec) (
 	return ReleaseFileUpdate{Path: spec.ScoopPath, Content: content}, true, nil
 }
 
-// Pins the marketplace catalogue's plugin sha to the release commit. Runs
-// alongside Homebrew/Scoop because all three require the release tag to exist
-// first.
+// Needs the release tag to exist, like Homebrew and Scoop.
 func SyncMarketplaceReleaseSHA(ctx core.Context, spec ReleasePackagingSyncSpec) (ReleaseFileUpdate, bool, error) {
 	if spec.MarketplacePath == "" {
 		return ReleaseFileUpdate{}, false, nil
@@ -357,8 +350,7 @@ func SyncMarketplaceReleaseSHA(ctx core.Context, spec ReleasePackagingSyncSpec) 
 	return ReleaseFileUpdate{Path: spec.MarketplacePath, Content: content}, true, nil
 }
 
-// Uses targeted text replacement rather than JSON marshal so the file's
-// existing formatting and key ordering survive the sha bump.
+// Text replacement keeps the file's formatting and key order.
 func updateMarketplaceReleaseSHA(marketplacePath, sha string) (string, bool, error) {
 	data, err := os.ReadFile(marketplacePath)
 	if err != nil {

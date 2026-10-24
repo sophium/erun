@@ -8,13 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// TestBuildKindContractRequiresAVersionAndKeepsLegacyGateRowsValid is the
-// database half of the builds.kind contract: every build written today is
-// RECORDED and must carry a version, with failure_detail an optional reason on
-// any failed build; the retired GATE kind stays insertable exactly as its
-// historical rows were (review-linked, no version, a failure detail when
-// failed), because MERGED reviews' last_merged_build_id still points at those
-// rows and the CHECKs keep them valid.
+// Legacy GATE rows stay insertable because MERGED reviews still reference them.
 func TestBuildKindContractRequiresAVersionAndKeepsLegacyGateRowsValid(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -67,10 +61,6 @@ func TestBuildKindContractRequiresAVersionAndKeepsLegacyGateRowsValid(t *testing
 	}
 }
 
-// TestBuildListPageFiltersByCommit: GET /v1/builds' commit filter narrows the
-// tenant-wide history to the builds of one commit, alongside the successful
-// filter, which is how a caller finds the successful build recorded for a
-// commit that landed.
 func TestBuildListPageFiltersByCommit(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -106,12 +96,7 @@ func TestBuildListPageFiltersByCommit(t *testing.T) {
 	}
 }
 
-// TestBuildProfileRoundTripsThroughCreateAndGet proves the bounded per-build
-// profile survives a real jsonb column round trip -- Get uses a hand-written
-// SELECT column list, unlike Bun's usual
-// Model(&x).Scan, so a column added to the table without a matching addition
-// to that SELECT would silently read back as the field's zero value rather
-// than failing loudly.
+// Get uses a hand-written column list, so a missing column would read back as zero.
 func TestBuildProfileRoundTripsThroughCreateAndGet(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -160,8 +145,6 @@ func TestBuildProfileRoundTripsThroughCreateAndGet(t *testing.T) {
 	}
 }
 
-// TestBuildTenantIsolation proves a caller from one tenant cannot see or fetch
-// another tenant's builds — the same RLS boundary every tenant-owned table must hold.
 func TestBuildTenantIsolation(t *testing.T) {
 	db, tenantA := reviewsDatabase(t)
 	authorA := seedReviewsUser(t, db, tenantA, "tenant-a-author")
@@ -199,10 +182,6 @@ func TestBuildTenantIsolation(t *testing.T) {
 	}
 }
 
-// TestBuildListScopesToTheOperationsCallersOwnTenant pins the failure
-// scenario for builds: an OPERATIONS caller's List must not include a
-// stranger tenant's builds even though erun_operations' RLS policy makes
-// them visible too.
 func TestBuildListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	db, strangerTenantID := reviewsDatabase(t)
 	strangerAuthor := seedReviewsUser(t, db, strangerTenantID, "stranger-author")

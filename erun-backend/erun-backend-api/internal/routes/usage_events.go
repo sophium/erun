@@ -7,8 +7,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 )
 
-// UsageEventRepository lists the caller's tenant's metering events. Read-only:
-// events are recorded by the provisioning/lifecycle workflows, never by a route.
+// UsageEventRepository lists the caller's tenant's metering events. Read-only: workflows record them.
 type UsageEventRepository interface {
 	List(ctx context.Context) ([]model.UsageEvent, error)
 }

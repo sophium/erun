@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// failingBinaryPath writes a script that fails the test if ever executed, so a
-// test asserting "kubectl must not run" catches a regression as a hard
-// failure rather than a silently-passed apply.
+// failingBinaryPath writes a script that fails the test if executed.
 func failingBinaryPath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

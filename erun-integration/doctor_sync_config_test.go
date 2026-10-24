@@ -13,8 +13,6 @@ import (
 )
 
 func doctorSyncConfigScenarios(t *testing.T) {
-	// --- erun doctor --sync-config: in-pod config reconciliation ---
-
 	t.Run("in_runtime_sync_config_in_sync_dry_run", testDoctorInRuntimeSyncConfigInSyncDryRun)
 	t.Run("in_runtime_sync_config_missing_cloud_context_dry_run", testDoctorInRuntimeSyncConfigMissingCloudContextDryRun)
 	t.Run("in_runtime_sync_config_legacy_remote_key_dry_run", testDoctorInRuntimeSyncConfigLegacyRemoteKeyDryRun)
@@ -27,8 +25,6 @@ func doctorSyncConfigScenarios(t *testing.T) {
 }
 
 func testDoctorInRuntimeSyncConfigInSyncDryRun(t *testing.T) {
-	// The on-disk projection already matches the injected env, so the only
-	// action is a status line — no write-yaml traces (the no-op branch).
 	setup := env.New(t)
 	seedRuntimeEnvConfig(t, setup, "team", "dev",
 		"name: dev\ntype: runtime\nkubernetescontext: in-cluster\nidle:\n  timeout: 5m0s\n  workinghours: 08:00-20:00\n")
@@ -40,9 +36,6 @@ func testDoctorInRuntimeSyncConfigInSyncDryRun(t *testing.T) {
 }
 
 func testDoctorInRuntimeSyncConfigMissingCloudContextDryRun(t *testing.T) {
-	// ERUN_CLOUD_* injected but the on-disk root carries no cloud context:
-	// missing drift for the root blocks plus the managedcloud flip, and
-	// write-yaml traces for both the env and root files.
 	setup := env.New(t)
 	seedRuntimeEnvConfig(t, setup, "team", "dev",
 		"name: dev\ntype: runtime\nkubernetescontext: in-cluster\nidle:\n  timeout: 5m0s\n  workinghours: 08:00-20:00\n")
@@ -57,9 +50,7 @@ func testDoctorInRuntimeSyncConfigMissingCloudContextDryRun(t *testing.T) {
 }
 
 func testDoctorInRuntimeSyncConfigLegacyRemoteKeyDryRun(t *testing.T) {
-	// A `remote: true` key on disk is detected as legacy drift for
-	// `type` even though a struct decode would migrate it away, and the
-	// rewrite drops it in favour of the canonical type.
+	// A legacy `remote: true` is drift even though decoding would migrate it.
 	setup := env.New(t)
 	seedRuntimeEnvConfig(t, setup, "team", "dev",
 		"name: dev\nremote: true\nkubernetescontext: in-cluster\nidle:\n  timeout: 5m0s\n  workinghours: 08:00-20:00\n")
@@ -71,8 +62,6 @@ func testDoctorInRuntimeSyncConfigLegacyRemoteKeyDryRun(t *testing.T) {
 }
 
 func testDoctorInRuntimeSyncConfigWrongValueDryRun(t *testing.T) {
-	// On-disk kubernetescontext differs from the injected value: wrong drift
-	// plus an env-file write trace.
 	setup := env.New(t)
 	seedRuntimeEnvConfig(t, setup, "team", "dev",
 		"name: dev\ntype: runtime\nkubernetescontext: stale-context\nidle:\n  timeout: 5m0s\n  workinghours: 08:00-20:00\n")
@@ -84,8 +73,6 @@ func testDoctorInRuntimeSyncConfigWrongValueDryRun(t *testing.T) {
 }
 
 func testDoctorInRuntimeSyncConfigIdleDriftDryRun(t *testing.T) {
-	// The idle block is in the projection: an on-disk timeout that differs
-	// from the injected one is flagged and rewritten.
 	setup := env.New(t)
 	seedRuntimeEnvConfig(t, setup, "team", "dev",
 		"name: dev\ntype: runtime\nkubernetescontext: in-cluster\nidle:\n  timeout: 10m0s\n  workinghours: 08:00-20:00\n")
@@ -97,10 +84,7 @@ func testDoctorInRuntimeSyncConfigIdleDriftDryRun(t *testing.T) {
 }
 
 func testDoctorInRuntimeSyncConfigLegacyRepopathNoSpuriousDriftDryRun(t *testing.T) {
-	// On-disk `repopath:` with no `localrepopath:` and an injected env that
-	// carries no LocalRepoPath must NOT report repopath/localrepopath drift
-	// (the field is excluded from the comparison set), so an otherwise
-	// matching config reports in-sync.
+	// repopath is excluded from the comparison.
 	setup := env.New(t)
 	seedRuntimeEnvConfig(t, setup, "team", "dev",
 		"name: dev\ntype: runtime\nrepopath: /home/erun/git/team\nkubernetescontext: in-cluster\nidle:\n  timeout: 5m0s\n  workinghours: 08:00-20:00\n")
@@ -112,8 +96,6 @@ func testDoctorInRuntimeSyncConfigLegacyRepopathNoSpuriousDriftDryRun(t *testing
 }
 
 func testDoctorInRuntimeSyncConfigNoTenantEnvNoop(t *testing.T) {
-	// ERUN_REPO_REMOTE=true but no tenant/environment: nothing to resolve,
-	// so the command reports it and writes nothing.
 	setup := env.New(t)
 	envVars := append(setup.Env(), "ERUN_REPO_REMOTE=true")
 	result := erun.Run(t, []string{"doctor", "--sync-config", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -121,9 +103,7 @@ func testDoctorInRuntimeSyncConfigNoTenantEnvNoop(t *testing.T) {
 }
 
 func testDoctorInRuntimeSyncConfigRealRunReconcilesAndPreserves(t *testing.T) {
-	// Real run: a drifting projected key (kubernetescontext) is rewritten
-	// while unprojected keys (sshd, runtimeversion) are preserved — the
-	// load-bearing read-modify-write invariant.
+	// Unprojected keys survive the rewrite.
 	setup := env.New(t)
 	seedRuntimeEnvConfig(t, setup, "team", "dev",
 		"name: dev\ntype: runtime\nkubernetescontext: stale-context\nruntimeversion: 1.2.3\nsshd:\n  enabled: true\nidle:\n  timeout: 5m0s\n  workinghours: 08:00-20:00\n")
@@ -145,8 +125,6 @@ func testDoctorInRuntimeSyncConfigRealRunReconcilesAndPreserves(t *testing.T) {
 }
 
 func testDoctorInRuntimeSyncConfigRealRunIdempotent(t *testing.T) {
-	// After a real reconcile, a second --sync-config run round-trips to
-	// in-sync with zero drift — no perpetual-drift loop.
 	setup := env.New(t)
 	seedRuntimeEnvConfig(t, setup, "team", "dev",
 		"name: dev\ntype: runtime\nkubernetescontext: stale-context\nidle:\n  timeout: 5m0s\n  workinghours: 08:00-20:00\n")
@@ -166,8 +144,7 @@ func testDoctorInRuntimeSyncConfigRealRunIdempotent(t *testing.T) {
 	}
 }
 
-// seedRuntimeEnvConfig mirrors what the entrypoint would have written on disk so
-// the --sync-config scenarios can drive reconciliation.
+// seedRuntimeEnvConfig writes the config the entrypoint would have written.
 func seedRuntimeEnvConfig(t *testing.T, setup env.Setup, tenant, environment, envYAML string) {
 	t.Helper()
 	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)

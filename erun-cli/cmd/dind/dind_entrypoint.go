@@ -6,9 +6,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewDindEntrypointCmd is the erun-dind sidecar's entrypoint. The runtime
-// chart's prepare-volumes init container copies this binary into a volume the
-// sidecar mounts, because the stock docker:dind image carries no erun.
+// NewDindEntrypointCmd is the erun-dind sidecar's entrypoint; an init container
+// copies this binary in because docker:dind carries no erun.
 func NewDindEntrypointCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dind-entrypoint [-- DOCKERD_ARGS...]",

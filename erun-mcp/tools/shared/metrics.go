@@ -7,10 +7,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// MetricsRecorder owns the five series metrics-spec.md documents plus the
-// in-process counter the traffic-window gauge samples from. Every method has
-// a nil-receiver no-op so callers (guardTool, the HTTP middleware, the
-// tickers) never need a "is metrics enabled" branch of their own.
+// MetricsRecorder owns the metrics-spec.md series; every method is a nil-receiver no-op.
 type MetricsRecorder struct {
 	Registry *prometheus.Registry
 
@@ -69,13 +66,8 @@ func (r *MetricsRecorder) AddMCPBytes(n int64) {
 	r.McpBytesSeen.Add(n)
 }
 
-// mcpCallResultLabel derives the `result` label from a tool handler's own
-// outcome. err is authoritative for "error". Absent an error, most delivery
-// tools (build, push, deploy, doctor, pin, terraform, ...) return a
-// CommandOutput-shaped struct whose Executed field is already the tool's own
-// preview/dry-run signal (runRuntimeCommand sets it false under DryRun); a
-// read-only tool with no such field (idle, list, version, usage) has no
-// preview concept, so it is always "success" once err is nil.
+// mcpCallResultLabel uses err for "error", else a CommandOutput's Executed flag for
+// preview; tools without that field are always "success".
 func mcpCallResultLabel(out any, err error) string {
 	if err != nil {
 		return "error"

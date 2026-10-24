@@ -7,15 +7,8 @@ import { beginLogin } from '../auth/auth';
 import { CONFIGURE_OIDC_DOCS_PATH, PUBLIC_DOCS_URL } from './landingContent';
 import { LandingHeroVisual } from './LandingHeroVisual';
 
-// The hero carries the pitch and both calls to action. Sign in stays the
-// primary button so an existing user's path is exactly as short as the old
-// bare card's — "Read the docs" is the secondary action a first-time visitor
-// takes instead, and it renders only when platform discovery actually
-// supplied a docs host: never a hardcoded fallback host. The
-// two-column split at `lg` (copy left, product visual right) is what keeps
-// the section from reading as a near-empty full-viewport banner, and what
-// constrains the headline's measure so a long instance tagline still reads
-// in a handful of lines instead of wrapping the width of the whole page.
+// Read the docs renders only when discovery supplied a docs host; never a
+// hardcoded fallback.
 export function LandingHero({
   tagline,
   description,
@@ -33,10 +26,8 @@ export function LandingHero({
   const docsBase = docsUrl !== undefined && docsUrl.length > 0 ? docsUrl : PUBLIC_DOCS_URL;
   const configureOidcHref = `${docsBase}${CONFIGURE_OIDC_DOCS_PATH}`;
   return (
-    // The hero visual's decorative glow bleeds 2rem past its own box; below
-    // ~504px that exceeds the section padding and widens the scroll region.
-    // Clip it here with `clip` rather than `hidden`: clip creates no scroll
-    // container, so focusing the CTAs below cannot scroll this section.
+    // The visual's glow bleeds 2rem past its box; `clip` (not `hidden`) avoids
+    // a scroll container so focusing the CTAs cannot scroll this section.
     <section className="overflow-x-clip border-b border-border bg-gradient-to-b from-muted/40 to-background px-6 py-12 sm:py-16">
       <div className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-2 lg:items-center lg:gap-16">
         <div className="flex flex-col items-center gap-6 text-center motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-4 motion-safe:duration-700 motion-safe:fill-mode-both lg:items-start lg:text-left">

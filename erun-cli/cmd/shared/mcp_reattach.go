@@ -10,19 +10,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// mcpChannelReattachTimeout bounds an automatic reattach. `erun open
-// --reconnect` only re-establishes port-forwards against an already-running
-// deployment (see common.DecideRuntimeWake) -- no cluster bootstrap, no image
-// pull -- so this only needs to cover a kubectl port-forward dial plus a
-// deployment-ready check, not a cold start.
+// mcpChannelReattachTimeout covers a port-forward dial plus readiness check, not a cold start.
 const mcpChannelReattachTimeout = 60 * time.Second
 
-// ReattachEnvironmentMCPChannel re-establishes a dropped or stale MCP
-// port-forward the same way `erun open <tenant> <environment> --reconnect`
-// does, so an automatic caller (job status, job await, mcp call) can recover
-// from a channel drop without the trap a naive retry loop falls into: a bare
-// `erun open` would silently start an environment the operator deliberately
-// stopped and clear the recorded stop, where --reconnect refuses instead.
+// ReattachEnvironmentMCPChannel runs the `erun open --reconnect` path, which refuses
+// rather than restarting a deliberately stopped environment.
 func ReattachEnvironmentMCPChannel(commandCtx core.Context, tenant, environment string) error {
 	executable, err := ErunExecutablePath()
 	if err != nil {

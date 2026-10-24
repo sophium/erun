@@ -59,8 +59,6 @@ func TestFindOrphanedSSHAliasesDoesNotReportABlockAnEnvironmentStillClaims(t *te
 	if orphans := lifecycle.FindOrphanedSSHAliases(entries, environments); len(orphans) != 0 {
 		t.Fatalf("a claimed alias is not stale, got %+v", orphans)
 	}
-	// And with nothing configured at all, every erun block is stale -- the
-	// environment whose block it was is gone.
 	if orphans := lifecycle.FindOrphanedSSHAliases(entries, nil); len(orphans) != 1 {
 		t.Fatalf("with no environments every erun block is stale, got %+v", orphans)
 	}

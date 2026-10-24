@@ -12,14 +12,11 @@ func withOrchestratorConfigHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", home)
-	// macOS resolves UserConfigDir from HOME rather than XDG_CONFIG_HOME.
+	// macOS resolves UserConfigDir from HOME.
 	t.Setenv("HOME", home)
 	return home
 }
 
-// Each orchestrator gets its own directory: they share one workspace, so a
-// shared outputs directory would show every orchestrator every other one's
-// files.
 func TestOrchestratorOutputsDirIsPerOrchestrator(t *testing.T) {
 	withOrchestratorConfigHome(t)
 
@@ -37,15 +34,11 @@ func TestOrchestratorOutputsDirIsPerOrchestrator(t *testing.T) {
 	if _, err := orchestratorOutputsDir("  "); err == nil {
 		t.Fatal("an empty orchestrator id has no directory")
 	}
-	// The id reaches a filesystem path, so it must not be able to steer it.
 	if _, err := orchestratorOutputsDir("../elsewhere"); err == nil {
 		t.Fatal("an id that is not a single path segment must be refused")
 	}
 }
 
-// The dialog reads this list, so a not-yet-used orchestrator has to report an
-// empty directory rather than an error — "nothing here yet" is the normal
-// starting state, not a fault.
 func TestListOrchestratorOutputsReportsNewestFirstAndToleratesNothingYet(t *testing.T) {
 	withOrchestratorConfigHome(t)
 	app := &App{}
@@ -83,9 +76,6 @@ func TestListOrchestratorOutputsReportsNewestFirstAndToleratesNothingYet(t *test
 	}
 }
 
-// The name reaches the filesystem, so an entry that climbs out of the outputs
-// directory has to be refused rather than resolved — the dialog must not become
-// a way to read or run the rest of the host.
 func TestOrchestratorOutputsRefuseNamesOutsideTheDirectory(t *testing.T) {
 	withOrchestratorConfigHome(t)
 	app := &App{}
@@ -103,8 +93,6 @@ func TestOrchestratorOutputsRefuseNamesOutsideTheDirectory(t *testing.T) {
 	}
 }
 
-// Running an output is running a host-native binary the orchestrator produced,
-// so it goes through the same launcher the environment artifacts use.
 func TestRunOrchestratorOutputOnHostLaunchesTheProducedFile(t *testing.T) {
 	withOrchestratorConfigHome(t)
 	dir, err := ensureOrchestratorOutputsDir("erun")

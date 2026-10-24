@@ -1,12 +1,4 @@
-// RTK Query endpoints for the job queue: what agents and orchestrators are
-// working on right now, and what they recently finished. A job is recorded
-// *before* the work starts, which is the half builds do not
-// have -- they report outcomes after the fact.
-//
-// Read-only on purpose. The queue is written by the actor doing the work
-// (`erun job` / the MCP job tools), the same self-report shape as
-// POST /v1/reviews/{review_id}/builds: an operator's part is watching the
-// queue, not editing someone else's row.
+// Read-only job queue endpoints; jobs are written by the actor doing the work.
 import { asOptionalString, asString, isRecord, parseList } from 'erun-kit';
 
 import { platformApi } from './platformApi';
@@ -29,10 +21,7 @@ const KNOWN_JOB_STATUSES: JobStatus[] = [
   'SUPERSEDED',
 ];
 
-// An unrecognised status is preserved as UNKNOWN rather than folded into
-// RUNNING. A status this console does not know about means the platform is
-// ahead of the client, and rendering it as "in progress" would state
-// something definite about a job whose state is exactly what is in doubt.
+// An unknown status stays UNKNOWN rather than RUNNING: the client is behind the platform.
 function asJobStatus(value: unknown): JobStatus {
   const raw = asString(value);
   return (KNOWN_JOB_STATUSES as string[]).includes(raw) ? (raw as JobStatus) : 'UNKNOWN';
@@ -40,12 +29,10 @@ function asJobStatus(value: unknown): JobStatus {
 
 export interface Job {
   jobId: string;
-  // environmentId is absent for host-side orchestrator work that never enters
-  // an environment -- a real case, not a gap.
+  // Absent for host-side orchestrator work.
   environmentId?: string;
   jobType: string;
-  // issueRef is the issue this work belongs to, in owner/repo#number form,
-  // absent when the work is not issue-driven.
+  // owner/repo#number.
   issueRef?: string;
   summary: string;
   status: JobStatus;
@@ -84,9 +71,6 @@ export interface JobFilter {
   actorId?: string;
 }
 
-// queryString omits an absent or empty filter rather than sending it as an
-// empty value: the server treats an absent filter as "no narrowing", and a
-// blank one would have to mean the same thing for no gain.
 function queryString(filter: JobFilter): string {
   const params = new URLSearchParams();
   const candidates: [string, string | undefined][] = [
@@ -107,8 +91,6 @@ function queryString(filter: JobFilter): string {
 
 export const jobsApi = platformApi.injectEndpoints({
   endpoints: (builder) => ({
-    // listJobs reads the caller's own tenant's queue, RUNNING first -- the
-    // console's counterpart to `erun job list`.
     listJobs: builder.query<Job[], { token: string; filter?: JobFilter }>({
       query: ({ token, filter }) => ({
         url: `/v1/jobs${queryString(filter ?? {})}`,

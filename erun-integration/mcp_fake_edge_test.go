@@ -14,16 +14,11 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
-// The MCP edge scenarios pin the env's local port range to 26100 (same rule as
-// the real-run open scenarios) so the fake edge never collides with a
-// developer's live erun session on the default 17000 range.
+// Off the default 17000 range so the fake edge never collides with a live session.
 const mcpEdgeLocalPort = 26100
 
-// startSilentPortForward binds port and holds every connection open without
-// ever answering it — a stale kubectl port-forward, as opposed to nothing
-// listening at all (dial refused) or an edge that answers with an error. Every
-// held connection is closed together on cleanup, once the listener itself
-// closes and the accept loop's deferred closes run.
+// startSilentPortForward accepts connections and never answers, like a stale
+// kubectl port-forward.
 func startSilentPortForward(t *testing.T, port int) {
 	t.Helper()
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
@@ -42,11 +37,8 @@ func startSilentPortForward(t *testing.T, port int) {
 	}()
 }
 
-// startDroppingPortForward binds port and closes every connection it accepts
-// without writing a reply — a forward that is up whose target never took the
-// call, which is what a pod mid-roll behind a working forward looks like from
-// the local side. It is the shape that must not be reported as a stale
-// forward: nothing about the tunnel is wrong.
+// startDroppingPortForward closes every connection unanswered, like a working
+// forward to a pod mid-roll.
 func startDroppingPortForward(t *testing.T, port int) {
 	t.Helper()
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
@@ -65,44 +57,21 @@ func startDroppingPortForward(t *testing.T, port int) {
 	}()
 }
 
-// fakeMCPEdge stands in for the per-env erun-mcp server: it speaks the
-// streamable-HTTP handshake (initialize, then a 202 for the initialized
-// notification, then the call) and records what each request carried, so a
-// scenario can assert the client minted a bearer and propagated the session id.
+// fakeMCPEdge stands in for the per-env erun-mcp server and records each request.
 type fakeMCPEdge struct {
-	// SSE frames replies as an event stream instead of a plain JSON body; the
-	// edge does one or the other depending on how it was configured, so both
-	// framings must round-trip.
-	SSE bool
-	// Status, when set, answers every POST with that status instead of a reply.
+	// SSE frames replies as an event stream instead of a JSON body.
+	SSE    bool
 	Status int
-	// AcceptEverything answers even a request carrying an id with a bodyless 202,
-	// the protocol anomaly that leaves a client waiting on a reply that is never
-	// coming.
+	// AcceptEverything answers even requests with an id with a bodyless 202.
 	AcceptEverything bool
-	// Results maps a JSON-RPC method to the raw JSON result it answers with.
-	Results map[string]string
-	// ToolResults maps a tools/call tool name to the raw JSON result it answers
-	// with, taking precedence over Results["tools/call"] for that tool. Use it
-	// when one scenario's command makes more than one tools/call round trip to
-	// different tools and each needs its own canned answer (e.g. starting a
-	// background job, then reading its status back).
+	Results          map[string]string
+	// ToolResults overrides Results["tools/call"] per tool name.
 	ToolResults map[string]string
-	// RPCErrors maps a JSON-RPC method to a raw JSON-RPC error object, the
-	// protocol-level failure a tool-level isError does not cover.
-	RPCErrors map[string]string
-	// ForgetSessionOnce answers 404 for the first request carrying a session id,
-	// the way an edge that restarted inside a still-running pod does; the next
-	// handshake hands out a live session again.
-	ForgetSessionOnce bool
-	// ForgetSessionAlways never accepts a session id, so a client that keeps
-	// re-handshaking would loop forever.
+	RPCErrors   map[string]string
+	// ForgetSessionOnce 404s the first request with a session id, like a restarted edge.
+	ForgetSessionOnce   bool
 	ForgetSessionAlways bool
-	// DropFirstRequest, when set, closes the raw connection for the very first
-	// request without answering it at all — a connection that was accepted and
-	// then cut, the shape a flapping local port-forward leaves an in-flight
-	// request in (as opposed to AcceptEverything, which answers but with an
-	// empty envelope).
+	// DropFirstRequest closes the first connection without answering.
 	DropFirstRequest bool
 
 	mu         sync.Mutex
@@ -116,17 +85,10 @@ type fakeMCPRequest struct {
 	Method     string
 	Authbearer string
 	SessionID  string
-	// Tool is the tool a tools/call named, which is what proves a caller reached
-	// the intended surface rather than some other one.
-	Tool string
-	// Arguments is the tools/call arguments object the caller actually sent, so
-	// a scenario can assert what a host-side command forwarded into the payload
-	// (e.g. that it restated the tenant/environment it already resolved) rather
-	// than only that a call reached the edge at all.
-	Arguments map[string]any
-	// IdleProbe reports whether the request carried the header that exempts it
-	// from the environment's activity accounting — set by a diagnostic read, and
-	// never by a call that can mutate the environment.
+	Tool       string
+	Arguments  map[string]any
+	// IdleProbe reports the activity-exempt header, which only diagnostic reads
+	// may set, never a call that can mutate the environment.
 	IdleProbe bool
 }
 
@@ -143,7 +105,6 @@ func (e *fakeMCPEdge) start(t *testing.T, port int) {
 	t.Cleanup(server.Close)
 }
 
-// fakeMCPRPCRequest is the slice of a JSON-RPC request the fake edge reads.
 type fakeMCPRPCRequest struct {
 	ID     json.RawMessage `json:"id"`
 	Method string          `json:"method"`
@@ -223,8 +184,7 @@ func (e *fakeMCPEdge) reply(request fakeMCPRPCRequest) string {
 func (e *fakeMCPEdge) writeReply(w http.ResponseWriter, reply string) {
 	if e.SSE {
 		w.Header().Set("Content-Type", "text/event-stream")
-		// A progress notification ahead of the reply proves the client skips
-		// non-reply events instead of failing on the first data line.
+		// A progress event first proves the client skips non-reply events.
 		_, _ = fmt.Fprintf(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}\n\n")
 		_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", reply)
 		return
@@ -262,9 +222,7 @@ func (e *fakeMCPEdge) newSession() {
 	e.handshakes++
 }
 
-// The first handshake keeps the historical id so the scenarios that only ever
-// shake hands once stay readable; a later one hands out a distinct id, which is
-// how a replay can be told apart from a request on the dead session.
+// Later handshakes get distinct ids so a replay is distinguishable from the dead session.
 func (e *fakeMCPEdge) sessionID() string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -274,9 +232,6 @@ func (e *fakeMCPEdge) sessionID() string {
 	return "test-session"
 }
 
-// requestsFor returns every recorded request for a method in arrival order, so a
-// scenario can prove a recovery cost exactly one extra handshake and that the
-// replay went out on the new session.
 func (e *fakeMCPEdge) requestsFor(method string) []fakeMCPRequest {
 	matched := make([]fakeMCPRequest, 0, 2)
 	for _, request := range e.recorded() {
@@ -293,8 +248,6 @@ func (e *fakeMCPEdge) recorded() []fakeMCPRequest {
 	return append([]fakeMCPRequest(nil), e.requests...)
 }
 
-// requestFor returns the recorded request for a method, failing the scenario when
-// the client never sent it.
 func (e *fakeMCPEdge) requestFor(t *testing.T, method string) fakeMCPRequest {
 	t.Helper()
 	for _, request := range e.recorded() {
@@ -306,11 +259,8 @@ func (e *fakeMCPEdge) requestFor(t *testing.T, method string) fakeMCPRequest {
 	return fakeMCPRequest{}
 }
 
-// assertToolArgumentsNameTarget asserts a tools/call request restated the
-// tenant/environment the host already resolved to reach this edge, rather
-// than leaving the tool to infer them from the server's own bound context.
-// Every off-environment idle/job/activity-lease call must carry
-// its own tenant/environment on the wire.
+// assertToolArgumentsNameTarget asserts the call restated tenant/environment
+// rather than relying on the server's bound context.
 func assertToolArgumentsNameTarget(t *testing.T, request fakeMCPRequest, tenant, environment string) {
 	t.Helper()
 	if got, _ := request.Arguments["tenant"].(string); got != tenant {

@@ -96,10 +96,7 @@ func runE2ECommand(ctx core.Context, resolveOpen shared.OpenResolver, params sha
 	return err
 }
 
-// resolveE2ETarget resolves the environment the suites run against. With
-// --base-url and --version and no --tenant/--environment the URL and version
-// name the target entirely, so no environment is resolved at all: a machine
-// with no tenant configured can still run the suites against, say, production.
+// resolveE2ETarget resolves no environment when --base-url and --version name the target.
 func resolveE2ETarget(resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, targetNamed bool, baseURL, version string) (e2e.E2ETarget, error) {
 	if !targetNamed && strings.TrimSpace(baseURL) != "" && strings.TrimSpace(version) != "" {
 		return e2e.E2ETarget{}, nil

@@ -14,31 +14,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The job verbs start long work in an environment and observe it by handle. The
-// work, its log, and the activity lease that keeps idle-stop off it all live in
-// the environment: inside it these act on its store directly, and anywhere else
-// they go to its own edge. What none of them re-implement is detachment, log
-// redirection, polling, or exit-status capture around a general-purpose escape
-// hatch, because every one of those is a place to get it wrong.
+// Job verbs act on the environment's own store inside it, and through its edge elsewhere.
 
 const (
-	// jobAwaitTimeoutExitCode is the bounded wait elapsing with the work still
-	// running. It is deliberately not 1: a caller that cannot tell "not finished
-	// yet" from "failed" is the exact defect this surface closes, and 124 is what
-	// timeout(1) has always meant.
+	// jobAwaitTimeoutExitCode means still running; 124 matches timeout(1).
 	jobAwaitTimeoutExitCode = 124
-	// jobAwaitUnknownExitCode is a job whose outcome was never recorded. Distinct
-	// again, because "we do not know" must never be actioned as "it failed" or as
-	// "it worked".
+	// jobAwaitUnknownExitCode means no outcome was recorded; never treat it as pass or fail.
 	jobAwaitUnknownExitCode = 125
 )
 
-// newJobCmd builds the job verb tree, shared by its canonical mount point
-// (`erun exec job`, alongside newJobSuperviseCmd) and its deprecated
-// top-level alias (`erun job`, kept for one release). supervise is not
-// included here: it is Hidden and only ever re-exec'd by StartEnvironmentJob
-// at the argv erun-common's environmentJobSupervisorArgs builds, which always
-// names the canonical path -- so the alias mount never needs its own copy.
+// newJobCmd builds the job verbs for `erun exec job` and the deprecated `erun job`.
+// supervise is excluded: it is only re-exec'd at the canonical path.
 func newJobCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "job",
@@ -65,19 +51,13 @@ func newJobCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-// DeprecatedTopLevelJobCmd mounts the same verb tree at the top level for one
-// release: `erun job <verb>` keeps working, with Cobra's own deprecation notice pointing callers
-// at `erun exec job <verb>` before this alias is removed.
+// DeprecatedTopLevelJobCmd mounts the job verbs as `erun job` for one release.
 func DeprecatedTopLevelJobCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	cmd := newJobCmd(resolveOpen)
 	cmd.Deprecated = "use `erun exec job` instead; this command will be removed in a future release"
 	return cmd
 }
 
-// jobStartLongHelp is `erun exec job start`'s own help body, kept beside the
-// command rather than inside its constructor: it is the longest single piece
-// of user-facing text in this file, and inlining it buried the command's
-// actual wiring under it.
 const jobStartLongHelp = "The command keeps running after this call returns and after the caller's\n" +
 	"connection drops: erun gives it its own session and captures its merged\n" +
 	"stdout and stderr to the job's log, so nothing has to be wrapped in setsid,\n" +
@@ -197,9 +177,7 @@ func newJobStartCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-// parseJobEnvFlags turns repeated --env KEY=VALUE flag values into a map. It
-// only splits the flag's own shape; StartEnvironmentJobParams.normalize (and,
-// server-side, the supervisor itself) is what actually validates each name.
+// parseJobEnvFlags only splits KEY=VALUE; names are validated downstream.
 func parseJobEnvFlags(pairs []string) (map[string]string, error) {
 	var out map[string]string
 	if len(pairs) > 0 {
@@ -224,8 +202,6 @@ func runJobStart(cmd *cobra.Command, resolveOpen shared.OpenResolver, params job
 	if err != nil {
 		return err
 	}
-	// A dry run resolved a plan and started nothing, so it says nothing about a
-	// job having started; the trace above is the whole answer.
 	if !resolved {
 		return nil
 	}
@@ -241,8 +217,7 @@ func startJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.O
 	if !shared.EnvironmentTargetsItself() {
 		return startJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
-	// The CLI binary is the supervisor: an already-resolved absolute path, so a
-	// job never depends on what the caller's PATH happens to hold.
+	// An absolute supervisor path keeps the job independent of the caller's PATH.
 	supervisor, err := shared.ErunExecutablePath()
 	if err != nil {
 		return sharedpkg.EnvironmentJob{}, false, err
@@ -327,13 +302,8 @@ func attachJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.
 	return job, !commandCtx.DryRun, nil
 }
 
-// newJobSuperviseCmd is the process a started job actually runs as. It is the
-// only writer of a job record, because it is the only thing waiting on the work
-// and therefore the only thing that can observe an exit status first-hand. It
-// always runs where the work runs, so it never reaches for an environment's edge.
-// Hidden: nothing invokes it directly. It is only ever re-exec'd by
-// jobspkg.StartEnvironmentJob, which always re-execs it
-// at `exec job supervise` regardless of which entry point started the job.
+// newJobSuperviseCmd is the process a started job runs as, and the only writer of
+// its record since only it observes the exit status.
 func newJobSuperviseCmd() *cobra.Command {
 	var tenant string
 	var environment string

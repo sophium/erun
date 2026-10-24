@@ -12,66 +12,27 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// build_report.go lets an ordinary `erun build` self-report its own outcome
-// to the erun platform, so a build no longer needs a review to exist
-// anywhere. Every existing platform command in this module
-// (review_commands.go, platform_commands.go) treats a missing/broken alias
-// or an unreachable platform as a hard, propagated error, because a human
-// asked for that specific call. This is the opposite contract on purpose:
-// `erun build` runs constantly, in every environment, most of which have no
-// platform alias configured at all, and a build must never fail -- or even
-// change its own output -- because reporting is unavailable.
+// Build reporting is best-effort: most environments have no platform alias, and a build must
+// never fail or change its output because reporting is unavailable.
 
-// buildReportTimeout bounds the network calls this file makes (resolving the
-// platform environment id, then reporting the build) so an unreachable
-// platform cannot hang a build indefinitely. It does not bound the token
-// mint a request triggers first when no cached access token exists (that
-// gap is shared by every existing platform command in this module, none of
-// which impose a deadline on CloudProviderBearerToken's own refresh call;
-// fixing it is a separate change to cloud.go, not specific to build
-// reporting).
+// buildReportTimeout bounds the reporting network calls; it does not bound a token refresh.
 const buildReportTimeout = 20 * time.Second
 
-// ReportBuildOutcomeParams carries what one `erun build` run knows about
-// itself when it finishes. The commit is deliberately not a field here:
-// resolving it runs a `git rev-parse` that traces unconditionally
-// (gitResolvedRef), so ReportBuildOutcome only resolves it once it has
-// already confirmed a platform alias exists to report to -- resolving it
-// eagerly, before that check, would add a trace line to every build that
-// has no platform alias configured at all, breaking the "no alias means zero
-// behavior change" contract this file exists to hold.
+// ReportBuildOutcomeParams carries one build's outcome. The commit is resolved only after an
+// alias is confirmed, since rev-parse traces and no-alias builds must not change output.
 type ReportBuildOutcomeParams struct {
-	// ProjectRoot is where build ran `git rev-parse HEAD` from; empty skips
-	// commit resolution (e.g. no git repository), same as ResolveDockerBuildProjectRoot's
-	// own "no repo" case.
+	// ProjectRoot is where to run `git rev-parse HEAD`; empty skips commit resolution.
 	ProjectRoot string
-	// Environment is the local env name build already resolved (see
-	// ResolveDockerBuildEnvConfig) -- empty when build could not resolve one,
-	// in which case there is nothing to report against and this is skipped
-	// the same as having no alias.
+	// Environment is the resolved local env name; empty skips reporting.
 	Environment   string
 	Version       string
 	Successful    bool
 	FailureDetail string
-	// Profile is the bounded per-step profile this build collected, when the
-	// caller has one -- nil for a build that collected none (see
-	// build_profile_summary.go).
-	Profile *core.BuildProfileSummary
+	Profile       *core.BuildProfileSummary
 }
 
-// ReportBuildOutcome self-reports build's outcome to the erun platform,
-// best-effort. It returns nothing and never fails the caller's build:
-//   - No alias configured at all (the overwhelming majority of invocations)
-//     degrades completely silently -- no trace line, no network call, zero
-//     behavior change from before this feature existed.
-//   - Any other reason reporting cannot complete (ambiguous alias, missing
-//     environment, an environment not registered on the platform, the
-//     platform unreachable or slow) is a recorded skip: traced, never
-//     silent, but never propagated as a build failure either.
-//
-// Traces the intended call before checking ctx.DryRun, the same contract
-// tracePlatformCall's other callers already use, so --dry-run shows the
-// attempt without making it.
+// ReportBuildOutcome self-reports the build outcome, best-effort, never failing the build.
+// No alias is silent with no network call; any other failure is a traced skip.
 func ReportBuildOutcome(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies, params ReportBuildOutcomeParams) {
 	if !cloud.HasAnyErunPlatformAlias(store) {
 		return
@@ -106,11 +67,7 @@ func ReportBuildOutcome(ctx core.Context, store config.CloudReadStore, deps clou
 	ctx.Trace("build reported to erun platform: " + created.BuildID)
 }
 
-// resolveBuildReportCommitID reads the full commit hash `erun build` ran
-// against. An empty ProjectRoot (no git repository) or an empty result from
-// `git rev-parse` (same case, seen through gitResolvedRef's own ok flag) both
-// report no commit rather than an error -- only a real git failure is an
-// error here.
+// resolveBuildReportCommitID returns "" when there is no repository; only a real git failure errors.
 func resolveBuildReportCommitID(ctx core.Context, projectRoot string) (string, error) {
 	if strings.TrimSpace(projectRoot) == "" {
 		return "", nil
@@ -130,9 +87,6 @@ func buildReportTraceDetails(params ReportBuildOutcomeParams, commitID string) [
 	return details
 }
 
-// createUnattachedBuildReport resolves the platform's environment id and
-// reports the build against it, both network calls bounded by
-// buildReportTimeout.
 func createUnattachedBuildReport(client *platformclient.PlatformClient, params ReportBuildOutcomeParams, commitID string) (platformclient.PlatformBuild, error) {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), buildReportTimeout)
 	defer cancel()

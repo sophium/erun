@@ -12,17 +12,13 @@ type DockerImageReference struct {
 	Registry    string
 	ImageName   string
 	Version     string
-	// BaseVersion is the stable semver without the snapshot suffix, set only for
-	// local snapshot builds where it differs from Version. It exists so downstream
-	// images (FROM …:${ERUN_VERSION}) resolve from the local Docker cache instead
-	// of the registry.
+	// BaseVersion is the non-snapshot version for local snapshot builds, so
+	// FROM …:${ERUN_VERSION} resolves from the local cache.
 	BaseVersion         string
 	Tag                 string
 	VersionFilePath     string
 	VersionFromBuildDir bool
-	// Insecure marks Registry as plain HTTP (a cluster registry with
-	// `insecure: true`). `docker manifest` never consults the daemon's
-	// insecure-registry list, so anything that shells out to it for this
-	// image must pass its own `--insecure` explicitly.
+	// Insecure marks Registry as plain HTTP; `docker manifest` ignores the daemon's
+	// insecure list, so callers must pass --insecure themselves.
 	Insecure bool
 }

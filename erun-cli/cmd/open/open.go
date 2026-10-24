@@ -18,16 +18,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// refuseOpenForHostEnvironment refuses `open` against a host env: it has no
-// pod and no cluster to open a kubectl-exec shell into. Its worktree is
-// already the operator's own directory, so the resolution here is to open
-// that directory directly rather than through erun. Checked against
-// ResolvedType rather than the broader !HasPod() so a legacy env with an
-// unresolved type (ResolvedType == "", see EnvConfig docs) keeps opening
-// exactly as it did before host existed, instead of being misreported as a
-// host environment it never was. Checked before any other open side effect
-// (persisting the local port range, ensuring the kubernetes context) so a
-// refusal never partially applies one.
+// refuseOpenForHostEnvironment refuses a host env before any side effect. It checks
+// ResolvedType, not !HasPod(), so legacy untyped envs keep opening.
 func refuseOpenForHostEnvironment(result config.OpenResult) error {
 	if result.EnvConfig.ResolvedType() != config.EnvironmentTypeHost {
 		return nil
@@ -35,11 +27,7 @@ func refuseOpenForHostEnvironment(result config.OpenResult) error {
 	return fmt.Errorf("open %s/%s: %s is a host environment — it has no pod and no cluster to open a shell into; its worktree is already %s, so open that directory directly", result.Tenant, result.Environment, result.Environment, result.RepoPath)
 }
 
-// resolveOpenTarget runs the resolution chain that must complete before a
-// runtime can be opened: flag validation, parameter resolution, the init
-// hand-off, the host-environment refusal, and persisting the local port range.
-// done reports that init already handled the request, so the caller returns
-// without opening anything.
+// resolveOpenTarget resolves everything needed before opening; done means init handled it.
 func resolveOpenTarget(
 	ctx core.Context,
 	args []string,
@@ -134,8 +122,7 @@ func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func
 				AI:               aiTab,
 				Contribute:       contributeTab,
 				Reconnect:        reconnect,
-				// A --version or --runtime-image override also implies a deploy:
-				// pinning a version is only meaningful if it rolls out.
+				// Pinning a version only means something if it rolls out.
 				Deploy: deployRuntime || strings.TrimSpace(versionOverride) != "" || strings.TrimSpace(runtimeImage) != "",
 			}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateAPI, activateSSHD, launchVSCode, launchIntelliJ)
 		},
@@ -150,10 +137,7 @@ func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func
 	cmd.Flags().BoolVar(&intellij, "intellij", false, "Open the remote environment in IntelliJ IDEA instead of a shell")
 	cmd.Flags().StringVar(&versionOverride, "version", "", "Override the runtime chart and image version before opening")
 	cmd.Flags().StringVar(&runtimeImage, "runtime-image", "", "Override the runtime image repository before opening")
-	// Desktop-integration flags: the app runs the remote shell as a persistent,
-	// reattachable session so closing and reopening a tab reconnects to the
-	// running shell. Hidden because they only make sense when the desktop
-	// manages the session lifecycle.
+	// Hidden desktop-integration flags for reattachable sessions.
 	cmd.Flags().StringVar(&appSession, "app-session", "", "Reattach to a persistent terminal session with this id")
 	cmd.Flags().BoolVar(&aiTab, "ai", false, "Launch the configured AI tool as the persistent session's program")
 	cmd.Flags().BoolVar(&contributeTab, "contribute", false, "Start the persistent session in the contribute clone")
@@ -265,10 +249,8 @@ func (r *resolvedOpenRunner) run() error {
 	shellReq.AppSession = r.options.AppSession
 	shellReq.AI = r.options.AI
 	shellReq.Contribute = r.options.Contribute
-	// Opening an environment means running it, so drop any recorded stop before
-	// the chart is rendered: a deploy that still saw the flag would re-apply
-	// replicas: 0 and the wake below would have to undo its own rollout. A
-	// reconnect makes no such statement — see clearStopIntent.
+	// Clear any recorded stop before rendering, or the deploy re-applies replicas: 0.
+	// A reconnect does not; see clearStopIntent.
 	if err := r.clearStopIntent(); err != nil {
 		return err
 	}
@@ -292,20 +274,8 @@ func (r *resolvedOpenRunner) run() error {
 	return r.runShellLoop(shellReq)
 }
 
-// emitNoShellFallbackIfNeeded handles --no-shell and the non-interactive
-// fallback (an MCP client, an orchestrator, a script — kubectl exec -it
-// would read EOF on a non-TTY stdin and return almost instantly). done
-// reports whether the caller should return immediately; err may be nil on
-// the plain setup-emitted success path.
-//
-// The two branches treat an unreachable forward differently on purpose.
-// --no-shell is an explicit request for the forwards alone, so one that
-// stayed unreachable must fail the run rather than read as success (root
-// AGENTS.md § "Smooth, Seamless, No Dead Ends"). The non-TTY fallback is
-// reached by callers that asked for none of this — a script or an MCP
-// client that simply has no terminal — and the forwards are a laptop-side
-// convenience for them, not the deliverable, so a degraded one is traced
-// and the run still succeeds.
+// emitNoShellFallbackIfNeeded handles --no-shell and non-TTY callers. --no-shell fails
+// on an unreachable forward (it is the deliverable); the non-TTY fallback only traces it.
 func (r *resolvedOpenRunner) emitNoShellFallbackIfNeeded(forwarderErr error) (done bool, err error) {
 	switch {
 	case r.options.NoShell:
@@ -333,12 +303,8 @@ func openIDEKindLabel(options OpenOptions) string {
 	}
 }
 
-// ensureKubernetesContext runs open's cloud-context preflight, which starts the
-// machine behind a stopped context so the cluster is reachable. A reconnect
-// skips it for the same reason it does not wake the runtime: starting what an
-// operator — or an idle policy — just stopped is not something a reattach gets
-// to decide. The reattach then fails against the unreachable cluster, which is
-// the honest outcome. `erun stop` skips the same preflight, for the same reason.
+// ensureKubernetesContext starts a stopped context's machine; a reconnect skips it,
+// since a reattach must not undo a stop.
 func (r *resolvedOpenRunner) ensureKubernetesContext() error {
 	if r.options.Reconnect {
 		r.ctx.Trace("open: --reconnect, so a stopped cloud context is left stopped rather than started to reach it")
@@ -371,14 +337,8 @@ func (r *resolvedOpenRunner) validateIDEOptions() error {
 	return nil
 }
 
-// refreshHostCredentials re-injects the operator's short-lived AWS credentials
-// at the moment they declare they are about to use the env. Nothing else renews
-// them, so a long-lived environment silently loses AWS access mid-session and
-// the failure surfaces layers away as an unrelated image-pull error. It writes
-// into the pod's credentials file, so it has to run after the runtime is awake —
-// a stopped environment has nothing to write to. Best-effort like the
-// forwarders: a lapsed SSO session degrades the environment but must not block
-// the session being opened.
+// refreshHostCredentials re-injects short-lived AWS credentials into the awake pod.
+// Best-effort: a lapsed SSO session must not block opening.
 func (r *resolvedOpenRunner) refreshHostCredentials() {
 	if !r.result.EnvConfig.HasAWSCloudAlias() {
 		return
@@ -394,24 +354,10 @@ func (r *resolvedOpenRunner) refreshHostCredentials() {
 	r.ctx.Trace(fmt.Sprintf("open: refreshed host AWS credentials for %s into the %s profile", refresh.Alias, refresh.Profile))
 }
 
-// activateForwarders binds the env's laptop-side port-forwards (SSHD, MCP, API).
-// None is a prerequisite for the session being opened: the remote shell/AI
-// session runs in-pod via `kubectl exec` and never uses these forwards — they
-// only back local tooling (the desktop app's panels, `erun api`, `erun mcp`).
-// Every forward is still attempted regardless of an earlier one's failure, and
-// each failure is traced as a warning, so an interactive shell that follows is
-// never aborted by a laptop-side convenience.
-//
-// The returned error carries every failure anyway, because a caller with no
-// shell to fall back on (--no-shell, or the non-TTY fallback) has nothing else
-// to show for the run: the forwards it just attempted are the whole
-// deliverable, and reporting success while one of them stayed unreachable is
-// exactly the "action that succeeds and changes nothing" dead end. run()
-// decides whether that error matters for the branch it is in.
+// activateForwarders attempts every laptop-side port-forward, tracing failures. The
+// returned error matters only when the forwards are the deliverable (no shell).
 func (r *resolvedOpenRunner) activateForwarders() error {
-	// Reclaim before starting anything: this is the moment the forward store
-	// is read and appended to, and the records being removed are the ones no
-	// environment left can reopen.
+	// Reclaim orphaned records before the forward store is read and appended to.
 	shared.ReclaimOrphanedPortForwardRecords(r.ctx)
 	var failures []string
 	if r.activateSSHD != nil && r.result.EnvConfig.SSHD.Enabled {
@@ -495,10 +441,7 @@ func (r *resolvedOpenRunner) runShellLoop(shellReq config.ShellLaunchParams) err
 			continue
 		}
 		if errors.Is(err, open.ErrShellSessionTakenOver) {
-			// Another ERun window re-attached this persistent session; it keeps
-			// running there, so end this viewer cleanly. The notice line is the
-			// desktop's signal to stop its reconnect loop instead of stealing the
-			// session straight back.
+			// Another window took over this session; the notice stops the desktop's reconnect loop.
 			r.ctx.Info(open.ShellSessionTakenOverNotice)
 			return nil
 		}

@@ -10,25 +10,20 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// runtimeInitSignals are the signals the init handles besides the terminating
-// ones: SIGCHLD wakes the reaper, and the user signals are forwarded.
 var runtimeInitSignals = []os.Signal{syscall.SIGCHLD, syscall.SIGUSR1, syscall.SIGUSR2}
 
 func isRuntimeReapSignal(sig os.Signal) bool {
 	return sig == syscall.SIGCHLD
 }
 
-// enableRuntimeSubreaper makes orphans reparent here when this process is not
-// already PID 1, so a run outside a container behaves like one inside.
 func enableRuntimeSubreaper() {
 	if os.Getpid() != 1 {
 		core.EnableEnvironmentJobSubreaper()
 	}
 }
 
-// reapOrphans waits every zombie child this process did not start itself. It
-// holds the supervisor's lock for the sweep, so a process being started is
-// either recorded as owned before the sweep reads it or not started yet.
+// reapOrphans holds the supervisor's lock so a starting process is either owned or not
+// yet started.
 func (s *runtimeSupervisor) reapOrphans() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -59,7 +54,6 @@ func runtimeExitCode(cmd *exec.Cmd, err error) int {
 	return state.ExitCode()
 }
 
-// syncRuntimeFilesystems flushes filesystem buffers before the host powers off.
 func syncRuntimeFilesystems() {
 	syscall.Sync()
 }

@@ -9,49 +9,25 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// ExposedService is one active exposure erun-expose created for an
-// environment: a Host-routing Ingress named "expose-<service>", discovered by
-// listing the env namespace's Ingresses. The Ingress is the source of truth,
-// so there is no separate record to keep in sync with it.
+// ExposedService is one erun-expose Ingress ("expose-<service>"); the Ingress is the source of truth.
 type ExposedService struct {
 	Service  string `json:"service"`
 	Hostname string `json:"hostname"`
 	Scheme   string `json:"scheme"`
-	// BackendService is the in-namespace Service the Ingress routes to, read
-	// from the Ingress rather than derived from Service: the two differ
-	// whenever the chart that rendered the Service is the repo's own.
+	// BackendService is read from the Ingress: a repo-native chart's Service name differs.
 	BackendService string `json:"backendService,omitempty"`
-	// TLSReady is meaningful only when Scheme is "https". cert-manager writes
-	// the Ingress's tls block (and the Secret it names) before issuance
-	// completes, so the block's mere presence -- what Scheme alone reflects --
-	// cannot tell a caller whether opening the URL right now hits a valid
-	// certificate or a warning. TLSReady is true only once the Certificate
-	// backing that Secret has actually reached cert-manager's own Ready
-	// condition.
-	TLSReady bool `json:"tlsReady,omitempty"`
-	// TLSNotReadyReason names why, resolved the same way `erun observe`
-	// resolves it: cert-manager's own Certificate condition, or -- once the
-	// chain is walked -- the deepest CertificateRequest/Order/Challenge reason
-	// available. Empty whenever TLSReady is true or Scheme is "http".
+	// TLSReady is true only once the backing Certificate is Ready; cert-manager writes
+	// the tls block before issuance completes.
+	TLSReady          bool   `json:"tlsReady,omitempty"`
 	TLSNotReadyReason string `json:"tlsNotReadyReason,omitempty"`
 }
 
-// ExposeIngressNamePrefix matches the name resolveExposeServicePlan gives
-// every Ingress RunExposeService applies.
 const ExposeIngressNamePrefix = "expose-"
 
-// ErrListExposedServicesForbidden reports that the caller's Kubernetes
-// credentials are not authorized to list the env namespace's Ingresses or
-// Certificates, so a caller can render a permission-restricted state rather
-// than an empty one.
+// ErrListExposedServicesForbidden reports that RBAC denies listing Ingresses or Certificates.
 var ErrListExposedServicesForbidden = errors.New("list exposed services: forbidden")
 
-// ListExposedServices reports the environment's active exposures by reading
-// its namespace's Ingresses and Certificates and keeping the exposures
-// erun-expose created among the former, each carrying the real TLS
-// readiness of the certificate the latter backs it with -- never inferred
-// from the Ingress carrying a tls block alone, which is true well before
-// issuance actually completes.
+// ListExposedServices reports the environment's erun-expose exposures with real TLS readiness.
 func ListExposedServices(req config.ShellLaunchParams) ([]ExposedService, error) {
 	ingresses, err := FetchObservedIngresses(ObserveGetArgs(req, "ingress"))
 	if err != nil {
@@ -70,9 +46,7 @@ func ListExposedServices(req config.ShellLaunchParams) ([]ExposedService, error)
 	return FilterExposedServices(ingresses, certs), nil
 }
 
-// FilterExposedServices maps observed Ingresses to the exposures erun-expose
-// created among them, split out from ListExposedServices as a pure function so
-// it can be tested without a kubectl process.
+// FilterExposedServices maps observed Ingresses to erun-expose exposures.
 func FilterExposedServices(ingresses []ObservedIngress, certs []ObservedCertificate) []ExposedService {
 	tlsSecretByHost := TlsSecretsByHost(ingresses)
 	certBySecret := certificatesBySecret(certs)
@@ -96,8 +70,7 @@ func FilterExposedServices(ingresses []ObservedIngress, certs []ObservedCertific
 	return services
 }
 
-// TlsSecretsByHost maps each TLS-terminated host to the Secret name its
-// Ingress's tls block names, across every observed Ingress.
+// TlsSecretsByHost maps each TLS-terminated host to its Ingress's TLS Secret name.
 func TlsSecretsByHost(ingresses []ObservedIngress) map[string]string {
 	tlsSecretByHost := make(map[string]string)
 	for _, ing := range ingresses {
@@ -120,10 +93,7 @@ func certificatesBySecret(certs []ObservedCertificate) map[string]ObservedCertif
 	return certBySecret
 }
 
-// tlsReadiness resolves whether the Certificate backing secretName has
-// actually reached Ready, and if not, why -- an absent Certificate (a
-// wildcard cert deleted out from under a still-live Ingress, for instance)
-// reads as not ready with a named reason, never as an assumed success.
+// tlsReadiness reports an absent Certificate as not ready with a reason, never as success.
 func tlsReadiness(secretName string, certBySecret map[string]ObservedCertificate) (ready bool, notReadyReason string) {
 	cert, found := certBySecret[secretName]
 	if !found {
@@ -135,13 +105,8 @@ func tlsReadiness(secretName string, certBySecret map[string]ObservedCertificate
 	return true, ""
 }
 
-// certificateNotReadyReason picks the most specific reason available for why
-// a Certificate has not reached Ready, walking into the
-// CertificateRequest -> Order -> Challenge chain `erun observe` already
-// resolves (populated only when the Certificate itself is not Ready) for the
-// blocker that actually explains a stuck issuance -- such as a webhook
-// solver's RBAC denial -- rather than stopping at the Certificate's own,
-// often generic, top-level condition.
+// certificateNotReadyReason prefers the deepest CertificateRequest/Order/Challenge
+// reason over the Certificate's often generic condition.
 func certificateNotReadyReason(cert ObservedCertificate) string {
 	for _, order := range cert.Orders {
 		for _, challenge := range order.Challenges {

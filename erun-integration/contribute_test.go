@@ -66,8 +66,6 @@ func testContributeCloneDryRunAlreadyPresent(t *testing.T) {
 }
 
 func testContributeCloneDryRunWrongRemote(t *testing.T) {
-	// If ~/git/erun exists but its origin points elsewhere, the command
-	// refuses rather than overwriting the user's checkout.
 	setup := env.New(t)
 	seedExistingContributeClone(t, filepath.Join(setup.Home, "git", "erun"), "git@github.com:other/repo.git")
 	result := erun.Run(t, []string{"contribute", "clone", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -78,8 +76,6 @@ func testContributeCloneDryRunWrongRemote(t *testing.T) {
 }
 
 func testContributeCloneRealRunFreshClonesAndInstallsShim(t *testing.T) {
-	// The installed shim must resolve $HOME at exec time, not bake in the
-	// install-time home, so it works for whoever runs it later.
 	setup := env.New(t)
 	stubs := setup.Cwd + "/stubs"
 	fixture.StubBinary(t, stubs, "git", "")
@@ -99,8 +95,6 @@ func testContributeCloneRealRunFreshClonesAndInstallsShim(t *testing.T) {
 }
 
 func testContributeCloneRealRunAlreadyPresentReinstallsShim(t *testing.T) {
-	// Even when the clone is skipped, the shim is reinstalled on every
-	// invocation so a stale or missing shim heals.
 	setup := env.New(t)
 	seedExistingContributeClone(t, filepath.Join(setup.Home, "git", "erun"), "https://github.com/sophium/erun.git")
 	result := erun.Run(t, []string{"contribute", "clone"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -113,8 +107,6 @@ func testContributeCloneRealRunAlreadyPresentReinstallsShim(t *testing.T) {
 	}
 }
 
-// seedExistingContributeClone stages a local checkout with a chosen origin
-// URL so scenarios can exercise the existing-clone path offline.
 func seedExistingContributeClone(t testing.TB, dir, originURL string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {

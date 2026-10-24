@@ -9,9 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// pinHistoryFileName records what the repo was pinned to before the last
-// re-pin, so reverting is one motion rather than remembering a number. It lives
-// beside the project's erun config because it describes this tree.
+// pinHistoryFileName records the version before the last re-pin, so a revert is one motion.
 const pinHistoryFileName = "pin-history.json"
 
 type pinHistory struct {
@@ -26,9 +24,8 @@ func pinHistoryKey(tenant, environment string) string {
 	return strings.TrimSpace(tenant) + "/" + strings.TrimSpace(environment)
 }
 
-// RecordPinPrevious remembers the version this environment was on before a
-// re-pin. A re-pin that changes nothing does not overwrite the record: reverting
-// twice must still reach the version you came from, not the one you are on.
+// RecordPinPrevious records the version before a re-pin; a no-op re-pin keeps the record so
+// reverting twice still reaches the original version.
 func RecordPinPrevious(projectRoot, tenant, environment, previous string) error {
 	previous = strings.TrimSpace(previous)
 	if previous == "" {
@@ -50,8 +47,7 @@ func RecordPinPrevious(projectRoot, tenant, environment, previous string) error 
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
-// PinPrevious reports the version recorded before the last re-pin, which is what
-// a revert targets.
+// PinPrevious reports the version recorded before the last re-pin.
 func PinPrevious(projectRoot, tenant, environment string) (string, bool) {
 	history := readPinHistory(pinHistoryPath(projectRoot))
 	previous, ok := history.Previous[pinHistoryKey(tenant, environment)]

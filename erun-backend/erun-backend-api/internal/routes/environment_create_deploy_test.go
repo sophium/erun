@@ -11,9 +11,6 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// TestCreateEnvironmentStartsDeployWhenWired: a wired provisioner flips a
-// runtime env with a pinned version from an inline 201 to an async deploy
-// workflow (202 Accepted), threading the tenant name and version to the deploy.
 func TestCreateEnvironmentStartsDeployWhenWired(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{
 		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3",
@@ -33,11 +30,6 @@ func TestCreateEnvironmentStartsDeployWhenWired(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentStartsDeployWithResourceCaps: the tenant's quota row
-// (env count plus the per-environment CPU/memory/storage namespace ceiling)
-// threads through to the provisioner input unchanged, not just the
-// tenant/environment/version coordinates TestCreateEnvironmentStartsDeployWhenWired
-// already locks.
 func TestCreateEnvironmentStartsDeployWithResourceCaps(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{
 		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3",
@@ -69,10 +61,7 @@ func TestCreateEnvironmentStartsDeployWithResourceCaps(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentRejectsQuotaBelowRuntimeFloor: a tenant quota configured
-// below what a stock runtime pod needs is refused at create time with a clear
-// 409, instead of the Job later failing to admit the pod under its own
-// ResourceQuota.
+// Refused at create time rather than the Job later failing pod admission.
 func TestCreateEnvironmentRejectsQuotaBelowRuntimeFloor(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{
 		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3",
@@ -97,11 +86,6 @@ func TestCreateEnvironmentRejectsQuotaBelowRuntimeFloor(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentRejectsAggregateBudgetExceeded: a tenant already
-// running one runtime environment at the per-environment cap, whose
-// aggregate budget has no room for a second, is refused clearly (409) rather
-// than persisting a row that would push the tenant over its contracted
-// total.
 func TestCreateEnvironmentRejectsAggregateBudgetExceeded(t *testing.T) {
 	environments := &stubEnvironmentRepository{
 		created:            model.Environment{EnvironmentID: "env-2", Name: "staging", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3"},
@@ -132,9 +116,6 @@ func TestCreateEnvironmentRejectsAggregateBudgetExceeded(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentAllowsWithinAggregateBudget: the mirror of the above —
-// a second runtime environment that fits within the tenant's aggregate
-// budget is admitted normally.
 func TestCreateEnvironmentAllowsWithinAggregateBudget(t *testing.T) {
 	environments := &stubEnvironmentRepository{
 		created:            model.Environment{EnvironmentID: "env-2", Name: "staging", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3"},
@@ -165,12 +146,6 @@ func TestCreateEnvironmentAllowsWithinAggregateBudget(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentStartFailureLeavesRowRegistered locks
-// writeStartProvisioningError: any failure to enqueue the durable workflow
-// answers 500, and the row created just before stays registered
-// (persistAndMaybeProvision already wrote it) — there is nothing to unwind
-// since the deploy Job was never started. A confirmed-missing tenant runtime
-// image does not reach this path: it selects the canonical-image bootstrap.
 func TestCreateEnvironmentStartFailureLeavesRowRegistered(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{
 		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.2.3",
@@ -183,8 +158,6 @@ func TestCreateEnvironmentStartFailureLeavesRowRegistered(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentRegistersOnlyWithoutVersion: nothing to deploy without a
-// pinned runtime version, so create stays a plain 201 registration.
 func TestCreateEnvironmentRegistersOnlyWithoutVersion(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{
 		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime,
@@ -200,8 +173,6 @@ func TestCreateEnvironmentRegistersOnlyWithoutVersion(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentRegistersOnlyForNonRuntime: the deploy executor targets
-// runtime envs; an agent env is registered (201) without a deploy.
 func TestCreateEnvironmentRegistersOnlyForNonRuntime(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{
 		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRemoteAgent, RuntimeVersion: "1.2.3",

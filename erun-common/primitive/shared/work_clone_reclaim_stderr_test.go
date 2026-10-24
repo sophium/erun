@@ -5,12 +5,7 @@ import (
 	"testing"
 )
 
-// TestGitCommitsAheadIncludesGitStderr covers the reclaim decision's own
-// comparison: git's stderr is already captured onto
-// exec.ExitError.Stderr by Output(), and decideBranchWorkCloneReclaim folds
-// the returned error's %v straight into the operator-facing Reason field, so
-// dropping the stderr there means the reclaim decision's own explanation
-// never carries it either.
+// The reclaim decision folds this error into its Reason, so git's stderr must survive.
 func TestGitCommitsAheadIncludesGitStderr(t *testing.T) {
 	nonRepo := t.TempDir()
 	_, err := GitCommitsAhead(testTraceContext(false), nonRepo, "a", "b")

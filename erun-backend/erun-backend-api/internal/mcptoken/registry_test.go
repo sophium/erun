@@ -8,11 +8,6 @@ import (
 	"time"
 )
 
-// TestSignRegistryRoundTrip proves a minted registry token carries the claims
-// the registry's bearer auth enforces (audience = the registry's own `service`
-// value, exactly the granted access — never more than what was passed in) and
-// verifies against the backend's public key, the same key a hosted deploy
-// injects into the registry's trusted-cert config.
 func TestSignRegistryRoundTrip(t *testing.T) {
 	signer := newTestSigner(t)
 	now := time.Unix(1_700_000_000, 0)
@@ -48,10 +43,6 @@ func TestSignRegistryRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSignRegistryNeverWidensAccess proves the signer mints exactly the access
-// grants it was given — an empty grant (the outcome of a scope clamped away
-// entirely, e.g. a cross-tenant request) mints a valid token that grants
-// nothing, never an error and never a fallback grant it invents itself.
 func TestSignRegistryNeverWidensAccess(t *testing.T) {
 	signer := newTestSigner(t)
 	now := time.Unix(1_700_000_000, 0)
@@ -68,9 +59,6 @@ func TestSignRegistryNeverWidensAccess(t *testing.T) {
 	}
 }
 
-// TestSignRegistryRequiresService proves the signer refuses to mint a token
-// with no service (the registry challenge's own audience value) rather than
-// minting one with an empty/ambiguous audience.
 func TestSignRegistryRequiresService(t *testing.T) {
 	signer := newTestSigner(t)
 	if _, err := signer.SignRegistry("erun", "", nil, time.Unix(1_700_000_000, 0)); err == nil {

@@ -1,15 +1,5 @@
 #!/usr/bin/env node
-// Authenticated REST via a saved browser session (Playwright storageState).
-//
-// Host-parameterized: no baked-in host, credentials, or IdP. The base URL comes
-// from ERUN_REST_BASE_URL or --base; the saved session from ERUN_REST_SESSION
-// or --session (default ./session.json), produced by save-session.mjs. The
-// session is rolled forward (re-saved) after each call so refreshed auth
-// cookies persist for the next one. See SKILL.md.
-//
-// Usage:
-//   ERUN_REST_BASE_URL=https://host node request.mjs GET /rest/api/2/myself
-//   node request.mjs --base https://host POST /path '{"json":"body"}'
+// Authenticated REST via a saved Playwright storageState session; see SKILL.md.
 import { request } from 'playwright';
 import { argv, env, exit, stdout } from 'node:process';
 

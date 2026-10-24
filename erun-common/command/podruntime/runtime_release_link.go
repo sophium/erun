@@ -5,18 +5,11 @@ import (
 	"path/filepath"
 )
 
-// RuntimeReleaseDir is where a tenant's <tenant>-devops image bakes its release
-// artifacts (terraform, ...). It lives outside /home/erun on purpose: the home
-// volume is mounted over /home/erun and would shadow anything baked under it.
+// RuntimeReleaseDir is outside /home/erun because the home volume would shadow it.
 const RuntimeReleaseDir = "/opt/erun/release"
 
-// LinkRuntimeRelease surfaces an image-baked release tree in a sourceless
-// runtime environment's git folder by making repoDir a symlink to releaseDir,
-// so the tree always reflects the deployed image. It never clobbers source:
-// a missing releaseDir changes nothing, an existing symlink (ours, or stale
-// from an earlier image) is relinked, an empty directory (the boot stub) is
-// replaced, and a populated directory -- a mounted or cloned worktree -- is
-// left untouched. It reports whether repoDir now links to releaseDir.
+// LinkRuntimeRelease symlinks repoDir to releaseDir. It never clobbers source: a populated
+// directory is left untouched. It reports whether repoDir now links to releaseDir.
 func LinkRuntimeRelease(repoDir, releaseDir string) (bool, error) {
 	if !isDirectory(releaseDir) {
 		return false, nil
@@ -31,9 +24,6 @@ func LinkRuntimeRelease(repoDir, releaseDir string) (bool, error) {
 	return true, os.Symlink(releaseDir, repoDir)
 }
 
-// clearRuntimeReleaseLinkTarget removes what may be replaced by the link -- an
-// existing symlink or an empty directory -- and reports whether the path is now
-// free. A populated directory, or anything else, is never touched.
 func clearRuntimeReleaseLinkTarget(repoDir string) (bool, error) {
 	info, err := os.Lstat(repoDir)
 	switch {

@@ -5,9 +5,7 @@ import type { PlatformTenant } from '../app/api/tenantsApi';
 import type { OrgTarget } from './enrollOrgTargetController';
 import type { PlatformEnrollState } from './platformEnrollController';
 
-// FirstUserNotice fires only on an exact, resolved 0 — never on an
-// undefined/unresolved userCount — so a tenant whose count hasn't loaded yet
-// never gets told it is about to receive its first user.
+// Only on a resolved 0, never on an unloaded count.
 export function FirstUserNotice({
   tenant,
 }: {
@@ -24,10 +22,6 @@ export function FirstUserNotice({
   );
 }
 
-// EnrollBasicFields is identity/UsersPanel.tsx's EnrollForm field set --
-// username/email required, first/last name optional -- distinct from
-// PlatformEnrollUsernameFields below (EnrollUserForm's direct-write path,
-// which takes an issuer/subject pair instead of an email).
 export function EnrollBasicFields({
   username,
   setUsername,
@@ -159,11 +153,7 @@ function tenantLabel(tenants: PlatformTenant[], tenantId: string): string {
   return tenants.find((tenant) => tenant.tenantId === tenantId)?.name ?? tenantId;
 }
 
-// OrgTargetStatus tells the operator which Zitadel org an identity is about
-// to be created in before they submit — the default (platform's own org) is
-// labelled explicitly rather than left implicit, and a chosen tenant with no
-// org mapping renders as its own distinguishable state rather than silently
-// falling back to the default or a generic error.
+// Labels the default org explicitly and shows an unmapped tenant as its own state.
 export function OrgTargetStatus({
   target,
   tenants,
@@ -205,9 +195,6 @@ export function OrgTargetStatus({
   );
 }
 
-// PlatformEnrollFeedback renders alreadyEnrolled and a genuine username
-// collision as two distinct messages; the backend already discriminates them
-// (200+alreadyEnrolled vs 409 USERNAME_TAKEN).
 export function PlatformEnrollFeedback({
   state,
   tenants,

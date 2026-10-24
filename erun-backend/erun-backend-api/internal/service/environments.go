@@ -12,41 +12,29 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
 
-// EnvironmentStatusWriter persists an environment's provisioning-lifecycle
-// transitions (the repository).
+// EnvironmentStatusWriter persists an environment's provisioning-lifecycle transitions.
 type EnvironmentStatusWriter interface {
-	// The owning tenant travels explicitly: the provisioner runs behind a
-	// durable workflow, so the environment row's own tenant_id — carried on
-	// the deploy params — is what scopes the write rather than whatever
-	// tenant the workflow's context happens to name. See
-	// repository.EnvironmentRepository.UpdateProvisioningStatus.
+	// UpdateProvisioningStatus takes tenantID explicitly: the durable workflow's context does not reliably name the owning tenant.
 	UpdateProvisioningStatus(ctx context.Context, tenantID, environmentID string, update repository.EnvironmentStatusUpdate) error
 }
 
-// DeployRunner runs a hosted-env deploy to a terminal result — satisfied by the
-// deployexec Job launcher, which the durable workflow supplies.
+// DeployRunner runs a hosted-env deploy to a terminal result.
 type DeployRunner interface {
 	Run(ctx context.Context, params deployexec.DeployJobParams) (deployexec.Result, error)
 }
 
-// UsageRecorder records a per-tenant metering event. Optional: a nil
-// recorder records nothing.
+// UsageRecorder records a per-tenant metering event; a nil recorder records nothing.
 type UsageRecorder interface {
 	Record(ctx context.Context, event model.UsageEvent) error
 }
 
 const (
-	// A lifecycle write that loses to a transient database blip would strand the
-	// env in `provisioning` under a workflow that has already run to a terminal
-	// state, so the write is worth a few attempts before giving up.
+	// A lost lifecycle write would strand the env in `provisioning` under a finished workflow.
 	statusWriteAttempts = 3
 	statusWriteBackoff  = 200 * time.Millisecond
 )
 
-// EnvironmentProvisioner drives a hosted env's deploy: it marks the env
-// provisioning, runs the deploy (a Job in the runtime image), and records the
-// terminal running/failed status. The durable DBOS workflow wraps this; keeping
-// the state transitions here makes them unit-testable without a cluster.
+// EnvironmentProvisioner holds a hosted env's lifecycle transitions outside the DBOS workflow so they are unit-testable.
 type EnvironmentProvisioner struct {
 	runner      DeployRunner
 	status      EnvironmentStatusWriter
@@ -55,19 +43,13 @@ type EnvironmentProvisioner struct {
 	backoff     time.Duration
 }
 
-// NewEnvironmentProvisioner wires the provisioner. usage may be nil, which
-// records no metering event. credentials may be nil, which refuses (rather
-// than silently deploying unauthenticated) any environment that names a
-// context;
-// every environment placed into the platform's own cluster is unaffected
-// either way.
+// NewEnvironmentProvisioner wires the provisioner. A nil credentials resolver refuses any environment naming a
+// context rather than deploying unauthenticated.
 func NewEnvironmentProvisioner(runner DeployRunner, status EnvironmentStatusWriter, usage UsageRecorder, credentials deployexec.PlacementCredentialResolver) *EnvironmentProvisioner {
 	return &EnvironmentProvisioner{runner: runner, status: status, usage: usage, credentials: credentials, backoff: statusWriteBackoff}
 }
 
-// Provision moves the env → provisioning → running/failed. A run error or a
-// non-succeeded deploy Job both land it in failed with the reason; only a
-// succeeded Job marks it running, recording the version that actually deployed.
+// Provision moves the env to provisioning, then running or failed; only a succeeded Job marks it running.
 func (p *EnvironmentProvisioner) Provision(ctx context.Context, environmentID string, params deployexec.DeployJobParams) error {
 	if err := p.write(ctx, params.Placement.TenantID, environmentID, repository.EnvironmentStatusUpdate{
 		Status: string(model.EnvironmentStatusProvisioning),
@@ -86,14 +68,7 @@ func (p *EnvironmentProvisioner) Provision(ctx context.Context, environmentID st
 	if result.Outcome != deployexec.OutcomeSucceeded {
 		return p.fail(ctx, params.Placement.TenantID, environmentID, deployFailureReason(params, result), fmt.Errorf("deploy job outcome %q", result.Outcome))
 	}
-	// The env is now running this version, so record it here rather than after
-	// any later step: a run that fails past this point still leaves the cluster
-	// carrying it, and an operator recovering needs the env to name it.
-	// deployexec chains the environment's exposure onto the same Job but never
-	// lets its failure fail the Job — the deploy already landed a
-	// healthy workload, so a DNS/Ingress problem downstream of it must not read
-	// as a failed provision. ExposeError names that failure distinctly instead,
-	// leaving Status/ProvisionError to mean exactly "did the deploy land".
+	// The chained expose never fails the Job, so its failure is recorded separately in ExposeError.
 	exposeError := deployexec.ExposeFailureFromOutput(result.Output)
 	var exposedHostname string
 	if exposeError == "" {
@@ -111,8 +86,7 @@ func (p *EnvironmentProvisioner) Provision(ctx context.Context, environmentID st
 	return nil
 }
 
-// recordUsage is best-effort: a metering write failing must never turn a
-// successful deploy into a reported failure, so it only logs.
+// recordUsage is best-effort: metering must never fail a successful deploy.
 func (p *EnvironmentProvisioner) recordUsage(ctx context.Context, environmentID string, params deployexec.DeployJobParams) {
 	if p.usage == nil {
 		return
@@ -129,11 +103,6 @@ func (p *EnvironmentProvisioner) recordUsage(ctx context.Context, environmentID 
 	}
 }
 
-// deployFailureReason is what the environment records when a deploy Job does not
-// succeed. The version is named here because it is the control plane's own fact;
-// everything actionable about *why* comes from the deploy itself, which already
-// knows the coordinates it probed. Without that detail the record says only that
-// a Job exited, which is nothing to act on.
 func deployFailureReason(params deployexec.DeployJobParams, result deployexec.Result) string {
 	reason := fmt.Sprintf("deploy job %s for version %s", result.Outcome, params.Version)
 	if detail := strings.TrimSpace(result.Failure); detail != "" {
@@ -142,10 +111,7 @@ func deployFailureReason(params deployexec.DeployJobParams, result deployexec.Re
 	return reason + " and left no reason behind (its pod was already reclaimed); `kubectl -n " + params.Namespace + " logs job/" + deployexec.DeployJobName(params.Tenant, params.Environment, params.Version, params.DeployID) + "` while a deploy is in flight shows what it is doing"
 }
 
-// fail records the failed status best-effort and returns the underlying cause,
-// so a status-write hiccup never masks the real provisioning failure. The write
-// error is logged rather than dropped, because a lost failure write is what
-// leaves an env stranded in `provisioning`.
+// fail returns the real cause; a failed status write is logged, not allowed to mask it.
 func (p *EnvironmentProvisioner) fail(ctx context.Context, tenantID, environmentID, reason string, cause error) error {
 	update := repository.EnvironmentStatusUpdate{
 		Status:         string(model.EnvironmentStatusFailed),
@@ -157,8 +123,6 @@ func (p *EnvironmentProvisioner) fail(ctx context.Context, tenantID, environment
 	return cause
 }
 
-// write applies one lifecycle transition, retrying a transient failure a bounded
-// number of times.
 func (p *EnvironmentProvisioner) write(ctx context.Context, tenantID, environmentID string, update repository.EnvironmentStatusUpdate) error {
 	var err error
 	for attempt := range statusWriteAttempts {

@@ -1,6 +1,4 @@
-// Package fixture writes deterministic seed configurations into an isolated
-// HOME so erun subprocesses see a known tenant/environment/cloud-context layout
-// without invoking interactive prompts.
+// Package fixture seeds deterministic erun configuration into an isolated HOME.
 package fixture
 
 import (
@@ -14,9 +12,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
-// SeedGitRepo runs `git init` inside the given dir and creates one commit so
-// commands that look at git state (release, diff, exec) can resolve a project
-// root without any prompts.
+// SeedGitRepo initializes dir as a git repo with one commit.
 func SeedGitRepo(t testing.TB, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -40,11 +36,7 @@ func SeedGitRepo(t testing.TB, dir string) {
 	}
 }
 
-// SeedGitRepoBehindItsRemote makes dir a git checkout that is one commit
-// behind the bare origin it tracks -- the state a machine that has not pulled
-// since the last release is in, and the state a reported pin ran on: it read
-// such a checkout and printed a plan that was internally consistent, with every
-// site reading the old version and nothing anywhere saying the base was old.
+// SeedGitRepoBehindItsRemote makes dir a checkout one commit behind its bare origin.
 func SeedGitRepoBehindItsRemote(t testing.TB, dir string) {
 	t.Helper()
 	SeedGitRepo(t, dir)
@@ -60,8 +52,6 @@ func SeedGitRepoBehindItsRemote(t testing.TB, dir string) {
 			t.Fatalf("git %v: %v", args, err)
 		}
 	}
-	// The advance lands on the remote only: the checkout is rewound to what it
-	// held before it, so the remote carries a commit this tree does not.
 	mustWrite(t, filepath.Join(dir, "README.md"), "# test\n\nlanded after this checkout\n")
 	for _, args := range [][]string{
 		{"add", "."},
@@ -88,12 +78,8 @@ func mustWrite(t testing.TB, path, contents string) {
 	}
 }
 
-// SeedDeployInflightMarker writes an in-flight deploy marker into the test's
-// XDG config dir so erun deploy --dry-run exercises the dedup branches
-// (skip on identical hash, conflict on different hash, reclaim on dead PID).
-// The marker filename mirrors erun-common's helmDeployReleaseKey format
-// (<context>-<namespace>-<release>.json), so the sanitize logic here must track
-// production's.
+// SeedDeployInflightMarker writes an in-flight deploy marker; its filename must track production's
+// helmDeployReleaseKey format.
 func SeedDeployInflightMarker(t testing.TB, setup env.Setup, kubernetesContext, namespace, releaseName string, record DeployInflightRecord) string {
 	t.Helper()
 	if record.StartedAt == "" {
@@ -118,8 +104,6 @@ func SeedDeployInflightMarker(t testing.TB, setup env.Setup, kubernetesContext, 
 	return path
 }
 
-// DeployInflightRecord captures the fields tests need to seed for the dedup
-// integration scenarios.
 type DeployInflightRecord struct {
 	PID         int
 	StartedAt   string

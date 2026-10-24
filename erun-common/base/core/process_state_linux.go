@@ -7,13 +7,8 @@ import (
 	"strconv"
 )
 
-// PlatformProcessZombie answers whether pid names a process that has exited and
-// is only waiting to be reaped, from /proc/<pid>/stat.
-//
-// The second return is false when this host cannot answer for that pid at all —
-// the entry is gone, so the process no longer exists, or it is not readable
-// under a hidepid mount. Neither is a claim that the process is running, and
-// the caller falls back rather than trusting a default answer.
+// PlatformProcessZombie reports whether pid is a zombie, from /proc/<pid>/stat.
+// The second return is false when that cannot be determined.
 func PlatformProcessZombie(pid int) (bool, bool) {
 	if pid <= 0 {
 		return false, false
@@ -23,9 +18,7 @@ func PlatformProcessZombie(pid int) (bool, bool) {
 		return false, false
 	}
 	proc, ok := parseProcStat(stat)
-	// The entry no longer describes the pid that was asked about, so the pid
-	// may have been reused since the read started; it is not this caller's
-	// process, and answering for whatever now holds it would be wrong.
+	// The pid may have been reused since the read started.
 	if !ok || proc.Pid != pid {
 		return false, false
 	}

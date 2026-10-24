@@ -7,9 +7,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
-// TestIdleStatusToUICarriesFromPodProvenance: the idle widget must be able to
-// tell whether a reading came from the pod's own idle monitor or was
-// assembled on the host because the pod could not be reached.
 func TestIdleStatusToUICarriesFromPodProvenance(t *testing.T) {
 	app := &App{}
 	status := activity.EnvironmentIdleStatus{StopEligible: true}
@@ -23,9 +20,6 @@ func TestIdleStatusToUICarriesFromPodProvenance(t *testing.T) {
 	}
 }
 
-// TestLoadLocalIdleStatusReportsHostOnlyProvenance locks in the one call site
-// that is always host-only: the local fallback path never claims a live pod
-// observation.
 func TestLoadLocalIdleStatusReportsHostOnlyProvenance(t *testing.T) {
 	store := stubUIStore{envs: map[string]config.EnvConfig{
 		"acme/dev": {Name: "dev"},

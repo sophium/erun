@@ -21,10 +21,7 @@ import type { UISelection } from '@/types';
 
 import { PermissionNotice } from './InlineAlert';
 
-// The fact the operator actually wants from the Version select is what the
-// environment is on right now, not an abstract "no choice made" state
-// (recognition over recall) — shown as helper text beside the control rather
-// than baked into the "Latest stable" option, since the two can differ.
+// Helper text, because the current version can differ from "Latest stable".
 function selectPinCurrentVersion(state: RootState, selection: UISelection | null): string {
   if (!selection) {
     return '';
@@ -34,9 +31,7 @@ function selectPinCurrentVersion(state: RootState, selection: UISelection | null
   return environment?.runtimeVersion ?? '';
 }
 
-// The plan is always shown before anything is written. A re-pin rewrites files
-// across the repo, so the operator should be agreeing to a specific set of
-// changes rather than trusting that the right ones happen.
+// The plan is always previewed before anything is written.
 export function PinVersionDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const {
@@ -126,8 +121,7 @@ export function PinVersionDialog(): React.ReactElement {
   );
 }
 
-// A sourceless environment has no local checkout for pin to rewrite, so this
-// says so up front rather than letting Preview/Apply fail after a click.
+// A sourceless env has no checkout to rewrite, so say so before Preview/Apply.
 function PinCheckoutNotice({
   resolvable,
   reason,
@@ -146,13 +140,7 @@ function PinCheckoutNotice({
   );
 }
 
-// The footer is where the decisions live, so it is its own component: Apply
-// stays unavailable until a plan is on screen, because applying without one is
-// exactly the blind motion this dialog exists to replace. Preview, Apply and
-// Revert all rewrite files in a local checkout, so all three stay unavailable
-// when checkoutResolvable is false — there is no checkout on this machine for
-// any of them to act on, and offering the buttons would just move the dead
-// end from "up front" to "after a click".
+// Apply needs a plan on screen; Preview, Apply and Revert all need a resolvable local checkout.
 function PinVersionFooter({
   busy,
   previewing,
@@ -259,12 +247,7 @@ function PinPlanTable({
   );
 }
 
-// PinSkippedNotes reports what a re-pin deliberately did not touch and why. A
-// repin site can be absent from the plan because it is already aligned or
-// because the environment's own config puts it on another release line, and the
-// operator has to be able to tell those apart: an environment that runs its own
-// runtime image keeps its runtimeversion, and the plan says so rather than
-// leaving a row they expected simply missing.
+// PinSkippedNotes explains sites left untouched, e.g. an env on its own runtime image keeps its runtimeversion.
 function PinSkippedNotes({ notes }: { notes?: string[] }): React.ReactElement | null {
   if (!notes?.length) {
     return null;

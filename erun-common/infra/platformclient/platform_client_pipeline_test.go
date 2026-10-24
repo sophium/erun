@@ -7,9 +7,7 @@ import (
 	"testing"
 )
 
-// pipelineFixtureBody is the pipeline read's response: one issue group holding
-// both halves of the union -- a job with no branch behind it, and a review
-// whose only issue link was parsed out of its branch name.
+// pipelineFixtureBody holds a branchless job and a review whose issue link is inferred.
 const pipelineFixtureBody = `[{"issueKey":"sophium/erun#2683","items":[
 	{"issueKey":"sophium/erun#2683","issueRef":"sophium/erun#2683","issueRefSource":"DECLARED","rung":"PLANNED",
 	 "job":{"jobId":"job-1","jobType":"triage","issueRef":"sophium/erun#2683","summary":"plan the view","status":"PLANNED","actorKind":"orchestrator","actorId":"erun/ideas","startedAt":"2026-09-25T09:00:00Z"}},
@@ -17,8 +15,6 @@ const pipelineFixtureBody = `[{"issueKey":"sophium/erun#2683","items":[
 	 "review":{"reviewId":"review-1","repository":"github.com/sophium/erun","name":"Add the view","targetBranch":"main","sourceBranch":"feature/2683-planned-job-status-and-pipeline-view","status":"OPEN"}}
 ]}]`
 
-// pipelineFixtureServer serves body from GET /v1/pipeline, asserting the
-// request the read makes.
 func pipelineFixtureServer(t *testing.T, body string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -41,17 +37,12 @@ func assertPipelinePlannedJob(t *testing.T, item PlatformPipelineItem) {
 	if item.Rung != "PLANNED" || item.Job.JobType != "triage" {
 		t.Fatalf("unexpected planned item: %+v", item)
 	}
-	// A planned job is a backlog entry: it carries no endedAt, and a reader
-	// must not see one invented for it.
 	if item.Job.EndedAt != nil {
 		t.Fatalf("a planned job must carry no endedAt, got %v", item.Job.EndedAt)
 	}
 }
 
-// A link parsed out of a branch name is a guess about the branch, and
-// issueRefSource is the only thing that makes it tellable apart from one the
-// author declared -- so a client that dropped the field could not refuse to
-// render the two the same way.
+// IssueRefSource is the only way to tell an inferred link from a declared one.
 func assertPipelineOpenReview(t *testing.T, item PlatformPipelineItem) {
 	t.Helper()
 	if item.Review == nil || item.Job != nil {
@@ -78,10 +69,6 @@ func TestPlatformClientGetPipelineCarriesBothHalvesOfTheUnion(t *testing.T) {
 	assertPipelineOpenReview(t, issues[0].Items[1])
 }
 
-// TestPlatformClientGetPipelineKeepsWorkThatNamesNoIssue: the unlinked group
-// is why the view shows work without an issue rather than guessing at one, so
-// a client must receive it as its own keyless group rather than as an error
-// or a dropped row.
 func TestPlatformClientGetPipelineKeepsWorkThatNamesNoIssue(t *testing.T) {
 	srv := pipelineFixtureServer(t, `[{"issueKey":"","items":[{"issueKey":"","rung":"FAILED","job":{"jobId":"job-2","jobType":"fix","summary":"why did this fail","status":"FAILED","actorKind":"agent","actorId":"agent-1"}}]}]`)
 	defer srv.Close()

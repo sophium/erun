@@ -8,9 +8,8 @@ import (
 
 var dockerfileVersionedFromPattern = regexp.MustCompile(`(?im)^\s*FROM(?:\s+--platform=\S+)?\s+[^\s]*\$\{?ERUN_VERSION\}?`)
 
-// dockerfileHasVersionedFrom identifies images that use ERUN_VERSION only for
-// base-image resolution, not to bake a version into a compiled binary, so their
-// ERUN_VERSION build arg must be the full snapshot version, not the stable semver.
+// dockerfileHasVersionedFrom identifies images that use ERUN_VERSION only to
+// resolve a base, so they get the full snapshot version.
 func dockerfileHasVersionedFrom(dockerfilePath string) bool {
 	data, err := os.ReadFile(dockerfilePath)
 	if err != nil {
@@ -19,17 +18,10 @@ func dockerfileHasVersionedFrom(dockerfilePath string) bool {
 	return dockerfileVersionedFromPattern.Match(data)
 }
 
-// The pattern requires the stage name to be exactly `test`. A word-boundary
-// match is not enough: `AS test-toolchain` satisfies one while the Dockerfile
-// declares no test stage at all, which would grant it the host-network
-// entitlement for nothing. Naming a stage after the toolchain it installs is
-// ordinary.
+// DockerfileTestStagePattern requires exactly `test`: `AS test-toolchain`
+// must not earn the host-network entitlement.
 var DockerfileTestStagePattern = regexp.MustCompile(`(?im)^\s*FROM\s+.*\bAS\s+test(?:\s|$)`)
 
-// DockerfileDeclaresTestStage reports whether a Dockerfile declares a `test`
-// stage at all: whether the build has a place for tests to run, which is the
-// question the host-network entitlement is scoped by. Whether a later stage
-// consumes it is checkDockerfileTestStageConsumed's question.
 func DockerfileDeclaresTestStage(dockerfilePath string) bool {
 	data, err := os.ReadFile(dockerfilePath)
 	if err != nil {
@@ -38,16 +30,10 @@ func DockerfileDeclaresTestStage(dockerfilePath string) bool {
 	return DockerfileTestStagePattern.Match(data)
 }
 
-// dockerfileTestStageConsumerPattern matches a later stage that depends on the
-// `test` stage: a stage built `FROM test`, `COPY --from=test` (with any other
-// flags), or a `RUN --mount=...,from=test`. Any of them puts the tests in the
-// graph BuildKit walks for the final image; erun does not parse stage
-// reachability beyond that.
+// dockerfileTestStageConsumerPattern matches FROM test, COPY --from=test, and
+// RUN --mount from=test; stage reachability is not parsed further.
 var dockerfileTestStageConsumerPattern = regexp.MustCompile(`(?im)^\s*(?:FROM(?:\s+--platform=\S+)?\s+test(?:\s|$)|(?:COPY|ADD)\s+(?:--\S+\s+)*--from=test(?:\s|$)|RUN\s.*--mount=\S*\bfrom=test(?:[,\s]|$))`)
 
-// DockerfileHasConsumedTestStage reports whether a Dockerfile declares a
-// `test` stage that a later stage consumes, which is what makes BuildKit run
-// the tests as part of building the image: no image is produced when they fail.
 func DockerfileHasConsumedTestStage(dockerfilePath string) bool {
 	data, err := os.ReadFile(dockerfilePath)
 	if err != nil {
@@ -56,10 +42,8 @@ func DockerfileHasConsumedTestStage(dockerfilePath string) bool {
 	return DockerfileTestStagePattern.Match(data) && dockerfileTestStageConsumerPattern.Match(data)
 }
 
-// CheckDockerfileTestStageConsumed refuses a Dockerfile that declares a `test`
-// stage no later stage consumes. BuildKit prunes such a stage from the final
-// image's graph, so the build would succeed, write its fingerprint tag, and
-// report a tested component whose tests never ran.
+// CheckDockerfileTestStageConsumed refuses an unconsumed test stage, which
+// BuildKit prunes, so the tests would silently never run.
 func CheckDockerfileTestStageConsumed(dockerfilePath string) error {
 	if !DockerfileDeclaresTestStage(dockerfilePath) || DockerfileHasConsumedTestStage(dockerfilePath) {
 		return nil

@@ -10,9 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// fakeKubectlPodRunner stubs the kubectl call jobSupervisorContainerRestart
-// makes, so a test can supply a canned `kubectl get pod -o json` response (or
-// a failure) without shelling out to a real kubectl or cluster.
+// fakeKubectlPodRunner returns a canned `kubectl get pod -o json` response or failure.
 func fakeKubectlPodRunner(t *testing.T, stdout string, err error) shared.OpenKubectlRunnerFunc {
 	t.Helper()
 	return func(args []string, out, errOut io.Writer) error {
@@ -48,11 +46,7 @@ func TestReconcileEnvironmentJobDistinguishesPodReplacedFromSupervisorGone(t *te
 	})
 }
 
-// TestReconcileEnvironmentJobChecksContainerRestartOnSamePod covers the case
-// TestReconcileEnvironmentJobDistinguishesPodReplacedFromSupervisorGone does
-// not: hostname match rules out a pod replacement, and the same-pod branch
-// then asks Kubernetes whether the runtime container itself restarted rather
-// than guessing.
+// On the same pod, reconcile asks Kubernetes whether the container restarted.
 func TestReconcileEnvironmentJobChecksContainerRestartOnSamePod(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(0, 0)
@@ -92,13 +86,7 @@ func TestReconcileEnvironmentJobChecksContainerRestartOnSamePod(t *testing.T) {
 	})
 }
 
-// A supervisor gone with nothing else to explain why should carry
-// this pod's own cgroup resource state, so a reader can tell resource
-// exhaustion apart from a genuine erun bug instead of reading an
-// unactionable "could not be determined". The cgroup read itself is
-// injected via environmentJobResourceStateSummaryFunc rather than depending
-// on this test process's own live cgroup, which was never given the limits
-// a real runtime pod has.
+// A supervisor gone without a known cause carries this pod's cgroup resource state.
 func TestReconcileEnvironmentJobSupervisorGoneIncludesInjectedResourceState(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(0, 0)
@@ -123,10 +111,7 @@ func TestReconcileEnvironmentJobSupervisorGoneIncludesInjectedResourceState(t *t
 	}
 }
 
-// A pod replacement is a *different* pod: reading this process's own cgroup
-// there would report the wrong container's resource state, so the resource
-// summary must only ever be appended to the same-pod, cause-unknown case
-// above.
+// A replaced pod must not get this process's cgroup summary.
 func TestReconcileEnvironmentJobPodReplacedDoesNotIncludeResourceState(t *testing.T) {
 	original := environmentJobResourceStateSummaryFunc
 	environmentJobResourceStateSummaryFunc = func() string { return "Environment resource state: should never appear here" }

@@ -7,9 +7,7 @@ import (
 	"testing"
 )
 
-// writeGitStub points ERUN_GIT_BIN at a script that prints stderr and exits
-// non-zero, so a test can drive a failing git invocation deterministically
-// rather than depending on a real git's own version-specific non-repo wording.
+// writeGitStub points ERUN_GIT_BIN at a script that prints stderr and exits with exitCode.
 func writeGitStub(t *testing.T, stderr string, exitCode int) {
 	t.Helper()
 	dir := t.TempDir()
@@ -21,11 +19,6 @@ func writeGitStub(t *testing.T, stderr string, exitCode int) {
 	t.Setenv("ERUN_GIT_BIN", path)
 }
 
-// TestGitStagedFilesIncludesGitStderr and
-// TestGitChangedWorkingTreeFilesIncludesGitStderr cover the git-backed commit
-// helpers: git's own stderr is already captured onto exec.ExitError.Stderr by
-// Output(), and the caller-visible message must include it instead of the
-// content-free "exit status N" a bare "%w" wrap renders.
 func TestGitStagedFilesIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: not a git repository (or any of the parent directories): .git", 128)
 	_, err := GitStagedFiles(testTraceContext(false), t.TempDir())

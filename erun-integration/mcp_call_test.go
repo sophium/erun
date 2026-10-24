@@ -16,8 +16,7 @@ import (
 
 func testMCPCallDryRunTracesTheResolvedToolCall(t *testing.T) {
 	t.Parallel()
-	// The plan must name the endpoint the call would reach, the tool, and the
-	// arguments, and must not touch the network.
+	// The plan names endpoint, tool, and arguments without touching the network.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	args := []string{"mcp", "call", "--tool", "raw", "--args", `{"command":["git","status"]}`, "--dry-run"}
@@ -52,9 +51,6 @@ func testMCPCallWithMalformedArgsFailsBeforeResolving(t *testing.T) {
 }
 
 func testMCPCallRealRunAgainstAJsonFramedEdge(t *testing.T) {
-	// Real-run: the round-trip only happens past the dry-run gate. A fake edge
-	// on the env's own local MCP port answers a plain JSON body, the framing
-	// the deployed edge uses today.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -70,9 +66,7 @@ func testMCPCallRealRunAgainstAJsonFramedEdge(t *testing.T) {
 	}
 	golden.Equal(t, "mcp/call_real_run_against_a_json_framed_edge", normalize.Apply(result.Combined))
 
-	// The bearer and the session id are request headers, not output, so the
-	// snapshot cannot cover them: assert the edge saw a token it can verify and
-	// that the call carried the session the handshake handed out.
+	// Headers are not in the snapshot, so assert the bearer and session directly.
 	call := edge.requestFor(t, "tools/call")
 	claims := verifyMCPToken(t, call.Authbearer, identity.PublicKey)
 	if claims.Audience != "erun-mcp:team/dev" {
@@ -84,8 +78,6 @@ func testMCPCallRealRunAgainstAJsonFramedEdge(t *testing.T) {
 }
 
 func testMCPCallRealRunAgainstAnSseFramedEdge(t *testing.T) {
-	// Same call against an edge that frames its reply as an event stream, so
-	// both framings the streamable-HTTP transport allows are locked.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -103,8 +95,7 @@ func testMCPCallRealRunAgainstAnSseFramedEdge(t *testing.T) {
 }
 
 func testMCPCallRealRunJsonOutputCarriesTheStructuredResult(t *testing.T) {
-	// --output json is the orchestrator contract: the tool's structured payload
-	// must survive to stdout instead of being flattened into text.
+	// --output json must keep the tool's structured payload intact.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -122,8 +113,6 @@ func testMCPCallRealRunJsonOutputCarriesTheStructuredResult(t *testing.T) {
 }
 
 func testMCPCallRealRunSurfacesAToolError(t *testing.T) {
-	// A tool that reports its own failure must exit non-zero with the tool's
-	// message, distinct from a transport or auth failure.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -141,8 +130,6 @@ func testMCPCallRealRunSurfacesAToolError(t *testing.T) {
 }
 
 func testMCPCallRealRunSurfacesAJsonrpcError(t *testing.T) {
-	// An unknown tool fails at the protocol level, not inside a tool, so the
-	// JSON-RPC error's code and message are what the operator must see.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -160,8 +147,6 @@ func testMCPCallRealRunSurfacesAJsonrpcError(t *testing.T) {
 }
 
 func testMCPCallRealRunPrintsTheStructuredResultWhenAToolReturnsNoText(t *testing.T) {
-	// Text mode must still show something useful for a tool whose result is
-	// only structured content.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -179,8 +164,6 @@ func testMCPCallRealRunPrintsTheStructuredResultWhenAToolReturnsNoText(t *testin
 }
 
 func testMCPCallRealRunUnauthorizedEdgePointsAtARedeploy(t *testing.T) {
-	// An edge that rejects the bearer is a trust problem, not a connectivity
-	// one: the error must say so and name the fix.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -196,15 +179,8 @@ func testMCPCallRealRunUnauthorizedEdgePointsAtARedeploy(t *testing.T) {
 }
 
 func testMCPCallRealRunUnreachableEdgePointsAtOpen(t *testing.T) {
-	// Nothing listening on the env's local MCP port means the port-forward is
-	// missing; the fix is `erun open`, and the error must say that instead of
-	// leaking a raw dial error. A one-shot reattach is attempted first (there
-	// is no kubectl on this scrubbed PATH, so it fails fast rather than
-	// hanging); the unreachable channel must still exit on the exit code
-	// distinct from a plain error (mcpChannelUnreachableExitCode, 126 —
-	// erun-cli/cmd/shared/environment_call.go), never a job/tool outcome's own code,
-	// so a caller looping on this command cannot misread "channel down" as
-	// "finished".
+	// The reattach fails fast with no kubectl on PATH; the exit code must be
+	// mcpChannelUnreachableExitCode (126), never a job/tool outcome's code.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -218,13 +194,8 @@ func testMCPCallRealRunUnreachableEdgePointsAtOpen(t *testing.T) {
 }
 
 func testMCPCallRealRunStaleForwardFailsFastInsteadOfHanging(t *testing.T) {
-	// A stale kubectl port-forward keeps the local port bound and accepts
-	// every connection, but never answers — the exact shape a dial-based
-	// check cannot see, and the one that used to hang a call for its full
-	// timeout (or forever, with none) instead of failing. The listener here
-	// holds every connection open and never writes to it, so the only way
-	// this scenario passes is if the client's own reachability probe — not
-	// the caller's timeout — is what ends the wait.
+	// A stale port-forward accepts but never answers; only the client's own
+	// reachability probe can end the wait.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -244,11 +215,7 @@ func testMCPCallRealRunStaleForwardFailsFastInsteadOfHanging(t *testing.T) {
 }
 
 func testMCPCallRealRunUnreadyTargetIsNotSentToAReopen(t *testing.T) {
-	// A forward whose target has not come up yet — an environment mid-roll
-	// after a deploy — takes the local connection and closes it without
-	// answering. The forward itself is working, so the recovery the stale
-	// case prints ("run `erun open …`") would replace nothing and leave the
-	// same wait ahead: the failure has to name the state it is actually in.
+	// A forward up in front of a pod mid-roll must not be reported as stale.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -262,8 +229,6 @@ func testMCPCallRealRunUnreadyTargetIsNotSentToAReopen(t *testing.T) {
 	if !strings.Contains(result.Combined, "still starting") {
 		t.Fatalf("expected the unready target to be named as such, got:\n%s", result.Combined)
 	}
-	// Re-opening is what the stale shape prints, and it replaces nothing
-	// while the forward is up and working.
 	if strings.Contains(result.Combined, "so the local MCP port-forward is up") {
 		t.Fatalf("an environment whose forward is up must not be sent to a re-open, got:\n%s", result.Combined)
 	}
@@ -273,11 +238,8 @@ func testMCPCallRealRunUnreadyTargetIsNotSentToAReopen(t *testing.T) {
 }
 
 func testMCPCallRealRunRecoversWhenTheLocalForwardDropsMidRequest(t *testing.T) {
-	// A flapping kubectl port-forward ("lost connection to pod", then a fresh
-	// forward) drops a request that was already in flight. The remote MCP
-	// server process itself never restarted — only the local tunnel blipped —
-	// so the retry needs no re-handshake, just one resend once the tunnel
-	// answers again, which is exactly what the still-live edge below proves.
+	// A flapping port-forward drops one in-flight request; the server is still
+	// live, so one resend suffices without re-handshake.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -291,21 +253,14 @@ func testMCPCallRealRunRecoversWhenTheLocalForwardDropsMidRequest(t *testing.T) 
 	if result.ExitCode != 0 {
 		t.Fatalf("expected the dropped first request to recover, got exit %d:\n%s", result.ExitCode, result.Combined)
 	}
-	// The dropped connection carries no readable request (it was hijacked and
-	// closed before any body was parsed), so exactly one *readable* initialize
-	// reaching the edge is what proves this succeeded via a plain retry, not
-	// by the edge happening to answer the doomed connection after all.
+	// The dropped connection is never parsed, so one readable initialize proves a plain retry.
 	if handshakes := edge.requestsFor("initialize"); len(handshakes) != 1 {
 		t.Fatalf("edge saw %d readable initialize requests, want exactly one (the retry): %+v", len(handshakes), edge.recorded())
 	}
 }
 
 func testMCPCallRealRunALiveEdgeThatRefusesTheSessionPointsAtTheCli(t *testing.T) {
-	// The reported failure: an environment whose edge is up and answering
-	// refuses this client's session on every call. Read as an unreachable
-	// endpoint it says the environment is down, and an orchestrator that
-	// believes that stops dispatching to a live environment — the one reading
-	// that costs capacity, since the CLI was reaching it throughout.
+	// An edge refusing the session is not an unreachable environment.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -321,32 +276,24 @@ func testMCPCallRealRunALiveEdgeThatRefusesTheSessionPointsAtTheCli(t *testing.T
 	}
 	golden.Equal(t, "mcp/call_real_run_a_live_edge_that_refuses_the_session_points_at_the_cli", normalize.Apply(result.Combined))
 
-	// Which side broke, named: the edge answered, so nothing about the
-	// environment is in question.
 	for _, want := range []string{"the MCP edge answered", "team/dev is up and dispatchable", "use the CLI"} {
 		if !strings.Contains(result.Combined, want) {
 			t.Fatalf("expected the message to contain %q, got:\n%s", want, result.Combined)
 		}
 	}
-	// The path that keeps working, named. It is what makes the difference
-	// between "wait for the environment" and "dispatch to it now".
 	if !strings.Contains(result.Combined, "erun exec job start --tenant team --environment dev") {
 		t.Fatalf("expected the CLI dispatch path to be spelled out, got:\n%s", result.Combined)
 	}
-	// The collapse the report described: an unreachable endpoint is a
-	// port-forward problem, and this failure is not one.
 	if strings.Contains(result.Combined, "so the local MCP port-forward is up") {
 		t.Fatalf("a live edge must not be reported as an unreachable endpoint, got:\n%s", result.Combined)
 	}
-	// Bounded recovery: one re-handshake, then the truth.
+	// Bounded recovery: one re-handshake.
 	if handshakes := edge.requestsFor("initialize"); len(handshakes) != 2 {
 		t.Fatalf("edge saw %d initialize requests, want the handshake plus exactly one retry: %+v", len(handshakes), edge.recorded())
 	}
 }
 
 func testMCPToolsRealRunListsToolsWithTheirArguments(t *testing.T) {
-	// Text mode must be usable for picking a tool: names, first description
-	// line, and which arguments are required.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -367,10 +314,7 @@ func testMCPToolsRealRunListsToolsWithTheirArguments(t *testing.T) {
 }
 
 func testMCPToolsStructuredOutputCarriesTheDescriptorTheEdgeSent(t *testing.T) {
-	// Structured output exists for callers that decide whether a tool is
-	// safe to call before calling it, so it must carry the annotations and
-	// protocol extensions the edge sent, not the subset the scannable text
-	// rendering narrows to.
+	// Structured output must carry the full annotations and extensions, not the text subset.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -404,8 +348,7 @@ func testMCPToolsStructuredOutputCarriesTheDescriptorTheEdgeSent(t *testing.T) {
 	if len(listed.Tools) != len(want.Tools) {
 		t.Fatalf("structured output listed %d tools, want %d: %s", len(listed.Tools), len(want.Tools), result.Stdout)
 	}
-	// Whole descriptors, so a field the protocol gains later fails here
-	// rather than disappearing from the structured surface unnoticed.
+	// Whole descriptors, so a field added later cannot vanish unnoticed.
 	if !reflect.DeepEqual(listed.Tools, want.Tools) {
 		t.Errorf("structured output does not carry the descriptor the edge sent\n got: %v\nwant: %v", listed.Tools, want.Tools)
 	}

@@ -9,17 +9,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// RemoteInitMarkerBaseDir roots the per-tenant/env bootstrap markers that let a
-// later `erun doctor` tell a deliberate --no-git init from one interrupted before
-// the git checkout finished, and recover the repository URL to finish that work.
-// Per-tenant/env scoping avoids marker collisions when tenants share one $HOME.
+// RemoteInitMarkerBaseDir roots per-tenant/env markers that let `erun doctor`
+// tell a deliberate --no-git init from an interrupted one.
 const RemoteInitMarkerBaseDir = ".erun"
 
 const RemoteInitMarkerFilename = "bootstrap.yaml"
 
-// RemoteInitMarker captures the intent of `erun init --remote` so a
-// later doctor invocation can detect what was supposed to happen and
-// offer to finish it.
+// RemoteInitMarker records the intent of `erun init --remote` so doctor can finish it.
 type RemoteInitMarker struct {
 	Tenant             string `yaml:"tenant"`
 	Environment        string `yaml:"environment"`
@@ -31,14 +27,11 @@ type RemoteInitMarker struct {
 	BootstrapComplete  bool   `yaml:"bootstrap_complete"`
 }
 
-// RemoteInitMarkerPath returns the marker path for the given tenant/environment under homeDir.
 func RemoteInitMarkerPath(homeDir, tenant, environment string) string {
 	return filepath.Join(homeDir, RemoteInitMarkerBaseDir, tenant, environment, RemoteInitMarkerFilename)
 }
 
-// LoadRemoteInitMarker reads the tenant/environment marker under homeDir. The found
-// flag distinguishes an absent marker — init never ran, or was interrupted before its
-// first write — from a read/parse failure.
+// LoadRemoteInitMarker reads the marker; found is false only when it is absent.
 func LoadRemoteInitMarker(homeDir, tenant, environment string) (RemoteInitMarker, bool, error) {
 	path := RemoteInitMarkerPath(homeDir, tenant, environment)
 	return readRemoteInitMarker(path)
@@ -59,9 +52,7 @@ func readRemoteInitMarker(path string) (RemoteInitMarker, bool, error) {
 	return marker, true, nil
 }
 
-// SaveRemoteInitMarker persists the marker locally, as in-runtime doctor recovery does
-// after finishing an interrupted init; the normal init flow writes it remotely instead.
-// Tenant and Environment must be set.
+// SaveRemoteInitMarker writes the marker locally; Tenant and Environment must be set.
 func SaveRemoteInitMarker(homeDir string, marker RemoteInitMarker) error {
 	if marker.Tenant == "" || marker.Environment == "" {
 		return fmt.Errorf("save remote init marker: tenant and environment are required")

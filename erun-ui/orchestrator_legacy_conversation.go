@@ -9,19 +9,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// Before orchestrators ran as background agents, the desktop chose which
-// conversation each launch resumed: one the operator attached, else what the
-// orchestrator's own session last reported, else a conversation id derived
-// from the orchestrator id. An orchestrator created under that scheme still has
-// its work in one of those conversations, so the first agent created for it
-// continues that conversation instead of starting empty. Nothing here is
-// written any more; it is read once, when an orchestrator has no agent yet.
+// Orchestrators created before background agents kept their work in a
+// desktop-chosen conversation; their first agent continues it. Read-only.
 
-// legacyOrchestratorSessionNamespace seeded the derived conversation id.
+// legacyOrchestratorSessionNamespace derives legacy conversation ids; never change it.
 var legacyOrchestratorSessionNamespace = uuid.MustParse("6f7e9c2a-1b3d-4e5f-8a9b-0c1d2e3f4a5b")
 
-// orchestratorLegacyConversation returns the conversation an orchestrator was
-// on under the previous scheme, or "" when none of them is still on disk.
+// orchestratorLegacyConversation returns "" when no legacy conversation is on disk.
 func orchestratorLegacyConversation(openPath, id string) string {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -40,8 +34,6 @@ func orchestratorLegacyConversation(openPath, id string) string {
 	return ""
 }
 
-// legacyAttachedConversation reads the conversation the operator attached by
-// hand, kept in the open-set record under the previous scheme.
 func legacyAttachedConversation(openPath, id string) string {
 	data, err := os.ReadFile(openPath)
 	if err != nil {
@@ -64,8 +56,6 @@ func legacyAttachedConversation(openPath, id string) string {
 	return ""
 }
 
-// legacyReportedConversation reads what the orchestrator's own session last
-// reported being on, from the record its hooks used to write.
 func legacyReportedConversation(id string) string {
 	if id != filepath.Base(id) || strings.HasPrefix(id, ".") {
 		return ""
@@ -83,8 +73,6 @@ func legacyReportedConversation(id string) string {
 	return strings.TrimSpace(record.ConversationID)
 }
 
-// claudeConversationExists reports whether a Claude conversation transcript
-// with this id is on disk, in any project folder.
 func claudeConversationExists(conversationID string) bool {
 	home, err := os.UserHomeDir()
 	if err != nil {

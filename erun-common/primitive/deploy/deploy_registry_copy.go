@@ -9,9 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
-// registryCopy is one image mirrored from the FROM registry to a TO registry
-// before the cluster pulls it from the DEPLOY registry, preserving the image's
-// multi-arch manifest list through the mirror.
+// registryCopy mirrors one image FROM -> TO, preserving its multi-arch manifest
+// list.
 type registryCopy struct {
 	From  string
 	To    string
@@ -33,9 +32,8 @@ func joinRegistryImage(registry, image string) string {
 	return strings.TrimRight(strings.TrimSpace(registry), "/") + "/" + strings.TrimSpace(image)
 }
 
-// RunDeployRegistryCopies mirrors the deploy's images from the FROM registry to
-// each TO registry. Every copy is traced even under --dry-run so a dry-run is a
-// complete audit of what a real deploy would push.
+// RunDeployRegistryCopies mirrors images FROM -> each TO registry, tracing every
+// copy even under --dry-run.
 func RunDeployRegistryCopies(ctx core.Context, execution DeploySpec) error {
 	copies, err := ResolveDeployRegistryCopies(execution)
 	if err != nil {
@@ -107,8 +105,6 @@ func deployCopyImages(execution DeploySpec) []string {
 		name, version := runtimeCopyImage(execution)
 		add(name, version)
 	}
-	// A pure deploy installs by reference and never builds, so the chart itself
-	// names the images the cluster pulls.
 	chartImages, err := findDockerImagesInChart(execution.DeployContext.ChartPath, execution.Deploy.Version)
 	if err == nil {
 		for _, image := range chartImages {

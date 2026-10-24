@@ -79,11 +79,7 @@ func TestStateFromListResultOmitsEmptyTenants(t *testing.T) {
 	}
 }
 
-// TestLoadStateFirstRunNeverRendersBareCLIInstruction: a genuinely fresh install (no tool
-// config at all) must resolve to the same renderable, non-nil-tenants shape
-// as "initialized with zero tenants", never a bare CLI instruction the
-// desktop cannot carry out and never a shape that crashes the frontend's
-// unconditional tenants iteration on boot.
+// A fresh install must yield non-nil tenants; the frontend iterates them unconditionally.
 func TestLoadStateFirstRunNeverRendersBareCLIInstruction(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
@@ -108,12 +104,7 @@ func TestLoadStateFirstRunNeverRendersBareCLIInstruction(t *testing.T) {
 	}
 }
 
-// TestLoadStateConfigCorruptedRendersDistinctFromEmptyList: a torn/corrupt config file must not surface as "zero
-// environments configured" (which the sidebar renders identically to a
-// genuinely empty install), and the raw yaml/unmarshal error text must never
-// reach the caller -- it crosses the headless HTTP bridge verbatim into a
-// browser console otherwise (headlessserver.handleInvoke writes err.Error()
-// into the response body).
+// Raw unmarshal text must not reach the caller: the headless bridge writes err.Error() verbatim.
 func TestLoadStateConfigCorruptedRendersDistinctFromEmptyList(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{

@@ -46,10 +46,7 @@ function useIdleWidgetState(): {
   const rawIdleStatus = useAppSelector((state) => state.idle.idleStatus);
   const idleStatus = displayableIdleStatus(rawIdleStatus);
   const cloudContextName = rawIdleStatus?.cloudContextName?.trim() ?? '';
-  // Scoped to the node this widget actually names. The name follows the
-  // selected environment, so a flag that did not would pair one environment's
-  // node with another's operation — the cross-environment bleed that let a
-  // progressive label survive onto a row with nothing running.
+  // Scoped to the named node so another environment's operation cannot bleed in.
   const inFlight = useAppSelector((state) =>
     cloudNodeOperationFor(state.idle.cloudNodeOperations, cloudContextName),
   );
@@ -95,8 +92,7 @@ function pickEnvDisplayName(idleStatus: IdleStatus, fallback: string): string {
   return fallback;
 }
 
-// The Cancel button dismisses the pending-stop grace window locally; it does
-// not touch AWS state.
+// Cancel dismisses the pending-stop grace window locally; AWS state is untouched.
 function IdleStopWarningBadge({
   idleStatus,
   cloudContextName,
@@ -316,10 +312,7 @@ function IdleStatusAction({
   );
 }
 
-// Click is deliberately NOT gated on the in-flight describe call: a hung
-// describe (idle-stopped instance, expired SSO token) would otherwise leave
-// the button disabled forever. It stays interactive while the state is
-// unknown, and the mutation reports its own outcome.
+// Click is not gated on the describe call, which can hang forever.
 function useStopProtectionState(contextName: string): {
   Icon: typeof LoaderCircle;
   label: string;
@@ -383,8 +376,7 @@ function useStopProtectionMutators(contextName: string): {
   };
 }
 
-// Only the lock direction is confirmed: it is destructive because it also
-// blocks the user's own manual Stop until reversed. Unlocking is one-click.
+// Only locking is confirmed: it also blocks the user's own manual Stop.
 function StopProtectionConfirmDialog({
   open,
   contextName,
@@ -435,10 +427,7 @@ function StopProtectionConfirmDialog({
   );
 }
 
-// Locking is the recovery lever for when the in-pod idle monitor races a
-// repair (e.g. erun-mcp stuck in ImagePullBackOff reads as idle, so the
-// monitor keeps stopping the instance). While locked, AWS rejects every stop
-// — including the user's own adjacent Power button — until the user clears it.
+// Locking stops the idle monitor from racing a repair; AWS rejects every stop until cleared.
 function StopProtectionToggle({ contextName }: { contextName: string }): React.ReactElement {
   const { Icon, label, amber, pressed, busy, locked } = useStopProtectionState(contextName);
   const { disable, enable } = useStopProtectionMutators(contextName);
@@ -488,8 +477,7 @@ function StopProtectionToggle({ contextName }: { contextName: string }): React.R
   );
 }
 
-// idleStatusTooltipLines encodes nesting depth as leading spaces, but HTML
-// collapses that whitespace, so re-encode the "- "/"  - " depth as padding.
+// HTML collapses the leading-space depth encoding, so re-encode it as padding.
 function tooltipLineClassName(line: string): string | undefined {
   if (line.startsWith('  - ')) {
     return 'pl-6';

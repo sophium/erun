@@ -8,18 +8,9 @@ import (
 	"testing"
 )
 
-// repinSurfaces are the operator-facing descriptions that enumerate what a
-// re-pin rewrites. It is the enumerations, not every passing mention of a
-// re-pin site: the desktop's one-line sidebar affordance names a few of them
-// without claiming to name them all, and is deliberately not listed here.
-//
-// Only erun-common owns the canonical PinSiteKind set, and none of these is
-// generated from it -- the CLI and MCP descriptions, the desktop dialog, the
-// skill, and the public pin page each say it in their own words -- so nothing
-// but this test keeps them enumerating the same thing. The regression it
-// exists to stop is a surface that says "every erun reference" and then lists
-// a subset: that reads as complete, and it understates what a re-pin touched
-// in exactly the operation whose blast radius is the question being asked.
+// repinSurfaces are the descriptions that enumerate what a re-pin rewrites. Each words it
+// independently, so only this test keeps them complete. The desktop sidebar's one-line
+// affordance names only some kinds and is deliberately not listed.
 var repinSurfaces = []string{
 	"erun-cli/cmd/pin/pin.go",
 	"erun-mcp/server_review_delivery_tools.go",
@@ -28,20 +19,13 @@ var repinSurfaces = []string{
 	"erun-docs/docs/cli/pin.md",
 }
 
-// pinKindDeclarationPattern reads the PinSiteKind constants out of the source
-// that declares them, so a kind added to the engine without a PinSiteSummaries
-// phrase fails here instead of shipping named by no surface at all.
+// A declared kind without a PinSiteSummaries phrase fails here.
 var pinKindDeclarationPattern = regexp.MustCompile(`(?m)^\s*PinSite\w+\s+PinSiteKind\s*=\s*"([^"]+)"`)
 
-// goStringConcatPattern rejoins a Go string literal split across lines with
-// `+`. The compiler allows that wrap anywhere, including through the middle of
-// a phrase this test is looking for.
+// goStringConcatPattern rejoins Go string literals wrapped with `+`.
 var goStringConcatPattern = regexp.MustCompile(`"\s*\+\s*"`)
 
-// normalizeRepinSurfaceText folds away the differences between these surfaces
-// that are not content: `+` line wrapping in Go string literals, JSX text
-// broken across lines, the dialog's typographic apostrophe, and the docs'
-// sentence-case table headings.
+// normalizeRepinSurfaceText ignores line wrapping, typographic apostrophes, and case.
 func normalizeRepinSurfaceText(raw string) string {
 	raw = strings.ReplaceAll(raw, "’", "'")
 	raw = goStringConcatPattern.ReplaceAllString(raw, "")

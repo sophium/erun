@@ -33,9 +33,6 @@ func TestPlatformClientPlatformDoesNotAuthenticate(t *testing.T) {
 	}
 }
 
-// TestPlatformClientWithMCPToolSendsAuditHeader pins the client side of
-// AuditEventTypeMCP: erun-backend-api can only classify a call as MCP-driven
-// if the request actually carries this header.
 func TestPlatformClientWithMCPToolSendsAuditHeader(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get(MCPToolAuditHeader); got != "review_show" {
@@ -51,9 +48,6 @@ func TestPlatformClientWithMCPToolSendsAuditHeader(t *testing.T) {
 	}
 }
 
-// TestPlatformClientWithoutMCPToolSendsNoAuditHeader guards the CLI/library
-// default: a caller that never opts in must not send the header at all, so
-// erun-backend-api keeps classifying it as a plain API call.
 func TestPlatformClientWithoutMCPToolSendsNoAuditHeader(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get(MCPToolAuditHeader); got != "" {
@@ -114,10 +108,7 @@ func TestPlatformClientCreateUserSendsJSONBodyAndReturnsCreated(t *testing.T) {
 	}
 }
 
-// TestPlatformClientCreateUserSendsRoleIDs is the cross-tenant recovery path:
-// an operations caller enrolls a tenant's administrator directly, so the roles
-// have to reach the platform on the enrollment itself rather than needing a
-// later grant from inside a tenant that may have nobody able to make one.
+// Operations callers enroll a tenant admin directly, so roles ride on enrollment.
 func TestPlatformClientCreateUserSendsRoleIDs(t *testing.T) {
 	var raw map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -141,8 +132,7 @@ func TestPlatformClientCreateUserSendsRoleIDs(t *testing.T) {
 	}
 }
 
-// An empty role list must stay off the wire entirely, so the platform applies
-// its own default rather than seeing an explicit "grant nothing".
+// An empty role list stays off the wire so the platform applies its default.
 func TestPlatformClientCreateUserOmitsEmptyRoleIDs(t *testing.T) {
 	var raw map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

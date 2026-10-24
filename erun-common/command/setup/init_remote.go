@@ -22,45 +22,26 @@ type remoteRepositoryState struct {
 	HasSSHConfig        bool
 }
 
-// ensureRemoteRepository deploys the env's runtime and wires its remote checkout.
-// The env it takes is the one this run just reconciled, so init's own deploy sees
-// the settings this invocation supplied rather than the params they arrived in —
-// the two diverge whenever a flag was omitted and the stored value stands.
+// ensureRemoteRepository takes the reconciled env, not params, so stored values
+// stand for omitted flags.
 func (s BootstrapRunner) ensureRemoteRepository(params open.BootstrapInitParams, tenant, envName, projectRoot string, env config.EnvConfig) (config.ShellLaunchParams, remoteinit.RemoteRepositorySpec, remoteProvisionedSecrets, error) {
 	target := s.remoteRepositoryOpenResult(tenant, envName, env.KubernetesContext, projectRoot, params.ResolvedType())
 	target.EnvConfig.RuntimePod = config.NormalizeRuntimePodResources(env.RuntimePod)
-	// The runtime registry is the one field that redirects chart resolution, so
-	// init's own deploy must see it. Without it `erun init --runtime-registry`
-	// would only take effect on the next deploy — no use to an env that cannot
-	// complete one.
+	// The runtime registry redirects chart resolution, so init's own deploy needs it.
 	target.EnvConfig.RuntimeRegistry = strings.TrimSpace(env.RuntimeRegistry)
-	// A private runtime image is exactly the case the pull secrets exist for, so
-	// init's own deploy must carry them; otherwise the env init just created
-	// cannot pull, and the flag only takes effect on a redeploy the operator has
-	// to know to run.
+	// A private runtime image cannot be pulled on init's own deploy without these.
 	target.EnvConfig.ImagePullSecrets = env.ImagePullSecrets
-	// Carry the env's configured registries onto the deploy target so the
-	// init-time runtime deploy renders the same container registry (cluster or
-	// --container-registry) the standalone `erun deploy` does; without this the
-	// target's minimal EnvConfig had no registries and the deploy fell back to the
-	// default, so an in-pod build would target the wrong registry until a redeploy.
+	// Without registries the deploy falls back to the default registry.
 	target.EnvConfig.ContainerRegistries = env.ContainerRegistries
 
-	// Provision a registry credential from the host BEFORE the runtime deploy, so
-	// the pod it creates can mount it from first boot rather than needing a
-	// redeploy once init's own in-pod check (below) discovers it is still
-	// missing. Resolves to "" when the host has nothing to give.
+	// Provision before deploy so the pod mounts it from first boot.
 	registryCredentialSecretName, err := s.resolveRegistryCredentialSecret(target)
 	if err != nil {
 		return config.ShellLaunchParams{}, remoteinit.RemoteRepositorySpec{}, remoteProvisionedSecrets{}, err
 	}
 	target.EnvConfig.RegistryCredentialSecretName = registryCredentialSecretName
 
-	// Provision the platform alias the same way and at the same point: the pod
-	// this deploy creates must mount it from first boot, so a fresh environment
-	// can call the platform API the moment an operator promotes it to drive the
-	// merge queue, without a human signing in inside it. Resolves to "" when the
-	// invoking host is not signed in to a platform alias to give.
+	// Likewise, so a fresh env can drive the merge queue without an in-pod sign-in.
 	platformAliasSecret, err := s.resolvePlatformAliasSecret(target)
 	if err != nil {
 		return config.ShellLaunchParams{}, remoteinit.RemoteRepositorySpec{}, remoteProvisionedSecrets{}, err
@@ -195,19 +176,13 @@ func (s BootstrapRunner) ensureRemoteRuntime(target config.OpenResult, req confi
 	if runtimeImageStated {
 		target.EnvConfig.RuntimeImage = runtimeImage
 	}
-	// Pass the env's registries to the chart as-is: a cluster: entry is expanded
-	// in-pod by the runtime chart, exactly as the standalone `erun deploy` renders
-	// it. Do NOT host-concretize here — that pins the in-pod BUILD registry to a
-	// localhost port-forward the pod cannot reach, so a later deploy that renders
-	// the correct cluster form rolls the pod. The runtime IMAGE still pulls from
-	// its own registry (publishedDevopsChartRegistry, e.g. ghcr), so create works.
+	// Pass cluster: entries as-is; the chart expands them in-pod. Host-concretizing
+	// pins the build registry to an unreachable localhost port-forward.
 	spec, err := deploy.ResolvePublishedDevopsDeploySpecWithOverrides(s.Context, target, runtimeVersion, "", runtimeImageStated)
 	if err != nil {
 		return err
 	}
-	// Init owns the env's single deploy, so it must also carry the desktop's
-	// MCP-auth key; otherwise the desktop would redeploy right after init just to
-	// inject it, rolling the pod init just created. A blank path is a no-op.
+	// Carry the MCP-auth key so the desktop need not redeploy right after init.
 	if err := deploy.ApplyMCPAuthToRuntimeSpec(s.Context, deploy.DeployTarget{Tenant: target.Tenant, MCPAuthPublicKeyPath: mcpAuthPublicKeyPath}, &spec); err != nil {
 		return err
 	}

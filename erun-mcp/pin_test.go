@@ -24,10 +24,6 @@ func writePinTestFile(t *testing.T, path, body string) {
 	}
 }
 
-// The reported bug: a project root that cannot be resolved must
-// refuse rather than widen to whatever directory this process happens to be
-// running in (its own cwd, a pod home directory). Unlike the CLI, there is no
-// cwd fallback here at all -- an MCP caller has no cwd to be inside of.
 func TestPinToolRefusesWhenNoProjectRootIsResolvable(t *testing.T) {
 	runtime := shared.RuntimeConfig{
 		Context: shared.RuntimeContext{Tenant: "frs", Environment: "prod"},
@@ -49,8 +45,6 @@ func TestPinToolRefusesWhenNoProjectRootIsResolvable(t *testing.T) {
 	}
 }
 
-// An explicit projectRoot input is exactly the remedy asked for: the
-// caller names the repository since it has no cwd to fall back on.
 func TestPinToolAcceptsAnExplicitProjectRoot(t *testing.T) {
 	root := t.TempDir()
 	if err := lifecycle.RecordPinPrevious(root, "frs", "prod", "1.0.100"); err != nil {
@@ -73,9 +67,6 @@ func TestPinToolAcceptsAnExplicitProjectRoot(t *testing.T) {
 	}
 }
 
-// The reported symptom: tenant/environment came back as empty strings and the
-// plan proceeded anyway. This must refuse instead, the same way every other
-// mutating tool in this module already refuses via resolveLocalTarget.
 func TestPinToolRefusesWhenTenantAndEnvironmentAreUnresolved(t *testing.T) {
 	runtime := shared.RuntimeConfig{
 		Context: shared.RuntimeContext{RepoPath: t.TempDir()},
@@ -88,10 +79,6 @@ func TestPinToolRefusesWhenTenantAndEnvironmentAreUnresolved(t *testing.T) {
 	assertNamesMissingAndRecovery(t, err, "tenant/environment")
 }
 
-// The reported bug's second half: even once a root resolves, it must never
-// widen to a sibling checkout that happens to sit beside the tenant repo (the
-// two-sibling-checkouts layout that reproduced it -- a tenant repo and erun's
-// own repo checked out next to each other in the same pod).
 func TestPinToolNeverScansOutsideTheResolvedProjectRoot(t *testing.T) {
 	parent := t.TempDir()
 	frsRoot := filepath.Join(parent, "frs")
@@ -101,8 +88,7 @@ func TestPinToolNeverScansOutsideTheResolvedProjectRoot(t *testing.T) {
   source = "git::https://github.com/sophium/erun.git//erun-devops/terraform-erun/modules/terraform-erun-cluster-edge?ref=v1.0.100"
 }
 `)
-	// erun's own sibling checkout -- must never be scanned when pin's root is
-	// scoped to frsRoot, even though it names an erun-dns01-webhook reference.
+	// A sibling checkout must not be scanned even though it names a pin site.
 	writePinTestFile(t, filepath.Join(erunRoot, "erun-devops", "terraform-erun", "modules", "terraform-erun-cluster-edge", "variables.tf"), `variable "dns01_webhook_image" {
   description = "Container image (repository:tag) for the DNS-01 webhook shim, e.g. \"ghcr.io/sophium/erun-dns01-webhook:1.0.150\"."
   type        = string
@@ -129,14 +115,6 @@ func TestPinToolNeverScansOutsideTheResolvedProjectRoot(t *testing.T) {
 	assertPlanScopedToFrsOnly(t, output, frsRoot)
 }
 
-// The gap found while fixing the same coordinate for the CLI transport:
-// nothing in this tool ever wrote the env-config half of a pin back to the
-// store at all, so a real (non-preview)
-// MCP re-pin left even runtimeversion unmoved -- the CLI transport's own
-// applyPinCommand does this via saveEnvConfig, but the MCP path had no
-// equivalent call. A real run must persist runtimeversion, a stated-stock
-// runtimeimage, and runtimechart together, the same coordinate the CLI's
-// integration suite locks.
 func TestPinToolRealRunPersistsTheEnvConfigCoordinate(t *testing.T) {
 	root := t.TempDir()
 	store := listToolStore{

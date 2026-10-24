@@ -13,8 +13,6 @@ import (
 )
 
 func testListRuntimeSizingLowersMemoryOnALongQuietWindow(t *testing.T) {
-	// erun/build's measured shape: a 23552Mi limit whose high-water sat at
-	// roughly half, with no kills and not one throttled period.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
@@ -30,8 +28,7 @@ func testListRuntimeSizingLowersMemoryOnALongQuietWindow(t *testing.T) {
 }
 
 func testListRuntimeSizingRaisesMemoryOnAnOOMKill(t *testing.T) {
-	// One kill outranks a comfortable-looking peak and needs no window: this
-	// history has watched a single minute.
+	// One kill outranks a comfortable peak and needs no observation window.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
@@ -62,9 +59,8 @@ func testListRuntimeSizingRaisesCPUOnSustainedThrottling(t *testing.T) {
 }
 
 func testListRuntimeSizingRaisesMemoryWhenThePeakNearsTheLimit(t *testing.T) {
-	// No kill yet, but the high-water is inside the raise margin. Sampling
-	// means the true peak is at least this, so the raise is high confidence
-	// without waiting for the environment to be killed first.
+	// Sampling means the true peak is at least the high-water, so the raise needs
+	// no kill first.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
@@ -80,10 +76,7 @@ func testListRuntimeSizingRaisesMemoryWhenThePeakNearsTheLimit(t *testing.T) {
 }
 
 func testListRuntimeSizingBoundsARaiseByTheNamespaceQuota(t *testing.T) {
-	// A namespace ResourceQuota counts every container in the pod, so a raise
-	// past the quota less the dind sidecar's own limit is a size nothing
-	// would schedule. The verdict says it clamped rather than quietly
-	// recommending a quota change too.
+	// A raise is clamped to the namespace quota less the dind sidecar's limit.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -105,9 +98,7 @@ func testListRuntimeSizingBoundsARaiseByTheNamespaceQuota(t *testing.T) {
 }
 
 func testListRuntimeSizingHoldsCPUOnTolerableThrottling(t *testing.T) {
-	// frs/local's measured 425 of 308631 periods. Sub-threshold throttling is
-	// tolerable, not unused: it must neither grow the environment nor license
-	// a shrink. This is the false-positive check.
+	// Sub-threshold throttling must neither grow the environment nor license a shrink.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
@@ -123,9 +114,6 @@ func testListRuntimeSizingHoldsCPUOnTolerableThrottling(t *testing.T) {
 }
 
 func testListRuntimeSizingWithholdsAShrinkOnAShortWindow(t *testing.T) {
-	// The same comfortable peak as the shrink scenario, watched for an hour.
-	// The verdict must be `insufficient-evidence` naming the shortfall, not a
-	// shrink and not a silent hold.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{

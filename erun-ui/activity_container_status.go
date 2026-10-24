@@ -11,14 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// resolveActivityKubeContext picks the kube context to attach to a new
-// trace-source activity entry. Selection wins when it carries a
-// context (the session has been bound through the desktop UI). When it
-// doesn't — e.g. a generic Local tab where the user invoked `erun open`
-// manually — fall back to the env config's KubernetesContext so the
-// container-status poller and lock-on-deploy watchlist still target
-// the right cluster instead of whatever `kubectl config
-// current-context` happens to be.
+// resolveActivityKubeContext prefers the selection's context, falling back to the
+// env config's so pollers never target kubectl's current-context.
 func (a *App) resolveActivityKubeContext(selection uiSelection, tenant, environment string) string {
 	if ctx := strings.TrimSpace(selection.KubernetesContext); ctx != "" {
 		return ctx
@@ -33,16 +27,8 @@ func (a *App) resolveActivityKubeContext(selection uiSelection, tenant, environm
 	return strings.TrimSpace(envConfig.KubernetesContext)
 }
 
-// pollActivityContainerStatuses feeds the queue per-container Ready snapshots
-// so the frontend can render Ready pills while a deploy runs.
-//
-// The loop is intentionally display-only: it does NOT finalize entries. Pod
-// readiness can flip to Ready seconds before helm's `--wait` returns
-// (readyReplicas trails container readiness while controllers reconcile), so
-// finalizing here would mark the activity done while the terminal still shows
-// the deploy running. Completion is owned by the trace handler's `==> Deployed`
-// line and by the helm poller's version+freshness check (a backstop if the PTY
-// dies).
+// pollActivityContainerStatuses is display-only and never finalizes: pods can
+// report Ready before helm --wait returns.
 func (a *App) pollActivityContainerStatuses(ctx context.Context, entry activityQueueEntry) {
 	if a.activityQueue == nil {
 		return
@@ -75,9 +61,7 @@ func (a *App) pollActivityContainerStatuses(ctx context.Context, entry activityQ
 	}
 }
 
-// fetchActivityContainerStatuses returns an error rather than an empty snapshot
-// on a transient kubectl outage, so the frontend keeps showing the last-known
-// state until the next successful poll.
+// fetchActivityContainerStatuses errors on a kubectl outage so the frontend keeps the last-known state.
 func (a *App) fetchActivityContainerStatuses(ctx context.Context, entry activityQueueEntry) ([]activityQueueContainerStatus, error) {
 	args := []string{"get", "pods", "-l", "app=" + entry.Release, "-o", "json"}
 	if strings.TrimSpace(entry.KubernetesContext) != "" {
@@ -95,8 +79,6 @@ func (a *App) fetchActivityContainerStatuses(ctx context.Context, entry activity
 	return parseActivityContainerStatuses(out)
 }
 
-// kubectlPodList is the subset of `kubectl get pods -o json` the container-status
-// poller decodes.
 type kubectlPodList struct {
 	Items []kubectlPodItem `json:"items"`
 }
@@ -142,8 +124,7 @@ func parseActivityContainerStatuses(raw []byte) ([]activityQueueContainerStatus,
 	out := make([]activityQueueContainerStatus, 0)
 	seen := make(map[string]bool)
 	for _, item := range parsed.Items {
-		// Spec containers give us images even when Status hasn't reported
-		// them yet (very early in pod lifecycle).
+		// Spec containers carry images before Status reports them.
 		imageByName := make(map[string]string, len(item.Spec.Containers))
 		for _, c := range item.Spec.Containers {
 			imageByName[c.Name] = c.Image

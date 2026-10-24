@@ -9,60 +9,26 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-// GitPushAccessStatus reports what a remote-worktree environment's project
-// checkout can do against its origin remote: fetch (read) and push (write)
-// are independent capabilities, and a public GitHub repository fetches
-// anonymously for the entire life of a piece of work. That asymmetry is what
-// makes this expensive to discover the hard way -- an environment can look
-// completely healthy for hours of real work and only fail at the final
-// `git push`, the worst possible moment to discover there was never a
-// credential.
+// GitPushAccessStatus reports fetch and push capability separately: a public repo fetches
+// anonymously, so a missing push credential otherwise surfaces only at the final push.
 type GitPushAccessStatus struct {
-	// RemoteURL is empty when the checkout has no origin remote at all (or no
-	// checkout exists yet); every other field is meaningless in that case.
+	// RemoteURL is empty when there is no origin; other fields are then meaningless.
 	RemoteURL string
-	// FetchOK reports whether `git ls-remote` against origin succeeded.
-	FetchOK bool
-	// GHAuthenticated reports whether `gh auth status` succeeded for the
-	// remote's host. It is read-only -- this never runs `gh auth login`,
-	// `gh auth refresh`, or `gh auth switch`, so inspecting this status can
-	// never itself start gh's interactive device-code/browser flow, which
-	// cannot complete in a headless pod (see interactiveGHAuthAllowed in
-	// build_docker_commands.go for the same reasoning applied to erun's own
-	// GHCR push-scope refresh).
+	FetchOK   bool
+	// GHAuthenticated never runs gh login/refresh/switch, whose interactive flow cannot finish in a pod.
 	GHAuthenticated bool
-	// PushCredential reports whether any credential that could push resolved.
-	// A `gh` session only counts when it either carries the classic OAuth
-	// `repo` scope or reports no scope list at all (a fine-grained PAT or
-	// GitHub App token uses a different permission model that `gh auth
-	// status` can't enumerate, so an absent scope list is not evidence of
-	// absent permission -- same reasoning as verifyGHCRPushScopeFor in
-	// ghcr_push_preflight.go: `gh auth status` succeeding only proves the
-	// session authenticates, not that it can push, so a read:org/gist-only
-	// token must not read as a push credential). GH_TOKEN/GITHUB_TOKEN always
-	// count. For an SSH remote with none of the above, a key the remote host
-	// accepts is detected by the ssh client's own exit-code convention: ssh
-	// reserves exit 255 for its own connection/auth failure and passes through
-	// whatever the remote process returns otherwise, so a non-255 exit means
-	// the remote accepted the key even though most git hosts (GitHub, GitLab,
-	// Bitbucket, self-hosted) then refuse the shell command itself -- grepping
-	// stderr for GitHub's own wording ("successfully authenticated") read a
-	// valid key against any other host as no credential at all.
+	// PushCredential: a gh session counts only with `repo` scope or no scope list (fine-grained
+	// tokens list none); GH_TOKEN/GITHUB_TOKEN always count. For SSH, any exit other than 255
+	// (ssh's own failure code) means the host accepted the key.
 	PushCredential bool
 }
 
-// FetchWorksPushDoesNot is the specific asymmetry this check exists to
-// surface: an environment that can read its origin remote but has no
-// credential that could ever push to it.
+// FetchWorksPushDoesNot reports a readable origin with no credential that could push.
 func (s GitPushAccessStatus) FetchWorksPushDoesNot() bool {
 	return s.RemoteURL != "" && s.FetchOK && !s.PushCredential
 }
 
-// InspectGitPushAccess reads back, from a remote-worktree environment's
-// project checkout, whether origin resolves, whether an anonymous fetch
-// succeeds, and whether a push credential is configured. The script it runs
-// is read-only: it never mutates git or gh state and never invokes gh's
-// interactive login/refresh/switch subcommands.
+// InspectGitPushAccess runs a read-only script that never invokes gh's interactive subcommands.
 func InspectGitPushAccess(ctx core.Context, runner kube.RemoteCommandRunnerFunc, req config.ShellLaunchParams, repoPath string) (GitPushAccessStatus, error) {
 	out, err := kube.RunTracedRemoteCommand(ctx, runner, req, "git-push-access-script", gitPushAccessScript(repoPath))
 	if err != nil {

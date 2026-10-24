@@ -21,9 +21,7 @@ func NormalizeCloudDependencies(deps CloudDependencies) CloudDependencies {
 	return deps
 }
 
-// normalizeERunCloudDependencies leaves CloudSecretStore nil on purpose: only
-// a transport wires one, and erun operations that need it fail clearly when
-// it is absent (same convention as Cloudflare).
+// normalizeERunCloudDependencies leaves CloudSecretStore nil: only a transport wires one.
 func normalizeERunCloudDependencies(deps CloudDependencies) CloudDependencies {
 	if deps.FetchPlatformInfo == nil {
 		deps.FetchPlatformInfo = defaultFetchPlatformInfo
@@ -83,10 +81,7 @@ func normalizeAWSCloudDependencies(deps CloudDependencies) CloudDependencies {
 	return deps
 }
 
-// resolveAWSIdentityForExecutionMode and checkAWSStatusForExecutionMode pick
-// the subprocess or library implementation per the aws-sts execution mode
-// (see execution_mode.go), split out of normalizeAWSCloudDependencies to keep
-// its own branching within the cyclomatic complexity budget.
+// resolveAWSIdentityForExecutionMode picks the subprocess or library implementation per the aws-sts mode.
 func resolveAWSIdentityForExecutionMode() func(core.Context, string) (AWSIdentity, error) {
 	if configpkg.CurrentExecutionMode(awsSTSIdentityExecutionOperation) == configpkg.ExecutionModeLibrary {
 		return libraryResolveAWSIdentity
@@ -115,9 +110,7 @@ func checkAWSStatusForExecutionMode() func(core.Context, configpkg.CloudProvider
 	return defaultCheckAWSStatus
 }
 
-// normalizeCloudflareCloudDependencies leaves CloudSecretStore nil on purpose:
-// only a transport wires one, and Cloudflare operations that need it fail
-// clearly when it is absent.
+// normalizeCloudflareCloudDependencies leaves CloudSecretStore nil: only a transport wires one.
 func normalizeCloudflareCloudDependencies(deps CloudDependencies) CloudDependencies {
 	if deps.VerifyCloudflareToken == nil {
 		deps.VerifyCloudflareToken = defaultVerifyCloudflareToken

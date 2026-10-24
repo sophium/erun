@@ -13,9 +13,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// assertBypassReported holds the report to what an operator needs: which remote
-// accepted the push, which ref's rules were stepped over, which rules they
-// were, and the command that resolves it afterwards.
 func assertBypassReported(t *testing.T, got, wantRef string) {
 	t.Helper()
 	for _, want := range []string{"origin", wantRef, "Changes must be made through a pull request", "reconcile-bypass"} {
@@ -25,10 +22,7 @@ func assertBypassReported(t *testing.T, got, wantRef string) {
 	}
 }
 
-// releaseBypassTestContext captures erun's own report while still giving the
-// release's git commands the stderr sink a real run has. Leaving it nil is a
-// shape production never produces, and a panic on the sink would prove nothing
-// about the report this exists to check.
+// A nil stderr sink is a shape production never produces.
 func releaseBypassTestContext(out io.Writer) core.Context {
 	return core.Context{
 		Logger: core.NewLoggerWithWriters(core.VerbosityInfo, out, out),
@@ -37,12 +31,8 @@ func releaseBypassTestContext(out io.Writer) core.Context {
 	}
 }
 
-// installBypassNoticeHook gives a bare remote GitHub's own answer to a push: a
-// pre-receive hook whose stderr git relays to the pushing side in the same
-// `remote: `-prefixed, blank-line-separated notice GitHub writes. Only a
-// receiving remote ever produces that notice, so a hook is the one way to make
-// a real `git push` carry a bypass -- which is what makes the claim push's
-// report reachable without an injected git seam to stand in for its remote.
+// installBypassNoticeHook makes a bare remote emit GitHub's `remote: ` bypass
+// notice from a pre-receive hook, so a real push carries it.
 func installBypassNoticeHook(t *testing.T, remote, ref string) {
 	t.Helper()
 	hook := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' 'Bypassed rule violations for %s:' '' '- Changes must be made through a pull request.' '' >&2\nexit 0\n", ref)
@@ -51,13 +41,8 @@ func installBypassNoticeHook(t *testing.T, remote, ref string) {
 	}
 }
 
-// TestReleaseClaimPushReportsAGitHubRulesetBypass drives the repository-global
-// claim push against a real remote, because that is the one push erun makes
-// with no injected git seam to stand in for one. It is the independently-driven
-// half of this report: the release-stage tests above stub git's stderr, so this
-// is what proves the notice survives a real push's own stderr plumbing, and
-// that the claim ref -- which lands on the same origin as the release's own
-// refs -- is not the push left silent.
+// The claim push has no git seam, so this proves the notice survives a real
+// push's stderr plumbing.
 func TestReleaseClaimPushReportsAGitHubRulesetBypass(t *testing.T) {
 	repo := newAgentJobTestRepo(t)
 	remote := newBareRemoteForTest(t, repo)

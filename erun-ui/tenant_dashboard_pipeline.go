@@ -8,20 +8,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// loadTenantDashboardPipeline is the Pipeline tab's own panel: every job and
-// review this tenant has, unioned on the issue each belongs to. It is the
-// desktop counterpart to the console's Pipeline section, reading the same
-// GET /v1/pipeline.
-//
-// It spans the Reviews tab rather than repeating it. A piece of
-// planned work exists only here: it has a recorded issue and no branch at
-// all, so neither the reviews list nor the merge queue can show it. The merge
-// queue keeps its single meaning -- the ordered set of READY reviews one gate
-// drives -- and nothing in this read adds a row to it.
-//
-// Degrades independently like every other panel here: a caller who cannot
-// read GET /v1/pipeline gets a named restriction, and a read that fails
-// carries its own error, neither of which blanks a neighbouring panel.
+// loadTenantDashboardPipeline reads GET /v1/pipeline: jobs and reviews unioned by
+// issue. It never adds rows to the merge queue.
 func loadTenantDashboardPipeline(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabPipeline}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadPipeline); restricted != "" {
@@ -64,10 +52,7 @@ func tenantDashboardPipelineItems(items []platformclient.PlatformPipelineItem) [
 	return converted
 }
 
-// tenantDashboardPipelineJob and tenantDashboardPipelineReview keep each half
-// nil when the platform sent none. An item carries exactly one of the two,
-// and a synthesised empty one would render as a record that exists but says
-// nothing -- the opposite of the "which record is this" the row is for.
+// A missing half stays nil; an empty synthesised one would render as a blank record.
 func tenantDashboardPipelineJob(job *platformclient.PlatformPipelineJob) *uiPipelineJob {
 	if job == nil {
 		return nil
@@ -85,9 +70,7 @@ func tenantDashboardPipelineJob(job *platformclient.PlatformPipelineJob) *uiPipe
 	}
 }
 
-// tenantDashboardOptionalTime renders a timestamp the platform may not have
-// sent at all. Absent stays absent rather than becoming a zero instant a
-// reader would take for a job that ended at the epoch.
+// Absent stays "" rather than a zero instant.
 func tenantDashboardOptionalTime(value *time.Time) string {
 	if value == nil {
 		return ""

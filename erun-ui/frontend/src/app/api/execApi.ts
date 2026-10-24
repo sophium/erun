@@ -20,10 +20,7 @@ interface ExecPushArgs {
   input: UIExecPushInput;
 }
 
-// execApi reaches the runtime repo's commit/push primitives — the
-// precondition CreateReview's sourceBranch needs — invalidating the diff
-// panel's own cache so a commit or push made from the review dialog is
-// reflected there without a manual refresh.
+// Invalidates the diff panel cache so dialog commits and pushes show there.
 export const execApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
     execCommit: builder.mutation<UICommitWorkingTreeResult, ExecCommitArgs>({

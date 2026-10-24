@@ -26,11 +26,7 @@ import { DashboardMessage } from './TenantDashboardMessage';
 import { TenantDashboardPanels } from './TenantDashboardPanels';
 import { TenantPlatformStateCard } from './TenantPlatformState';
 
-// tenantDashboardIsBlocked reports whether the surface has a single shared
-// precondition unmet (loading, a generic load failure, or one of the
-// platform-readiness states) — in which case the tab strip and per-panel
-// chrome must not render at all: a caller who cannot read anything sees
-// that named once, not six enabled tabs each discovering it on their own.
+// A blocked dashboard renders its one shared reason without the tab strip.
 function tenantDashboardIsBlocked(dashboard: AppState['tenantDashboard']): boolean {
   return (
     dashboard.loading ||
@@ -62,20 +58,14 @@ export function TenantDashboardView(): React.ReactElement | null {
             <p className="truncate text-sm text-muted-foreground">
               {tenantDashboardSubtitle(tenant, environmentName)}
             </p>
-            {/* Whose rows these are. The heading above names the local tenant
-                this dashboard was opened from; every panel below renders the
-                platform tenant its credential reaches, and nothing else on the
-                surface can say whether those are the same tenant. */}
+            {/* The local tenant and the platform tenant may differ; this names the latter. */}
             {platformTenantName && (
               <p className="truncate text-[12px] text-muted-foreground">
                 Platform tenant: <span className="font-mono">{platformTenantName}</span>
               </p>
             )}
           </div>
-          {/* Refresh is a manual-choice convenience for an already-loaded
-              dashboard, never the repair path for a blocked one — every
-              blocked state recovers on its own once its real precondition
-              is resolved. */}
+          {/* Blocked states recover on their own, so Refresh is only offered when loaded. */}
           {!blocked && (
             <Button
               type="button"
@@ -100,10 +90,6 @@ export function TenantDashboardView(): React.ReactElement | null {
   );
 }
 
-// TenantDashboardBlockedBody renders the one shared reason nothing loaded,
-// full-panel, with no tab strip beside it: the operator sees a designed
-// card naming what was attempted, not an alert floating over an
-// otherwise-empty tab strip.
 function TenantDashboardBlockedBody({
   dashboard,
   tenant,
@@ -149,9 +135,7 @@ function TenantDashboardBlockedCard({
   if (dashboard.data?.platformState) {
     return <TenantPlatformStateCard data={dashboard.data} />;
   }
-  // A whole-dashboard apiError with no platformState is a failure this build
-  // could not classify into one of the named states — diagnosed as far as
-  // possible, not guessed the rest of the way (per the standard's rule 1).
+  // An apiError with no platformState is a failure this build could not classify.
   return (
     <GenericLoadFailure
       message={dashboard.data?.apiError ?? 'The tenant dashboard failed to load.'}
@@ -202,20 +186,9 @@ function TenantDashboardReadyBody({
       className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] px-5 py-4"
     >
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
-        {/* The strip wraps rather than truncating: a narrow <main> has less
-            width than the full tab set needs, and a tab an operator cannot
-            reach is a worse answer than a second line.
-
-            The height override has to carry the primitive's own variant, not
-            a bare h-auto. The primitive pins the height under
-            group-data-[orientation=horizontal]/tabs, which both survives
-            tailwind-merge beside an unqualified class and outranks it on
-            specificity — so the tabs wrapped while their box stayed one row
-            tall, and the overflowing row painted over the panel beneath it.
-
-            flex-none likewise overrides the primitive's flex-1: a grown tab
-            fills whatever its row has left, which turns a lone wrapped tab
-            into a full-width bar sitting in dead space instead of a tab. */}
+        {/* Wrap rather than truncate. The height override must carry the primitive's
+            group-data variant to outrank its pinned height; flex-none overrides
+            flex-1 so a wrapped tab does not stretch full-width. */}
         <TabsList className="group-data-[orientation=horizontal]/tabs:h-auto w-full flex-wrap justify-start gap-1">
           {visibleTabs.map((descriptor) => (
             <TabsTrigger key={descriptor.tab} value={descriptor.tab} className="h-auto flex-none">
@@ -233,11 +206,7 @@ function TenantDashboardReadyBody({
   );
 }
 
-// RestrictedAccessNote is why a short tab strip is not an empty tenant. Hiding
-// the tabs alone would leave the user to infer that the panels do not exist, so
-// the access they are missing is named where they are looking (Nielsen #1) —
-// and, since several reads can be missing at once, so is the grant for each
-// one that a role already covers.
+// RestrictedAccessNote names the missing access so a short tab strip does not read as an empty tenant.
 function RestrictedAccessNote({
   missing,
   remedies,

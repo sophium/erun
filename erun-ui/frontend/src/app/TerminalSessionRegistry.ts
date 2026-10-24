@@ -17,8 +17,7 @@ import {
 } from './terminalBuffers';
 import { selectionKey } from './versionSuggestions';
 
-// The raw output of a session, kept only for failedTerminalOutput to report
-// the tail of a tracked session that exits.
+// Raw session output, kept only so failedTerminalOutput can report its tail.
 interface RetainedRawBuffer {
   chunks: Uint8Array[];
   bytes: number;
@@ -26,14 +25,10 @@ interface RetainedRawBuffer {
 
 interface RetainedDisplayBuffer {
   chunks: TerminalWriteData[];
-  // Running totals kept in lockstep with `chunks` so a budget check is O(1)
-  // on the common (under-budget) path -- see appendDisplayBuffer.
+  // Running totals kept in lockstep with `chunks` for an O(1) budget check.
   lines: number;
   bytes: number;
-  // How many chunks have ever been appended to this session, monotonic: a trim
-  // drops chunks from the head of `chunks` and never touches this. It is what
-  // makes "the chunks that arrived after X" answerable across a trim, which a
-  // length -- an index into an array whose head can move -- is not.
+  // Monotonic chunk count; unlike an index it stays meaningful across head trims.
   appended: number;
 }
 
@@ -47,24 +42,14 @@ function totals(chunks: TerminalWriteData[]): { lines: number; bytes: number } {
   return { lines, bytes };
 }
 
-// The output buffers stay on this instance as Maps rather than in the Redux
-// sessions slice on purpose: they are large and churn on every terminal
-// write, so keeping them in the store would be a perf sink. All other
-// per-session metadata lives in the slice.
+// Output buffers stay out of Redux: they are large and churn on every write.
 export class TerminalSessionRegistry {
   private readonly sessionBuffers = new Map<number, RetainedRawBuffer>();
   private readonly sessionDisplayBuffers = new Map<number, RetainedDisplayBuffer>();
-  // The last serialized screen+scrollback xterm captured for a session when
-  // it was switched away from (see TerminalController.snapshotSession). A
-  // switch back writes this once, then only the (already-bounded) display
-  // buffer accumulated since -- O(delta since last visit), not O(session
-  // history). Absent for a session that has never been switched away
-  // from yet; that session still replays its buffer from scratch once.
+  // Last serialized screen captured on switch-away, so a switch back replays
+  // only the delta since.
   private readonly sessionSnapshots = new Map<number, string>();
-  // Sessions forgotten for good. The pane can still be on a forgotten session
-  // when it is released -- the switch away is queued behind xterm's writes --
-  // and that switch's capture would otherwise store a whole serialized screen
-  // for a session nothing will ever show again.
+  // A queued switch-away can still capture a forgotten session; this refuses it.
   private readonly forgottenSessions = new Set<number>();
 
   knownSelectionSession(key: string): number {
@@ -79,8 +64,7 @@ export class TerminalSessionRegistry {
     return store.getState().sessions.openSelections[sessionId] !== undefined;
   }
 
-  // Bounded by the display buffer's byte budget: an exit report needs the tail
-  // of the output, and a session that runs for a day must not keep all of it.
+  // Bounded so a long-running session keeps only the tail an exit report needs.
   appendSessionBuffer(sessionId: number, data: Uint8Array): void {
     if (this.forgottenSessions.has(sessionId)) {
       return;
@@ -104,15 +88,11 @@ export class TerminalSessionRegistry {
     return this.sessionBuffers.get(sessionId)?.chunks ?? [];
   }
 
-  // Once a session's exit has been reported, nothing reads its raw output.
   forgetSessionBuffer(sessionId: number): void {
     this.sessionBuffers.delete(sessionId);
   }
 
-  // forgetSession drops everything retained for a session no tab shows any
-  // more, and refuses anything retained for it later. Go mints session ids
-  // monotonically and never reuses one, so nothing can ask for this session's
-  // output again.
+  // forgetSession drops a session's state for good; Go never reuses session ids.
   forgetSession(sessionId: number): void {
     this.forgottenSessions.add(sessionId);
     this.sessionBuffers.delete(sessionId);
@@ -120,17 +100,9 @@ export class TerminalSessionRegistry {
     this.sessionSnapshots.delete(sessionId);
   }
 
-  // Bounded at append time, not only at replay time: an inactive session (an
-  // orchestrator idling in the background, a build a nobody is watching) must
-  // not grow this array without limit just because nothing has read it since.
-  // The same budget xterm's own scrollback uses (TERMINAL_SCROLLBACK) --
-  // retaining more than that is memory nothing will ever render.
-  //
-  // The budget check itself is O(1) on the common under-budget path (a
-  // running total, not a re-scan of the whole array on every single output
-  // chunk). Crossing the budget trims to RETAINED_TRIM_TARGET of it, so the
-  // O(retained size) rescan runs once per quarter-budget of new output rather
-  // than on every chunk after the first crossing.
+  // Bounded at append time to TERMINAL_SCROLLBACK so idle sessions cannot grow
+  // without limit; crossing the budget trims to RETAINED_TRIM_TARGET so the
+  // rescan is amortized.
   appendDisplayBuffer(sessionId: number, data: TerminalWriteData): void {
     if (this.forgottenSessions.has(sessionId)) {
       return;
@@ -144,9 +116,7 @@ export class TerminalSessionRegistry {
     existing.chunks.push(data);
     existing.lines += countNewlines(data);
     existing.bytes += data.length;
-    // Counted before the trim below, and never decremented by it: this is the
-    // session's output in append order, which the retained array only ever
-    // shows the tail of.
+    // Counted before the trim and never decremented by it.
     existing.appended += 1;
     if (existing.lines > MAX_RETAINED_LINES || existing.bytes > MAX_RETAINED_BYTES) {
       ({
@@ -166,8 +136,6 @@ export class TerminalSessionRegistry {
     return this.sessionDisplayBuffers.get(sessionId)?.chunks ?? [];
   }
 
-  // How many chunks this session has ever been given, for a caller that needs
-  // to name a point in its output later -- see captureSnapshot.
   displayAppendedCount(sessionId: number): number {
     return this.sessionDisplayBuffers.get(sessionId)?.appended ?? 0;
   }
@@ -176,48 +144,12 @@ export class TerminalSessionRegistry {
     return this.sessionSnapshots.get(sessionId);
   }
 
-  // captureSnapshot records the serialized screen a switch-away captured and
-  // drops the display buffer entries that screen already carries, in the same
-  // step: everything up to the capture is in `serialized`, so from here the
-  // buffer holds only the delta a future switch-back needs to replay on top of
-  // it.
-  //
-  // `appendedAtDispatch` is where output that arrived after the switch was
-  // dispatched begins, named in the append sequence rather than as an index
-  // into `chunks`. Those chunks were never written to the pane -- a session the
-  // store no longer names buffers without writing -- so they are not in
-  // `serialized` and are kept, not dropped with the captured prefix. They are
-  // also the newest output there is, so they are the tail of the array and a
-  // trim can only have dropped chunks from the head, in front of them: counting
-  // back that many from the tail lands on the same chunks whatever the array's
-  // length has become in the meantime. An index taken at dispatch does not --
-  // a session sitting at the budget trims its head on every later append, and
-  // the index then points past the end or at output the snapshot already
-  // carries. The default says nothing arrived in any window, which is what a
-  // caller with no such window wants.
-  //
-  // An empty capture is the one case where that premise does not hold, and it
-  // is reachable whenever the session being switched away from has not painted
-  // yet: xterm parses writes asynchronously, so a second switch dispatched
-  // before the outgoing session's activation writes have flushed serializes a
-  // terminal whose buffer those writes have not reached -- "" for a session
-  // that was just switched to. Storing that would replace the session's
-  // remembered screen with nothing and drop the display buffer that was the
-  // only other copy of it, so every later switch back would render blank.
-  // Refuse it: the session keeps whatever snapshot it already had, and the
-  // buffer stays whole. That is what stops the blank -- it is not a promise
-  // that the screen is replayed from the buffer, because the two activation
-  // paths differ. A session with no snapshot falls back to activateSession's
-  // cold path and replays the retained buffer, which is the screen the capture
-  // could not reach. A session that already has a non-empty snapshot takes the
-  // snapshot path instead -- [snapshot, ...delta] -- so it comes back on that
-  // older screen plus whatever arrived since; output the reset or the refused
-  // capture dropped stays dropped, and the pane is stale rather than blank.
-  // That stale case is latent, not live: it needs the shared terminal reset
-  // without a capture in between, and every reset caller runs either on
-  // session 0 or on a session id just minted, which Go allocates
-  // monotonically (a.nextSerial++) and never reuses. A future caller that
-  // resets an active session or reuses an id would have to revisit this guard.
+  // captureSnapshot stores the switch-away screen and drops the buffered chunks
+  // it already contains. Chunks after `appendedAtDispatch` were never written to
+  // the pane, so they are kept; counting from the tail survives head trims.
+  // An empty capture (the session had not painted yet) is refused, keeping the
+  // old snapshot and the whole buffer so the pane never comes back blank. This
+  // assumes resets only hit session 0 or fresh ids, which Go never reuses.
   captureSnapshot(
     sessionId: number,
     serialized: string,
@@ -229,9 +161,7 @@ export class TerminalSessionRegistry {
     this.sessionSnapshots.set(sessionId, serialized);
     const buffered = this.sessionDisplayBuffers.get(sessionId);
     if (buffered) {
-      // What arrived after the boundary. More of it than the buffer still holds
-      // means a trim reached into the window itself, and what survived is all
-      // there is to keep.
+      // Fewer buffered than arrived means a trim reached into the window.
       const arrived = buffered.appended - appendedAtDispatch;
       const keep = Number.isFinite(arrived)
         ? buffered.chunks.slice(Math.max(0, buffered.chunks.length - arrived))

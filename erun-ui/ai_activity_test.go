@@ -6,24 +6,8 @@ import (
 	"time"
 )
 
-// TestRecordAIActivityDebounce locks the debounced "AI tab is working"
-// signal that drives the sidebar busy badge for non-active envs.
-//
-// Policy:
-//   - busy=true must fire only after aiActivitySustainedThreshold (5 s)
-//     of *sustained* output. A single burst that ends inside the window
-//     must not toggle the badge.
-//   - busy=false must fire aiActivityIdleThreshold (3 s) after the last
-//     output, regardless of how long busy=true was latched.
-//   - Session close (finalizeAIActivity) must release a latched
-//     busy=true even mid-generation.
-//   - An orchestrator session does NOT drive this signal. It runs an
-//     interactive agent TUI, which repaints continuously, so the silence
-//     rule that releases the latch never fires and the row span forever.
-//     An env's AI tab survives that only because the pod heartbeat sees its
-//     program exit; an orchestrator has no pod, so it reports its own turn
-//     boundaries instead (orchestrator_activity.go).
-//   - The signal is silent for every other session kind.
+// busy fires after sustained output, clears after idle or close, and orchestrator
+// sessions never drive it: their TUI repaints forever and has no pod heartbeat.
 func TestRecordAIActivityDebounce(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -51,8 +35,7 @@ func TestRecordAIActivityDebounce(t *testing.T) {
 				serial:    7,
 			}
 
-			// Single burst: no time has passed, so even an AI session
-			// must not have flipped busy=true yet.
+			// No time has passed, so busy must not be set yet.
 			app.recordAIActivity(managed)
 			if len(emits.events(aiActivityEvent)) != 0 {
 				t.Fatalf("unexpected immediate emit: %+v", emits.events(aiActivityEvent))
@@ -115,11 +98,7 @@ func assertFinalizeEmit(t *testing.T, allEvents []any, kind sessionKind, wantEmi
 	}
 }
 
-// TestClearAIActivityIfQuietBouncesNewOutput verifies that a stale
-// AfterFunc firing does not clear the busy latch when fresh output has
-// arrived since the timer was scheduled. The production path relies on
-// this to suppress flicker when recordAIActivity calls overlap with a
-// previously scheduled timer.
+// A stale timer must not clear busy when fresh output arrived.
 func TestClearAIActivityIfQuietBouncesNewOutput(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{
@@ -168,17 +147,8 @@ func (c *capturedEmits) fn() func(string, ...any) {
 	}
 }
 
-// waitFor blocks until the captured events satisfy pred, returning false only
-// if bound elapses first. It waits on the emitter's own signal rather than
-// re-reading a snapshot on a short wall-clock budget: the emit a test waits
-// for arrives from a background goroutine, so a budget sized for an idle
-// machine turns CPU contention into a failure that says nothing about the
-// code — which is how the orchestrator forward-open test went red under a
-// full gate run and green on its own. Because the wait returns the instant
-// the emit lands, bound is a safety net for "never arrives" and costs the
-// happy path nothing.
-//
-// pred reads byName under the lock and must not call back into capturedEmits.
+// waitFor waits on the emitter's signal rather than a wall-clock poll, so CPU
+// contention cannot fail it; pred runs under the lock.
 func (c *capturedEmits) waitFor(bound time.Duration, pred func(byName map[string][]any) bool) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

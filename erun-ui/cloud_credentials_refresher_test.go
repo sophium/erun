@@ -7,9 +7,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// credentialRefreshTargetApp builds an app whose store holds one env of the
-// given type with the given alias attached, plus the AWS and Cloudflare
-// providers those aliases can resolve to.
 func credentialRefreshTargetApp(t *testing.T, envType config.EnvironmentType, alias string) *App {
 	t.Helper()
 	projectRoot := t.TempDir()
@@ -39,11 +36,7 @@ func credentialRefreshTargetApp(t *testing.T, envType config.EnvironmentType, al
 	})
 }
 
-// TestResolveCloudCredentialsRefreshTargetCoversEveryEnvTypeWithAnAWSAlias locks
-// the fix: the chart wires AWS_PROFILE=erun-host into the runtime container for
-// any env with an AWS alias attached, so the refresher that writes that profile
-// must run for any such env too. Gating it on worktree location left local-agent
-// pods pointing at a profile nothing ever created.
+// The chart sets AWS_PROFILE=erun-host for any env with an AWS alias, so the refresher must run for every type.
 func TestResolveCloudCredentialsRefreshTargetCoversEveryEnvTypeWithAnAWSAlias(t *testing.T) {
 	for _, envType := range []config.EnvironmentType{
 		config.EnvironmentTypeLocalAgent,
@@ -63,9 +56,6 @@ func TestResolveCloudCredentialsRefreshTargetCoversEveryEnvTypeWithAnAWSAlias(t 
 	}
 }
 
-// TestResolveCloudCredentialsRefreshTargetSkipsWithoutAnAWSAlias keeps the
-// remaining gates honest now that env type no longer participates: no alias, or
-// a non-AWS one, must still leave the pod alone.
 func TestResolveCloudCredentialsRefreshTargetSkipsWithoutAnAWSAlias(t *testing.T) {
 	for name, alias := range map[string]string{"no_alias": "", "cloudflare_alias": "op@cloudflare"} {
 		t.Run(name, func(t *testing.T) {

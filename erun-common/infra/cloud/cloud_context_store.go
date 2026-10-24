@@ -199,9 +199,7 @@ func defaultRunCloudContextAWS(ctx core.Context, provider configpkg.CloudProvide
 	return stdout.String(), nil
 }
 
-// defaultRunCloudContextKubectl executes an already-traced kubectl config
-// command; configureCloudKubeContext traces (redacted) and gates on
-// ctx.DryRun itself before calling this, so it does neither here.
+// defaultRunCloudContextKubectl runs a command the caller already traced and dry-run gated.
 func defaultRunCloudContextKubectl(ctx core.Context, args []string) error {
 	stdout, _ := captureWriter(ctx.Stdout)
 	stderr, stderrBuffer := captureWriter(ctx.Stderr)
@@ -233,9 +231,6 @@ func dryRunAWSOutput(args []string) string {
 	case strings.Contains(joined, "ec2 run-instances"):
 		return "i-<new-instance>\n"
 	case strings.Contains(joined, "ec2 describe-instances"):
-		// Two describe-instances callers share this path: the status
-		// refresh (queried as [InstanceId,State.Name]) and the public-IP
-		// lookup.
 		if strings.Contains(joined, "[InstanceId,State.Name]") {
 			return dryRunDescribeInstanceStateOutput(joined)
 		}
@@ -245,10 +240,7 @@ func dryRunAWSOutput(args []string) string {
 	}
 }
 
-// dryRunDescribeInstanceStateOutput defaults every instance to "running" so
-// the dry-run preflight does not spuriously plan a start for a context that
-// in real life would already be up; a test that needs the start path supplies
-// a RunAWS returning "stopped".
+// dryRunDescribeInstanceStateOutput reports "running" so dry-run preflight plans no start.
 func dryRunDescribeInstanceStateOutput(joined string) string {
 	const marker = "Values="
 	idx := strings.Index(joined, marker)

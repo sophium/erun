@@ -7,11 +7,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// TestResolveContainerRegistryPrecedence pins the order resolveContainerRegistry
-// tries each source in, since that order is the thing most likely to regress
-// silently: an explicit flag must beat project config, project config must beat
-// a previously stored value, and only a brand-new environment falls through to
-// the default/prompt step.
+// Flag beats project config, which beats a stored value; only a new env reaches
+// the default/prompt.
 func TestResolveContainerRegistryPrecedence(t *testing.T) {
 	tests := []struct {
 		name             string

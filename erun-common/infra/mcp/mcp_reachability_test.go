@@ -9,10 +9,7 @@ import (
 	"testing"
 )
 
-// A listener that accepts and then never answers is exactly what a stale
-// kubectl port-forward is, and it is the case a dial-based check cannot see:
-// the handshake succeeds, so the tunnel reads as healthy while every call
-// through it hangs. This is the whole reason reachability is a round trip.
+// A stale port-forward accepts and never answers, which a dial-based check cannot see.
 func TestCanReachLocalMCPEndpointSeesThroughASilentListener(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -25,7 +22,6 @@ func TestCanReachLocalMCPEndpointSeesThroughASilentListener(t *testing.T) {
 			if acceptErr != nil {
 				return
 			}
-			// Held open and never answered, like the stale forward.
 			defer func() { _ = conn.Close() }()
 		}
 	}()
@@ -43,9 +39,7 @@ func TestCanReachLocalMCPEndpointSeesThroughASilentListener(t *testing.T) {
 	}
 }
 
-// Any answer proves the edge replied — an unauthenticated request is answered
-// 401, and that is enough. Requiring a success status would report a healthy
-// tunnel as broken.
+// A 401 still proves the edge replied.
 func TestCanReachLocalMCPEndpointAcceptsAnyAnswer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -66,9 +60,6 @@ func TestCanReachLocalMCPEndpointAcceptsAnyAnswer(t *testing.T) {
 	}
 }
 
-// ClassifyLocalMCPUnreachable is what DescribeLocalMCPUnreachable's own branch
-// reduces to; pinning it directly means a caller that needs the kind on its
-// own (to pick a UI treatment, say) does not have to parse the sentence for it.
 func TestClassifyLocalMCPUnreachableNamesTheKind(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -92,8 +83,7 @@ func TestClassifyLocalMCPUnreachableNamesTheKind(t *testing.T) {
 	}
 }
 
-// startHeldOpenListener is the stale-forward shape: every connection is
-// accepted and then held open, never answered.
+// startHeldOpenListener accepts and never answers, like a stale forward.
 func startHeldOpenListener(t *testing.T) int {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -113,9 +103,7 @@ func startHeldOpenListener(t *testing.T) int {
 	return loopbackListenerPort(t, listener)
 }
 
-// startDroppingListener is the shape a forward whose target has not come up
-// yet leaves behind: the connection is accepted and then closed without a
-// reply, because the far end kubectl tried to dial was not listening yet.
+// startDroppingListener accepts and closes without replying, like a forward whose target is not up.
 func startDroppingListener(t *testing.T) int {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -135,10 +123,6 @@ func startDroppingListener(t *testing.T) int {
 	return loopbackListenerPort(t, listener)
 }
 
-// A forward whose target has not come up yet — a pod mid-roll after a deploy —
-// accepts the local connection and then closes it without answering. Naming
-// that a stale forward sends the operator to re-open an environment the
-// forward is already reaching, which replaces nothing and answers nothing.
 func TestClassifyLocalMCPUnreachableSeparatesAnUnreadyTargetFromAStaleForward(t *testing.T) {
 	unreadyPort := startDroppingListener(t)
 	stalePort := startHeldOpenListener(t)
@@ -162,8 +146,6 @@ func TestClassifyLocalMCPUnreachableSeparatesAnUnreadyTargetFromAStaleForward(t 
 	}
 }
 
-// Nothing listening is a different problem from a forward that has gone stale,
-// and the operator's next move differs, so the two must not share wording.
 func TestDescribeLocalMCPUnreachableSeparatesMissingFromStale(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

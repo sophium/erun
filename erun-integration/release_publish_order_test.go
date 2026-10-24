@@ -15,18 +15,13 @@ import (
 )
 
 func testReleaseRealRunPublishesBeforeTheTagReachesOrigin(t *testing.T) {
-	// A release publishes between its local stages and its outward-facing
-	// ones, so an announced version is always deployable. Real git against a bare origin proves the
-	// ordering behaviourally: the publish stage runs, the read-back
-	// verification resolves each image and chart, and only then does the
-	// tag reach origin. docker and helm are stubbed because the harness has
-	// no daemon or registry; git is real so "public" means public.
+	// The tag reaches origin only after publish and read-back verification. git is real
+	// (bare origin) so "public" means public; docker and helm are stubbed.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 	seedBareOrigin(t, setup)
 
-	// release marks source control only, so the publish and the preflights it
-	// owns live in `build --release`, which is what this asserts.
+	// The publish lives in `build --release`; release only marks source control.
 	result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubPublishToolchain(t, setup)...)})
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -40,12 +35,7 @@ func testReleaseRealRunPublishesBeforeTheTagReachesOrigin(t *testing.T) {
 }
 
 func testReleaseRealRunPublishFailureLeavesNoPublicTag(t *testing.T) {
-	// The other half of the same contract: when the publish cannot
-	// complete, the release must fail while nothing is public. docker fails
-	// every invocation, so the build inside the publish stage errors out.
-	// The tag must not exist on origin and VERSION must still hold the
-	// version that was being released, so re-running retries the same
-	// version rather than stranding it behind a bump.
+	// A failed publish leaves no tag on origin and VERSION unchanged, so a re-run retries it.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 	seedBareOrigin(t, setup)
@@ -53,12 +43,9 @@ func testReleaseRealRunPublishFailureLeavesNoPublicTag(t *testing.T) {
 	fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{Stderr: "simulated docker failure", ExitCode: 1})
 	fixture.StubBinary(t, stubs, "helm", "")
 
-	// Give the registry-credential preflight a resolvable credential
-	// so this scenario still reaches the simulated docker failure it is about.
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 	envVars = append(envVars, "GH_TOKEN=integration-test-token")
-	// release marks source control only, so the publish and the preflights it
-	// owns live in `build --release`, which is what this asserts.
+	// The publish lives in `build --release`; release only marks source control.
 	result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit when the publish fails, got 0: %s", result.Combined)
@@ -72,13 +59,8 @@ func testReleaseRealRunPublishFailureLeavesNoPublicTag(t *testing.T) {
 }
 
 func testReleaseRealRunRefusesWhenTheBaseBranchMovedBeforeTheBuild(t *testing.T) {
-	// The base branch is re-read immediately before the build, so one that
-	// moved after sync-remote is caught before anything is public, and a release that cannot land refuses
-	// while nothing is published and the version file is untouched.
-	//
-	// git is stubbed so the re-read reports a moved branch deterministically:
-	// the move is what this scenario is about, and no fixture can make a real
-	// remote move between two of the release's own git calls.
+	// The base branch is re-read right before the build; git is stubbed because no fixture
+	// can move a real remote between two of the release's own git calls.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -95,44 +77,31 @@ exit 0
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "git")...)
 	envVars = append(envVars, stubPublishToolchain(t, setup)...)
 
-	// release marks source control only, so the publish and the preflights it
-	// owns live in `build --release`, which is what this asserts.
+	// The publish lives in `build --release`; release only marks source control.
 	result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode == 0 {
 		t.Fatalf("expected non-zero exit when the base branch moved before the build, got 0: %s", result.Combined)
 	}
 	golden.Equal(t, "release/real_run_refuses_when_the_base_branch_moved_before_the_build", normalize.Apply(result.Combined))
 
-	// Outside the captured streams: the refusal must leave the version file
-	// on the version it was releasing, so re-running retries that version.
 	assertVersionFile(t, setup, "1.4.2\n")
 }
 
 func testReleaseRealRunAbsorbsABaseBranchThatMovedDuringTheBuild(t *testing.T) {
-	// A base branch that moves while the release builds, after everything
-	// went public, must not strand the packaging commit and version bump:
-	// the final push rebases onto the moved branch and retries.
-	//
-	// The helm stub is what moves origin. helm first runs inside the publish
-	// stage, which places the move exactly where the real one landed — after
-	// the pre-build re-check, while the version is going public.
+	// A base branch moving after publish must not strand the bump: the final push rebases
+	// and retries. helm's first call (inside publish) moves origin at the realistic point.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 	origin := seedBareOrigin(t, setup)
 
-	// The GitHub release entry is created when the linux packages are
-	// attached, after the push. The gh stub's marker proves a rejected push
-	// does not strand it.
+	// The gh stub's marker proves a rejected push does not strand the GitHub release.
 	githubReleaseCreated := filepath.Join(setup.Home, "github-release-created")
 	mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "linux", "erun-cli", "Dockerfile"), untestedLinuxPackageDockerfile)
 	fixture.RunGit(t, setup.Cwd, "add", ".")
 	fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add linux package")
 	fixture.RunGit(t, setup.Cwd, "push", "-q", "origin", "main")
 
-	// The checkout that stands in for the pull request, cloned once origin is
-	// at the commit the release starts from. -b main because the bare origin's
-	// HEAD still names whatever branch git init defaults to, so a plain clone
-	// would land on an unborn branch with no main to push.
+	// -b main: the bare origin's HEAD names git init's default branch, which may be unborn.
 	merging := filepath.Join(setup.Home, "merging")
 	fixture.RunGit(t, setup.Home, "clone", "-q", "-b", "main", origin, merging)
 	fixture.RunGit(t, merging, "config", "user.email", "test@example")
@@ -141,7 +110,6 @@ func testReleaseRealRunAbsorbsABaseBranchThatMovedDuringTheBuild(t *testing.T) {
 	stubs := filepath.Join(setup.Cwd, "stubs")
 	stubDockerWithManifestTracking(t, stubs)
 	fixture.StubBinaryMergingIntoRemoteOnce(t, stubs, "helm", merging, "main", "a merged pull request")
-	// The release does not exist yet, so gh views nothing and creates it.
 	fixture.StubBinaryWithScript(t, stubs, "gh", strings.Join([]string{
 		`case "$1 $2" in`,
 		`  "release view") exit 1 ;;`,
@@ -150,27 +118,18 @@ func testReleaseRealRunAbsorbsABaseBranchThatMovedDuringTheBuild(t *testing.T) {
 	}, "\n"))
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm", "gh")...)
 	envVars = append(envVars,
-		// Give the registry-credential preflight a resolvable credential
-		// so this scenario still reaches the moved-branch-absorption it is about.
 		"GH_TOKEN=integration-test-token",
 	)
 
-	// release marks source control only, so the publish and the preflights it
-	// owns live in `build --release`, which is what this asserts.
+	// The publish lives in `build --release`; release only marks source control.
 	result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// git's push-rejection hint block is worded differently across git
-	// versions, so it cannot be part of a reviewed golden; the `! [rejected]`
-	// line and erun's own retry line are what this scenario locks.
+	// git's hint block wording varies by version, so it is stripped from the golden.
 	combined := normalize.Apply(result.Combined, normalize.Replacement{Pattern: regexp.MustCompile(`(?m)^hint:.*\n?`), Token: ""})
 	golden.Equal(t, "release/real_run_absorbs_a_base_branch_that_moved_during_the_build", combined)
 
-	// Side effects outside the captured streams, one per contract the
-	// absorbed push has to hold: the repository records the release it
-	// published, the tag is public, the version moved past what was
-	// published, and the GitHub release step still ran.
 	remote := remoteMainSubjects(t, merging)
 	for _, want := range []string{"a merged pull request", "[skip ci] release 1.4.2", "[skip ci] prepare 1.4.3"} {
 		if !strings.Contains(remote, want) {
@@ -187,17 +146,8 @@ func testReleaseRealRunAbsorbsABaseBranchThatMovedDuringTheBuild(t *testing.T) {
 }
 
 func testReleaseRealRunNamesTheRejectedDevelopAndDoesNotRebaseMain(t *testing.T) {
-	// The misdiagnosed direction of the release push retry. Releasing 1.0.258, main pushed
-	// and develop was rejected as a non-fast-forward: another release had
-	// advanced origin/develop while this release's own sync-develop added
-	// commits locally. The retry attributed the rejection to origin/main —
-	// which had not moved — and rebased it twice, a no-op each time, never
-	// fetching or merging origin/develop.
-	//
-	// The scenario pins the shape rather than the wording: origin/develop
-	// carries a commit this checkout's develop never will, so the develop
-	// ref is genuinely diverged when the push runs while main is cleanly
-	// ahead of origin/main.
+	// The rejected ref is develop (diverged on origin), while main is cleanly ahead; the
+	// retry must not blame main.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 	origin := seedBareOrigin(t, setup)
@@ -227,9 +177,7 @@ func testReleaseRealRunNamesTheRejectedDevelopAndDoesNotRebaseMain(t *testing.T)
 	combined := normalize.Apply(result.Combined, normalize.Replacement{Pattern: regexp.MustCompile(`(?m)^hint:.*\n?`), Token: ""})
 	golden.Equal(t, "release/real_run_names_the_rejected_develop_and_does_not_rebase_main", combined)
 
-	// Everything the release publishes landed before the develop rejection:
-	// main carries the release and the prepare commit, and the tag is public.
-	// develop is what did not land, and the failure has to say so.
+	// main and the tag landed before develop was rejected; the failure must say so.
 	remote := remoteMainSubjects(t, diverging)
 	for _, want := range []string{"[skip ci] release 1.4.2", "[skip ci] prepare 1.4.3"} {
 		if !strings.Contains(remote, want) {
@@ -242,14 +190,8 @@ func testReleaseRealRunNamesTheRejectedDevelopAndDoesNotRebaseMain(t *testing.T)
 }
 
 func testReleaseRealRunRefusesWhenAnotherOrchestratorIsAlreadyReleasingTheVersion(t *testing.T) {
-	// Two orchestrators driving the same runtime pod must not race the same
-	// release. Pre-claiming the exact exclusive lease scope
-	// release itself takes — via the activity lease CLI, sharing this
-	// scenario's XDG_CACHE_HOME — simulates "another orchestrator got there
-	// first". release must refuse before it ever touches git — sync-remote
-	// never runs — though execution-plan resolution has already made its
-	// own read-only docker fingerprint check by this point, hence the
-	// docker stub.
+	// A pre-claimed exclusive lease (shared XDG_CACHE_HOME) makes release refuse before
+	// touching git; the docker stub covers the fingerprint read made during plan resolution.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 
@@ -271,8 +213,5 @@ func testReleaseRealRunRefusesWhenAnotherOrchestratorIsAlreadyReleasingTheVersio
 		t.Fatalf("expected the refusal to name the version and the holder:\n%s", result.Combined)
 	}
 
-	// Outside the captured streams: the refusal must leave the version file
-	// untouched, so re-running retries once the other release finishes (or
-	// its claim is reclaimed automatically).
 	assertVersionFile(t, setup, "1.4.2\n")
 }

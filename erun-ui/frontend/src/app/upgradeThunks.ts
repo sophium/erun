@@ -14,9 +14,7 @@ import { recordTab } from './tabsThunks';
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
 
-// openUpgradeAll shows the read-only Upgrade-all preview: nothing deploys until
-// the user confirms, and it resolves the plan with the same resolver the per-env
-// runs use, so the preview never promises an upgrade the run would refuse.
+// openUpgradeAll uses the per-env resolver, so the preview matches what the run does.
 export const openUpgradeAll = (): AppThunk<Promise<void>> => async (dispatch) => {
   dispatch(openUpgradeAllDialog());
   try {
@@ -27,11 +25,8 @@ export const openUpgradeAll = (): AppThunk<Promise<void>> => async (dispatch) =>
   }
 };
 
-// confirmUpgradeAll runs each member's upgrade in its OWN Local shell so members
-// upgrade in parallel and each env's output, activity, and failures stay on the
-// env they belong to. It deliberately does not select the env or ensure its
-// default tabs: confirming an upgrade is not an open intent, so a Claude session
-// must never launch as a side effect of clicking Upgrade.
+// confirmUpgradeAll runs each member in its own Local shell. It does not select
+// the env or open its tabs, so no Claude session launches as a side effect.
 export const confirmUpgradeAll =
   (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
     const state = getState();
@@ -95,17 +90,14 @@ export const confirmUpgradeAll =
     );
   };
 
-// UpgradeMember is one environment the confirmed Upgrade-all run will redeploy:
-// a lagging env (no version — the CLI resolves its single channel target) or an
-// ambiguous env the operator picked a version for.
+// UpgradeMember has no version for a lagging env (the CLI resolves the target).
 interface UpgradeMember {
   tenant: string;
   environment: string;
   version?: string;
 }
 
-// upgradeMembers must mirror the dialog's enable/count logic so what runs
-// matches what the Upgrade button promised.
+// upgradeMembers must mirror the dialog's enable/count logic.
 function upgradeMembers(
   items: UIUpgradePlanItem[],
   choices: Record<string, string>,

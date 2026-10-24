@@ -22,9 +22,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-// MaxRuntimeOutputBytes caps a single download: the whole payload is buffered in
-// memory, so an unbounded download could exhaust it. It is not what bounds one
-// transfer over the wire — see runtimeOutputChunkBytes for that.
+// MaxRuntimeOutputBytes caps a single download, which is buffered in memory.
 const MaxRuntimeOutputBytes = 100 * 1024 * 1024
 
 const outputDownloadArchiveFormat = "tar.gz"
@@ -37,8 +35,7 @@ type OutputEntry struct {
 	IsDir   bool      `json:"isDir"`
 }
 
-// RuntimeOutputsListResult is the read-model for `outputs list`: the entries in
-// one pod directory, newest-first.
+// RuntimeOutputsListResult is one pod directory's entries, newest-first.
 type RuntimeOutputsListResult struct {
 	Dir       string        `json:"dir"`
 	Entries   []OutputEntry `json:"entries"`
@@ -46,10 +43,8 @@ type RuntimeOutputsListResult struct {
 	Truncated bool          `json:"truncated"`
 }
 
-// RuntimeOutputResult is the result of `outputs download`: one entry's bytes plus
-// the metadata a caller needs to save them. A directory arrives as a gzip tarball
-// (IsArchive=true). Bytes stays out of JSON so a transport returning the payload
-// inline can base64-encode it separately.
+// RuntimeOutputResult is one downloaded entry; a directory arrives as a gzip
+// tarball. Bytes stays out of JSON so transports can encode it separately.
 type RuntimeOutputResult struct {
 	Name          string `json:"name"`
 	IsArchive     bool   `json:"isArchive"`
@@ -57,31 +52,27 @@ type RuntimeOutputResult struct {
 	Size          int64  `json:"size"`
 	SHA256        string `json:"sha256"`
 	Bytes         []byte `json:"-"`
-	// Signing is set only when host-side ad-hoc code signing had something to
-	// report — see SignHostArtifact. It is nil on the common paths (a non-darwin
-	// host, a payload that is not a Mach-O, an artifact already signed).
+	// Signing is nil unless host-side ad-hoc signing had something to report.
 	Signing *codesign.HostArtifactSigning `json:"signing,omitempty"`
 }
 
 // RuntimeOutputsParams selects which directory `outputs list` reads.
 type RuntimeOutputsParams struct {
-	// Dir is the pod directory to list; empty defaults to DefaultRuntimeOutputsDir.
+	// Dir defaults to DefaultRuntimeOutputsDir.
 	Dir string
-	// Limit caps the number of entries returned (newest-first). 0 means no limit.
+	// Limit caps entries returned; 0 means no limit.
 	Limit int
 }
 
 // RuntimeOutputDownloadParams selects which entry `outputs download` fetches.
 type RuntimeOutputDownloadParams struct {
-	// Dir is the base directory the entry lives under; empty defaults to
-	// DefaultRuntimeOutputsDir.
+	// Dir defaults to DefaultRuntimeOutputsDir.
 	Dir string
-	// Name is the entry to download, a single path segment under Dir.
+	// Name is a single path segment under Dir.
 	Name string
 }
 
-// RuntimeOutputsRunner runs a /bin/sh script in the env's runtime pod and
-// returns its captured output.
+// RuntimeOutputsRunner runs a /bin/sh script in the env's runtime pod.
 type RuntimeOutputsRunner func(req config.ShellLaunchParams, script string) (kube.RemoteCommandResult, error)
 
 func resolveOutputsDir(dir string) (string, error) {
@@ -92,9 +83,8 @@ func resolveOutputsDir(dir string) (string, error) {
 	return core.ValidateAbsolutePodPath(dir, "outputs path")
 }
 
-// ResolveRuntimeOutputs lists one directory in the env's runtime pod,
-// newest-first. A missing directory yields an empty result, not an error, and
-// dry-run returns an empty result without contacting the pod.
+// ResolveRuntimeOutputs lists one runtime-pod directory, newest-first; a missing
+// directory is an empty result.
 func ResolveRuntimeOutputs(ctx core.Context, req config.ShellLaunchParams, params RuntimeOutputsParams, run RuntimeOutputsRunner) (RuntimeOutputsListResult, error) {
 	dir, err := resolveOutputsDir(params.Dir)
 	if err != nil {
@@ -143,8 +133,7 @@ func newRuntimeOutputResult(name string, isDir bool, data []byte) RuntimeOutputR
 	return result
 }
 
-// traceRuntimeOutputsScript returns true when the context is in dry-run, in which
-// case the caller must not run the command.
+// traceRuntimeOutputsScript reports dry-run, in which case the caller must not run.
 func traceRuntimeOutputsScript(ctx core.Context, req config.ShellLaunchParams, label, script string) bool {
 	traceArgs := append([]string{}, kube.KubectlRemoteExecArgs(req, script)...)
 	if len(traceArgs) > 0 {
@@ -155,15 +144,13 @@ func traceRuntimeOutputsScript(ctx core.Context, req config.ShellLaunchParams, l
 	return ctx.DryRun
 }
 
-// runtimeOutputsListScript emits one tab-separated record per entry: type (f/d),
-// size, mtime epoch, basename. A missing directory prints nothing.
+// runtimeOutputsListScript emits "type\tsize\tmtime\tname" per entry.
 func runtimeOutputsListScript(dir string) string {
 	quoted := core.ShellQuote(dir)
 	return fmt.Sprintf("if [ -d %s ]; then find %s -mindepth 1 -maxdepth 1 -printf '%%y\\t%%s\\t%%T@\\t%%f\\n'; fi", quoted, quoted)
 }
 
-// parseRuntimeOutputsListing skips malformed lines rather than failing the whole
-// listing.
+// parseRuntimeOutputsListing skips malformed lines.
 func parseRuntimeOutputsListing(stdout string) []OutputEntry {
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
 	entries := make([]OutputEntry, 0, len(lines))
@@ -187,10 +174,8 @@ func parseRuntimeOutputsListing(stdout string) []OutputEntry {
 	return entries
 }
 
-// ResolveLocalOutputs lists one directory on the local filesystem, newest-first.
-// It is the in-pod counterpart of ResolveRuntimeOutputs: the MCP server runs
-// inside the runtime pod, so it reads the files directly instead of exec-ing in.
-// A missing directory yields an empty result, not an error.
+// ResolveLocalOutputs is ResolveRuntimeOutputs for the in-pod MCP server, reading
+// the filesystem directly.
 func ResolveLocalOutputs(params RuntimeOutputsParams) (RuntimeOutputsListResult, error) {
 	dir, err := resolveOutputsDir(params.Dir)
 	if err != nil {
@@ -230,9 +215,7 @@ func ResolveLocalOutputs(params RuntimeOutputsParams) (RuntimeOutputsListResult,
 	return result, nil
 }
 
-// StatLocalOutput resolves one local entry and returns its metadata without
-// reading any bytes — the in-pod preview path for outputs_download. A directory
-// is reported as the archive it would produce.
+// StatLocalOutput returns an entry's metadata without reading its bytes.
 func StatLocalOutput(params RuntimeOutputDownloadParams) (RuntimeOutputResult, error) {
 	_, name, target, err := resolveLocalOutputTarget(params)
 	if err != nil {
@@ -253,9 +236,7 @@ func StatLocalOutput(params RuntimeOutputDownloadParams) (RuntimeOutputResult, e
 	return result, nil
 }
 
-// DownloadLocalOutput reads one local entry into memory — the in-pod counterpart
-// of DownloadRuntimeOutput. A directory becomes an in-memory gzip tarball
-// (IsArchive=true).
+// DownloadLocalOutput is DownloadRuntimeOutput for the in-pod path.
 func DownloadLocalOutput(params RuntimeOutputDownloadParams) (RuntimeOutputResult, error) {
 	dir, name, target, err := resolveLocalOutputTarget(params)
 	if err != nil {
@@ -278,9 +259,7 @@ func DownloadLocalOutput(params RuntimeOutputDownloadParams) (RuntimeOutputResul
 	if info.Size() > MaxRuntimeOutputBytes {
 		return RuntimeOutputResult{}, fmt.Errorf("runtime output %q is too large (%d bytes); the limit is %d bytes", name, info.Size(), MaxRuntimeOutputBytes)
 	}
-	// Sign before reading so the bytes the caller receives are the runnable ones:
-	// an ad-hoc signature lives inside the Mach-O, so every copy made from here
-	// inherits it.
+	// Sign before reading so the returned bytes carry the ad-hoc signature.
 	signing := codesign.SignHostArtifact(target)
 	data, err := os.ReadFile(target)
 	if err != nil {
@@ -316,8 +295,7 @@ func statLocalTarget(target, name string) (os.FileInfo, error) {
 	return info, nil
 }
 
-// tarGzLocalDir builds an in-memory gzip tarball of one directory, with entry
-// names relative to its parent so the archive unpacks as <name>/….
+// tarGzLocalDir tars a directory with names relative to parent, unpacking as <name>/.
 func tarGzLocalDir(parent, name string) ([]byte, error) {
 	root := filepath.Join(parent, name)
 	var buf bytes.Buffer
@@ -375,8 +353,7 @@ func tarGzWriteEntry(tw *tar.Writer, parent, p string, info os.FileInfo) error {
 	return err
 }
 
-// parseFindEpoch parses find's `%T@` mtime (`<seconds>.<nanos>`) into a UTC
-// time. A malformed value yields the zero time, which sorts last.
+// parseFindEpoch parses find's `%T@` mtime; malformed yields the zero time.
 func parseFindEpoch(value string) time.Time {
 	value = strings.TrimSpace(value)
 	if value == "" {

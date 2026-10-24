@@ -205,22 +205,13 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 	if len(awsCalls) != 1 || !strings.Contains(awsCalls[0], "ec2 describe-instances") {
 		t.Fatalf("expected one describe-instances call, got %+v", awsCalls)
 	}
-	// The settings refresh must populate the in-memory cache that the
-	// idle widget and respawn gate now read from — otherwise the
-	// titlebar would only converge to truth on the next 10s poll.
 	if got := app.cloudContextStatus("team-context"); got != cloud.CloudContextStatusStopped {
 		t.Fatalf("expected settings refresh to seed cloud-context cache with stopped, got %q", got)
 	}
 }
 
 func TestApplyCloudContextStatusesToCachePreservesKnownStatusOnTransientUnknown(t *testing.T) {
-	// AWS describe-instances failing for one region drives the
-	// returned slice to Status=Unknown for the affected contexts.
-	// Without this preservation, the next poll tick would blank a
-	// "running" cache entry, hiding the idle widget for one cycle on
-	// every transient SSO/network blip. Authoritative observations
-	// must overwrite; Unknown must only land on previously-empty
-	// slots.
+	// A transient Unknown must not overwrite a known status; it only fills empty slots.
 	app := NewApp(erunUIDeps{store: stubUIStore{}})
 	defer app.shutdown(context.Background())
 

@@ -7,8 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// ObservedResourceQuota pairs a namespace's ResourceQuota cap with what is
-// currently consumed against it.
+// ObservedResourceQuota pairs a ResourceQuota cap with current usage.
 type ObservedResourceQuota struct {
 	Name string            `json:"name"`
 	Hard map[string]string `json:"hard,omitempty"`
@@ -29,10 +28,7 @@ type ObservedLimitRangeItem struct {
 	DefaultRequest map[string]string `json:"defaultRequest,omitempty"`
 }
 
-// resourceQuotaList/limitRangeList are deliberately partial parses of
-// `kubectl get resourcequota|limitrange -o json`, matching the podStatusList
-// idiom in deploy_pod_watch.go: unknown fields are ignored so kubectl version
-// drift does not break observe.
+// Deliberately partial parses, so kubectl version drift does not break observe.
 type resourceQuotaList struct {
 	Items []resourceQuotaItem `json:"items"`
 }

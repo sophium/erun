@@ -1,19 +1,5 @@
-// `shadcn add --overwrite` runs its own dependency install as a side effect,
-// and that install has been observed to prune a declared dependency
-// (node_modules/radix-ui) and rewrite the root yarn.lock (dropping the exact-
-// version key `yarn`'s `resolutions` field pins) -- against the real
-// workspace. `yarn install --frozen-lockfile` afterwards reports
-// "Already up-to-date" while the pruned package stays missing, so the drift
-// check must never run that regeneration against the real tree.
-//
-// Instead, this script mirrors just enough of the workspace into a scratch
-// copy outside the repo -- the hoisted node_modules, the root package.json
-// (workspaces trimmed to this package alone) and yarn.lock, and this
-// package's own source -- and runs the exact same regenerate-then-reapply
-// pipeline there. `shadcn`'s install step is free to mutate the scratch
-// copy's node_modules and yarn.lock; both are thrown away with the rest of
-// the scratch directory once the diff is taken. The real workspace's
-// node_modules and yarn.lock are never touched.
+// `shadcn add --overwrite` runs its own install, which can prune dependencies and
+// rewrite yarn.lock, so regeneration runs in a scratch copy, never the real tree.
 import { execFileSync } from 'node:child_process';
 import { cpSync, copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -51,13 +37,8 @@ const scratchRoot = mkdtempSync(path.join(tmpdir(), 'erun-kit-shadcn-check-'));
 let drifted = false;
 
 try {
-  // Mirror the workspace root just enough for the package manager to resolve
-  // this as the same project: hoisted node_modules (including the relative
-  // `node_modules/erun-kit -> ../erun-kit` workspace symlink, which keeps
-  // resolving correctly because the scratch copy of erun-kit lands at the
-  // same relative position), yarn.lock, and a root package.json scoped to
-  // this one workspace member so the install step never needs the sibling
-  // erun-ui/frontend or erun-console checkouts to exist.
+  // The relative erun-kit workspace symlink keeps resolving because the scratch
+  // copy lands at the same relative position; workspaces are trimmed to this package.
   cpSync(path.join(REPO_ROOT, 'node_modules'), path.join(scratchRoot, 'node_modules'), {
     recursive: true,
   });

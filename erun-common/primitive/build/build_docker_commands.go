@@ -53,15 +53,8 @@ func runMultiPlatformBuild(buildInput shared.DockerBuildSpec, stdout, stderr io.
 	return assembleMultiPlatformManifest(buildInput.Image.Tag, perPlatformTags, buildInput.Image.Insecure, buildInput.Verbosity, stdout, stderr)
 }
 
-// buildPlatformImageFromSource runs one platform's real docker build, tags
-// its fingerprint and stable-base aliases, and pushes it. It is also the
-// fallback promotePlatformImage reaches for when the registry rejects a
-// promoted tag, so a cache-hit decision that turns out to be wrong at push
-// time still ends in a real, correctly-tagged image rather than a failure.
-// The returned string is the real `docker build`'s own captured
-// `--progress=plain` output, for a caller (PlatformObserver) to mine for a
-// per-Dockerfile-step timing breakdown; the tag/push steps that follow it
-// produce nothing worth parsing the same way.
+// buildPlatformImageFromSource builds, tags and pushes one platform, returning the
+// captured build output for step timing.
 func buildPlatformImageFromSource(buildInput shared.DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
 	platformTag := shared.PlatformSuffixedTag(buildInput.Image.Tag, platform)
 	args := shared.DockerBuildArgs(buildInput, platform)
@@ -86,8 +79,7 @@ func promoteDockerImage(buildInput shared.DockerBuildSpec, stdout, stderr io.Wri
 		perPlatformTags = append(perPlatformTags, platformTag)
 		output, err := promotePlatformImage(buildInput, platform, stdout, stderr)
 		if buildInput.PlatformObserver != nil {
-			// Promotion re-tags and pushes an already-built image; it never runs
-			// `docker build`, so there is no build-cgroup cost to attribute.
+			// Promotion never runs `docker build`, so there is no build cost to attribute.
 			buildInput.PlatformObserver(platform, time.Since(started), err, nil, output)
 		}
 		if err != nil {
@@ -100,14 +92,8 @@ func promoteDockerImage(buildInput shared.DockerBuildSpec, stdout, stderr io.Wri
 	return assembleMultiPlatformManifest(buildInput.Image.Tag, perPlatformTags, buildInput.Image.Insecure, buildInput.Verbosity, stdout, stderr)
 }
 
-// promotePlatformImage re-tags one platform's cached fingerprint image and
-// pushes it under the real version tag. Promotion is only ever an optimization
-// over building from source, so a promote that cannot be trusted falls back to
-// building and pushing this platform for real rather than failing the whole
-// release over a cache check that was wrong; settlePromoteFailure decides which
-// failures those are. Every other failure is returned with the promoted tag and
-// its cached source named, so it says which image and which operation it
-// belongs to instead of a bare daemon message.
+// promotePlatformImage re-tags and pushes one platform's cached fingerprint image,
+// falling back to a real build when settlePromoteFailure deems the cache untrustworthy.
 func promotePlatformImage(buildInput shared.DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
 	fpTag := shared.FingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
 	platformTag := shared.PlatformSuffixedTag(buildInput.Image.Tag, platform)
@@ -117,13 +103,8 @@ func promotePlatformImage(buildInput shared.DockerBuildSpec, platform string, st
 	}
 	singlePlatform := true
 	if err == nil {
-		// A cached image that is a whole multi-platform index would be
-		// published as a manifest list under this platform's tag, and the
-		// assembly step rejects input that is a list ("<tag> is a manifest
-		// list"): the two halves of the release would disagree about what a
-		// per-arch tag is. The build path cannot produce that — dockerBuildArgs
-		// passes --provenance=false — but a promoted tag has no build behind it,
-		// so the shape of the image it was re-tagged from is checked here.
+		// A promoted tag has no build behind it, so check it is not a multi-platform index,
+		// which manifest assembly rejects.
 		singlePlatform = localImageIsSinglePlatform(platformTag)
 	}
 	if err == nil && singlePlatform {
@@ -135,56 +116,32 @@ func promotePlatformImage(buildInput shared.DockerBuildSpec, platform string, st
 	return settlePromoteFailure(buildInput, platform, platformTag, fpTag, err, stdout, stderr)
 }
 
-// promoteSourceMissing reports an affirmative "no image" from the local store
-// for the fingerprint tag a promote would re-tag. An inspect that could not run
-// at all is not that: it is not evidence the image is gone, so it is left to
-// fail on the daemon's own reason — the same fail-safe direction
-// localImageIsSinglePlatform takes for a shape it cannot read.
+// promoteSourceMissing reports only an affirmative "no image"; a failed inspect is not evidence.
 func promoteSourceMissing(fpTag string) bool {
 	present, err := shared.DockerImageExists(fpTag)
 	return err == nil && !present
 }
 
-// settlePromoteFailure decides what a promote that did not publish does. The
-// fingerprint check that chose the promote path proves only that the cached
-// image existed when that check ran, which is before any image in the run
-// builds; this promote runs minutes later, so a disk-floor prune mid-release is
-// enough to take the image out from under a decision already made. That case,
-// a push the registry rejects for a blob it does not hold (surfacing as
-// "unknown blob"), and a cache entry that cannot be published as a per-arch
-// manifest all mean the same thing — this cache entry cannot be trusted this
-// run — so all three rebuild and push this platform from source, instead of
-// aborting a release whose other images have all built.
-//
-// Any other failure (a real auth or network error, for instance) is not
-// retried, since rebuilding could not change its outcome.
+// settlePromoteFailure rebuilds from source when the cached image vanished, the registry
+// reports "unknown blob", or the image is not single-platform; other failures are returned.
 func settlePromoteFailure(buildInput shared.DockerBuildSpec, platform, platformTag, fpTag string, promoteErr error, stdout, stderr io.Writer) (string, error) {
 	switch {
 	case promoteErr == nil:
 		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s would publish a multi-platform image under a per-arch tag; rebuilding %s from source instead of trusting the cache\n", platformTag, fpTag, platform)
 	case promoteSourceMissing(fpTag):
-		// Every branch below ends in buildPlatformImageFromSource, so the run did
-		// real build work for this image and is no longer the cache hit the
-		// timing row recorded before the promote ran.
 		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); that cached image is no longer in the local image store, so rebuilding %s from source instead of trusting the cache\n", platformTag, fpTag, promoteErr, platform)
 	case shared.IsDockerUnknownBlobError(promoteErr.Error()):
 		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); the registry does not have every blob it references, so rebuilding from source instead of trusting the cache\n", platformTag, fpTag, promoteErr)
 	default:
 		return "", fmt.Errorf("promote %s from cached fingerprint image %s: %w", platformTag, fpTag, promoteErr)
 	}
+	// The run now does real build work, so the timing row must not report a cache hit.
 	buildInput.Cache.NotePromoteFallback()
 	return buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
 }
 
-// localImageIsSinglePlatform reports whether a local tag names a single-platform
-// image rather than a whole multi-platform index.
-//
-// A daemon backed by the containerd image store keeps a multi-platform image as
-// the index itself and records that on the image's descriptor; the classic
-// store cannot hold one at all, and records no descriptor. Anything that cannot
-// be read — no descriptor, an older docker, an image that vanished between the
-// tag and this inspect — reports single-platform, so the classic path keeps
-// publishing exactly as it did before.
+// localImageIsSinglePlatform reports false only for a readable multi-platform index
+// descriptor; anything unreadable counts as single-platform.
 func localImageIsSinglePlatform(tag string) bool {
 	cmd := core.Command("docker", "image", "inspect", tag)
 	var output bytes.Buffer
@@ -209,8 +166,6 @@ func localImageIsSinglePlatform(tag string) bool {
 	return true
 }
 
-// isImageIndexMediaType reports whether a media type names a manifest list, in
-// either the docker or the OCI spelling.
 func isImageIndexMediaType(mediaType string) bool {
 	switch strings.TrimSpace(mediaType) {
 	case "application/vnd.docker.distribution.manifest.list.v2+json",
@@ -221,18 +176,8 @@ func isImageIndexMediaType(mediaType string) bool {
 	}
 }
 
-// pushPlatformImage publishes one platform the moment it is built, instead of
-// leaving every platform for a push pass that runs after the last build.
-//
-// A daemon backed by the containerd image store is free to collect content that
-// only a tag points at, and does. With build-all-then-push the first platform's
-// manifest was routinely gone by the time its push ran, and the release failed
-// with "content digest ... not found" — after paying for every build. Publishing
-// each platform immediately means no artifact ever has to survive another build,
-// which is the property that was missing rather than anything about the content.
-//
-// The manifest list is unaffected: `docker manifest create` reads its inputs
-// back from the registry, so it does not care whether they are still local.
+// pushPlatformImage publishes each platform as soon as it builds: the containerd store
+// may collect tag-only content before a later push pass runs.
 func pushPlatformImage(buildInput shared.DockerBuildSpec, platformTag string, stdout, stderr io.Writer) error {
 	if !buildInput.Push {
 		return nil
@@ -240,19 +185,10 @@ func pushPlatformImage(buildInput shared.DockerBuildSpec, platformTag string, st
 	return shared.DockerImagePusher(platformTag, buildInput.Verbosity, stdout, stderr)
 }
 
-// assembleMultiPlatformManifest publishes the arch-less tag that points at the
-// per-arch images just pushed.
-//
-// The local manifest list is discarded first. docker keeps manifest lists in its
-// own store, so re-publishing a version that was pushed before would otherwise
-// merge into the cached list and republish the digests it already held: the
-// per-arch tags advance, the arch-less tag does not, and a deploy of that version
-// runs the previous image while every step reports success. Removing the cached
-// list makes the published tag a function of this run alone. It is absent on a
-// first publish, so its failure is not one.
+// assembleMultiPlatformManifest publishes the arch-less tag. The cached local manifest
+// list is removed first, or a re-publish would merge into it and keep stale digests.
 func assembleMultiPlatformManifest(tag string, perPlatformTags []string, insecure bool, verbosity int, stdout, stderr io.Writer) error {
-	// `docker manifest rm` only touches the local manifest-list store, never the
-	// registry, so it needs no --insecure of its own.
+	// `docker manifest rm` is local-only, so it needs no --insecure.
 	_ = runDockerSimpleCommandWithVerbosity([]string{"manifest", "rm", tag}, verbosity, io.Discard, io.Discard)
 	createArgs := append(shared.DockerManifestArgs("create", insecure), tag)
 	createArgs = append(createArgs, perPlatformTags...)
@@ -275,12 +211,8 @@ func tagFingerprintAfterBuild(buildInput shared.DockerBuildSpec, platform string
 	return runDockerTag(sourceTag, target, stdout, stderr)
 }
 
-// tagStableBaseVersionAfterBuild makes a snapshot base resolvable by wrappers
-// whose `FROM image:${ERUN_VERSION}` reads it from the local daemon (the
-// snapshot tag is never pushed). The per-arch tag is what a multi-platform
-// wrapper build must resolve, because the arch-less tag is last-arch-wins and
-// therefore single-arch. No-op for release builds, whose base resolves from its
-// pushed multi-arch manifest rather than a local tag.
+// tagStableBaseVersionAfterBuild tags a snapshot base locally per arch so wrapper builds
+// can resolve it; no-op for release builds.
 func tagStableBaseVersionAfterBuild(buildInput shared.DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
 	target := shared.StableBaseVersionTag(buildInput.Image)
 	if target == "" {
@@ -298,20 +230,8 @@ func tagStableBaseVersionAfterBuild(buildInput shared.DockerBuildSpec, platform 
 	return runDockerTag(sourceTag, target, stdout, stderr)
 }
 
-// runDockerBuildOnce always builds with --progress=plain (see
-// dockerVerbosityBuildFlags) so BuildKit emits every step's own output,
-// including a failing RUN's — a component's in-Dockerfile test stage is
-// exactly such a step. Below debug verbosity that output is captured rather
-// than streamed live, so a successful build stays as quiet as --quiet used to
-// make it; on failure the capture is flushed to stderr before the error
-// returns, so "exit code: N" is never the whole story for a step that just
-// spent minutes running. At debug verbosity the caller already wants
-// everything live, so it streams as it always has.
-// runDockerBuildOnce returns the build's captured combined output alongside
-// its error (or "" alongside a nil error's own message-shaped output on
-// success — see below) so a caller can mine BuildKit's own per-step timings
-// out of it (build_progress_phases.go) without re-running or re-capturing
-// anything.
+// runDockerBuildOnce captures --progress=plain output below debug verbosity and flushes
+// it on failure; it returns the captured output for step timing.
 func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, verbosity int, stdout, stderr io.Writer) (string, error) {
 	cmd := core.Command("docker", args...)
 	cmd.Dir = dir
@@ -343,8 +263,7 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, ve
 	if diagnosis, ok := dockerBuildResourceExhaustionDiagnosis(message, err); ok {
 		return message, DockerBuildResourceExhaustionError{Diagnosis: diagnosis, Err: err}
 	}
-	// Keep the step's own last words whatever else is known: they are all the
-	// durable timing record will ever have (see build_failure_reason.go).
+	// The step's last words are all the durable timing record will have.
 	reason := dockerBuildFailureReason(message)
 	if diagnosis, ok := dockerBuildNetworkDiagnosis(message); ok {
 		reason = joinFailureReason(reason, diagnosis)
@@ -366,9 +285,7 @@ func runDockerSimpleCommand(args []string, stdout, stderr io.Writer) error {
 	return cmd.Run()
 }
 
-// runDockerSimpleCommandWithVerbosity emulates --quiet for docker subcommands
-// (manifest create/push, tag) that lack the native flag, replaying captured
-// output only on error.
+// runDockerSimpleCommandWithVerbosity emulates --quiet, replaying captured output only on error.
 func runDockerSimpleCommandWithVerbosity(args []string, verbosity int, stdout, stderr io.Writer) error {
 	if verbosity >= core.VerbosityDebug {
 		return runDockerSimpleCommand(args, stdout, stderr)
@@ -389,11 +306,7 @@ func runDockerTag(source, target string, stdout, stderr io.Writer) error {
 	} else if !dockerTagAlreadyExistsRace(err) {
 		return err
 	}
-	// Recover from the daemon race where the target tag is held by a stale
-	// manifest list (a previous push, or the previous platform in this same
-	// multi-arch run), surfacing as "AlreadyExists ... after deleting the
-	// existing one". Clearing both possible holders may fail harmlessly when the
-	// target exists as neither kind, so their errors are ignored.
+	// A stale manifest list can hold the target tag ("AlreadyExists"); clearing either kind may fail harmlessly.
 	_ = runDockerSimpleCommand([]string{"manifest", "rm", target}, io.Discard, io.Discard)
 	_ = runDockerSimpleCommand([]string{"image", "rm", "-f", target}, io.Discard, io.Discard)
 	return tryDockerTag(source, target, stdout, stderr)
@@ -439,8 +352,7 @@ func dockerTagAlreadyExistsRace(err error) bool {
 }
 
 func BuildScriptRunner(dir, scriptPath string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	// Project build scripts are POSIX shell; Windows can't exec a shebang script
-	// by name ("%1 is not a valid Win32 application"), so run it through sh.
+	// Windows cannot exec a shebang script by name, so run it through sh.
 	cmd := core.Command(scriptPath)
 	if runtime.GOOS == "windows" {
 		cmd = core.Command("sh", scriptPath)
@@ -480,12 +392,8 @@ func isHostedRegistry(registry string) bool {
 	return strings.EqualFold(strings.TrimSpace(registry), config.HostedRegistryHost)
 }
 
-// DockerRegistryLoginWithHostedRegistry wraps DockerRegistryLogin with the one
-// branch it cannot resolve on its own: the hosted registry's password is the
-// operator's own erun-api bearer token (see the registry token endpoint in
-// api-protocol.md), minted from their configured erun cloud provider alias —
-// never a secret an operator could type by hand. Every other registry falls
-// through to DockerRegistryLogin unchanged.
+// DockerRegistryLoginWithHostedRegistry logs in to the hosted registry with the operator's
+// erun-api bearer token, deferring to DockerRegistryLogin otherwise.
 func DockerRegistryLoginWithHostedRegistry(store config.CloudReadStore, deps cloud.CloudDependencies) DockerRegistryLoginFunc {
 	return func(registry string, stdin io.Reader, stdout, stderr io.Writer) error {
 		if isHostedRegistry(registry) {
@@ -495,10 +403,7 @@ func DockerRegistryLoginWithHostedRegistry(store config.CloudReadStore, deps clo
 	}
 }
 
-// hostedRegistryDockerLogin resolves the operator's sole configured erun
-// platform cloud provider alias, mints a fresh bearer token from it, and feeds
-// that token to `docker login` as the password over stdin — never argv, so it
-// never appears in a process listing.
+// hostedRegistryDockerLogin passes the token over stdin, never argv.
 func hostedRegistryDockerLogin(store config.CloudReadStore, deps cloud.CloudDependencies, stdout, stderr io.Writer) error {
 	provider, err := shared.ResolveERunPlatformAlias(store, "")
 	if err != nil {
@@ -543,17 +448,8 @@ func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) 
 	return true, nil
 }
 
-// RefreshGHCRPackageScopes widens the gh-stored token to write:packages so a
-// push denied for lacking that scope can succeed. Call it only after
-// TryGHCRNamespaceLogin + retry still fails scope-denied: that means the token
-// itself lacks the scope and must be re-minted.
-//
-// `gh auth refresh` has no `-u` flag and acts on the active account, so this
-// switches to the namespace owner first (best-effort; else runs against the
-// active account). The refresh drives gh's interactive browser device-code
-// flow, so it bails with an actionable recovery error rather than launching gh
-// in a headless pod or any non-interactive context (MCP, CI, pipes) where the
-// prompt could never advance.
+// RefreshGHCRPackageScopes re-mints the gh token with write:packages; use it only after
+// TryGHCRNamespaceLogin and a retry still fail scope-denied. It refuses non-interactive contexts.
 func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
 	if !registrypkg.IsGHCRRegistry(registrypkg.DockerRegistryFromImageTag(tag)) {
 		return false, nil
@@ -566,9 +462,7 @@ func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Wri
 		return false, nil
 	}
 
-	// Bail before mutating any gh state: the switch/refresh/login below all drive
-	// gh's interactive browser flow, which hangs forever in a headless pod or any
-	// non-interactive context with no operator at the prompt.
+	// gh's browser flow hangs forever without an operator, so bail before mutating gh state.
 	if !interactiveGHAuthAllowed(stdin) {
 		return false, newNonInteractiveGHCRScopeRefreshError(tag, namespace)
 	}
@@ -594,12 +488,8 @@ func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Wri
 	return shared.TryGHCRNamespaceLogin(tag, stdout, stderr)
 }
 
-// interactiveGHAuthAllowed reports whether gh's interactive browser device-code
-// flow can complete here. The in-pod check comes first because a runtime pod
-// shell is PTY-backed and would pass the terminal test, yet has no browser to
-// finish the device flow; otherwise stdin must be a real terminal (not MCP, CI,
-// or a pipe). ERUN_FORCE_TTY=1 is the CLI's test seam so the integration
-// harness, whose stdin is always a pipe, can still exercise the interactive path.
+// interactiveGHAuthAllowed is false in a runtime pod (PTY but no browser) and for a
+// non-terminal stdin; ERUN_FORCE_TTY=1 is a test seam.
 func interactiveGHAuthAllowed(stdin io.Reader) bool {
 	if core.InInjectedRuntimePod() {
 		return false

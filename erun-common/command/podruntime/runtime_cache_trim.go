@@ -13,35 +13,14 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// The go build cache is bounded by size here, evicting the entries that have
-// gone longest unused rather than clearing the directory.
-//
-// Go bounds its own build cache only by age: cmd/go trims entries whose mtime is
-// older than five days, at most once a day, and refreshes an entry's mtime on
-// use (at most hourly), so those mtimes mean "last used". That is a recency rule
-// with no ceiling, and the five-day working set of a multi-module repository
-// built in several variants reaches tens of gigabytes. The cache lives on the
-// environment's home volume, whose declared size is not a quota on a node-local
-// storage class, so several environments growing it put their node under
-// DiskPressure.
-//
-// Clearing would bound it too, and make every later build cold. Evicting by
-// last-use mtime keeps exactly the entries the next build wants. Only Go's own
-// entries are candidates -- names ending in -a or -d one directory down, the set
-// cmd/go's own trim removes -- so the cache's bookkeeping (trim.txt, README,
-// log.txt) stays, and trim.txt is not rewritten: this is not the age trim, and
-// claiming one ran would suppress the one Go does on its own.
-//
-// An entry removed between one build writing it and the next reading it is a
-// cache miss, which the go command tolerates; it never makes a build fail.
+// Go trims its build cache only by age, which has no ceiling; the home volume's size is not a
+// node-local quota. Evicting Go's own entries by last-use mtime bounds it and keeps it warm.
+// trim.txt is left alone so Go's own age trim still runs.
 
-// DefaultGoBuildCacheMaxBytes is the cap the runtime pod applies when the chart
-// renders none (16 GiB).
+// DefaultGoBuildCacheMaxBytes is the cap when the chart renders none.
 const DefaultGoBuildCacheMaxBytes int64 = 16 << 30
 
-// goBuildCacheTrimPasses bounds how often one trim re-reads the cache. An entry
-// written while a pass runs can leave the cache over its cap again; a pass that
-// frees nothing ends the trim at once, so this is slack, not a retry loop.
+// A pass that frees nothing ends the trim, so goBuildCacheTrimPasses is slack, not a retry loop.
 const goBuildCacheTrimPasses = 4
 
 // GoBuildCacheTrimResult is one trim's outcome.
@@ -53,8 +32,7 @@ type GoBuildCacheTrimResult struct {
 	Evicted     int    `json:"evicted"`
 	Passes      int    `json:"passes"`
 	DryRun      bool   `json:"dryRun"`
-	// Missing reports a cache directory that does not exist, which holds nothing.
-	Missing bool `json:"missing,omitempty"`
+	Missing     bool   `json:"missing,omitempty"`
 }
 
 type goBuildCacheEntry struct {
@@ -63,10 +41,7 @@ type goBuildCacheEntry struct {
 	mtime time.Time
 }
 
-// TrimGoBuildCache brings the go build cache at dir under maxBytes. A cache
-// already within its cap is not touched and reports nothing; a missing one is
-// not created. Under ctx.DryRun nothing is removed and the result counts what
-// would have been evicted.
+// TrimGoBuildCache brings the cache at dir under maxBytes without creating a missing one.
 func TrimGoBuildCache(ctx core.Context, dir string, maxBytes int64) (GoBuildCacheTrimResult, error) {
 	result := GoBuildCacheTrimResult{Dir: dir, MaxBytes: maxBytes, DryRun: ctx.DryRun}
 	if strings.TrimSpace(dir) == "" {
@@ -139,8 +114,6 @@ func reportGoBuildCacheTrim(ctx core.Context, result GoBuildCacheTrimResult) {
 	}
 }
 
-// goBuildCacheEvictionPlan lists the least recently used entries whose sizes
-// first cover want bytes, oldest first.
 func goBuildCacheEvictionPlan(dir string, want int64) ([]goBuildCacheEntry, error) {
 	entries, err := goBuildCacheEntries(dir)
 	if err != nil {
@@ -164,8 +137,7 @@ func goBuildCacheEvictionPlan(dir string, want int64) ([]goBuildCacheEntry, erro
 	return plan, nil
 }
 
-// goBuildCacheEntries reads every go cache entry: <dir>/<xx>/<hash>-a|-d. An
-// executable entry is a directory, so its size is what it holds.
+// An executable entry is a directory, sized by what it holds.
 func goBuildCacheEntries(dir string) ([]goBuildCacheEntry, error) {
 	subdirs, err := os.ReadDir(dir)
 	if err != nil {
@@ -199,9 +171,7 @@ func goBuildCacheEntries(dir string) ([]goBuildCacheEntry, error) {
 	return entries, nil
 }
 
-// goBuildCacheSize sums the sizes of the files under path. Directories' own
-// sizes are left out: they are filesystem bookkeeping no eviction can free, and
-// counting them would make the same cache read differently on every filesystem.
+// Directory sizes are excluded: they vary by filesystem and eviction cannot free them.
 func goBuildCacheSize(path string) (int64, error) {
 	var total int64
 	err := filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {

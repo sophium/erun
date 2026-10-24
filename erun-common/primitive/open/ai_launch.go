@@ -12,14 +12,11 @@ import (
 const (
 	defaultAITool       = "claude"
 	DefaultClaudeEffort = "ultracode"
-	// ClaudeEffortUltracode is not a `claude --effort` value (Claude Code
-	// rejects it) but a settings key meaning "everything on" — xhigh thinking
-	// plus standing multi-agent workflow orchestration.
+	// ClaudeEffortUltracode is a settings key, not a `claude --effort` value.
 	ClaudeEffortUltracode = "ultracode"
 )
 
-// ClaudeEffortLevels lists the selectable effort levels; all but ultracode are
-// real `claude --effort` values (ultracode launches through --settings).
+// ClaudeEffortLevels lists the selectable effort levels.
 var ClaudeEffortLevels = []string{"low", "medium", "high", "xhigh", "max", ClaudeEffortUltracode}
 
 func ValidClaudeEffort(level string) bool {
@@ -41,27 +38,16 @@ func ResolveClaudeEffort(config configpkg.EnvironmentClaudeConfig) string {
 	return DefaultClaudeEffort
 }
 
-// ResolveClaudeLaunchModel picks the model the managed AI session starts on,
-// never the agent's own default: the environment may not be able to serve it.
-//
-// With a gateway configured the catalog supplies the selectable set, but an
-// environment's own choice is honoured even when the catalog does not list it —
-// typing an id the operator has not curated is a supported act, and refusing it
-// here would silently launch a different model than the tab shows. Without a
-// gateway the previous rule stands: the choice must be one of the environment's
-// available models.
+// ResolveClaudeLaunchModel never falls back to the agent's own default, which
+// the environment may not be able to serve.
 func ResolveClaudeLaunchModel(config configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig) string {
-	// Resolved through the environment's own opt-out, so an environment that
-	// stays on its own Claude sign-in is never handed a catalog model.
 	if effective := configpkg.EffectiveGateway(config, gateway); effective.Configured() {
 		return ResolveGatewayLaunchModel(config, effective)
 	}
 	return resolveAvailableClaudeModel(config)
 }
 
-// ClaudeConfiguredModel returns the environment's own model choice when it is a
-// token the launch can pass safely, and "" otherwise. A choice that is not a
-// safe token is ignored rather than passed through.
+// ClaudeConfiguredModel returns the environment's model if it is a shell-safe token.
 func ClaudeConfiguredModel(config configpkg.EnvironmentClaudeConfig) string {
 	if config.DefaultModel == nil {
 		return ""
@@ -73,19 +59,8 @@ func ClaudeConfiguredModel(config configpkg.EnvironmentClaudeConfig) string {
 	return model
 }
 
-// ResolveGatewayLaunchModel resolves against a gateway: the environment's choice
-// wins even when the catalog does not list it, because typing an uncurated id is
-// a supported act and silently substituting another model would launch
-// something other than what the tab shows.
-//
-// One choice is refused rather than substituted: an id the catalog itself lists
-// as requiring reasoning echo. That listing is the operator stating this model
-// cannot be driven, and nothing about the environment's own record makes it
-// driveable again, so launching it would substitute a mid-run provider refusal
-// for a launch that never happens. It is not a silent substitution of the kind
-// the rule above guards against — the id cannot be launched at all, and
-// ModelIDs no longer offers it, so the resolved default is the only model the
-// tab can present as selectable.
+// ResolveGatewayLaunchModel honours an uncurated choice, except one the catalog
+// lists as requiring reasoning echo, which cannot be driven at all.
 func ResolveGatewayLaunchModel(config configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig) string {
 	if model := ClaudeConfiguredModel(config); model != "" && !gateway.RequiresReasoningEcho(model) {
 		return model
@@ -93,9 +68,6 @@ func ResolveGatewayLaunchModel(config configpkg.EnvironmentClaudeConfig, gateway
 	return gateway.ResolveDefaultModel()
 }
 
-// resolveAvailableClaudeModel resolves against an environment's own available
-// set: the choice must be one of them, so a model the environment cannot serve
-// is never launched.
 func resolveAvailableClaudeModel(config configpkg.EnvironmentClaudeConfig) string {
 	available := config.NormalizedModels()
 	if len(available) == 0 {
@@ -116,33 +88,21 @@ func resolveAvailableClaudeModel(config configpkg.EnvironmentClaudeConfig) strin
 	return ""
 }
 
-// AISessionLaunchCommand returns the shell command the AI tab's persistent
-// remote session runs as its program — for claude, a guard that resumes the
-// cwd's existing session or starts fresh. It runs once when the dtach session
-// is created; reattaches never re-run it. Centralised so `erun open --ai` can
-// launch it pod-side and survive a disconnect.
-//
-// Never add --fork-session here: it mints a new session id on every resume,
-// which reintroduces the conversation-id drift this launch command exists to
-// avoid (an orchestrator resuming the wrong, empty conversation after a pod
-// restart). If a future resume bug looks like it needs a fresh id, that is a
-// sign the underlying id tracking is wrong, not that this flag is missing.
+// AISessionLaunchCommand returns the AI tab's dtach program; it runs once per
+// session, not on reattach. Never add --fork-session: a new id per resume
+// breaks conversation tracking.
 func AISessionLaunchCommand(aiTool string, claude configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig, tenant, environment string) string {
 	if tool := strings.TrimSpace(aiTool); tool != "" && tool != defaultAITool {
 		return tool
 	}
 	prefix := claudeLaunchEnvPrefix(claude, gateway)
 	flags := claudeLaunchFlags(claude, gateway, tenant, environment)
-	// The runtime image links claude to erun, which resumes the working
-	// directory's conversation when Claude Code has one (claude_resume.go).
+	// The runtime image links claude to erun, which resumes the cwd's conversation.
 	return prefix + `claude` + flags
 }
 
-// AISessionLaunchLines returns the dtach session's AI program as script lines:
-// the launch plus an exit wrapper. Without it a killed or exited Claude
-// silently falls through to the trailing interactive shell — a tab labelled
-// "AI" showing a bare bash prompt — so the wrapper makes the exit state
-// explicit and puts the resume command one paste away.
+// AISessionLaunchLines wraps the launch so an exit is reported instead of
+// silently dropping to the trailing shell.
 func AISessionLaunchLines(aiTool string, claude configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig, tenant, environment string) []string {
 	launch := AISessionLaunchCommand(aiTool, claude, gateway, tenant, environment)
 	label := "Claude"
@@ -155,8 +115,7 @@ func AISessionLaunchLines(aiTool string, claude configpkg.EnvironmentClaudeConfi
 		"ai_status=0",
 		launch + " || ai_status=$?",
 		`if [ "$ai_status" = 137 ]; then printf '\n\033[2;33m── ` + label + ` was killed (exit 137) — likely out of memory; consider raising Memory in the environment Runtime settings ──\033[0m\n'; elif [ "$ai_status" != 0 ]; then printf '\n\033[2;33m── ` + label + ` exited (exit %s) ──\033[0m\n' "$ai_status"; else printf '\n\033[2;33m── ` + label + ` session ended ──\033[0m\n'; fi`,
-		// shellQuote, not inlining: the resume command can carry single quotes
-		// (the ultracode --settings JSON) that would break the printf format.
+		// Quoted: the ultracode --settings JSON carries single quotes.
 		`printf '\033[2;33m── resume with: %s — or use this shell ──\033[0m\n' ` + core.ShellQuote(resume),
 	}
 }
@@ -173,11 +132,8 @@ func claudeLaunchFlags(claude configpkg.EnvironmentClaudeConfig, gateway *config
 	return flags
 }
 
-// claudeRemoteControlFlag enables Claude Code Remote Control by default so the
-// operator can drive the managed AI session from the Claude iOS app, naming it
-// <tenant>/<env> to keep each environment distinct. Gateway auth disables it:
-// Remote Control pairs through the claude.ai account relay, which gateway
-// credentials cannot satisfy, so enabling it would fail to pair.
+// claudeRemoteControlFlag is off under gateway auth, which cannot pair through
+// the claude.ai account relay.
 func claudeRemoteControlFlag(claude configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig, tenant, environment string) string {
 	if claudeUsesGatewayAuth(claude, gateway) {
 		return ""
@@ -188,12 +144,7 @@ func claudeRemoteControlFlag(claude configpkg.EnvironmentClaudeConfig, gateway *
 	return " --remote-control"
 }
 
-// claudeUsesGatewayAuth reports whether the session authenticates through a
-// gateway rather than a claude.ai account, which is what decides Remote
-// Control eligibility.
 func claudeUsesGatewayAuth(claude configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig) bool {
-	// Through the opt-out, so an environment that left the gateway keeps Remote
-	// Control, which a gateway credential could not pair.
 	if configpkg.EffectiveGateway(claude, gateway).Configured() {
 		return true
 	}
@@ -201,8 +152,6 @@ func claudeUsesGatewayAuth(claude configpkg.EnvironmentClaudeConfig, gateway *co
 		(claude.UseMantle != nil && *claude.UseMantle)
 }
 
-// claudeRemoteControlSessionName builds the <tenant>/<env> session name, or ""
-// when either identifier is not shell-safe for the unquoted launch one-liner.
 func claudeRemoteControlSessionName(tenant, environment string) string {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -213,43 +162,25 @@ func claudeRemoteControlSessionName(tenant, environment string) string {
 	return tenant + "/" + environment
 }
 
-// claudeSessionNameTokenPattern keeps the composed <tenant>/<env> name shell-safe
-// so the launch one-liner needs no quoting. It must start with an alphanumeric:
-// a leading '-' is shell-safe but would look like an option flag to Claude
-// Code's own parser, not the --remote-control value.
+// claudeSessionNameTokenPattern is shell-safe and must not start with '-', which
+// Claude Code would parse as a flag.
 var claudeSessionNameTokenPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
-// claudeLaunchEnvPrefix mirrors the resolved default model into
-// CLAUDE_CODE_SUBAGENT_MODEL so subagents run on the same model the session
-// launches with, and declares that model's context window so Claude Code does
-// not have to assume one for an id it does not recognise.
-//
-// It must be an in-string command prefix, not a PTY env entry: for remote-agent
-// envs the guard runs `claude` in the pod via kubectl exec, and only an
-// in-string assignment crosses into the pod.
-//
-// The gateway credential is deliberately absent here. A launch command's argv
-// is visible to anything that can list processes, so the token reaches the pod
-// as the container's ANTHROPIC_AUTH_TOKEN, read from the gateway Secret that
-// deploy writes from OpenRouterConfig.AuthTokenRef. Only non-secret routing
-// values belong in this prefix.
+// claudeLaunchEnvPrefix must be an in-string prefix (only that crosses kubectl
+// exec) and must never carry the gateway token, since argv is visible.
 func claudeLaunchEnvPrefix(claude configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig) string {
 	model := ResolveClaudeLaunchModel(claude, gateway)
 	if model == "" {
 		return ""
 	}
 	prefix := "CLAUDE_CODE_SUBAGENT_MODEL=" + model + " "
-	// Through the opt-out: an environment that left the gateway is not running
-	// the catalog's model, even when its own choice shares a catalog id.
 	if context := configpkg.EffectiveGateway(claude, gateway).ContextFor(model); context > 0 {
 		prefix = "CLAUDE_CODE_MAX_CONTEXT_TOKENS=" + strconv.Itoa(context) + " " + prefix
 	}
 	return prefix
 }
 
-// ClaudeEffortFlags maps a resolved effort level to its launch flags. ultracode
-// launches as `--settings '{"ultracode":true}'`, single-quoted because the
-// guard is a sh one-liner in which nothing may interpolate.
+// ClaudeEffortFlags single-quotes ultracode's JSON so nothing interpolates.
 func ClaudeEffortFlags(effort string) string {
 	switch {
 	case effort == ClaudeEffortUltracode:

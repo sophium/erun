@@ -12,9 +12,7 @@ import (
 const testGatewayURL = "https://openrouter.ai/api"
 
 func TestResolveGatewayCredentialTrimsWhatItDelivers(t *testing.T) {
-	// A token pasted into a settings file or a dialog routinely carries a
-	// trailing newline. Delivered raw it would be sent as part of the credential
-	// and rejected by the gateway, so it is trimmed on the way out.
+	// A pasted token's trailing newline would be rejected by the gateway.
 	store := cloud.NewFileCloudSecretStore(t.TempDir())
 	if err := store.SaveCloudSecret("claude-gateway", "  sk-or-v1-abc\n"); err != nil {
 		t.Fatalf("save: %v", err)
@@ -33,10 +31,8 @@ func TestRenderGatewayCredentialsSecret(t *testing.T) {
 	for _, want := range []string{
 		"namespace: team-dev",
 		"name: " + config.GatewaySecretName,
-		// The key the chart reads, so the two cannot drift apart.
 		config.GatewaySecretKey + ":",
 		"sk-or-v1-abc",
-		// The label every erun-applied Secret carries.
 		"app.kubernetes.io/managed-by: erun-deploy",
 	} {
 		if !strings.Contains(manifest, want) {
@@ -46,9 +42,6 @@ func TestRenderGatewayCredentialsSecret(t *testing.T) {
 }
 
 func TestApplyGatewayCredentialsSecretSkipsAnOptedOutEnvironment(t *testing.T) {
-	// An environment that opted out renders no gateway env block, so it must get
-	// no Secret either: a credential left in a namespace that asked not to have
-	// one is not harmless, it is a credential where none was wanted.
 	ctx, trace := traceCapturingContext()
 	ctx.DryRun = true
 	no := false
@@ -66,11 +59,7 @@ func TestApplyGatewayCredentialsSecretSkipsAnOptedOutEnvironment(t *testing.T) {
 	}
 }
 
-// TestHelmClaudeSetArgsGatewayRendersProviderFlagsOff pins that a gateway
-// replaces the model provider: Claude Code reads CLAUDE_CODE_USE_BEDROCK and
-// _MANTLE ahead of ANTHROPIC_BASE_URL, so an environment that selected the
-// gateway with either still on would be routed past it. One that opted out of
-// the gateway keeps its own provider choice.
+// Claude Code reads CLAUDE_CODE_USE_BEDROCK and _MANTLE ahead of ANTHROPIC_BASE_URL.
 func TestHelmClaudeSetArgsGatewayRendersProviderFlagsOff(t *testing.T) {
 	on, off := true, false
 	catalog := &config.OpenRouterConfig{BaseURL: testGatewayURL}
@@ -108,9 +97,6 @@ func stubGatewaySecretDelete(t *testing.T) *[][]string {
 	return &calls
 }
 
-// TestPruneGatewayCredentialsSecretRemovesItWhenTheGatewayIsOff is the second
-// half of switching the gateway off: before this, deploy only ever applied the
-// credential, so a namespace kept it after the environment left the gateway.
 func TestPruneGatewayCredentialsSecretRemovesItWhenTheGatewayIsOff(t *testing.T) {
 	no := false
 	for name, spec := range map[string]HelmDeploySpec{

@@ -14,10 +14,7 @@ import (
 )
 
 func testDeployHelpOutsideDevopsCwd(t *testing.T) {
-	// When cwd has no devops context, the deploy command must still be
-	// registered so the desktop UI's `erun deploy <tenant> <env> --version X`
-	// invocation can land its flags rather than hit "unknown flag:
-	// --version".
+	// deploy must stay registered without a devops context so the desktop's --version lands.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"deploy", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode != 0 {
@@ -27,9 +24,6 @@ func testDeployHelpOutsideDevopsCwd(t *testing.T) {
 }
 
 func testDeployVersionFlagRecognizedOutsideDevopsCwd(t *testing.T) {
-	// Even when the flag is set on a real deploy attempt, "unknown flag:
-	// --version" must not appear. The command still fails (no env or no
-	// chart) but for a sensible reason rather than flag parsing.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"deploy", "missing", "missing", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	golden.Equal(t, "deploy/version_flag_recognized_outside_devops_cwd", normalize.Apply(result.Combined))
@@ -44,18 +38,8 @@ func testDeployDryRunFromDevopsCwd(t *testing.T) {
 }
 
 func testDeployDryRunRetrofitsThePlatformAliasOnAPreExistingEnv(t *testing.T) {
-	// The reported failure: an environment initialised before anything
-	// provisioned a platform alias records no platform-alias Secret, so the
-	// runtime chart mounts nothing, the entrypoint's seeder correctly finds
-	// nothing, and the pod can never call the platform API -- `erun review
-	// list` among them. Deploying it from a host that is signed in is the one
-	// step such an environment takes that can fix it, and this is what that
-	// deploy now renders: the Secret applied, its name threaded into the helm
-	// upgrade so the chart mounts it, and the name recorded on the
-	// environment so every later deploy keeps it. Before the change this
-	// deploy was byte-for-byte the same as an env whose host had nothing to
-	// give -- no Secret, no --set, and the pod left unable to reach the
-	// platform.
+	// A signed-in host deploy applies the platform-alias Secret, threads its name
+	// into helm, and records it so later deploys keep it.
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithSignedInERunPlatformAlias(t, setup, "team", "dev", "erun+test@erun")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -67,8 +51,6 @@ func testDeployDryRunRetrofitsThePlatformAliasOnAPreExistingEnv(t *testing.T) {
 }
 
 func testDeployRefusesHostEnvironment(t *testing.T) {
-	// A host env has no pod and no cluster at all, so deploy must refuse it
-	// by name instead of resolving a helm plan that cannot run anywhere.
 	setup := env.New(t)
 	fixture.SeedHostTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -76,9 +58,6 @@ func testDeployRefusesHostEnvironment(t *testing.T) {
 }
 
 func testDeployDryRunFromDevopsModuleRoot(t *testing.T) {
-	// Exercises resolveCurrentDevopsK8sDir's first arm: when cwd is the
-	// <tenant>-devops module root (not its k8s/ subdir and not a chart
-	// dir), the module's own k8s/ directory must drive chart discovery.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -91,9 +70,6 @@ func testDeployDryRunFromDevopsModuleRoot(t *testing.T) {
 }
 
 func testDeployDryRunFromNestedDevopsSubdir(t *testing.T) {
-	// Exercises resolveAncestorDevopsK8sDir: from a nested directory
-	// inside the devops module (e.g. team-devops/notes), the walker must
-	// climb to the nearest *-devops ancestor and use its k8s/ directory.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -109,9 +85,6 @@ func testDeployDryRunFromNestedDevopsSubdir(t *testing.T) {
 }
 
 func testDeployDryRunFromK8sDir(t *testing.T) {
-	// Exercises ResolveCurrentKubernetesDeployContexts' k8s-dir arm:
-	// when cwd is the devops module's k8s/ directory itself, every chart
-	// underneath it resolves directly without the devops-dir walkers.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -124,11 +97,7 @@ func testDeployDryRunFromK8sDir(t *testing.T) {
 }
 
 func testDeployDryRunConfiguredK8sPath(t *testing.T) {
-	// A paths.k8s override in .erun/config.yaml relocates the chart tree out of
-	// <tenant>-devops/k8s: deploy resolves the runtime chart from deploy/k8s
-	// and traces the configured dir as a decision line. No <tenant>-devops
-	// module exists, so without the override deploy would fall back to the
-	// published runtime chart.
+	// No <tenant>-devops module exists, so without the override deploy would use the published chart.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -142,9 +111,7 @@ func testDeployDryRunConfiguredK8sPath(t *testing.T) {
 }
 
 func testDeployDryRunGitignoredProjectConfigWarns(t *testing.T) {
-	// A project config that resolves from disk but is excluded by .gitignore
-	// silently works on this machine only, since git never sees it. The
-	// deploy trace must surface that as a warning instead of staying silent.
+	// A gitignored project config works on this machine only, so deploy warns.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -158,9 +125,6 @@ func testDeployDryRunGitignoredProjectConfigWarns(t *testing.T) {
 }
 
 func testDeployConfiguredK8sPathWrongNameErrors(t *testing.T) {
-	// A paths.k8s override pointing at a directory not named "k8s" fails with an
-	// error explaining the naming constraint, rather than silently falling back
-	// to convention discovery.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -174,11 +138,7 @@ func testDeployConfiguredK8sPathWrongNameErrors(t *testing.T) {
 }
 
 func testDeployDryRunFromGitProjectRootDetectsTenantDevops(t *testing.T) {
-	// Exercises detectedProjectRootDevopsK8sDir: from a git project root
-	// whose repo name equals the tenant, chart discovery must go straight
-	// to <root>/<tenant>-devops/k8s instead of scanning every *-devops
-	// candidate. The repo dir is named "team" so findProjectRoot's
-	// detected tenant matches the configured one.
+	// The repo dir is named "team" so findProjectRoot's detected tenant matches.
 	setup := env.New(t)
 	repo := filepath.Join(setup.Cwd, "team")
 	fixture.SeedGitRepo(t, repo)
@@ -210,10 +170,6 @@ func testDeployDryRunFromGitProjectRootDetectsTenantDevops(t *testing.T) {
 }
 
 func testDeployDryRunMultipleDevopsModulesErrors(t *testing.T) {
-	// Exercises resolveProjectRootDevopsK8sDir's ambiguity guard: two
-	// *-devops modules with k8s charts under the project root cannot be
-	// disambiguated, so deploy must fail with "multiple devops k8s
-	// directories found" instead of picking one arbitrarily.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -226,12 +182,8 @@ func testDeployDryRunMultipleDevopsModulesErrors(t *testing.T) {
 }
 
 func testDeployDryRunScopeDefaultedEarlyFailureNamesResolvedEnv(t *testing.T) {
-	// A deploy that takes its target from the current scope rather than
-	// explicit args must resolve tenant/environment before any early
-	// failure, so the header never renders as "==> Deploy failed /:" — a
-	// bare separator the desktop cannot attribute to an env. Same ambiguous
-	// -devops-modules failure as the scenario above, with the target left to
-	// the default scope: the header must name team/dev.
+	// Tenant/environment resolve before any early failure so the header never
+	// renders as "==> Deploy failed /:".
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -244,12 +196,7 @@ func testDeployDryRunScopeDefaultedEarlyFailureNamesResolvedEnv(t *testing.T) {
 }
 
 func testDeployDryRunUnresolvableScopeFailureOmitsEnvPair(t *testing.T) {
-	// The other arm of the same header: with no tenant configured at all
-	// there is no env to name, so the header drops the tenant/environment
-	// pair entirely instead of falling back to a bare separator. Also locks
-	// resolveOpenTenant's inference-permitted-but-unresolved error: it must
-	// name the command that actually ran (deploy, not open), not just repeat
-	// "default tenant is not configured", and state that command's recovery.
+	// With no tenant, the header drops the pair, and the error names deploy (not open).
 	setup := env.New(t)
 	result := erun.Run(t, []string{"deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
 	if result.ExitCode == 0 {
@@ -259,11 +206,6 @@ func testDeployDryRunUnresolvableScopeFailureOmitsEnvPair(t *testing.T) {
 }
 
 func testDeployDryRunDefaultEnvironmentNotConfiguredNamesOpenAndRecovery(t *testing.T) {
-	// Sibling of the scenario above for resolveOpenEnvironment: a tenant
-	// resolves (from the configured default), but that tenant has no
-	// default environment, so the error must name the tenant and open's
-	// recovery instead of repeating the bare "default environment is not
-	// configured".
 	setup := env.New(t)
 	root := filepath.Join(setup.ConfigHome, "erun")
 	if err := os.MkdirAll(filepath.Join(root, "team"), 0o755); err != nil {
@@ -283,15 +225,8 @@ func testDeployDryRunDefaultEnvironmentNotConfiguredNamesOpenAndRecovery(t *test
 }
 
 func testDeployDryRunNoDevopsModuleBootstrapsPublishedRuntime(t *testing.T) {
-	// Opt-in-only resolution: a local env whose project root has no
-	// *-devops module has no local charts, so an empty selection defaults to
-	// the runtime and — finding no repo-local runtime chart — bootstraps the
-	// env on the published erun-devops chart by reference, once the runtime
-	// chart ladder confirms it published at the version (the
-	// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam stands in for that registry
-	// read). This replaces the old "no devops module errors" contract: a
-	// configured env can heal its runtime from a confirmed published chart,
-	// exit 0.
+	// With no local charts, an empty selection bootstraps the runtime from the
+	// published erun-devops chart once the probe override confirms it.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
@@ -303,12 +238,7 @@ func testDeployDryRunNoDevopsModuleBootstrapsPublishedRuntime(t *testing.T) {
 }
 
 func testDeployDryRunUnconfiguredAliasDerivesProviderAndRegion(t *testing.T) {
-	// Exercises applyCloudProviderDeployMetadata's fallbacks: the env's
-	// cloudprovideralias has no configured provider, so the provider
-	// derives from the alias shape (cloudProviderFromAlias → "aws"), no
-	// cloud context matches the kubernetes context, and the region
-	// derives from the context name suffix (cloudContextRegionFromName →
-	// eu-west-2). The helm set-strings must carry both derived values.
+	// Provider derives from the alias shape and region from the context name suffix.
 	setup := env.New(t)
 	root := filepath.Join(setup.ConfigHome, "erun")
 	tenantDir := filepath.Join(root, "team")
@@ -338,11 +268,7 @@ func testDeployDryRunUnconfiguredAliasDerivesProviderAndRegion(t *testing.T) {
 }
 
 func testDeployDryRunTenantAliasesResolveOIDCIssuers(t *testing.T) {
-	// Exercises ResolveTenantCloudProviderIssuers +
-	// CloudProviderOIDCIssuerURL: a tenant carrying three provider
-	// aliases must resolve each issuer (explicit oidcissuerurl, a
-	// duplicate that is deduplicated, and one derived from a non-awsapps
-	// SSO start URL) into the api.oidcAllowedIssuers helm set-string.
+	// Covers an explicit issuer, a duplicate, and one derived from a non-awsapps SSO URL.
 	setup := env.New(t)
 	root := filepath.Join(setup.ConfigHome, "erun")
 	tenantDir := filepath.Join(root, "team")
@@ -387,10 +313,8 @@ func testDeployDryRunTenantAliasesResolveOIDCIssuers(t *testing.T) {
 }
 
 func testDeployDryRunAWSAliasWithoutCloudContextResolvesRegionFromAlias(t *testing.T) {
-	// An env with a provider alias but no cloud context must not thread an
-	// empty `cloudContext.region=` — an empty AWS_REGION overrides the pod
-	// profile's own region and breaks every AWS call in the pod. The alias' Identity Center region is the fallback, and
-	// the helm command must carry it.
+	// An empty AWS_REGION would override the pod profile's region, so the alias'
+	// Identity Center region is the fallback.
 	setup := env.New(t)
 	fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -402,9 +326,7 @@ func testDeployDryRunAWSAliasWithoutCloudContextResolvesRegionFromAlias(t *testi
 }
 
 func testDeployDryRunAWSAliasResolvesRegionFromECRRegistryHost(t *testing.T) {
-	// Last region fallback: the alias records no Identity Center region, so
-	// the only region left to find is the one the tenant's ECR registry host
-	// encodes. Its sibling above locks the alias tier.
+	// Last fallback: the region encoded in the tenant's ECR registry host.
 	setup := env.New(t)
 	fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "", "123456789012.dkr.ecr.eu-west-1.amazonaws.com/team")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -416,10 +338,8 @@ func testDeployDryRunAWSAliasResolvesRegionFromECRRegistryHost(t *testing.T) {
 }
 
 func testDeployDryRunOutsideDevopsWithTenantEnv(t *testing.T) {
-	// When erun deploy <tenant> <env> is invoked from a cwd outside the
-	// devops module (e.g. the desktop UI launching the binary from $HOME
-	// for a remote environment), the resolved tenant project root must
-	// drive chart discovery instead of cwd.
+	// From a cwd outside the devops module (e.g. desktop from $HOME), the tenant
+	// project root drives chart discovery.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -428,19 +348,8 @@ func testDeployDryRunOutsideDevopsWithTenantEnv(t *testing.T) {
 }
 
 func testDeployDryRunRuntimeChartOverrideOffATenantUmbrellaDropsTheSubchartScope(t *testing.T) {
-	// The value scope belongs to the chart that is actually installed. This env
-	// resolves the tenant's own charts/team-devops umbrella, whose runtime
-	// values are re-scoped under the erun-devops subchart key; naming the
-	// canonical chart instead must drop that nesting, because helm silently
-	// ignores values addressed to a subchart the chart does not wrap -- the
-	// image override and the required tenant/environment values would land
-	// nowhere and the pod would come up wrong rather than failing. The bundled
-	// values pull goes with it: a canonical chart ships no per-env values.
-	//
-	// The image is deliberately untouched -- it stays the tenant's own
-	// team-devops at the deploy version. That is the whole point of naming the
-	// chart separately: the chart rides erun's release line, the image rides the
-	// tenant's, and overriding one must not move the other.
+	// Naming the canonical chart drops the subchart nesting (helm silently ignores
+	// values for an unwrapped subchart) but leaves the tenant's image untouched.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0")
@@ -466,12 +375,7 @@ func testDeployDryRunRuntimeChartOverrideOffATenantUmbrellaDropsTheSubchartScope
 }
 
 func testDeployComponentsConfigScopesComponentChartLookup(t *testing.T) {
-	// A declared .erun/config.yaml components.<name>.k8s (the
-	// monorepo-of-independent-deployables shape) scopes --components' chart
-	// lookup to that harness's own k8s root instead of walking the whole
-	// project, so a same-named chart elsewhere (here, a decoy under an
-	// unrelated -devops module) cannot collide with it. Without the scoping
-	// this would resolve "multiple Helm charts found for component".
+	// components.<name>.k8s scopes the lookup, so the decoy chart cannot collide.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedProjectComponentsConfig(t, setup, fixture.ComponentPathsConfig{
@@ -493,11 +397,6 @@ func testDeployComponentsConfigScopesComponentChartLookup(t *testing.T) {
 }
 
 func testDeployDryRunFromChartCwdResolvesSingleChartContext(t *testing.T) {
-	// When deploy runs with cwd inside the chart directory itself,
-	// ResolveCurrentKubernetesDeployContexts takes the direct-context
-	// branch: the cwd is the chart, ValidateHelmChartPath vets its
-	// Chart.yaml, and exactly one deploy context resolves without the
-	// project-root devops/k8s directory scan.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	chart := fixture.SeedDevopsRepo(t, setup, "team", "dev")

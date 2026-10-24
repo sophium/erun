@@ -14,10 +14,6 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// TestResolveTenantByIssuerReportsUnresolvedForMissingOrgClaim proves that once
-// an issuer is org-scoped, a token that carries no matching org claim is not
-// confused with "not enrolled" -- the caller may be a genuine member of a tenant this one token
-// cannot resolve to.
 func TestResolveTenantByIssuerReportsUnresolvedForMissingOrgClaim(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
@@ -35,8 +31,7 @@ func TestResolveTenantByIssuerReportsUnresolvedForMissingOrgClaim(t *testing.T) 
 
 	_, err = repo.ResolveTenantByIssuer(context.Background(), security.Claims{
 		Issuer: issuer,
-		// No org claim -- exactly what an OIDC client that never requested the
-		// org scope presents.
+		// No org claim, as a client that never requested the org scope presents.
 	})
 	if !errors.Is(err, security.ErrTenantUnresolved) {
 		t.Fatalf("err = %v, want security.ErrTenantUnresolved", err)
@@ -46,12 +41,6 @@ func TestResolveTenantByIssuerReportsUnresolvedForMissingOrgClaim(t *testing.T) 
 	}
 }
 
-// TestResolveIdentityDistinguishesNotEnrolledFromUnresolved locks in that a
-// genuinely-unenrolled identity (a
-// real tenant exists, this subject simply isn't one of its users) must report
-// differently from an identity whose tenant could not be resolved at all --
-// even when, in the second case, the very same already-enrolled subject
-// presents a token this one time cannot resolve.
 func TestResolveIdentityDistinguishesNotEnrolledFromUnresolved(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
@@ -78,10 +67,6 @@ func TestResolveIdentityDistinguishesNotEnrolledFromUnresolved(t *testing.T) {
 		t.Fatalf("not-enrolled err = %v, want ErrNotFound", notEnrolledErr)
 	}
 
-	// A tenant already exists at this point (seeded above), so registering the
-	// org-scoped issuer's tenant explicitly through TenantRepository.Create --
-	// not empty-database bootstrap, which only ever fires once -- mirrors how
-	// a second tenant is actually added to a platform.
 	const orgScopedIssuer = "https://auth.erunpaas.example/1721-unresolved-vs-enrolled"
 	const orgClaimKey = "urn:zitadel:iam:user:resourceowner:id"
 	const org = "222222222222222222"
@@ -106,7 +91,6 @@ func TestResolveIdentityDistinguishesNotEnrolledFromUnresolved(t *testing.T) {
 	_, _, unresolvedErr := repo.ResolveIdentity(context.Background(), security.Claims{
 		Issuer:  orgScopedIssuer,
 		Subject: "operator-subject", // the same, already-enrolled subject
-		// No org claim this time.
 	})
 	if unresolvedErr == nil {
 		t.Fatal("expected a missing org claim to be rejected")
@@ -116,13 +100,6 @@ func TestResolveIdentityDistinguishesNotEnrolledFromUnresolved(t *testing.T) {
 	}
 }
 
-// TestRefreshUserUsernameCollisionSignsInWithoutLeakingRawSQL proves the auth
-// path's own instance of this issue: a token's claimed username refresh
-// colliding with a different user already enrolled under it in the same
-// tenant must not fail authentication, and must never let the raw Postgres
-// unique-violation error (constraint name, SQLSTATE) reach the log as the
-// rejection reason -- an already-resolved identity signs in under its
-// existing username instead.
 func TestRefreshUserUsernameCollisionSignsInWithoutLeakingRawSQL(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
@@ -165,16 +142,7 @@ func TestRefreshUserUsernameCollisionSignsInWithoutLeakingRawSQL(t *testing.T) {
 	}
 }
 
-// TestResolveIdentityRepeatedWhoamiReadsWithExistingLinkNeverFail exercises
-// the read path GET /v1/whoami drives on every call: a tenant with three
-// enrolled users -- "erun" (its bootstrap user), "va-admin", and
-// "rihards@frs.lv", the last already holding a user_external_ids link for the
-// subject -- and a token whose username claim collides with a different
-// enrolled user's username. Enrolment through
-// ResolveIdentity's own bootstrap only ever creates a *tenant's first* user
-// (insertFirstTenantUser refuses once any user exists), so rihards@frs.lv
-// and her link are seeded directly, as the ordinary UserRepository.Create
-// path would enrol her.
+// rihards@frs.lv is seeded directly because bootstrap only creates a tenant's first user.
 func TestResolveIdentityRepeatedWhoamiReadsWithExistingLinkNeverFail(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
@@ -182,9 +150,6 @@ func TestResolveIdentityRepeatedWhoamiReadsWithExistingLinkNeverFail(t *testing.
 
 	const issuer = "https://auth.erunpaas.com"
 
-	// Seed the tenant's other enrolled users, the same shape as tenant frs:
-	// "erun" bootstraps the tenant itself, "va-admin" is a second, unrelated
-	// user already holding the username the collision will target.
 	tenant, _, err := repo.ResolveIdentity(context.Background(), security.Claims{
 		Issuer:   issuer,
 		Subject:  "erun-subject",
@@ -196,8 +161,6 @@ func TestResolveIdentityRepeatedWhoamiReadsWithExistingLinkNeverFail(t *testing.
 		tenant.TenantID, "va-admin",
 	).Err(), "seed a second, unrelated enrolled user")
 
-	// The subject's link already exists -- seeded directly, since this is not a tenant's first
-	// user and ResolveIdentity's own bootstrap would refuse to create it.
 	const subject = "387534471668170904"
 	var rihardsID string
 	mustNoErr(t, db.QueryRow(
@@ -213,9 +176,6 @@ func TestResolveIdentityRepeatedWhoamiReadsWithExistingLinkNeverFail(t *testing.
 	log.SetOutput(&logBuf)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 
-	// GET /v1/whoami, repeated, as it fires on every call: the token's username claim now collides with va-admin's
-	// username, so every one of these calls attempts (and must survive) the
-	// same refresh collision.
 	for i := 0; i < 3; i++ {
 		_, resolved, err := repo.ResolveIdentity(context.Background(), security.Claims{
 			Issuer:   issuer,
@@ -236,21 +196,9 @@ func TestResolveIdentityRepeatedWhoamiReadsWithExistingLinkNeverFail(t *testing.
 	}
 }
 
-// TestBootstrapFirstTenantUserSanitizesARealRaceOnTheUsernameConstraint
-// covers the other branch that writes users: two callers racing to become a zero-user tenant's first user,
-// both deriving the same username, must not let the loser's raw
-// unique-violation (constraint name, SQLSTATE) escape ResolveIdentity -- it
-// is sanitized into ErrIdentityResolutionFailed exactly like the
-// refresh-collision branch above, but distinguishably logged with step
-// "bootstrap first tenant user" rather than "username refresh" (the two
-// otherwise violate the identical constraint and would be indistinguishable
-// from the auth-rejected log line alone). The race is forced
-// deterministically, never by racing two goroutines and hoping for a
-// particular interleaving: a second, independent connection holds an
-// uncommitted insert of the exact colliding row so the racing
-// ResolveIdentity call's own insert genuinely blocks on the real unique
-// index, observed through pg_stat_activity, and only then does that
-// connection commit -- there is exactly one possible outcome once it does.
+// The race is forced deterministically: a second connection holds an
+// uncommitted colliding insert until pg_stat_activity shows the bootstrap
+// insert blocked on it.
 func TestBootstrapFirstTenantUserSanitizesARealRaceOnTheUsernameConstraint(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
@@ -274,8 +222,6 @@ func TestBootstrapFirstTenantUserSanitizesARealRaceOnTheUsernameConstraint(t *te
 		secondTenantID, issuer, "second tenant issuer",
 	).Err(), "map second tenant issuer")
 
-	// Hold an uncommitted insert of the exact row the racing bootstrap call
-	// will also try to insert, on a second, independent connection.
 	ctx := context.Background()
 	blocker, err := db.Conn(ctx)
 	mustNoErr(t, err, "open blocker connection")
@@ -299,9 +245,6 @@ func TestBootstrapFirstTenantUserSanitizesARealRaceOnTheUsernameConstraint(t *te
 		resultCh <- raceErr
 	}()
 
-	// Wait until PostgreSQL itself reports the racing insert genuinely
-	// blocked on the blocker's uncommitted row -- an observable condition,
-	// never a sleep-and-hope interleaving.
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		var blocked int

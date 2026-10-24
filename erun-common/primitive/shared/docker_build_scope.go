@@ -27,11 +27,7 @@ func NormalizeDockerDependencies(store DockerStore, findProjectRoot ProjectFinde
 	return store, findProjectRoot, resolveBuildContext, now
 }
 
-// ConfiguredDockerDir resolves the project-global paths.docker override. It
-// returns (dir, true, nil) when configured and a usable docker build module,
-// (,false,nil) when unset, and an error when configured but not a docker build
-// module — a misconfigured override fails loudly rather than silently falling
-// back to convention.
+// ConfiguredDockerDir fails on an unusable override rather than fall back to convention.
 func ConfiguredDockerDir(projectRoot string) (string, bool, error) {
 	paths, err := config.LoadProjectPaths(projectRoot)
 	if err != nil {
@@ -154,10 +150,6 @@ func dockerBuildEnvironmentFromDetectedProject(store DockerStore, findProjectRoo
 	return strings.TrimSpace(tenantConfig.DefaultEnvironment), nil
 }
 
-// ResolveDockerBuildEnvConfigForProject is ResolveDockerBuildEnvConfig's core,
-// usable by callers that already know the resolved project root and
-// environment name directly (e.g. newDockerBuildSpec) without re-deriving them
-// through a DockerCommandTarget.
 func ResolveDockerBuildEnvConfigForProject(store DockerStore, projectRoot, wantEnv string) *config.EnvConfig {
 	cleanRoot := filepath.Clean(projectRoot)
 
@@ -178,16 +170,9 @@ func ResolveDockerBuildEnvConfigForProject(store DockerStore, projectRoot, wantE
 	return InjectedDockerBuildEnvConfig(nil)
 }
 
-// InjectedDockerBuildEnvConfig lets the values the chart injected win over the
-// on-disk copy when the build runs inside a runtime pod.
-//
-// That copy is a projection, and it is rewritten over the environment's life; a
-// build that trusted it resolved the default registry instead of the one the
-// environment marks for building, and stopped honouring disablebuildscript, so it
-// ran the project's own build script and minted no image version. Both failures
-// are silent and neither is recoverable from the build output, so the pod reads
-// its own identity from the env the chart set rather than from a file anything
-// else may have written since.
+// InjectedDockerBuildEnvConfig prefers chart-injected values in a runtime pod:
+// the on-disk projection drifts, silently costing the build registry and
+// disablebuildscript.
 func InjectedDockerBuildEnvConfig(onDisk *config.EnvConfig) *config.EnvConfig {
 	injected, ok := ResolveInjectedRuntimeConfig(os.Getenv)
 	if !ok {

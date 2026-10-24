@@ -14,15 +14,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// inPodTestContext is a Context that can trace, so the resolver's trace lines
-// are exercised rather than panicking on a nil logger.
+// inPodTestContext can trace, avoiding a nil-logger panic.
 func inPodTestContext(dryRun bool) core.Context {
 	var trace bytes.Buffer
 	return core.Context{Logger: core.NewLoggerWithWriters(0, &trace, &trace), DryRun: dryRun}
 }
 
-// stubDeclaredImagePullSecrets replaces the cluster read with a static auths
-// document, so these tests exercise the resolution without a live cluster.
 func stubDeclaredImagePullSecrets(t *testing.T, auths map[string]config.DockerConfigJSONAuthEntry) {
 	t.Helper()
 	prev := readDeclaredImagePullSecretAuths
@@ -35,9 +32,7 @@ func stubDeclaredImagePullSecrets(t *testing.T, auths map[string]config.DockerCo
 	})
 }
 
-// useInPodIdentity marks this process as the target env's own runtime pod and
-// clears every other credential route, reproducing the pod's boot state: no
-// docker config, no gh session, no GH_TOKEN/GITHUB_TOKEN.
+// useInPodIdentity reproduces a runtime pod's boot state: in-pod identity, no other credential route.
 func useInPodIdentity(t *testing.T) {
 	t.Helper()
 	useDockerConfigDir(t, t.TempDir())
@@ -63,8 +58,6 @@ func frsProdRuntimeTarget() config.OpenResult {
 	}
 }
 
-// The env declares the credential as its own imagePullSecret; the pod has none
-// of the three routes resolveGHCRBasicAuth otherwise knows.
 func TestConfigureInPodDeclaredRegistryAuthResolvesForGHCR(t *testing.T) {
 	useInPodIdentity(t)
 	stubDeclaredImagePullSecrets(t, ghcrDeclaredAuths("_json_key:ghcrtok"))
@@ -78,8 +71,7 @@ func TestConfigureInPodDeclaredRegistryAuthResolvesForGHCR(t *testing.T) {
 	}
 }
 
-// Every pre-existing route keeps its precedence: the declared pull secret is
-// consulted only once all three have come up empty.
+// The declared pull secret is consulted only after every other route is empty.
 func TestResolveGHCRBasicAuthPrefersExistingRoutesOverDeclaredPullSecret(t *testing.T) {
 	useInPodIdentity(t)
 	stubDeclaredImagePullSecrets(t, ghcrDeclaredAuths("pullsecret:pw"))
@@ -102,8 +94,6 @@ func TestResolveGHCRBasicAuthPrefersExistingRoutesOverDeclaredPullSecret(t *test
 	}
 }
 
-// Outside the target env's own pod the declared pull secrets are not this
-// process's credential, so nothing is read and nothing is resolved.
 func TestConfigureInPodDeclaredRegistryAuthRequiresRuntimePodIdentity(t *testing.T) {
 	useInPodIdentity(t)
 	t.Setenv("ERUN_TENANT", "")
@@ -128,7 +118,6 @@ func TestConfigureInPodDeclaredRegistryAuthRequiresRuntimePodIdentity(t *testing
 	}
 }
 
-// A pod of one env must not authenticate as another env.
 func TestConfigureInPodDeclaredRegistryAuthIgnoresAnotherEnvironmentsTarget(t *testing.T) {
 	useInPodIdentity(t)
 	stubDeclaredImagePullSecrets(t, ghcrDeclaredAuths("pullsecret:pw"))
@@ -142,7 +131,6 @@ func TestConfigureInPodDeclaredRegistryAuthIgnoresAnotherEnvironmentsTarget(t *t
 	}
 }
 
-// A dry run performs no cluster read and states no credential.
 func TestConfigureInPodDeclaredRegistryAuthSkipsDryRun(t *testing.T) {
 	useInPodIdentity(t)
 	calls := 0
@@ -163,9 +151,7 @@ func TestConfigureInPodDeclaredRegistryAuthSkipsDryRun(t *testing.T) {
 	}
 }
 
-// ghcrPrivateRegistryServer answers the token exchange and tag list the way a
-// private ghcr namespace does: anonymous token requests are refused, a Basic
-// credential mints a pull token for the declared tag.
+// ghcrPrivateRegistryServer refuses anonymous tokens, as a private ghcr namespace does.
 func ghcrPrivateRegistryServer(t *testing.T, version string) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -203,8 +189,6 @@ func resolveGHCRChartWithDeclaredCredential(t *testing.T, version string) (Runti
 	})
 }
 
-// End to end through the real registry read: with the env's declared credential
-// resolved, the private chart is confirmed instead of refused.
 func TestDeclaredImagePullSecretConfirmsPrivateChart(t *testing.T) {
 	useInPodIdentity(t)
 	stubDeclaredImagePullSecrets(t, ghcrDeclaredAuths("pullsecret:pw"))
@@ -219,8 +203,6 @@ func TestDeclaredImagePullSecretConfirmsPrivateChart(t *testing.T) {
 	}
 }
 
-// A Secret the pod cannot read (RBAC denial, unreachable API server) must leave
-// the run credential-less rather than failing the deploy on the read.
 func TestConfigureInPodDeclaredRegistryAuthToleratesUnreadableSecret(t *testing.T) {
 	useInPodIdentity(t)
 	prev := readDeclaredImagePullSecretAuths

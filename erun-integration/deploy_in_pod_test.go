@@ -13,10 +13,6 @@ import (
 )
 
 func testDeployDevopsK8sDeployComponentDryRun(t *testing.T) {
-	// Exercises the `devops k8s deploy COMPONENT` single-component path:
-	// --version wins as the version override, no tenant/env args resolves
-	// the default tenant, and the component resolves to its chart under the
-	// tenant repo.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -28,12 +24,7 @@ func testDeployDevopsK8sDeployComponentDryRun(t *testing.T) {
 }
 
 func testDeployDevopsK8sDeployComponentInPodLocalAgentRuntimeRefused(t *testing.T) {
-	// Regression: ResolveDeploySpec (the component-named path behind
-	// `devops k8s deploy` and the MCP deploy tool's component branch) already
-	// applied the runtime chart's other guards — the chart override and the
-	// MCP-auth downgrade refusal — but not this one, so naming the runtime
-	// release as a component reached exactly the in-pod local-agent redeploy
-	// this guard exists to refuse. team-devops is RuntimeReleaseName("team").
+	// team-devops is RuntimeReleaseName("team").
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -46,9 +37,7 @@ func testDeployDevopsK8sDeployComponentInPodLocalAgentRuntimeRefused(t *testing.
 }
 
 func testDeployDevopsK8sDeployComponentInPodLocalAgentNonRuntimeAllowed(t *testing.T) {
-	// The guard must stay scoped to the runtime chart alone: naming a
-	// non-runtime component from inside the pod carries no environment shape,
-	// so it must keep working even in-pod on a local-agent env.
+	// The guard is scoped to the runtime chart; components carry no environment shape.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -62,13 +51,7 @@ func testDeployDevopsK8sDeployComponentInPodLocalAgentNonRuntimeAllowed(t *testi
 }
 
 func testDeployDevopsK8sDeployComponentInPodNonLocalAgentRuntimeRefused(t *testing.T) {
-	// Regression: naming the runtime release as a component from inside a
-	// remote-agent env's own pod reached the same projection-resolved rollout
-	// the local-agent case already refused. Naming the chart makes the
-	// selection deliberate, not the values authoritative — the resolve still
-	// reads the pod's projection, so it still carries the substituted sshd
-	// state, port block, and runtime sizing. Mirrors
-	// in_pod_remote_agent_runtime_deploy_refused for the component-named path.
+	// Naming the chart makes the selection deliberate, not its projection-resolved values correct.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	repoPath := filepath.Join(setup.Home, "git", "team")
@@ -82,13 +65,8 @@ func testDeployDevopsK8sDeployComponentInPodNonLocalAgentRuntimeRefused(t *testi
 }
 
 func testDeployInPodLocalAgentRuntimeDeployRefused(t *testing.T) {
-	// Regression: calling a local-agent env's own in-pod MCP deploy resolved
-	// every environment-shaping value from the in-pod config projection —
-	// default ports, the in-pod mount path as worktreeHostPath, default pod
-	// resources, the project's deploy registry for the chart — so the rollout
-	// reshaped the env and cut the channel that asked for it. The in-pod
-	// marker is the chart-set ERUN_TENANT/ERUN_ENVIRONMENT pair, which the
-	// harness sets here to stand in for running inside the pod.
+	// In-pod values come from the config projection and would reshape the env. The
+	// harness sets ERUN_TENANT/ERUN_ENVIRONMENT to stand in for running in the pod.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -101,13 +79,7 @@ func testDeployInPodLocalAgentRuntimeDeployRefused(t *testing.T) {
 }
 
 func testDeployInPodRemoteAgentRuntimeDeployRefused(t *testing.T) {
-	// Regression: the guard keyed on the target being local-agent, so a
-	// remote-agent env's own pod rolled its own runtime chart from a resolve
-	// that had substituted the projection's values — sshdEnabled=false where
-	// the environment runs the sshd that serves workspace-sync, and the
-	// projection's port block and runtime sizing in place of the host store's.
-	// Owning the worktree inside the pod makes the deploy reachable; it does
-	// not make the values it resolved correct.
+	// The projection's sshd, port and sizing values are wrong for a remote-agent env too.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
@@ -119,13 +91,8 @@ func testDeployInPodRemoteAgentRuntimeDeployRefused(t *testing.T) {
 }
 
 func testDeployInPodRuntimeEnvRuntimeDeployRefused(t *testing.T) {
-	// Regression: a runtime env's pod carries only the config projection the
-	// chart injected, which has no deploy block — so `deploy.components` is
-	// empty in there even when the env has a saved selection, the
-	// runtime-chart-alone fallback is reached for lack of information rather
-	// than by choice, and the deploy exited 0 having rolled one chart of the
-	// nine the operator selected. The refusal names the runtime chart it would
-	// have rolled alone and both remedies.
+	// The projection has no deploy block, so an empty selection here is unknown,
+	// not a choice.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
 	envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
@@ -137,12 +104,7 @@ func testDeployInPodRuntimeEnvRuntimeDeployRefused(t *testing.T) {
 }
 
 func testDeployInPodRuntimeEnvExplicitRuntimeComponentRefused(t *testing.T) {
-	// Regression: naming the runtime release used to be the empty-selection
-	// refusal's own second remedy, and it carried the same
-	// projection-substituted values as the inferred fallback the first remedy
-	// avoids. A deliberate selection is not an authoritative one: the resolve
-	// still reads the pod's projection, so the rollout still emits the
-	// projection's sshd state and port block for this pod's own environment.
+	// A deliberate selection still resolves values from the pod's projection.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
 	envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
@@ -154,12 +116,7 @@ func testDeployInPodRuntimeEnvExplicitRuntimeComponentRefused(t *testing.T) {
 }
 
 func testDeployInPodRuntimeEnvSavedSelectionRefusedByTheRuntimeChartGuard(t *testing.T) {
-	// A saved deploy.components selection resolves, so the empty-selection
-	// guard stays silent — its diagnosis, that the pod cannot tell a genuinely
-	// empty selection from the one saved on the host, does not apply. What
-	// refuses the rollout is the runtime-chart guard one layer on, because a
-	// selection that resolved still resolves the runtime chart's values from
-	// the pod's projection.
+	// A saved selection resolves, so the runtime-chart guard refuses, not the empty-selection one.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"team-devops"})
 	envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
@@ -174,9 +131,6 @@ func testDeployInPodRuntimeEnvSavedSelectionRefusedByTheRuntimeChartGuard(t *tes
 }
 
 func testDeployInPodLocalAgentComponentDeployAllowed(t *testing.T) {
-	// A component chart carries no environment shape, so an in-pod
-	// local-agent deploy that selects only components keeps working — the
-	// guard fires on the runtime chart alone.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")

@@ -17,10 +17,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// VersionCommandInfo keeps erun's own build identity separate from the version of
-// whatever project the caller happens to stand in. Collapsing the two made
-// `erun version` report a project's VERSION as erun's, which reads as a runtime
-// stranded many releases behind the `latest stable:` line right beneath it.
+// VersionCommandInfo keeps erun's build version separate from the current project's VERSION.
 type VersionCommandInfo struct {
 	Build           model.BuildInfo
 	ProjectName     string
@@ -136,8 +133,7 @@ func formatProjectVersionLine(info VersionCommandInfo) string {
 	return "project " + version
 }
 
-// A registry lookup failure is not fatal: the local build version is still worth
-// printing, so the error is traced and the lines are simply omitted.
+// A registry lookup failure is traced, not fatal.
 func resolveRegistryVersionsForVersionCommand(ctx context.Context, commandCtx core.Context, resolveRegistryVersions registry.RuntimeRegistryVersionResolverFunc) registry.RuntimeRegistryVersions {
 	if resolveRegistryVersions == nil {
 		return registry.RuntimeRegistryVersions{}
@@ -180,8 +176,7 @@ func ResolveVersionCommandBuildInfo(findProjectRoot sharedpkg.ProjectFinderFunc)
 	return info, nil
 }
 
-// The project's name is taken from the directory holding the VERSION file, which
-// is what an operator recognizes it by.
+// projectNameForVersionFile names the project after the directory holding VERSION.
 func projectNameForVersionFile(versionFilePath string) string {
 	dir := strings.TrimSpace(filepath.Dir(strings.TrimSpace(versionFilePath)))
 	if dir == "" || dir == "." || dir == string(filepath.Separator) {

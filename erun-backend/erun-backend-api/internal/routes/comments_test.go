@@ -45,8 +45,6 @@ func (s *stubCommentService) UpdateStatus(context.Context, string, model.Comment
 	return s.comment, s.err
 }
 
-// TestCreateCommentInvalidCommitIDReportsItsCode: comments.md documents
-// INVALID_COMMIT_ID as 400 for a commitId that is not 40 lowercase hex chars.
 func TestCreateCommentInvalidCommitIDReportsItsCode(t *testing.T) {
 	routes := CommentRoutes{service: &stubCommentService{err: &service.InvalidCommitIDError{CommitID: "bad"}}}
 	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/review-1/comments", bytes.NewBufferString(`{"commitId":"bad"}`))
@@ -63,8 +61,6 @@ func TestCreateCommentInvalidCommitIDReportsItsCode(t *testing.T) {
 	}
 }
 
-// TestCreateCommentMalformedJSONReportsInvalidBody: a decode failure gets the
-// same INVALID_BODY code documented for a missing/invalid field.
 func TestCreateCommentMalformedJSONReportsInvalidBody(t *testing.T) {
 	routes := CommentRoutes{service: &stubCommentService{}}
 	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/review-1/comments", bytes.NewBufferString(`{not json`))
@@ -81,8 +77,6 @@ func TestCreateCommentMalformedJSONReportsInvalidBody(t *testing.T) {
 	}
 }
 
-// TestUpdateCommentStatusAlreadyClosedReportsItsCode: comments.md documents
-// ALREADY_CLOSED as 409 for closing an already-closed thread.
 func TestUpdateCommentStatusAlreadyClosedReportsItsCode(t *testing.T) {
 	routes := CommentRoutes{service: &stubCommentService{err: &service.AlreadyClosedError{CommentID: "comment-1"}}}
 	req := httptest.NewRequest(http.MethodPatch, "/v1/reviews/review-1/comments/comment-1/status", bytes.NewBufferString(`{"status":"CLOSED"}`))
@@ -99,9 +93,6 @@ func TestUpdateCommentStatusAlreadyClosedReportsItsCode(t *testing.T) {
 	}
 }
 
-// TestCreateCommentBodyConstraintReportsInvalidBody: the comments.body CHECK
-// constraint (empty or over 8 KiB) is documented as INVALID_BODY, distinct
-// from the generic code a malformed-JSON decode failure would also produce.
 func TestCreateCommentBodyConstraintReportsInvalidBody(t *testing.T) {
 	routes := CommentRoutes{service: &stubCommentService{err: apirepository.ErrCommentBodyInvalid}}
 	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/review-1/comments", bytes.NewBufferString(`{"commitId":"abcdef0123456789abcdef0123456789abcdef01","body":""}`))
@@ -118,8 +109,6 @@ func TestCreateCommentBodyConstraintReportsInvalidBody(t *testing.T) {
 	}
 }
 
-// TestListCommentsGenericErrorCarriesAStatusDerivedCode covers the codepath
-// with no business-specific code: the envelope still always carries one.
 func TestListCommentsGenericErrorCarriesAStatusDerivedCode(t *testing.T) {
 	routes := CommentRoutes{comments: &stubCommentRepository{err: apirepository.ErrForbidden}}
 	req := httptest.NewRequest(http.MethodGet, "/v1/reviews/review-1/comments", nil)

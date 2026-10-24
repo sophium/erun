@@ -13,14 +13,9 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 )
 
-// confirmANSI mirrors the integration suite's first normalization rule, which
-// strips escape codes before anything compares a capture.
 var confirmANSI = regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`)
 
-// confirmPromptStdin points both readers a confirmation can use at one pipe:
-// the prompt's own os.Stdin (promptui reads it directly) and the shared plain
-// reader, which is a sync.OnceValue already bound to whatever os.Stdin was when
-// another test first prompted.
+// confirmPromptStdin points both promptui's os.Stdin and the shared, once-bound plain reader at one pipe.
 func confirmPromptStdin(t *testing.T, answer string, rounds int) {
 	t.Helper()
 	reader, writer, err := os.Pipe()
@@ -35,8 +30,7 @@ func confirmPromptStdin(t *testing.T, answer string, rounds int) {
 	}
 	previousStdin, previousInput := os.Stdin, shared.PlainPromptInput
 	os.Stdin = reader
-	// One reader for the whole run, the way production binds it: a fresh
-	// bufio.Reader per prompt would buffer the later answers away.
+	// One reader for the run; a fresh bufio.Reader per prompt would buffer later answers away.
 	shared.PlainPromptInput = sync.OnceValue(func() *bufio.Reader { return bufio.NewReader(reader) })
 	t.Cleanup(func() {
 		os.Stdin, shared.PlainPromptInput = previousStdin, previousInput
@@ -44,20 +38,8 @@ func confirmPromptStdin(t *testing.T, answer string, rounds int) {
 	})
 }
 
-// The confirmation the open --no-shell alias flow asks must settle on one
-// recognizable line, every time.
-//
-// Its capture is compared through normalize.PromptConfirm, which recognizes a
-// repaint frame by the cursor glyph or the "[Y/n]" marker and keeps the one
-// settled line. promptui renders that frame from a readline goroutine while the
-// caller renders from its own, over one shared ScreenBuf and Cursor: `go test
-// -race` reports that overlap on every repaint prompt (Cursor.Get vs
-// Cursor.Update, and the Run loop's inputErr write vs the listener's read), and
-// a frame whose tail is lost leaves a line carrying neither marker, so it
-// survives normalization and reds the golden on content that passed in another
-// run. Driving the confirmation many times in one process is what makes both
-// visible here: the race detector sees the overlap, and a renderer that
-// repaints cannot produce the same two lines twice.
+// Repeating the confirmation exposes promptui's repaint race to -race and lets
+// renders be compared.
 func TestConfirmPromptSettlesOnOneRecognizableLine(t *testing.T) {
 	t.Setenv("ERUN_FORCE_TTY", "1")
 	const rounds = 20
@@ -80,9 +62,6 @@ func TestConfirmPromptSettlesOnOneRecognizableLine(t *testing.T) {
 			t.Fatalf("round %d: answering y must confirm", round)
 		}
 
-		// One confirmation's render, read back from the capture and normalized
-		// the way the golden's does: strip escape codes and carriage returns,
-		// then read the lines.
 		captured, err := os.ReadFile(out.Name())
 		if err != nil {
 			t.Fatalf("round %d: read capture: %v", round, err)
@@ -94,8 +73,7 @@ func TestConfirmPromptSettlesOnOneRecognizableLine(t *testing.T) {
 			t.Fatalf("round %d: the confirm rendered %d lines, want 2 (a label and its settled line), so a capture cannot keep just the answered one:\n%q",
 				round, len(renders), delta)
 		}
-		// The label has to stay recognizable as a waiting prompt: the golden's
-		// normalizer drops exactly this line.
+		// The golden's normalizer drops exactly this line.
 		if !strings.Contains(renders[0], "[Y/n]") {
 			t.Fatalf("round %d: label %q carries no [Y/n] marker, so a capture cannot tell it apart from an answer", round, renders[0])
 		}
@@ -105,9 +83,6 @@ func TestConfirmPromptSettlesOnOneRecognizableLine(t *testing.T) {
 	}
 }
 
-// The injected runner is the seam tests answer prompts through, so a
-// confirmation must keep reaching it wherever the repaint prompt is not in
-// play.
 func TestConfirmPromptReachesTheInjectedRunnerWithoutATerminal(t *testing.T) {
 	t.Setenv("ERUN_FORCE_TTY", "")
 	confirmPromptStdin(t, "y", 1)

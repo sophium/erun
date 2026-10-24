@@ -38,10 +38,8 @@ func SeedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	)
 }
 
-// SeedHostTenantEnv seeds a host env: a worktree with no pod and no cluster at
-// all, so unlike SeedTenantEnv it carries no kubernetescontext,
-// containerregistry, or runtimeversion — none of those apply to a type with no
-// pod to configure.
+// SeedHostTenantEnv seeds a host env, which has no pod and so no
+// kubernetescontext, containerregistry, or runtimeversion.
 func SeedHostTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -66,9 +64,7 @@ func SeedHostTenantEnv(t testing.TB, setup env.Setup, tenant, environment string
 	)
 }
 
-// SeedStoppedTenantEnv seeds a tenant env the operator has stopped, so a
-// scenario can exercise the recorded stop intent — the durable half of `erun
-// stop` that makes deploy re-render replicas: 0 and open wake the environment.
+// SeedStoppedTenantEnv seeds a tenant env with the recorded stop intent.
 func SeedStoppedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	SeedTenantEnv(t, setup, tenant, environment)
@@ -76,12 +72,8 @@ func SeedStoppedTenantEnv(t testing.TB, setup env.Setup, tenant, environment str
 }
 
 // SeedTenantEnvDeployingComponents seeds an env whose saved deploy selection
-// names platform components: the shape an operator meets whenever an
-// environment hosting the platform's own API and database is stopped, and the
-// pods those components keep running are read as a stop that did not finish.
-// The runtime's own name is in the selection on purpose — `erun deploy` accepts
-// it — so a scenario can pin that a stop reports the components and never
-// itself.
+// names platform components, including the runtime itself, which a stop must
+// never report.
 func SeedTenantEnvDeployingComponents(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	SeedTenantEnv(t, setup, tenant, environment)
@@ -93,17 +85,14 @@ func SeedTenantEnvDeployingComponents(t testing.TB, setup env.Setup, tenant, env
 			"    - "+tenant+"-backend-postgres\n")
 }
 
-// SeedStoppedTenantEnvDeployingComponents is that env already stopped — the
-// state a Stop press meets as a no-op, where the surviving components are the
-// whole explanation for why nothing changed.
+// SeedStoppedTenantEnvDeployingComponents is SeedTenantEnvDeployingComponents
+// already stopped.
 func SeedStoppedTenantEnvDeployingComponents(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	SeedTenantEnvDeployingComponents(t, setup, tenant, environment)
 	appendEnvConfig(t, setup, tenant, environment, "stopped: true\n")
 }
 
-// appendEnvConfig adds extra keys to an already-seeded env config, so seed
-// variants stay one line instead of a copy of the whole tree.
 func appendEnvConfig(t testing.TB, setup env.Setup, tenant, environment, extra string) {
 	t.Helper()
 	path := filepath.Join(setup.ConfigHome, "erun", tenant, environment, "config.yaml")
@@ -114,9 +103,7 @@ func appendEnvConfig(t testing.TB, setup env.Setup, tenant, environment, extra s
 	mustWrite(t, path, string(existing)+extra)
 }
 
-// SeedTenantEnvWithContext puts an env on a caller-chosen kubernetes context so
-// a scenario can place a second environment on a distinct cluster (e.g. expose's
-// cross-cluster DNS routing between a PowerDNS platform env and a target env).
+// SeedTenantEnvWithContext seeds an env on a caller-chosen kubernetes context.
 func SeedTenantEnvWithContext(t testing.TB, setup env.Setup, tenant, environment, kubernetesContext string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -143,8 +130,7 @@ func SeedTenantEnvWithContext(t testing.TB, setup env.Setup, tenant, environment
 	)
 }
 
-// SeedTenantEnvWithDeployTimeout persists a per-env deploy.timeout so deploy
-// scenarios can exercise the configurable helm rollout timeout.
+// SeedTenantEnvWithDeployTimeout seeds an env with deploy.timeout set.
 func SeedTenantEnvWithDeployTimeout(t testing.TB, setup env.Setup, tenant, environment, timeout string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -174,10 +160,7 @@ func SeedTenantEnvWithDeployTimeout(t testing.TB, setup env.Setup, tenant, envir
 	)
 }
 
-// SeedTenantEnvWithDeployComponents persists a saved deploy selection so deploy
-// scenarios can exercise the saved-set precedence tier: a deploy with no
-// --components resolves to exactly the saved charts, and the runtime deploys
-// only if it too is saved.
+// SeedTenantEnvWithDeployComponents seeds an env with a saved deploy selection.
 func SeedTenantEnvWithDeployComponents(t testing.TB, setup env.Setup, tenant, environment string, components []string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -209,11 +192,8 @@ func SeedTenantEnvWithDeployComponents(t testing.TB, setup env.Setup, tenant, en
 	mustWrite(t, filepath.Join(envDir, "config.yaml"), body)
 }
 
-// SeedTenantEnvNoRegistry omits the per-env container registry so the registry
-// list resolves entirely from the project's .erun/config.yaml (seed it with
-// SeedProjectK8sConfig). Use it for marked-registry-list scenarios where the
-// project config — not a migrated env-config scalar — must drive BUILD/FROM/
-// TO/DEPLOY resolution.
+// SeedTenantEnvNoRegistry omits the env's container registry so registries
+// resolve only from the project's .erun/config.yaml.
 func SeedTenantEnvNoRegistry(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -240,9 +220,8 @@ func SeedTenantEnvNoRegistry(t testing.TB, setup env.Setup, tenant, environment 
 	)
 }
 
-// SeedTenantEnvWithLocalPortRangeStart persists a fixed localportrangestart so
-// open exercises the persisted-range branch instead of the resolver's
-// alphabetical walker.
+// SeedTenantEnvWithLocalPortRangeStart seeds an env with a fixed
+// localportrangestart.
 func SeedTenantEnvWithLocalPortRangeStart(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -271,9 +250,8 @@ func SeedTenantEnvWithLocalPortRangeStart(t testing.TB, setup env.Setup, tenant,
 	)
 }
 
-// SeedSecondaryTenantEnv writes a second tenant/env into an already-seeded XDG
-// tree so resolver scenarios can exercise cross-tenant interactions (walker
-// skip, overlap detection) without overwriting the primary tenant.
+// SeedSecondaryTenantEnv adds a second tenant/env without overwriting the
+// primary tenant.
 func SeedSecondaryTenantEnv(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -302,9 +280,7 @@ func SeedSecondaryTenantEnv(t testing.TB, setup env.Setup, tenant, environment s
 	mustWrite(t, filepath.Join(envDir, "config.yaml"), envContents)
 }
 
-// SeedTenantEnvWithSnapshot persists the env's snapshot preference so open
-// exercises the persisted-preference branch instead of the user passing
-// --snapshot every time.
+// SeedTenantEnvWithSnapshot seeds an env with its snapshot preference.
 func SeedTenantEnvWithSnapshot(t testing.TB, setup env.Setup, tenant, environment string, enabled bool) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")

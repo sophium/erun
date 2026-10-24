@@ -4,10 +4,7 @@ import * as React from 'react';
 import { useAcceptInviteMutation } from '../app/api/identityApi';
 import { describeQueryError } from '../app/queryError';
 
-// describeAcceptError turns the invite-accept endpoint's status code into
-// an exact, distinct message: an expired or consumed link
-// says so plainly rather than a generic failure, since "try again" is not
-// the right recovery for any of these three states.
+// Each status gets a distinct message: "try again" fixes none of these states.
 function describeAcceptError(error: unknown): string {
   const { status, message } = describeQueryError(error);
   switch (status) {
@@ -62,9 +59,6 @@ function TextField({
   );
 }
 
-// useAcceptInviteFields holds the form's five inputs as one unit, so
-// AcceptInviteForm only needs one hook call and one destructure instead of
-// five repeated pairs — mirrors OrgSettingsPanel's usePasswordComplexityFields.
 function useAcceptInviteFields(): {
   username: string;
   email: string;
@@ -203,10 +197,7 @@ function AcceptInviteResultMessage({ state }: { state: AcceptState }): React.Rea
   return null;
 }
 
-// AcceptInvitePage is the unauthenticated landing page for an invite link:
-// the invitee has no bearer token yet, so this renders standalone
-// before App.tsx's normal OIDC-gated flow ever starts. See App.tsx for the
-// path check that routes here instead of dispatching resolveAuth().
+// Unauthenticated: rendered before App.tsx's OIDC-gated flow starts.
 export function AcceptInvitePage({ token }: { token: string }): React.ReactElement {
   const [state, setState] = React.useState<AcceptState>({ status: 'idle' });
   const done = state.status === 'succeeded' || state.status === 'partial';

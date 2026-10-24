@@ -56,11 +56,8 @@ type resolvedUIIdleStatus struct {
 	status activity.EnvironmentIdleStatus
 }
 
-// loadLocalIdleStatus assembles the idle status from what the host itself
-// knows, taken only when the pod could not be asked (mcp unreachable, or the
-// pod call itself failed). The resulting uiIdleStatus.FromPod is always
-// false: this reading may be stale relative to whatever the pod is actually
-// doing right now.
+// loadLocalIdleStatus is the host-side fallback when the pod cannot be asked;
+// FromPod is always false and the reading may be stale.
 func (a *App) loadLocalIdleStatus(result config.OpenResult) (resolvedUIIdleStatus, error) {
 	status, err := activity.ResolveStoredEnvironmentIdleStatus(a.deps.store, result.Tenant, result.Environment, time.Now())
 	if err != nil {
@@ -80,9 +77,7 @@ func (a *App) idleStatusToUI(result config.OpenResult, status activity.Environme
 	ui.CloudContextName = strings.TrimSpace(cloudContext.Name)
 	ui.CloudContextStatus = strings.TrimSpace(cloudContext.Status)
 	ui.CloudContextLabel = cloudContextDisplayName(cloudContext)
-	// idle-stop.log on the pod persists across pod and host restarts. If the
-	// context is observably running again, the recorded error is from a
-	// previous lifetime and should not be advertised next to a healthy env.
+	// idle-stop.log outlives restarts; hide its error once the context runs again.
 	if ui.CloudContextStatus == cloud.CloudContextStatusRunning {
 		ui.StopError = ""
 	}
@@ -110,23 +105,14 @@ func idleStatusToUI(status activity.EnvironmentIdleStatus) uiIdleStatus {
 		StopError:           strings.TrimSpace(status.StopError),
 		Markers:             markers,
 		Leases:              environmentLeasesToUI(status.Leases, time.Now()),
-		// The desktop only observes the pending-stop fields, never computing
-		// them, so the pill renders the same state whichever client armed the stop.
+		// Observed, never computed here, so every client renders the same state.
 		StopPendingSince:       strings.TrimSpace(status.StopPendingSince),
 		SecondsUntilForcedStop: status.SecondsUntilForcedStop,
 		GracePeriodSeconds:     status.GracePeriodSeconds,
 	}
 }
 
-// environmentLeasesToUI carries the held leases through to the desktop so it
-// can name the job already working in an environment — the data idle status
-// already resolves, previously dropped on the way to the UI contract.
-//
-// EnvironmentJobIDFromLeaseID only recognizes the id's shape; a lease taken by
-// hand (`erun activity lease take --name job-whatever` with no explicit --id)
-// produces exactly that shape with no job behind it at all, so the JobID set
-// here is a candidate, not proof. verifyLeaseJobIDs clears it when no job
-// record actually backs it.
+// The JobID is only an id-shape match; verifyLeaseJobIDs confirms it.
 func environmentLeasesToUI(leases []activity.EnvironmentActivityLease, now time.Time) []uiEnvironmentLease {
 	if len(leases) == 0 {
 		return nil
@@ -145,14 +131,8 @@ func environmentLeasesToUI(leases []activity.EnvironmentActivityLease, now time.
 	return out
 }
 
-// verifyLeaseJobIDs clears a lease's candidate JobID when no job record
-// actually backs it, so the occupancy banner never offers a "View jobs" action
-// that the Jobs tab cannot substantiate: a hand-taken lease named like a
-// job's own lease would otherwise surface a "View jobs" button pointing at a
-// job that never existed, with the Jobs tab reporting "No jobs yet". Skips
-// the read entirely when nothing needs verifying, and fails closed (clears
-// rather than keeps) on a lookup error, since an unconfirmed claim is worse
-// than none.
+// verifyLeaseJobIDs clears a candidate JobID no job record backs, so a
+// hand-taken "job-*" lease never offers "View jobs". Fails closed on error.
 func (a *App) verifyLeaseJobIDs(tenant, environment string, leases []uiEnvironmentLease) {
 	var candidates []int
 	for i := range leases {
@@ -284,9 +264,8 @@ func uiStopBlockedReason(markers []activity.EnvironmentIdleMarker) string {
 	return ""
 }
 
-// The desktop no longer fires auto-stop — the in-pod idle monitor owns that.
-// This only clears the post-fire latch when an env reappears as running, so a
-// stale "already fired" flag never sticks forever for future start callers.
+// The in-pod monitor owns auto-stop; this only clears the post-fire latch when
+// an env runs again.
 func (a *App) maybeStopIdleCloudEnvironment(result config.OpenResult, _ activity.EnvironmentIdleStatus) {
 	cloudContext, ok, err := a.linkedCloudContext(result.EnvConfig)
 	if err != nil || !ok {
@@ -297,9 +276,7 @@ func (a *App) maybeStopIdleCloudEnvironment(result config.OpenResult, _ activity
 	}
 }
 
-// CancelPendingIdleStop dismisses the grace-period auto-stop warning for the
-// env. The dismissal is shared state, so the in-pod monitor and any other
-// client observe it too.
+// CancelPendingIdleStop dismisses the env's pending auto-stop for every client.
 func (a *App) CancelPendingIdleStop(selection uiSelection) error {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("cancel pending idle stop", selection.Tenant, selection.Environment); err != nil {
@@ -325,12 +302,8 @@ func (a *App) CancelPendingIdleStop(selection uiSelection) error {
 	return nil
 }
 
-// recordManualStopForCloudContext records a manual-stop audit entry for every
-// env linked to the cloud context, so the History tab explains operator-clicked
-// stops alongside the monitor's auto-stops.
-//
-// Best-effort by design: the stop has already succeeded by the time we get here,
-// so a failed audit write must not make the manual stop look failed.
+// Best-effort: the stop already succeeded, so a failed audit write must not
+// make it look failed.
 func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextName string) {
 	selections := a.selectionsForCloudContext(cloudContextName)
 	for _, selection := range selections {
@@ -344,8 +317,6 @@ func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextN
 		}
 		mcpPort := config.MCPPortForResult(result)
 		if !a.deps.canReachMCPEndpoint(mcpPort) {
-			// Best-effort audit: no port-forward to reach the tool, and the
-			// stop already succeeded, so skip silently.
 			continue
 		}
 		endpoint := mcpEndpointForOpenResult(result)
@@ -356,8 +327,7 @@ func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextN
 	}
 }
 
-// LoadStopHistory returns the env's stop audit records newest first, reading the
-// canonical history the in-pod monitor records rather than any local copy.
+// LoadStopHistory returns the in-pod stop history, newest first.
 func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("load stop history", selection.Tenant, selection.Environment); err != nil {
@@ -413,16 +383,13 @@ func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) 
 	return out, nil
 }
 
-// idlePolicyIsZero reports whether the entry's policy snapshot is
-// unset — older history rows pre-date the snapshot, so we render
-// nothing rather than a misleading "Timeout: 0s" line.
+// Older rows pre-date the policy snapshot; render nothing, not "Timeout: 0s".
 func idlePolicyIsZero(p config.EnvironmentIdlePolicy) bool {
 	return p.Timeout == 0 && strings.TrimSpace(p.WorkingHours) == "" && strings.TrimSpace(p.Timezone) == "" && p.IdleTrafficBytes == 0
 }
 
-// clearIdleStopsForCloudContext returns true when a latched auto-stop flag was
-// actually removed, letting callers distinguish an externally-restarted context
-// from one that was already in sync.
+// Returns true when a latched flag was removed, so callers can tell an
+// externally restarted context from one already in sync.
 func (a *App) clearIdleStopsForCloudContext(name string) bool {
 	name = strings.TrimSpace(name)
 	if name == "" {

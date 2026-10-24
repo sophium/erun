@@ -3,31 +3,10 @@ import type { Page } from '@playwright/test';
 import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { holdTabSetup } from '../../../fixtures/seedRoot.js';
 
-// Closing the window would SIGKILL every in-flight build/deploy/release, so
-// `beforeClose` blocks the close and asks first when the activity queue holds
-// running work.
-//
-// The default suite's kubectl/helm/docker stubs mean nothing here ever
-// reaches a genuinely long-running, backend-tracked activity entry (see
-// deploy-orchestration.spec.ts's own comment on the same limitation), so the
-// "blocked" rendering is driven the same way activity-events.spec.ts drives
-// the drawer: by emitting the real "app-close-gate" event the backend would
-// emit, with a fake entry. The idle-queue paths below do call the real
-// bound PrepareWindowClose. "Idle" includes the tabs every boot opens for the
-// selected environment: their setup holds a running activity entry until the
-// tab's ready marker, and a close asked for in that window must not prompt —
-// the second test holds a tab in exactly that window on purpose, since boot
-// alone opens it only for milliseconds.
-//
-// "Close anyway" is never allowed to run for real here: it would call the
-// real ConfirmWindowClose, which quits the one shared headless backend this
-// whole suite runs against (playwright/AGENTS.md: "the headless backend is a
-// singleton"), tearing it down for every spec that runs after this one. The
-// spec instead intercepts the bound method to prove the click reaches it.
-// The real persist-then-quit behavior is covered by
-// erun-ui/window_close_test.go (TestConfirmWindowClosePersistsRecordThenQuits,
-// TestConfirmWindowCloseSkipsRecordWhenNothingIsRunning,
-// TestConfirmWindowCloseStillQuitsWhenRecordingFails).
+// beforeClose asks first when running work would be killed. The blocked state
+// is driven by emitting "app-close-gate", since stubs never produce long work;
+// tabs still in setup count as idle. "Close anyway" is intercepted because the
+// real ConfirmWindowClose would quit the shared singleton backend.
 
 interface TabSelection {
   tenant: string;
@@ -99,9 +78,7 @@ test.describe('close confirmation (erun#1214)', () => {
     };
     const release = holdTabSetup(seededEnv.tenant, seededEnv.environment);
     try {
-      // StartSession resolves once the tab's process is spawned, which is
-      // after its activity entry went running and, with the hold in place,
-      // before its ready marker can release it.
+      // StartSession resolves after the entry runs but, with the hold, before ready.
       const { setup, gate } = await app.page.evaluate(async (sel) => {
         const bridge = (window as unknown as CloseGateBridge).go.main.App;
         await bridge.StartSession(sel, 0, 80, 24);
@@ -118,8 +95,7 @@ test.describe('close confirmation (erun#1214)', () => {
       release();
     }
 
-    // Converge on the released tab finishing its setup, so no running entry
-    // outlives this test in the worker.
+    // Let the released tab finish so no running entry outlives this test.
     await expect
       .poll(async () => {
         const entry = await app.page.evaluate(async (sel) => {
@@ -144,9 +120,7 @@ test.describe('close confirmation (erun#1214)', () => {
     await app.closeConfirmDialog.cancel();
     await app.closeConfirmDialog.waitForClosed();
 
-    // Cancelling is purely a frontend dismissal — it must not call back into
-    // the backend to touch the (still-running, as far as the operator knows)
-    // job.
+    // Cancel is frontend-only and must not call back into the backend.
   });
 
   test('closing anyway calls the backend confirmation', async ({ app }) => {
@@ -159,8 +133,7 @@ test.describe('close confirmation (erun#1214)', () => {
         bridge.go.main.App.ConfirmWindowClose = () => {
           resolve(true);
           return new Promise<void>(() => {
-            // Deliberately never resolves: the real call would drive the app
-            // to quit next, and this stub stands in for the rest of the test.
+            // Never resolves: the real call would quit the app.
           });
         };
       });

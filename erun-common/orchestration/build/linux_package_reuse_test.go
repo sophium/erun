@@ -13,11 +13,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// No test in this binary may read or write the operator's real package-test
-// record: one that has not pointed the seam at its own tree finds no record
-// and records nothing.
-// No test asks a real docker daemon for its platform either: the daemon is
-// linux/arm64 unless a test names another one.
+// Keep tests off the operator's package-test record and any real docker daemon
+// (linux/arm64 unless a test names another).
 func init() {
 	build.LinuxPackageTestRecordDir = func() (string, error) {
 		return "", errors.New("linux package test records are off in this test binary unless a test points them at its own directory")
@@ -62,9 +59,6 @@ const reusableLinuxPackageDockerfile = "" +
 	"FROM scratch AS dist\n" +
 	"COPY --from=package /deb/ /\n"
 
-// reusablePackageProject lays out one tested package whose stages COPY from
-// the context: app/ into build, tests/ into test, LICENSE and VERSION into
-// package only.
 func reusablePackageProject(t *testing.T) (string, shared.LinuxPackageSpec) {
 	t.Helper()
 	root := t.TempDir()
@@ -146,9 +140,6 @@ func TestLinuxPackageDryRunNeitherRunsNorRecords(t *testing.T) {
 	}
 }
 
-// Any file a stage up to the check target COPYs moves the fingerprint; a file
-// the context ignores, a file nothing copies, and the version (which only the
-// package stage consumes) do not.
 func TestLinuxPackageFingerprintTracksTheCheckStagesCopySources(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -185,8 +176,6 @@ func TestLinuxPackageFingerprintTracksTheCheckStagesCopySources(t *testing.T) {
 	}
 }
 
-// A pass is recorded per platform: one recorded on arm64 is not a pass on
-// amd64.
 func TestLinuxPackagePassIsPerPlatform(t *testing.T) {
 	useLinuxPackageTestRecordDir(t)
 	_, pkg := reusablePackageProject(t)
@@ -204,9 +193,6 @@ func TestLinuxPackagePassIsPerPlatform(t *testing.T) {
 	}
 }
 
-// The platform is the one the docker daemon builds for, not the host's CPU: a
-// plain check build passes no --platform, so a remote daemon of another
-// architecture runs it as its own. The daemon is asked once per build.
 func TestLinuxPackagePassIsKeyedByTheDaemonsPlatform(t *testing.T) {
 	useLinuxPackageTestRecordDir(t)
 	_, pkg := reusablePackageProject(t)
@@ -229,8 +215,6 @@ func TestLinuxPackagePassIsKeyedByTheDaemonsPlatform(t *testing.T) {
 	}
 }
 
-// A daemon that cannot say what it builds for reuses nothing and records
-// nothing: a pass filed under a guessed platform could be reused on another.
 func TestLinuxPackageWithoutTheDaemonsPlatformNeitherReusesNorRecords(t *testing.T) {
 	recordDir := useLinuxPackageTestRecordDir(t)
 	_, pkg := reusablePackageProject(t)
@@ -264,8 +248,6 @@ func TestLinuxPackageWithoutTheDaemonsPlatformNeitherReusesNorRecords(t *testing
 	}
 }
 
-// A release resolves no plain-build packages, and --no-incremental takes no
-// reuse decision, so neither can skip a check.
 func TestBuildExecutionReuseDecisionRespectsNoIncremental(t *testing.T) {
 	useLinuxPackageTestRecordDir(t)
 	root, pkg := reusablePackageProject(t)

@@ -6,13 +6,8 @@ import { hostnameFieldLabel } from './hostnameFieldLabel';
 import { DriveToolResult } from './mcpFormShared';
 import { buildOperateArgs, OPERATE_TOOL_OPTIONS, operateFormValid } from './operateToolArgs';
 
-// OperateToolForm drives the four tools an erun:operate-scoped token grants
-// directly (mcpCapabilities.go's mcpOperateTools), over the same live
-// JSON-RPC edge DriveToolForm already speaks -- so a console session holding
-// only erun:operate can do real operate-shaped work without leaving the
-// browser, rather than just minting the token and handing it to another MCP
-// client (DriveToolForm only ever calls the read-only `version` tool, which
-// erun:operate deliberately cannot reach).
+// OperateToolForm drives the erun:operate tools over the live edge, since that scope
+// cannot reach the `version` tool DriveToolForm calls.
 
 interface OperateFieldsProps {
   tool: string;
@@ -190,9 +185,6 @@ function ResizeFields({
   );
 }
 
-// OperateToolFields dispatches to the one tool-shaped set of fields that
-// matches the current selection -- kept out of OperateToolForm itself to
-// stay under this module's complexity/line budget.
 function OperateToolFields(props: OperateFieldsProps): React.ReactElement | null {
   switch (props.tool) {
     case 'deploy':
@@ -234,9 +226,6 @@ interface OperateFormState extends OperateFieldsProps {
   setPreview: (value: boolean) => void;
 }
 
-// useOperateFormState owns every field the four operate tools can take
-// between them, split out of OperateToolForm to keep that component under
-// this module's line/complexity budget.
 function useOperateFormState(): OperateFormState {
   const [tool, setTool] = React.useState(OPERATE_TOOL_OPTIONS[0]?.value ?? 'deploy');
   const [version, setVersion] = React.useState('');

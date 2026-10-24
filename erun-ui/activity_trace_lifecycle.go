@@ -4,15 +4,8 @@ import (
 	"strings"
 )
 
-// finishDeployByTenantEnv finalizes the active deploy entry for the
-// (tenant, environment) parsed from a `==> Deployed`/`==> Skipping`
-// trace line, falling back to the session's selection only when the
-// line did not name them (an older erun build, or an unexpected
-// shape). Looking up by parsed tenant/env keeps finalization
-// robust when the trace is observed in a tab whose selection differs
-// from the deploy's target — e.g. a generic Local shell where the user
-// invoked `erun open` manually and the session selection has no
-// tenant/env bound at all.
+// finishDeployByTenantEnv finalizes by the tenant/env parsed from the trace line,
+// falling back to the selection, since the observing tab may target another env.
 func (a *App) finishDeployByTenantEnv(selection uiSelection, tenant, environment string, status activityQueueStatus, errMsg string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -30,24 +23,18 @@ func (a *App) finishDeployByTenantEnv(selection uiSelection, tenant, environment
 	if final, finished := a.activityQueue.finish(entry.ID, status, errMsg); finished {
 		a.unlockTerminalsForActivity(final)
 		if status == activityQueueStatusSucceeded {
-			// A successful deploy supersedes any stale 'failed' flag on the row:
-			// clearing keeps the sidebar dot and hover card truthful and lets the
-			// next session exit respawn normally.
+			// A successful deploy clears any stale 'failed' flag on the row.
 			a.emitEnvStatus(uiSelection{Tenant: tenant, Environment: environment}, "")
 		}
 		if status == activityQueueStatusSucceeded || status == activityQueueStatusSkipped {
-			// The runtime is now reachable (deployed, or skipped because it was
-			// already current). Signal the create→deploy→open gate so a
-			// freshly-created env opens its tabs only after deploy lands, never
-			// against a runtime that does not exist.
+			// Releases the create→deploy→open gate only once the runtime exists.
 			a.emitEnvironmentDeployed(tenant, environment)
 		}
 	}
 }
 
-// startInitFromTrace registers the umbrella init entry covering the whole
-// bootstrap. The `==> Deploying` line for the helm step within init still
-// registers its own deploy entry, finalized independently.
+// startInitFromTrace registers the umbrella init entry; init's helm step still
+// gets its own deploy entry.
 func (a *App) startInitFromTrace(selection uiSelection, tenant, environment string) {
 	if a.activityQueue == nil {
 		return
@@ -76,8 +63,6 @@ func (a *App) startInitFromTrace(selection uiSelection, tenant, environment stri
 	a.lockTerminalsForActivity(entry)
 }
 
-// finishInitByTenantEnv looks the entry up by parsed tenant/env so the trace,
-// wherever it is observed, converges on the same init record.
 func (a *App) finishInitByTenantEnv(tenant, environment string, status activityQueueStatus, errMsg string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -96,12 +81,8 @@ func (a *App) finishInitByTenantEnv(tenant, environment string, status activityQ
 	}
 }
 
-// startDoctorFromTrace registers an activity entry for `erun doctor`, giving
-// it a persistent, glanceable presence in the activity drawer/sidebar spinner
-// regardless of which surface started it (sidebar, Manage dialog, or a failed
-// deploy card's "Run doctor" recovery button). Unlike deploy/init it never
-// locks terminals: doctor's recovery actions prompt interactively in the very
-// terminal it runs in, and locking that terminal would block the prompt.
+// startDoctorFromTrace never locks terminals: doctor prompts interactively in the
+// terminal it runs in.
 func (a *App) startDoctorFromTrace(selection uiSelection, tenant, environment string) {
 	if a.activityQueue == nil {
 		return
@@ -128,10 +109,7 @@ func (a *App) startDoctorFromTrace(selection uiSelection, tenant, environment st
 	a.rememberKubeContextForActivity(kubeContext)
 }
 
-// finishDoctorByTenantEnv finalizes the activity entry and records the
-// persisted last-run outcome the Manage dialog's SSH tab reads
-// (state.doctor.lastDoctorBySelection) — the answer "is this healthy?" that
-// otherwise vanished the moment the terminal scrolled past it.
+// finishDoctorByTenantEnv also records the last-run outcome the Manage dialog shows.
 func (a *App) finishDoctorByTenantEnv(tenant, environment string, status activityQueueStatus, errMsg string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -146,12 +124,7 @@ func (a *App) finishDoctorByTenantEnv(tenant, environment string, status activit
 	a.emitDoctorCompleted(tenant, environment, status == activityQueueStatusSucceeded, errMsg)
 }
 
-// startSSHDInitFromTrace registers an activity entry for `erun sshd init`,
-// giving it a persistent, glanceable presence in the activity drawer/sidebar
-// spinner regardless of which surface started it. Unlike doctor, sshd init
-// runs no interactive recovery prompts of its own — it is a one-shot
-// provisioning action like init/deploy — so it locks terminals the same way
-// those do.
+// startSSHDInitFromTrace locks terminals like init/deploy; it has no interactive prompts.
 func (a *App) startSSHDInitFromTrace(selection uiSelection, tenant, environment string) {
 	if a.activityQueue == nil {
 		return
@@ -180,10 +153,7 @@ func (a *App) startSSHDInitFromTrace(selection uiSelection, tenant, environment 
 	a.lockTerminalsForActivity(entry)
 }
 
-// finishSSHDInitByTenantEnv finalizes the activity entry and records the
-// persisted last-run outcome the Manage dialog's SSH access section reads —
-// the answer "did enabling SSHD work?" that otherwise vanished the moment the
-// terminal scrolled past it.
+// finishSSHDInitByTenantEnv also records the last-run outcome the Manage dialog shows.
 func (a *App) finishSSHDInitByTenantEnv(tenant, environment string, status activityQueueStatus, errMsg string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -200,9 +170,7 @@ func (a *App) finishSSHDInitByTenantEnv(tenant, environment string, status activ
 	a.emitSSHDInitCompleted(tenant, environment, status == activityQueueStatusSucceeded, errMsg)
 }
 
-// startDeployFromTrace registers a deploy entry from a `==> Deploying` trace.
-// No-op when an active entry already exists, so the helm poller and trace
-// handler converge on the same record.
+// startDeployFromTrace is a no-op when an active entry exists, so poller and trace converge.
 func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, release, version string) {
 	if a.activityQueue == nil {
 		return
@@ -217,11 +185,7 @@ func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, r
 	if _, ok := a.activityQueue.findActiveByCommand("deploy", tenant, environment); ok {
 		return
 	}
-	// The runtime chart's `==> Deploying` line carries no release token, so an
-	// empty parsed release means the runtime deploy; fall back to its release
-	// name. A non-runtime component names itself, so the drawer labels it by
-	// component ("deploy erun/local · erun-backend-postgres") instead of
-	// reading like a full-env redeploy.
+	// An empty release means the runtime chart; other components are labeled by name.
 	summary := "deploy " + tenant + "/" + environment
 	if release == "" {
 		release = releaseNameForTenant(tenant)
@@ -250,23 +214,9 @@ func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, r
 	}
 }
 
-// startCommandFromTrace registers a build/release/push entry from a
-// `==> Building` / `==> Releasing` / `==> Pushing` trace observed in
-// the session's PTY. Unlike deploy/init these umbrella lines carry no
-// tenant/env (build, release, and push have no deploy target the way
-// RunHelmDeploy does), so the activity is keyed off the session
-// selection — the user invoked the command from a specific terminal
-// tab, and that tab's env row is the natural place to render the
-// spinner. No-op when the selection has no tenant/env yet (a generic
-// Local shell at the repo level): there is no row to attach the
-// indicator to, and a stray activity entry with empty tenant/env
-// would land on every row.
-//
-// Intentionally skips lockTerminalsForActivity: deploys lock the
-// session so a user cannot run conflicting commands while helm is
-// rolling out, but build/release/push run IN the user's terminal —
-// locking it would freeze the very tab the user is reading output in.
-// The sidebar spinner is the only indicator these commands need.
+// startCommandFromTrace keys build/release/push on the selection, since their
+// trace lines carry no tenant/env; no-op without one. It never locks: these run
+// in the terminal the user is reading.
 func (a *App) startCommandFromTrace(selection uiSelection, command string) {
 	if a.activityQueue == nil {
 		return
@@ -293,10 +243,7 @@ func (a *App) startCommandFromTrace(selection uiSelection, command string) {
 	a.rememberKubeContextForActivity(kubeContext)
 }
 
-// finishCommandBySelection is keyed off the session selection because the
-// build/release/push completion lines carry no tenant/env — see
-// startCommandFromTrace. The unlock is idempotent in case an earlier code path
-// latched a lock this entry did not.
+// finishCommandBySelection's unlock is idempotent.
 func (a *App) finishCommandBySelection(selection uiSelection, command string, status activityQueueStatus, errMsg string) {
 	if a.activityQueue == nil {
 		return

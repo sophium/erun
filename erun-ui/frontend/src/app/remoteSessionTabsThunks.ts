@@ -5,17 +5,14 @@ import { trackOpenSession } from './slices/sessionsSlice';
 import type { AppThunk } from './store';
 import { recordTab } from './tabsThunks';
 
-// reattachRemoteTerminalTabs re-attaches to persistent pod sessions this window
-// does not know about — custom terminals still running from another ERun window
-// or a previous run. Attaching takes the session over rather than mirroring it.
-// Detection is best-effort and must never stall the open flow.
+// reattachRemoteTerminalTabs takes over, not mirrors, sessions from another window
+// or run. Best-effort: it must never stall the open flow.
 export const reattachRemoteTerminalTabs =
   (runSelection: UISelection, key: string, cols: number, rows: number): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
     let ids: string[];
     try {
-      // The generated binding is typed string[], but a Go nil slice arrives
-      // as null at runtime — widen before defaulting.
+      // A Go nil slice arrives as null despite the binding's type.
       const listed = (await ListRemoteAppSessions(runSelection)) as string[] | null;
       ids = listed ?? [];
     } catch {

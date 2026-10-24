@@ -10,17 +10,15 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/env"
 )
 
-// SeedRemoteTenantEnvWithSSHD marks SSHD enabled on a remote env so
-// open --vscode / --intellij reach past the validateIDEOptions guard.
+// SeedRemoteTenantEnvWithSSHD seeds a remote env with SSHD enabled.
 func SeedRemoteTenantEnvWithSSHD(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	seedRemoteTenantEnvWithSSHD(t, setup, tenant, environment, 0)
 }
 
-// SeedRemoteTenantEnvWithSSHDPortRange pins a high localportrangestart (e.g.
-// 26100) so a real-run open scenario's port-forward simulators never collide
-// with a developer's live erun session on the default 17000 range; without the
-// pin those scenarios silently skip on busy hosts and their coverage evaporates.
+// SeedRemoteTenantEnvWithSSHDPortRange is SeedRemoteTenantEnvWithSSHD with a
+// high localportrangestart, so port-forward simulators avoid a live erun
+// session's default range.
 func SeedRemoteTenantEnvWithSSHDPortRange(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
 	t.Helper()
 	seedRemoteTenantEnvWithSSHD(t, setup, tenant, environment, rangeStart)
@@ -63,11 +61,8 @@ func seedRemoteTenantEnvWithSSHD(t testing.TB, setup env.Setup, tenant, environm
 	mustWrite(t, filepath.Join(envDir, "config.yaml"), envContents)
 }
 
-// SeedRemoteTenantEnvWithWorkspaceSync seeds a remote-agent env with SSHD and
-// workspace sync enabled, a local mirror directory, and a fixed public-key path,
-// pinning a high localportrangestart so the SSH port-forward preview never
-// collides with a developer's live erun session on the default 17000 range. It
-// backs the `erun doctor --repair-workspace-sync` scenario.
+// SeedRemoteTenantEnvWithWorkspaceSync seeds a remote-agent env with SSHD,
+// workspace sync, a local mirror directory, and a public key.
 func SeedRemoteTenantEnvWithWorkspaceSync(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -116,10 +111,7 @@ func SeedRemoteTenantEnvWithWorkspaceSync(t testing.TB, setup env.Setup, tenant,
 	mustWrite(t, filepath.Join(envDir, "config.yaml"), envContents)
 }
 
-// SeedRemoteTenantEnv marks the env remote so commands like open, api, and mcp
-// exercise the kubectl port-forward and remote-runtime traces. Its project root
-// lives under a real on-disk repo dir so cwd resolution still works when the
-// scenario chdirs into it.
+// SeedRemoteTenantEnv seeds a remote-agent env whose repo dir exists on disk.
 func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -152,10 +144,7 @@ func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment stri
 	)
 }
 
-// SeedRuntimeTenantEnv writes a runtime-type env tree pinned to a version. It is
-// the fixture for the retype lane: a runtime env is remote-worktree like a
-// remote-agent one, so it is the shape that proves a type change lands between
-// two remote-worktree types rather than only out of local-agent.
+// SeedRuntimeTenantEnv seeds a runtime-type env.
 func SeedRuntimeTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	SeedRemoteTenantEnv(t, setup, tenant, environment)
@@ -170,12 +159,8 @@ func SeedRuntimeTenantEnv(t testing.TB, setup env.Setup, tenant, environment str
 	)
 }
 
-// SeedRuntimeTenantEnvWithDeployComponents writes a runtime-type env tree that
-// also carries a saved deploy.components selection. It models the env as the
-// host sees it, so a scenario can set the in-pod identity and still hand the
-// process a selection that resolved to something — the contrast to
-// SeedRuntimeTenantEnv, whose config has no deploy block at all and is what the
-// pod actually carries.
+// SeedRuntimeTenantEnvWithDeployComponents seeds a runtime env with a saved
+// deploy selection, as the host sees it; the pod's own config has none.
 func SeedRuntimeTenantEnvWithDeployComponents(t testing.TB, setup env.Setup, tenant, environment string, components []string) {
 	t.Helper()
 	SeedRuntimeTenantEnv(t, setup, tenant, environment)
@@ -195,12 +180,8 @@ func SeedRuntimeTenantEnvWithDeployComponents(t testing.TB, setup env.Setup, ten
 	mustWrite(t, filepath.Join(envDir, "config.yaml"), contents)
 }
 
-// SeedRuntimeTenantEnvNoVersion writes a runtime-type env tree with NO
-// runtimeversion (and no local/published chart), reproducing the fresh-env
-// decision path that the desktop create regression hit: with no version
-// to deploy, the published-chart resolver bails with "runtime version is
-// required". Every other fixture pins runtimeversion: 1.0.0, so this is the
-// single fixture that locks the empty-version path under `open --deploy`.
+// SeedRuntimeTenantEnvNoVersion seeds a runtime env with no runtimeversion and
+// no chart, so the published-chart resolver has no version to deploy.
 func SeedRuntimeTenantEnvNoVersion(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -232,15 +213,9 @@ func SeedRuntimeTenantEnvNoVersion(t testing.TB, setup env.Setup, tenant, enviro
 	)
 }
 
-// SeedRuntimeTenantEnvNoRepoPath writes a runtime-type env tree with NO
-// repopath at all, reproducing the shape the backend's provisioning deploy,
-// stop, and delete Jobs seed for a control-plane-created tenant with no
-// project (deployexec.bootstrapEnvironmentScript writes exactly this: type
-// and kubernetescontext — never repopath, since nothing on the tenant's side
-// was ever `erun init`ed, and never a runtime version, which nothing on this
-// path reads back). Every other runtime fixture pins a repopath, so this is
-// the single fixture that locks the repo-path-optional resolution for a
-// genuinely projectless env.
+// SeedRuntimeTenantEnvNoRepoPath seeds a runtime env with no repopath or
+// version, the shape deployexec.bootstrapEnvironmentScript writes for a
+// projectless tenant.
 func SeedRuntimeTenantEnvNoRepoPath(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -264,11 +239,8 @@ func SeedRuntimeTenantEnvNoRepoPath(t testing.TB, setup env.Setup, tenant, envir
 	)
 }
 
-// SeedLegacyRemoteTenantEnv writes a tenant/env tree whose env config carries
-// the retired `remote: true` shape with no `type` and no `snapshot`.
-// It exists to exercise EnvConfig.UnmarshalYAML's legacy migration on read:
-// remote with no build-here signal resolves to runtime. All other fixtures use
-// the modern `type:` field; this one is the single deliberate legacy shape.
+// SeedLegacyRemoteTenantEnv seeds an env in the retired `remote: true` shape,
+// with no type or snapshot.
 func SeedLegacyRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -301,11 +273,8 @@ func SeedLegacyRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environmen
 	)
 }
 
-// SeedRemoteTenantEnvWithPortRange pins a high localportrangestart (e.g. 26100)
-// on a remote env (no sshd) so a real-run shell scenario's port-forward
-// simulators never collide with a developer's live erun session on the default
-// 17000 range; without the pin those scenarios would silently skip on busy
-// hosts and their coverage would evaporate.
+// SeedRemoteTenantEnvWithPortRange seeds a remote env (no sshd) with a high
+// localportrangestart, so port-forward simulators avoid a live erun session.
 func SeedRemoteTenantEnvWithPortRange(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
 	t.Helper()
 	SeedRemoteTenantEnv(t, setup, tenant, environment)
@@ -321,9 +290,7 @@ func SeedRemoteTenantEnvWithPortRange(t testing.TB, setup env.Setup, tenant, env
 	)
 }
 
-// SeedRemoteTenantEnvWithClaude attaches a claude: config block so scenarios can
-// exercise the per-env Claude launch flags (--effort / --model / --verbose
-// --debug) that the AI tab's persistent session resolves from env config.
+// SeedRemoteTenantEnvWithClaude seeds a remote env with claudeBlock appended.
 func SeedRemoteTenantEnvWithClaude(t testing.TB, setup env.Setup, tenant, environment, claudeBlock string) {
 	t.Helper()
 	SeedRemoteTenantEnv(t, setup, tenant, environment)
@@ -339,9 +306,7 @@ func SeedRemoteTenantEnvWithClaude(t testing.TB, setup env.Setup, tenant, enviro
 	)
 }
 
-// SeedRemoteTenantEnvWithAWSAlias attaches an AWS cloud alias — the operator
-// opting the env into acting on their behalf — so it drives the deploy plumbing
-// that injects host AWS credentials into the remote runtime.
+// SeedRemoteTenantEnvWithAWSAlias seeds a remote env with an AWS cloud alias.
 func SeedRemoteTenantEnvWithAWSAlias(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	SeedRemoteTenantEnv(t, setup, tenant, environment)
@@ -357,13 +322,9 @@ func SeedRemoteTenantEnvWithAWSAlias(t testing.TB, setup env.Setup, tenant, envi
 	)
 }
 
-// SeedLocalTenantEnvWithAWSAlias seeds an env on a local cluster carrying an AWS
-// alias but no cloud context, with the alias registered in the root config so it
-// actually resolves — the shape that produced both the expired-host-credential
-// and the empty-AWS_REGION failures. ssoRegion and
-// registry select which region tier the env exercises — the alias' Identity
-// Center region, the region an ECR registry host encodes, or (both left plain)
-// no resolvable region at all.
+// SeedLocalTenantEnvWithAWSAlias seeds a local env with an AWS alias registered
+// in the root config and no cloud context. ssoRegion and registry choose which
+// region source, if any, resolves.
 func SeedLocalTenantEnvWithAWSAlias(t testing.TB, setup env.Setup, tenant, environment, alias, ssoRegion, registry string) {
 	t.Helper()
 	SeedTenantEnv(t, setup, tenant, environment)
@@ -391,11 +352,8 @@ func SeedLocalTenantEnvWithAWSAlias(t testing.TB, setup env.Setup, tenant, envir
 	)
 }
 
-// SeedRemoteRepoPathTenantEnv points the env's repopath at a nonexistent
-// remote-host path while keeping the tenant projectroot at setup.Cwd (so chart
-// resolution still finds the local <tenant>-devops module). Use it for
-// regression scenarios where deploy must not readdir() the env's remote-host
-// path.
+// SeedRemoteRepoPathTenantEnv points repopath at a nonexistent remote-host
+// path while projectroot stays at setup.Cwd.
 func SeedRemoteRepoPathTenantEnv(t testing.TB, setup env.Setup, tenant, environment, remoteRepoPath string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -423,12 +381,9 @@ func SeedRemoteRepoPathTenantEnv(t testing.TB, setup env.Setup, tenant, environm
 	)
 }
 
-// SeedClusterRegistryRemoteTenantEnv writes a remote-agent env whose registry is
-// an in-cluster (`--cluster-registry`) entry — the erun-registry Service resolved
-// from the kube-context, holding the tenant's built app images but never the erun
-// platform chart. It pins a runtimeimage on ghcr so deploy must resolve the
-// runtime chart/registry from the runtime image's own registry, not the in-cluster
-// pull host. No local <tenant>-devops chart, so deploy takes the published path.
+// SeedClusterRegistryRemoteTenantEnv seeds a remote-agent env whose only
+// registry is the in-cluster one and whose runtimeimage is on ghcr, with no
+// local <tenant>-devops chart.
 func SeedClusterRegistryRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment, remoteRepoPath string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")

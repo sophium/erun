@@ -15,24 +15,9 @@ import type { DiffLine } from '@/types';
 
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 
-// DiffLineCommentAction starts a new top-level review thread anchored to this
-// diff line. It lives here because only the diff panel knows which line was
-// clicked.
-//
-// The affordance is revealed on hover or keyboard focus, the way the sidebar's
-// per-row actions already are: the diff is the densest reading surface in the
-// app, so one persistent icon on every line would compete with the code it is
-// there to discuss. Its column leads the row and is always laid out, so
-// revealing it shifts nothing and it cannot scroll out of view on a diff wider
-// than the panel. Clicking it when a precondition is unmet explains which one
-// rather than doing nothing.
-//
-// `revealed` carries the panel's own record of the line the reader revealed,
-// which outlives a pointer that no longer happens to be over this row -- the
-// panel re-reads the diff on a timer, and an answer that renders the change
-// differently moves the row out from under it. Hover alone cannot cover that:
-// it is a property of where the pointer sits now, and the reader who revealed
-// this line has not moved.
+// DiffLineCommentAction starts a review thread on this line. Its column is always
+// laid out so revealing it shifts nothing. `revealed` comes from the panel so it
+// survives a re-read moving the row under a stationary pointer.
 export function DiffLineCommentAction({
   filePath,
   line,
@@ -47,10 +32,7 @@ export function DiffLineCommentAction({
   revealed: boolean;
 }): React.ReactElement | null {
   const dispatch = useAppDispatch();
-  // The active commenting context is the last-opened review, which survives
-  // closing its dialog (see closeReviewDetail) precisely so it can still be
-  // referenced from here — the dialog is modal and would otherwise cover the
-  // diff panel entirely while "open".
+  // The last-opened review survives closing its dialog so it can be referenced here.
   const hasActiveReview = useAppSelector((state) => state.reviewDetail.reviewId !== '');
   const canComment = useAppSelector((state) => state.reviewDetail.data?.canComment ?? false);
   const anchor = useAppSelector((state) => state.reviewDetail.newCommentAnchor);
@@ -111,14 +93,8 @@ export function DiffLineCommentAction({
   );
 }
 
-// DiffLineCommentBlocked renders the explanatory sentence every blocked
-// reason gets, plus the one action that actually resolves a reason: the
-// no-active-review case names the Reviews tab, which lives in the tenant
-// dashboard — a different surface from this diff panel — so the popover
-// navigates there in one click rather than leaving the reader to find it on
-// their own. The other two reasons are actionable exactly where the
-// operator already stands (commit the change, request access), so they stay
-// message-only.
+// The no-active-review reason links to the Reviews tab; the others are
+// actionable where the operator already is.
 function DiffLineCommentBlocked({
   reason,
   tenant,

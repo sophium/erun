@@ -6,17 +6,6 @@ import (
 	"testing"
 )
 
-// TestWriteResultEmitsAnEmptySliceAsAnArray pins the serialiser half of the
-// reported defect. A command returning a Go nil slice -- which is every
-// handler that builds its rows by appending -- reached --output json as the
-// literal document `null`, so a caller reading .length or iterating the
-// result worked while the list had rows and failed on the day it did not.
-// null conflates "we queried and nothing matched" with "this was not
-// determined"; [] can only mean the first.
-//
-// The nil slice here is what the same call sites hand over unchanged: the
-// platform list commands and the local listing commands all build by append
-// and pass the result straight through.
 func TestWriteResultEmitsAnEmptySliceAsAnArray(t *testing.T) {
 	type row struct {
 		ID string `json:"id"`
@@ -59,13 +48,7 @@ func TestWriteResultEmitsAnEmptySliceAsAnArray(t *testing.T) {
 	}
 }
 
-// TestWriteResultLeavesStructFieldsAlone is the half that keeps the
-// normalisation from destroying information. Inside a struct, absence is part
-// of the declared shape: omitempty marks a value that is genuinely not part of
-// this result, and a nil slice without it is reported as null on purpose.
-// Filling either in would turn a reported absence into a claim -- an empty
-// collection asserts that the producer looked and found nothing, which is a
-// different fact from never having looked.
+// TestWriteResultLeavesStructFieldsAlone: nested absence is meaningful and must stay null.
 func TestWriteResultLeavesStructFieldsAlone(t *testing.T) {
 	type optional struct {
 		Omitted []string `json:"omitted,omitempty"`
@@ -91,9 +74,6 @@ func TestWriteResultLeavesStructFieldsAlone(t *testing.T) {
 	}
 }
 
-// TestWriteResultKeepsTextModeSilent guards the normalisation from leaking into
-// the default human-facing mode, where a command streams its own prose and the
-// structured writer must stay out of the way.
 func TestWriteResultKeepsTextModeSilent(t *testing.T) {
 	var buf bytes.Buffer
 	ctx := Context{Output: OutputText, Stdout: &buf, Stderr: &buf}

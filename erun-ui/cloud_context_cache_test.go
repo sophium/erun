@@ -8,9 +8,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// TestCloudContextCacheSmoothsATransientUnknown locks in the deliberate grace
-// period: a single failed describe-instances call must not blank a
-// known-good status the moment it comes in.
 func TestCloudContextCacheSmoothsATransientUnknown(t *testing.T) {
 	app := &App{}
 	app.applyCloudContextStatusesToCache([]config.CloudContextStatus{
@@ -24,9 +21,6 @@ func TestCloudContextCacheSmoothsATransientUnknown(t *testing.T) {
 	}
 }
 
-// TestCloudContextCacheHonoursUnknownPastTTL: a sustained AWS failure must
-// downgrade the cache to Unknown rather than serve a "running" that may be an
-// hour stale, which would offer the Stop button against unverifiable state.
 func TestCloudContextCacheHonoursUnknownPastTTL(t *testing.T) {
 	app := &App{
 		cloudContextStatuses: map[string]cloudContextCacheEntry{
@@ -41,12 +35,7 @@ func TestCloudContextCacheHonoursUnknownPastTTL(t *testing.T) {
 	}
 }
 
-// TestCloudContextStatusReadSideAppliesTTLEvenWithoutANewPoll covers the case
-// where the poller itself stops producing results entirely (e.g.
-// RefreshCloudContextStatuses fails at the list-contexts step, before any
-// per-context Unknown is even produced): the read path must age the
-// observation out on its own, mirroring session_heartbeat.go's
-// heartbeatSaysRunning.
+// The read path must age out the observation even when the poller produces nothing.
 func TestCloudContextStatusReadSideAppliesTTLEvenWithoutANewPoll(t *testing.T) {
 	app := &App{
 		cloudContextStatuses: map[string]cloudContextCacheEntry{
@@ -58,9 +47,6 @@ func TestCloudContextStatusReadSideAppliesTTLEvenWithoutANewPoll(t *testing.T) {
 	}
 }
 
-// TestCloudContextCacheRecoversImmediatelyOnAGoodReading guards against
-// over-correcting: once AWS answers again, the cache must reflect it right
-// away rather than waiting out any grace period.
 func TestCloudContextCacheRecoversImmediatelyOnAGoodReading(t *testing.T) {
 	app := &App{
 		cloudContextStatuses: map[string]cloudContextCacheEntry{

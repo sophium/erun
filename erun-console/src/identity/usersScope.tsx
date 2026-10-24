@@ -8,12 +8,7 @@ function tenantLabel(tenants: PlatformTenant[], tenantId: string): string {
   return tenants.find((tenant) => tenant.tenantId === tenantId)?.name ?? tenantId;
 }
 
-// ScopedUsersStatus renders the org-target lookup's non-ready states for a
-// scoped read: loading/error/unmapped are real states to state plainly
-// rather than silently falling back to the caller's own org, which
-// would render a confidently wrong page -- see erun-backend-api's
-// identity.go listUsers doc for why guessing an org is refused outright.
-// 'default'/'resolved' render nothing; the table takes over in either case.
+// Non-ready lookup states render plainly rather than falling back to the caller's own org.
 export function ScopedUsersStatus({
   target,
   tenants,
@@ -48,10 +43,7 @@ export function ScopedUsersStatus({
   return null;
 }
 
-// UsersScopeBadge names which tenant the panel is viewing, the same
-// "unlabeled scoped read is indistinguishable from the caller's own"
-// treatment quota/QuotaPanel.tsx already gives -- undefined
-// scopeTenantId (the caller's own tenant) renders nothing.
+// Renders nothing for the caller's own tenant.
 export function UsersScopeBadge({
   scopeTenantId,
   tenants,

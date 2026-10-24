@@ -51,8 +51,7 @@ func TestFindMissingDesktopSurfaceMatchesInsideCamelCaseIdentifiers(t *testing.T
 	capabilities := []Capability{
 		{Name: "whip", Source: "MCP tool", Token: "whip", AgentFacing: false},
 	}
-	// A plain \bwhip\b word-boundary regex would miss this: there is no
-	// non-word character between "whip" and "Button".
+	// A \bwhip\b regex would miss this camelCase identifier.
 	frontend := FrontendSource("export function WhipButton() { return null }")
 
 	missing := FindMissingDesktopSurface(capabilities, frontend)
@@ -80,12 +79,8 @@ func TestAPIRoutePatternMatchesAParameterizedPathWithAnInterpolatedSegment(t *te
 	}
 }
 
-// TestAPIRoutePatternDoesNotMatchAnUnrelatedWordSharingTheLastSegment guards
-// against the exact trap that motivated using a path pattern instead of a
-// plain Token substring for API routes: erun-ui/frontend/src genuinely
-// contains a "Roles" table column and a `user.roles` display field with no
-// connection to the /v1/roles or /v1/users/{user_id}/roles endpoints, so a
-// bare "roles" substring match would have wrongly cleared both.
+// TestAPIRoutePatternDoesNotMatchAnUnrelatedWordSharingTheLastSegment: the frontend has unrelated
+// "Roles" copy, so a bare "roles" substring must not clear the route.
 func TestAPIRoutePatternDoesNotMatchAnUnrelatedWordSharingTheLastSegment(t *testing.T) {
 	pattern := APIRoutePattern("/v1/roles")
 	source := FrontendSource(`
@@ -107,8 +102,6 @@ func TestFindMissingDesktopSurfaceUsesPatternOverTokenWhenBothCouldMatch(t *test
 			Pattern: APIRoutePattern("/v1/roles"),
 		},
 	}
-	// Contains "roles" as a bare word (would clear a Token match) but not the
-	// full "/v1/roles" path (must not clear a Pattern match).
 	frontend := FrontendSource(`<DataCell>{formatRoles(user.roles)}</DataCell>`)
 
 	missing := FindMissingDesktopSurface(capabilities, frontend)
@@ -157,9 +150,6 @@ func TestMissingMessageNamesTheCapabilitysOwnDeclarationHint(t *testing.T) {
 	}
 }
 
-// TestFindMissingDesktopSurfaceSkipsAKnownGapCapability locks rule 1 of the
-// baseline: a route recorded as a known gap does not fail the gate, the same
-// as an AgentFacing one, even with zero frontend references.
 func TestFindMissingDesktopSurfaceSkipsAKnownGapCapability(t *testing.T) {
 	capabilities := []Capability{
 		{Name: "GET /v1/roles", Source: "API route", Pattern: APIRoutePattern("/v1/roles"), KnownGap: true},
@@ -173,10 +163,6 @@ func TestFindMissingDesktopSurfaceSkipsAKnownGapCapability(t *testing.T) {
 	}
 }
 
-// TestFindMissingDesktopSurfaceFlagsAnUndeclaredCapabilityNotInTheBaseline
-// locks rule 2: a capability that is neither declared internal nor recorded
-// in the baseline still fails, so a 34th unsurfaced route cannot land
-// silently just because the baseline mechanism exists.
 func TestFindMissingDesktopSurfaceFlagsAnUndeclaredCapabilityNotInTheBaseline(t *testing.T) {
 	capabilities := []Capability{
 		{Name: "GET /v1/widgets", Source: "API route", Pattern: APIRoutePattern("/v1/widgets")},
@@ -190,10 +176,6 @@ func TestFindMissingDesktopSurfaceFlagsAnUndeclaredCapabilityNotInTheBaseline(t 
 	}
 }
 
-// TestFindStaleBaselineEntriesFlagsAKnownGapThatGainedASurface locks rule 3:
-// the baseline can only shrink. A capability recorded as a known gap that has
-// since gained a real frontend reference must fail, not silently pass --
-// otherwise nobody notices the baseline could be shorter.
 func TestFindStaleBaselineEntriesFlagsAKnownGapThatGainedASurface(t *testing.T) {
 	capabilities := []Capability{
 		{Name: "GET /v1/roles", Source: "API route", Pattern: APIRoutePattern("/v1/roles"), KnownGap: true},
@@ -210,10 +192,6 @@ func TestFindStaleBaselineEntriesFlagsAKnownGapThatGainedASurface(t *testing.T) 
 	}
 }
 
-// TestFindStaleBaselineEntriesClearsAKnownGapStillMissingItsSurface is the
-// negative case for rule 3: a baselined route that still has no frontend
-// reference is not stale -- it is exactly the gap the baseline was meant to
-// record, and rule 1 (not rule 3) governs it.
 func TestFindStaleBaselineEntriesClearsAKnownGapStillMissingItsSurface(t *testing.T) {
 	capabilities := []Capability{
 		{Name: "GET /v1/roles", Source: "API route", Pattern: APIRoutePattern("/v1/roles"), KnownGap: true},
@@ -227,9 +205,6 @@ func TestFindStaleBaselineEntriesClearsAKnownGapStillMissingItsSurface(t *testin
 	}
 }
 
-// TestStaleBaselineEntryMessageNamesTheCapabilitysOwnBaselineHint mirrors
-// TestMissingMessageNamesTheCapabilitysOwnDeclarationHint for the stale-entry
-// message, so a failure names the removal fix rather than a generic pointer.
 func TestStaleBaselineEntryMessageNamesTheCapabilitysOwnBaselineHint(t *testing.T) {
 	entry := StaleBaselineEntry{Capability: Capability{
 		Name:         "GET /v1/roles",
@@ -243,11 +218,6 @@ func TestStaleBaselineEntryMessageNamesTheCapabilitysOwnBaselineHint(t *testing.
 	}
 }
 
-// TestFindMissingDesktopSurfaceClearsARouteReferencedOnlyByItsWailsBinding
-// locks the mechanism that recognizes Wails-mediated routes: a route whose
-// literal path never appears in TypeScript because erun-ui/frontend/src
-// calls the Wails-bound Go method by name instead is still found, through
-// WailsBinding, as long as that method name is what actually appears.
 func TestFindMissingDesktopSurfaceClearsARouteReferencedOnlyByItsWailsBinding(t *testing.T) {
 	capabilities := []Capability{
 		{
@@ -257,8 +227,6 @@ func TestFindMissingDesktopSurfaceClearsARouteReferencedOnlyByItsWailsBinding(t 
 			WailsBinding: "AddReviewer",
 		},
 	}
-	// No literal "/v1/reviews/.../reviewers" path anywhere -- only the Wails
-	// method name the frontend actually calls.
 	frontend := FrontendSource("useAddReviewerMutation(AddReviewer)")
 
 	missing := FindMissingDesktopSurface(capabilities, frontend)
@@ -268,12 +236,8 @@ func TestFindMissingDesktopSurfaceClearsARouteReferencedOnlyByItsWailsBinding(t 
 	}
 }
 
-// TestFindMissingDesktopSurfaceStillFlagsAWailsBoundRouteWithNoRealReference
-// is the negative case: a WailsBinding entry that is wrong (or a route that
-// gains one without ever actually being called from the frontend) must not
-// silently clear the gate. WailsBinding is only ever correct because it was
-// hand-verified against real source on both ends -- the mechanism itself does
-// no verification, so an absent reference must still fail exactly like today.
+// TestFindMissingDesktopSurfaceStillFlagsAWailsBoundRouteWithNoRealReference: WailsBinding does no
+// verification itself, so an absent reference must still fail.
 func TestFindMissingDesktopSurfaceStillFlagsAWailsBoundRouteWithNoRealReference(t *testing.T) {
 	capabilities := []Capability{
 		{
@@ -292,10 +256,6 @@ func TestFindMissingDesktopSurfaceStillFlagsAWailsBoundRouteWithNoRealReference(
 	}
 }
 
-// TestFindMissingDesktopSurfaceClearsAFlagSpelledInCamelCase locks the second
-// spelling a CLI flag legitimately appears under: a frontend request model
-// names the same dimension "waitingOnMe", never the kebab-case flag name the
-// CLI parses.
 func TestFindMissingDesktopSurfaceClearsAFlagSpelledInCamelCase(t *testing.T) {
 	capabilities := []Capability{
 		{Name: "review list --waiting-on-me", Source: "CLI flag", Tokens: []string{"waiting-on-me", "waitingOnMe"}},
@@ -309,10 +269,6 @@ func TestFindMissingDesktopSurfaceClearsAFlagSpelledInCamelCase(t *testing.T) {
 	}
 }
 
-// TestFindMissingDesktopSurfaceFlagsAFlagWhoseCommandIsSurfacedButDimensionIsNot
-// is the classifier-level statement of the granularity change: the command
-// token is all over the source and the flag's own dimension is nowhere, and
-// the flag must still be flagged. Command granularity cleared exactly this.
 func TestFindMissingDesktopSurfaceFlagsAFlagWhoseCommandIsSurfacedButDimensionIsNot(t *testing.T) {
 	capabilities := []Capability{
 		{Name: "review_list", Source: "MCP tool", Token: "list"},
@@ -330,9 +286,6 @@ func TestFindMissingDesktopSurfaceFlagsAFlagWhoseCommandIsSurfacedButDimensionIs
 	}
 }
 
-// TestFindMissingDesktopSurfaceRequiresEveryTokenToBeAbsentBeforeFlagging is
-// the any-of half of the Tokens contract: one spelling present is enough, so
-// the gate does not demand a frontend use both.
 func TestFindMissingDesktopSurfaceRequiresEveryTokenToBeAbsentBeforeFlagging(t *testing.T) {
 	capabilities := []Capability{
 		{Name: "expose --no-tls", Source: "CLI flag", Tokens: []string{"no-tls", "noTls"}},
@@ -385,13 +338,8 @@ func TestFindUnboundAppMethodsClearsAnExportedMethodEvenWithNoCaller(t *testing.
 	}
 }
 
-// TestContainsFlagIdentifierIgnoresIncidentalMatches pins the narrowing
-// containsFlagIdentifier exists for. A CLI flag's camelCase spelling is an
-// ordinary word, so a bare substring match counted an unrelated component's
-// field read -- and an interface's field declaration -- as an operator way in
-// for a flag nothing surfaces: a denial-remedy note that names an RBAC role
-// made `cloud init aws --role-name` read as surfaced while
-// erun-cli/cmd/command_tree.go still declared that gap.
+// TestContainsFlagIdentifierIgnoresIncidentalMatches: a flag's camelCase spelling is an ordinary word,
+// so field reads and declarations must not count.
 func TestContainsFlagIdentifierIgnoresIncidentalMatches(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

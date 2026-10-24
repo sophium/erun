@@ -1,16 +1,5 @@
-// Command erun-stub-runner faithfully forwards argv to a sibling POSIX-shell
-// stub script on Windows.
-//
-// A .bat launcher can't do this: cmd.exe's %* forwards a command-line string
-// that sh then re-parses with POSIX rules, mangling complex args (notably the
-// multi-line `sh -lc '<script>'` erun passes to kubectl). Go's exec, by
-// contrast, hands this .exe its argv faithfully via CommandLineToArgvW. This
-// program then passes that argv to sh through a NUL-delimited file
-// (ERUN_STUB_ARGV_FILE) — never a command line — so the stub script sees each
-// argument exactly, byte for byte.
-//
-// The stub script beside this executable is its own path minus the .exe suffix;
-// a writeStub-injected preamble rebuilds "$@" from the argv file.
+// Command erun-stub-runner forwards argv byte-exact to the sibling sh stub on
+// Windows via a NUL-delimited file (ERUN_STUB_ARGV_FILE); a .bat would mangle it.
 package main
 
 import (
@@ -26,8 +15,7 @@ func main() {
 	os.Exit(run())
 }
 
-// run returns the exit code, so the argv file's removal is deferred past
-// every exit path.
+// run returns the exit code so the deferred argv-file removal always runs.
 func run() int {
 	script := strings.TrimSuffix(os.Args[0], ".exe")
 
@@ -48,9 +36,7 @@ func run() int {
 		return 97
 	}
 
-	// The scenario PATH holds no shell, so the scenario routes an absolute one
-	// through ERUN_STUB_SH; a bare "sh" is only a fallback for a caller that
-	// built the environment itself.
+	// The scenario PATH has no shell; ERUN_STUB_SH supplies an absolute one.
 	shell := os.Getenv("ERUN_STUB_SH")
 	if strings.TrimSpace(shell) == "" {
 		shell = "sh"

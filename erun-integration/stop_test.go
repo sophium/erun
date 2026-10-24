@@ -13,12 +13,8 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// stubKubectlStopRunState routes kubectl to a stub that answers the runtime
-// run-state read with the given replica counts. That answer is the decision
-// input for stop — a trace alone cannot say whether the environment is already
-// scaled to zero — so every scenario below pins it explicitly rather than
-// letting whatever kubectl sits on the developer's PATH drive the branch.
-// (open's sibling helper additionally stubs the adopt probes it needs.)
+// stubKubectlStopRunState answers the run-state read with fixed replica counts, which
+// decide stop's branch.
 func stubKubectlStopRunState(t *testing.T, setup env.Setup, desired, ready int) []string {
 	t.Helper()
 	stubs := setup.Cwd + "/stubs"
@@ -26,12 +22,8 @@ func stubKubectlStopRunState(t *testing.T, setup env.Setup, desired, ready int) 
 	return append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
 }
 
-// stubKubectlScalingStopTarget is stubKubectlStopRunState's stateful sibling:
-// the run-state read answers with whatever the last `kubectl scale` set, so a
-// real-run stop's own post-scale confirmation sees the zero it just asked for.
-// Real-run scenarios need it — with the fixed-answer stub the deployment claims
-// it still wants a replica after the scale, which is exactly the "the stop did
-// not take effect" case the confirmation is there to catch.
+// stubKubectlScalingStopTarget answers the run-state read with the last scale, so a
+// real stop's post-scale confirmation sees zero.
 func stubKubectlScalingStopTarget(t *testing.T, setup env.Setup, desired int) []string {
 	t.Helper()
 	stubs := setup.Cwd + "/stubs"
@@ -53,67 +45,33 @@ func TestStop(t *testing.T) {
 	t.Parallel()
 	t.Run("help", testStopHelp)
 
-	// A running environment is the main case: the plan must show the scale to
-	// zero AND the recorded intent, because the scale patch alone is drift helm
-	// reverts on the next upgrade.
+	// The scale patch alone is drift helm reverts; the intent must be recorded too.
 	t.Run("dry_run_running_environment", testStopDryRunRunningEnvironment)
 
-	// An environment already scaled to zero needs no scale call, but still needs
-	// the intent recorded when the config does not carry it yet — otherwise the
-	// next deploy silently brings it back.
 	t.Run("dry_run_already_scaled_to_zero", testStopDryRunAlreadyScaledToZero)
 
-	// Fully stopped — scaled to zero and the intent already recorded — is the
-	// complete no-op: no scale, no config write.
 	t.Run("dry_run_already_stopped_is_a_no_op", testStopDryRunAlreadyStoppedIsANoOp)
 
-	// The scope-defaulted form resolves the same target as `open`/`deploy` do,
-	// so an operator inside a tenant project needs no arguments.
 	t.Run("dry_run_defaults_to_current_scope", testStopDryRunDefaultsToCurrentScope)
 
-	// --tenant/--environment target another environment, matching deploy/open.
 	t.Run("dry_run_target_flags", testStopDryRunTargetFlags)
 
-	// Nothing to stop is an explicit error, not a silent success that leaves the
-	// operator believing capacity was freed.
 	t.Run("not_deployed_fails_informatively", testStopNotDeployedFailsInformatively)
 
-	// Real run: the stop is durable. The snapshot cannot see the config file, so
-	// the persisted `stopped: true` is asserted directly — the side effect is
-	// outside the captured streams.
 	t.Run("real_run_records_stop_intent", testStopRealRunRecordsStopIntent)
 
-	// The regression this suite exists to pin: a stop must survive the desktop
-	// respawning its session tabs. Stopping drops every attached session, the
-	// desktop respawns `erun open` per tab, and before the fix each respawn
-	// cleared the recorded stop and scaled the runtime back up — so an
-	// environment with a tab open could not be stopped at all. The sequence runs
-	// against a stub that remembers what the last `kubectl scale` set, so each
-	// leg genuinely observes the previous leg's cluster state.
+	// A stop must survive the desktop respawning `erun open` per session tab.
 	t.Run("real_run_stop_survives_a_session_reconnect", testStopRealRunStopSurvivesASessionReconnect)
 
-	// --output json is the orchestrator-facing result; the human summary must
-	// not corrupt the payload on stdout.
 	t.Run("real_run_output_json", testStopRealRunOutputJson)
 
-	// Stopping an environment that is already scaled to zero must succeed and
-	// say so, rather than reporting a stop that did not happen. The distinction
-	// only reaches the operator in real-run — dry-run prints the plan, not the
-	// summary — so the no-op wording needs its own real-run scenario.
+	// Dry-run prints the plan, not the summary, so the no-op wording needs a real run.
 	t.Run("real_run_already_stopped_reports_the_no_op", testStopRealRunAlreadyStoppedReportsTheNoOp)
 
-	// The reported defect: an environment hosting platform components was
-	// stopped, its runtime scaled to zero, and the component pods were still
-	// running — which the operator read as the stop having failed. Stop scales
-	// one Deployment and never touches those components (they are the
-	// platform's own API and database), so the outcome has to say which ones it
-	// left holding capacity. The runtime is in the saved selection too, and must
-	// never be named among them: it is the thing that was just stopped.
+	// Stop scales only the runtime; it must name the platform components left running,
+	// excluding the runtime itself.
 	t.Run("real_run_names_the_components_it_left_running", testStopRealRunNamesTheComponentsItLeftRunning)
 
-	// The same scope on the no-op path, where it matters most: nothing else
-	// changed at all, so the components still standing are the entire
-	// explanation for why pressing Stop did nothing.
 	t.Run("dry_run_already_stopped_names_the_components_it_leaves_running", testStopDryRunAlreadyStoppedNamesTheComponentsItLeavesRunning)
 }
 
@@ -217,8 +175,6 @@ func testStopRealRunStopSurvivesASessionReconnect(t *testing.T) {
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
 	fixture.StubKubectlScalingRuntime(t, stubs, "team-devops", 1)
-	// The operator open in leg three plans port-forwards, so it needs the
-	// same holder-probe stubs and darwin pin every `open` scenario uses.
 	stubLsofNoHolder(t, stubs)
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
 	envVars = append(envVars, openHostOSOverride)
@@ -231,9 +187,7 @@ func testStopRealRunStopSurvivesASessionReconnect(t *testing.T) {
 		t.Fatalf("stop did not record the intent:\n%s", config)
 	}
 
-	// Leg two is the desktop's tab respawn: same `erun open`, plus the
-	// --reconnect the desktop attaches to every automatic respawn. It must
-	// fail rather than wake, and must leave the recorded stop alone.
+	// Leg two is the desktop's --reconnect respawn: it must fail and keep the stop.
 	reconnected := erun.Run(t, []string{"open", "team", "dev", "--app-session", "open-0", "--reconnect", "--no-shell", "--no-alias-prompt"},
 		erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if reconnected.ExitCode == 0 {
@@ -243,9 +197,7 @@ func testStopRealRunStopSurvivesASessionReconnect(t *testing.T) {
 		t.Fatalf("the reconnect erased the recorded stop:\n%s", config)
 	}
 
-	// Leg three is the operator opening the environment, which is still the
-	// one gesture that starts it: the plan reads 0 replicas from the stub —
-	// proof leg two scaled nothing — and wakes.
+	// Leg three is the operator's open: it reads 0 replicas and wakes.
 	opened := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"},
 		erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if opened.ExitCode != 0 {

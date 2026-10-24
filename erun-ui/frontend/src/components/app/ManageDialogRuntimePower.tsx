@@ -15,23 +15,8 @@ import type { AppState } from '@/app/state';
 export const RUNTIME_RUN_STATE_ID = 'environment-config-run-state';
 export const RUNTIME_STOP_HELP_ID = 'environment-config-stop-help';
 
-// RuntimePowerField sits directly under Deploy because that is where the
-// operator is standing when they find the resource sliders capped: the figures
-// below are computed from what the node's pods currently reserve, so stopping an
-// environment nobody is using is the action that raises them.
-//
-// It leads with the runtime's run state, and disables Stop when there is
-// nothing to stop. The state is what `erun stop` itself reads to decide its own
-// no-op, so without it the control offers a correct no-op as if it were the
-// action that frees capacity — the operator presses it, the dialog does not
-// change, and the button reads as broken. The state line is also the answer to
-// the other shape of that defect, a runtime that was never deployed, which
-// `erun stop` refuses outright.
-//
-// There is deliberately no Start button — opening the environment wakes it
-// (`erun open` scales the runtime back up), and a second wake control would be a
-// second implementation of the same thing. The helper text names that recovery
-// so the stopped state is never shown without the way out of it.
+// RuntimePowerField disables Stop when `erun stop` would no-op.
+// There is no Start: `erun open` wakes the runtime.
 export function RuntimePowerField({
   dialog,
 }: {
@@ -44,11 +29,7 @@ export function RuntimePowerField({
 
   return (
     <div className="grid gap-2">
-      {/* Above the button, not below it: whether pressing Stop will do anything
-          is what the operator needs before they decide to press it, and the
-          reason a disabled control is disabled has to be reachable without
-          activating it. role=status because a stop this desktop issues changes
-          this line a moment after the click. */}
+      {/* role=status: a stop changes this line just after the click. */}
       <p
         id={RUNTIME_RUN_STATE_ID}
         role="status"
@@ -81,14 +62,7 @@ export function RuntimePowerField({
   );
 }
 
-// stopHelpText states Stop's scope. A stop scales the environment's runtime
-// Deployment and nothing else, so the components an operator rolled out
-// alongside it (`erun deploy --components`: the platform's API, its database,
-// the ingress and DNS pieces) keep running and keep holding their capacity.
-// That is deliberate — on an environment hosting the platform those components
-// are the platform — but the panel they read before clicking promised the
-// figure would rise, and it cannot while they are up. Naming them, before the
-// click, is what keeps them from being read afterwards as a stop that failed.
+// stopHelpText names the components a stop leaves running: it scales only the runtime Deployment.
 function stopHelpText(keptComponents: string): string {
   const scope =
     keptComponents === ''

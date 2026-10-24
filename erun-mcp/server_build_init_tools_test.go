@@ -63,9 +63,7 @@ func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
 	}
 }
 
-// newComponentBuildFixture writes a project with a root build.sh (so the
-// environment's build script is not disabled) plus one component docker
-// context, for TestBuildToolBuildsComponentWithMultiPlatformSpec.
+// newComponentBuildFixture includes a root build.sh so the build script is not disabled.
 func newComponentBuildFixture(t *testing.T) string {
 	t.Helper()
 	projectRoot := t.TempDir()
@@ -85,10 +83,8 @@ func newComponentBuildFixture(t *testing.T) string {
 	return projectRoot
 }
 
-// TestBuildToolBuildsComponentWithMultiPlatformSpec: a component build on an environment whose build script is not disabled must
-// still resolve a real, buildable docker spec (matching what the no-component
-// path resolves via newDockerBuildSpec) rather than a spec with no platforms,
-// which builds and pushes nothing while still reporting success.
+// A component build must still resolve a spec with platforms; one without
+// builds nothing yet reports success.
 func TestBuildToolBuildsComponentWithMultiPlatformSpec(t *testing.T) {
 	projectRoot := newComponentBuildFixture(t)
 
@@ -127,12 +123,8 @@ func TestBuildToolBuildsComponentWithMultiPlatformSpec(t *testing.T) {
 	}
 }
 
-// TestBuildToolSurfacesInvalidDockerContext locks that a misconfigured
-// paths.dockercontext fails the MCP build tool loudly for a component build,
-// rather than being swallowed — the erun-common resolver's error must propagate
-// through the MCP transport. The shared behaviour is gated by the erun-cli
-// integration suite, which never enters this MCP wrapper, so the propagation is
-// covered here in the owning module.
+// The erun-cli integration suite never enters this MCP wrapper, so error
+// propagation is covered here.
 func TestBuildToolSurfacesInvalidDockerContext(t *testing.T) {
 	projectRoot := t.TempDir()
 	componentDir := filepath.Join(projectRoot, "acme-devops", "docker", "web")
@@ -203,22 +195,8 @@ func TestInitToolReturnsInteractionWhenSharedInitNeedsInput(t *testing.T) {
 	}
 }
 
-// stubKubectlAlwaysSucceeds points the ERUN_KUBECTL_BIN seam (core.Command)
-// at a script that exits 0 unconditionally, so deploy.RunHelmDeploy's own
-// namespace-ensure — which runs before the pre-rollout secret applies and is not
-// reachable through RuntimeConfig.EnsureKubernetesNamespace (see
-// deploy.WrapHelmChartDeployerWithNamespaceEnsure and
-// TestRunHelmDeployEnsuresTheNamespaceBeforeApplyingSecrets) — never shells out to
-// a real cluster. Without it, these tests depend on the host's kubeconfig
-// happening to have a context named "cluster-remote"/"cluster-dev", which no real
-// machine does.
-//
-// `get secret ... -o json` is answered as NotFound rather than the same bare
-// success every other invocation gets: the image-pull-secret refresh
-// (registry.ExistingImagePullSecretAuths) reads a named Secret back before
-// merging into it, and a bare `exit 0` with no stdout is not valid JSON. NotFound is exactly what a first deploy
-// into a fresh namespace sees, and it is the shape every other image-pull-secret
-// test already uses (see primitive/deploy's imagePullSecretKubectlStub).
+// stubKubectlAlwaysSucceeds keeps RunHelmDeploy off a real cluster. `get secret`
+// answers NotFound, since an empty stdout is not valid JSON for the pull-secret read.
 func stubKubectlAlwaysSucceeds(t *testing.T) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kubectl")
@@ -229,14 +207,8 @@ func stubKubectlAlwaysSucceeds(t *testing.T) {
 	t.Setenv("ERUN_KUBECTL_BIN", path)
 }
 
-// stubGHCRDockerCredential points DOCKER_CONFIG at a fixture carrying a fake
-// ghcr.io credential, so registry.ResolveOCIRegistryBasicAuth resolves one
-// deterministically for these tests regardless of what the host machine
-// actually has logged in -- without this, a remote init's runtime deploy
-// (which defaults the tenant's own image onto ghcr.io) would take its
-// pull-secret decision from whatever real ~/.docker/config.json this test
-// happens to run next to, and fall back to a live, network-dependent
-// anonymous-pullability probe on any host with no cached credential.
+// stubGHCRDockerCredential makes the ghcr.io pull-secret decision independent
+// of the host's docker login and the network.
 func stubGHCRDockerCredential(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
@@ -246,12 +218,8 @@ func stubGHCRDockerCredential(t *testing.T) {
 	t.Setenv("DOCKER_CONFIG", dir)
 }
 
-// fakeRemoteRepositoryStateRunner fakes RunRemoteCommand for a remote-init
-// flow that reaches the repository-state script, answering the
-// registry-credential-check script (identified by its own content, since
-// every remote-exec call shares this one seam) with "credential configured"
-// so these tests keep exercising repository interaction rather than tripping
-// that check.
+// fakeRemoteRepositoryStateRunner answers the registry-credential check
+// (recognized by its script content) as configured.
 func fakeRemoteRepositoryStateRunner(repositoryStateStdout string) func(configpkg.ShellLaunchParams, string) (kube.RemoteCommandResult, error) {
 	return func(_ configpkg.ShellLaunchParams, script string) (kube.RemoteCommandResult, error) {
 		if strings.Contains(script, ".docker/config.json") {
@@ -264,11 +232,7 @@ func fakeRemoteRepositoryStateRunner(repositoryStateStdout string) func(configpk
 func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 	stubKubectlAlwaysSucceeds(t)
 	stubGHCRDockerCredential(t)
-	// The remote init flow deploys the runtime chart, which now refuses rather
-	// than guess when no candidate is confirmed published; this test cares
-	// about the returned repository interaction, not registry resolution, so
-	// the seam confirms erun-devops published at every version instead of
-	// reaching a live registry.
+	// Confirm the runtime chart as published without reaching a registry.
 	t.Setenv("ERUN_PUBLISHED_CHART_PROBE_OVERRIDE", "erun-devops:*")
 	handler := initenv.InitTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
 		Context: sharedpkg.RuntimeContext{},
@@ -308,11 +272,7 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 	stubKubectlAlwaysSucceeds(t)
 	stubGHCRDockerCredential(t)
-	// The remote init flow deploys the runtime chart, which now refuses rather
-	// than guess when no candidate is confirmed published; this test cares
-	// about the deployed version, not registry resolution, so the seam
-	// confirms erun-devops published at every version instead of reaching a
-	// live registry.
+	// Confirm the runtime chart as published without reaching a registry.
 	t.Setenv("ERUN_PUBLISHED_CHART_PROBE_OVERRIDE", "erun-devops:*")
 	var deployedVersion string
 	handler := initenv.InitTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{

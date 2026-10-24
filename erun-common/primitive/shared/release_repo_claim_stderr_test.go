@@ -9,11 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
-// TestWriteReleaseRepoClaimBlobIncludesGitStderr and
-// TestLoadReleaseRepoClaimRecordCatFileIncludesGitStderr: git's stderr is
-// already captured onto exec.ExitError.Stderr by Output(), and each caller
-// (takeReleaseRepoClaim/claimReleaseVersion) must surface it rather than the
-// content-free "exit status N" a bare "%w" wrap renders.
+// Callers must surface git's stderr, not a bare "exit status N".
 func TestWriteReleaseRepoClaimBlobIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: could not write blob object", 128)
 	now := time.Now()
@@ -28,9 +24,7 @@ func TestWriteReleaseRepoClaimBlobIncludesGitStderr(t *testing.T) {
 }
 
 func TestLoadReleaseRepoClaimRecordCatFileIncludesGitStderr(t *testing.T) {
-	// The fetch itself must succeed so the failure is isolated to the
-	// cat-file read; the stub answers every git invocation with the same
-	// script, so make fetch a no-op success and only cat-file fail.
+	// Fetch succeeds so only cat-file fails.
 	dir := t.TempDir()
 	script := "#!/bin/sh\ncase \"$*\" in\n  *cat-file*) echo 'fatal: Not a valid object name probe-ref' >&2; exit 128 ;;\n  *) exit 0 ;;\nesac\n"
 	path := dir + "/git-stub"

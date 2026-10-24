@@ -22,23 +22,12 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// A linux package component never produces an image, so it has no fp tag to
-// promote from. Its reuse record is a local one instead: after a plain build's
-// check stage passes, the package's fingerprint is recorded under the user's
-// erun state directory, and the next plain build with the same fingerprint on
-// the same docker daemon platform skips the stage: `test: reused` for a `test`
-// stage, `test: none declared` for a package that only has a `build` stage.
-// The fingerprint hashes the Dockerfile's text, so a base image tag that moves
-// to new content does not change it; only the record's expiry bounds that.
-// Only a plain build reads or writes the record: a release always builds its
-// `dist` stage (exportReleaseLinuxPackages never consults it).
+// A package has no image to promote, so a plain build's passing check stage is recorded locally
+// per fingerprint and daemon platform. Releases never consult the record.
 
 const (
-	// linuxPackageTestRecordsKept bounds each package's record to its most
-	// recent passes, so a long-lived checkout does not grow it without limit.
 	linuxPackageTestRecordsKept = 8
-	// linuxPackageTestRecordMaxAge expires a pass, so a record is never older
-	// than the toolchain drift a pinned base tag can still hide.
+	// linuxPackageTestRecordMaxAge bounds drift a moved base tag can hide, since the fingerprint hashes only the tag.
 	linuxPackageTestRecordMaxAge = 30 * 24 * time.Hour
 )
 
@@ -52,8 +41,6 @@ type linuxPackageTestRecord struct {
 	Passed []linuxPackageTestPass `json:"passed"`
 }
 
-// linuxPackageTestRecordDir and linuxPackageTestRecordNow are package-level
-// seams, like timingRecordDir, so a test points them at its own tree and clock.
 var (
 	LinuxPackageTestRecordDir = defaultLinuxPackageTestRecordDir
 	linuxPackageTestRecordNow = time.Now
@@ -79,18 +66,15 @@ func linuxPackageTestRecordPath(name string) (string, error) {
 	return filepath.Join(dir, name+".json"), nil
 }
 
-// LinuxPackageDaemonPlatform is the platform a plain check build runs on. The
-// build passes no --platform, so BuildKit builds for the docker daemon's own
-// platform, which is not the host's when DOCKER_HOST names a remote daemon of
-// another architecture. It is a package-level seam so a test can name one.
+// LinuxPackageDaemonPlatform is the daemon's platform, which differs from the host's when
+// DOCKER_HOST names a remote daemon of another architecture.
 var LinuxPackageDaemonPlatform = ReadDockerDaemonPlatform
 
 const linuxPackageDaemonPlatformTimeout = 30 * time.Second
 
 var dockerDaemonPlatformPattern = regexp.MustCompile(`^linux/[a-z0-9_]+$`)
 
-// ReadDockerDaemonPlatform asks the daemon the builds run on for its platform,
-// under a deadline so a daemon that never answers cannot hold the build.
+// ReadDockerDaemonPlatform asks the docker daemon for its platform, under a deadline.
 func ReadDockerDaemonPlatform() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), linuxPackageDaemonPlatformTimeout)
 	defer cancel()
@@ -108,10 +92,8 @@ func ReadDockerDaemonPlatform() (string, error) {
 	return platform, nil
 }
 
-// ApplyLinuxPackageReuse fingerprints each package's check stage and marks the
-// ones with a recorded pass on the daemon's platform for reuse. The daemon is
-// asked once per build. A package that cannot be fingerprinted, or whose
-// daemon platform is unknown, runs and records nothing, and says why.
+// ApplyLinuxPackageReuse marks packages with a recorded pass on the daemon's platform for reuse.
+// A package that cannot be fingerprinted runs, records nothing, and says why.
 func ApplyLinuxPackageReuse(packages []shared.LinuxPackageSpec) []shared.LinuxPackageSpec {
 	out := slices.Clone(packages)
 	daemonPlatform := sync.OnceValues(LinuxPackageDaemonPlatform)
@@ -137,12 +119,8 @@ func ApplyLinuxPackageReuse(packages []shared.LinuxPackageSpec) []shared.LinuxPa
 	return out
 }
 
-// linuxPackageCheckFingerprint is computeBuildFingerprint's input set for a
-// package's check stage: the Dockerfile, every file the stages that stage is
-// built from COPY out of the context, less what the context's ignore files
-// exclude. A plain check build passes no build arg, so none is hashed; the
-// version reaches only the stages after it, so neither ERUN_VERSION nor the
-// VERSION file a `package` stage copies moves it.
+// linuxPackageCheckFingerprint hashes the Dockerfile and context COPY sources of the check stage
+// and its ancestors. No build args are hashed; the version reaches only later stages.
 func linuxPackageCheckFingerprint(pkg shared.LinuxPackageSpec, target string) (string, error) {
 	data, err := os.ReadFile(pkg.DockerfilePath)
 	if err != nil {
@@ -179,10 +157,8 @@ var (
 	copyStageMountFromPattern = regexp.MustCompile(`(?i)--mount=\S*\bfrom=([^,\s]+)`)
 )
 
-// dockerfileStageCopySources returns the context COPY sources of target and of
-// every stage it is built from, through FROM <stage>, COPY --from=<stage> and
-// RUN --mount=...,from=<stage>: the stages BuildKit runs for that target. A
-// target the Dockerfile does not name falls back to every stage's sources.
+// dockerfileStageCopySources returns the context COPY sources of target and the stages it builds on.
+// An unknown target falls back to every stage.
 func dockerfileStageCopySources(dockerfile, target string) [][]string {
 	stages := parseCopyStages(dockerfile)
 	reachable := reachableCopyStages(stages, strings.ToLower(target))
@@ -223,7 +199,6 @@ func parseCopyStages(dockerfile string) []*copyStage {
 	return stages
 }
 
-// parseDockerfileFromArgs reads `[--platform=...] <base> [AS <name>]`.
 func parseDockerfileFromArgs(args string) (base, name string) {
 	fields := make([]string, 0, 3)
 	for _, field := range strings.Fields(args) {
@@ -263,8 +238,7 @@ func reachableCopyStages(stages []*copyStage, target string) map[int]bool {
 	return reachable
 }
 
-// copyStageIndex resolves a stage reference: an index, or a stage name. Any
-// other reference is an external image, which the context does not feed.
+// copyStageIndex resolves an index or stage name; anything else is an external image.
 func copyStageIndex(stages []*copyStage, ref string) (int, bool) {
 	if n, err := strconv.Atoi(ref); err == nil && n >= 0 && n < len(stages) {
 		return n, true
@@ -293,8 +267,7 @@ func readLinuxPackageTestRecord(name string) (linuxPackageTestRecord, string, er
 	return record, path, nil
 }
 
-// linuxPackageTestPassed reports a recorded, unexpired pass. A record that
-// cannot be read is no pass: the package runs, which is never wrong.
+// linuxPackageTestPassed reports a recorded, unexpired pass; an unreadable record is no pass.
 func linuxPackageTestPassed(name, fingerprint, platform string) bool {
 	record, _, err := readLinuxPackageTestRecord(name)
 	if err != nil {
@@ -306,8 +279,6 @@ func linuxPackageTestPassed(name, fingerprint, platform string) bool {
 	})
 }
 
-// RecordLinuxPackageTestPass records a pass, dropping expired entries and all
-// but the most recent linuxPackageTestRecordsKept.
 func RecordLinuxPackageTestPass(name, fingerprint, platform string) error {
 	record, path, err := readLinuxPackageTestRecord(name)
 	if path == "" {

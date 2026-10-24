@@ -33,9 +33,6 @@ func testUnexposeHelp(t *testing.T) {
 }
 
 func testUnexposeDryRun(t *testing.T) {
-	// Happy path: a platform block plus an env yields a complete unexpose
-	// plan (the delete-rrset command against the platform's PowerDNS pod)
-	// with no side effects.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -45,9 +42,7 @@ func testUnexposeDryRun(t *testing.T) {
 }
 
 func testUnexposeDryRunWithPlatformOverride(t *testing.T) {
-	// --services-zone/--platform-namespace let a sourceless caller (the
-	// hosted delete Job, with no git checkout) run unexpose without a
-	// project, mirroring expose's own override.
+	// The hosted delete Job has no checkout, so the overrides replace the project.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{
@@ -60,9 +55,6 @@ func testUnexposeDryRunWithPlatformOverride(t *testing.T) {
 }
 
 func testUnexposeRequiresPlatformConfig(t *testing.T) {
-	// unexpose only makes sense for a platform deployment; without a
-	// platform block it fails with an actionable error rather than
-	// resolving a wildcard record under an unknown zone.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -74,10 +66,6 @@ func testUnexposeRequiresPlatformConfig(t *testing.T) {
 }
 
 func testUnexposeRealRunViaStub(t *testing.T) {
-	// Real-run exercises the live delete-side effect (the only branch
-	// --dry-run cannot reach): a stubbed kubectl lets the pdnsutil exec
-	// succeed, proving RunUnexposeService's non-dry-run path actually
-	// calls deleteDNSRecord and reports success.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -93,10 +81,7 @@ func testUnexposeRealRunViaStub(t *testing.T) {
 }
 
 func testUnexposeRealRunViaPlatformAlias(t *testing.T) {
-	// Mirrors expose's own real_run_via_platform_alias: drives the
-	// platform-route DELETE for real against a stub erun-backend-api.
-	// Substring assertion, not golden.Equal, for the same reason expose's
-	// scenario uses one -- the stub server's ephemeral port.
+	// Substring assertion because the stub server's port is ephemeral.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -117,10 +102,6 @@ func testUnexposeRealRunViaPlatformAlias(t *testing.T) {
 }
 
 func testUnexposeDryRunViaPlatformAlias(t *testing.T) {
-	// Mirrors expose's own automatic switch: an erun platform alias
-	// configured (and no --services-zone/--platform-namespace override)
-	// routes the delete through the platform's API instead of a direct
-	// kubectl exec.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -134,10 +115,7 @@ func testUnexposeDryRunViaPlatformAlias(t *testing.T) {
 }
 
 func testUnexposeDryRunSkipIfUnconfigured(t *testing.T) {
-	// --skip-if-unconfigured turns the missing-platform-block failure above
-	// into a traced no-op success, for a caller (the delete Job) composing
-	// unexpose after delete without knowing whether the target was ever
-	// exposed at all.
+	// The delete Job composes unexpose without knowing whether the target was exposed.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)

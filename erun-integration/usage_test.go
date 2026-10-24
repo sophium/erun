@@ -56,13 +56,7 @@ func testUsageHelp(t *testing.T) {
 }
 
 func testUsageDryRun(t *testing.T) {
-	// --dry-run must trace the kubectl exec into the erun-devops container
-	// and the reading script it would run, at the default 1s CPU sample
-	// interval, without executing anything. team/dev is build-capable
-	// (carries the erun-dind sidecar), so a second traced exec into that
-	// container must appear too -- per erun-integration/AGENTS.md's
-	// dry-run contract, every action this command would take needs its
-	// own trace line, and reading the sidecar is now one of them.
+	// team/dev is build-capable, so the dind sidecar exec is traced too.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"usage", "--dry-run", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -73,9 +67,6 @@ func testUsageDryRun(t *testing.T) {
 }
 
 func testUsageDryRunCustomInterval(t *testing.T) {
-	// --interval changes the sample window baked into the traced script's
-	// `sleep` line — the golden pins the flag actually reaching the plan,
-	// for both the runtime container and the dind sidecar exec.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"usage", "--interval", "2.5", "--dry-run", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -86,8 +77,6 @@ func testUsageDryRunCustomInterval(t *testing.T) {
 }
 
 func testUsageDryRunMissingTenant(t *testing.T) {
-	// No tenant configured at all: resolution fails before any kubectl call
-	// is even planned, matching observe's equivalent scenario.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"usage", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode == 0 {
@@ -96,13 +85,7 @@ func testUsageDryRunMissingTenant(t *testing.T) {
 	golden.Equal(t, "usage/dry_run_missing_tenant", normalize.Apply(result.Combined))
 }
 
-// real_run_reports_cgroup_v2_usage is the scenario a metrics-server-based
-// design gets wrong: the reading has to come from inside the container's
-// own cgroup v2 accounting, not from a cluster add-on. The dry-run trace
-// alone cannot prove parsing correctness, so this stubs `kubectl exec` to
-// answer with a canned reading — the decision input dry-run cannot supply,
-// per erun-integration/AGENTS.md's "stubs as dry-run decision input" — and
-// asserts on the parsed JSON.
+// The reading must come from the container's cgroup v2 accounting, not metrics-server.
 func testUsageRealRunReportsCgroupV2Usage(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -128,39 +111,22 @@ func testUsageRealRunReportsCgroupV2Usage(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// The watched mount is normalize.Apply's own <HOME> safety-net rule
-	// (any /home/<user> path, not just the test's actual HOME), so the
-	// snapshot cannot distinguish "/home/erun" from any other home
-	// directory. Assert the literal, un-normalized value once here.
+	// normalize masks any /home/<user> as <HOME>, so assert the literal mount once.
 	if !strings.Contains(result.Combined, `"mount": "/home/erun"`) {
 		t.Fatalf("expected the watched mount to be the literal /home/erun, got:\n%s", result.Combined)
 	}
-	// nr_periods/nr_throttled are the CPU-starvation signal
-	// RuntimeUsageHistory derives its throttle ratio from, so a consumer
-	// can read the ratio rather than take a warning's word for it. These
-	// counters are cumulative for the container's lifetime, and 425 of
-	// 376,556 is 0.11% -- a residue, not starvation -- which is why this
-	// reading carries no build-throttling warning while the materially
-	// throttled scenario below does.
+	// 425 of 376,556 cumulative periods is 0.11%: residue, so no throttling warning.
 	if !strings.Contains(result.Combined, `"periods": 376556`) || !strings.Contains(result.Combined, `"throttledPeriods": 425`) {
 		t.Fatalf("expected cpu.periods/throttledPeriods parsed from cpu.stat, got:\n%s", result.Combined)
 	}
-	// nodeShared and ownUsedBytes: the mount's total/used/percent are the
-	// node's, not this environment's, and ownUsedBytes is the figure
-	// scoped to this environment alone.
+	// The mount figures are the node's; ownUsedBytes is this environment's.
 	if !strings.Contains(result.Combined, `"nodeShared": true`) || !strings.Contains(result.Combined, `"ownUsedBytes": 45097156608`) {
 		t.Fatalf("expected nodeShared and ownUsedBytes parsed from du, got:\n%s", result.Combined)
 	}
 	golden.Equal(t, "usage/real_run_reports_cgroup_v2_usage", normalize.Apply(result.Combined))
 }
 
-// real_run_reports_the_scheduler_request is the scenario this reading
-// exists for: every sizing surface reported only the cgroup *limit*, which
-// reserves nothing, so an environment capped at 27Gi that reserves 1Gi read
-// as if it held 27Gi. The request is not a cgroup file -- it lives in the
-// pod spec alone -- so this stubs `kubectl get pods -o json` (the decision
-// input dry-run cannot supply) and asserts the parsed reading and the text
-// an operator reads it from.
+// The request lives in the pod spec, not a cgroup file; a limit reserves nothing.
 func testUsageRealRunReportsTheSchedulerRequest(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -186,10 +152,7 @@ func testUsageRealRunReportsTheSchedulerRequest(t *testing.T) {
 	if jsonRun.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", jsonRun.ExitCode, jsonRun.Combined)
 	}
-	// 0.25 CPU declared in cores on the runtime container and 250m declared
-	// in millicores on the sidecar land on the same number, and the pod's
-	// own reservation is the two summed -- not the sum of the limits the
-	// same JSON carries beside them.
+	// Cores and millicores normalize alike; the reservation sums requests, not limits.
 	for _, want := range []string{
 		`"cpuMilli": 250`,
 		`"memoryBytes": 1073741824`,
@@ -207,13 +170,7 @@ func testUsageRealRunReportsTheSchedulerRequest(t *testing.T) {
 	golden.Equal(t, "usage/real_run_reports_the_scheduler_request", normalize.Apply(textRun.Combined))
 }
 
-// real_run_runtime_env_omits_builds_caveat is the negative case: a
-// runtime-type env has no erun-dind sidecar (every image build for it
-// happens elsewhere, never in this pod), so the reading is the whole
-// story and must not carry the "excludes builds" caveat that a
-// build-capable env's own reading (the scenario above) does carry. Locks
-// EnvironmentType.UsesDindSidecar's runtime=false branch end-to-end
-// through the real command, not just the unit-level predicate.
+// A runtime env has no dind sidecar, so no "excludes builds" caveat.
 func testUsageRealRunRuntimeEnvOmitsBuildsCaveat(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
@@ -245,11 +202,7 @@ func testUsageRealRunRuntimeEnvOmitsBuildsCaveat(t *testing.T) {
 	golden.Equal(t, "usage/real_run_runtime_env_omits_builds_caveat", normalize.Apply(result.Combined))
 }
 
-// real_run_local_agent_env_states_the_builds_caveat is the positive
-// sibling: a build-capable env (local-agent/remote-agent) carries the
-// erun-dind sidecar every image build actually runs in, a separate cgroup
-// this reading cannot see, so the JSON output must say so rather than let
-// a busy build read as an idle environment.
+// Builds run in the dind sidecar's separate cgroup, so the reading must say so.
 func testUsageRealRunLocalAgentEnvStatesTheBuildsCaveat(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -278,22 +231,14 @@ func testUsageRealRunLocalAgentEnvStatesTheBuildsCaveat(t *testing.T) {
 	if !strings.Contains(result.Combined, "erun-dind sidecar") {
 		t.Fatalf("a build-capable env must state the builds-excluded caveat, got:\n%s", result.Combined)
 	}
-	// The Disk line names the node-shared scope, and the own-usage line
-	// beneath it is the figure scoped to this environment alone.
 	if !strings.Contains(result.Combined, "Disk (node, shared):") || !strings.Contains(result.Combined, "this environment's own usage:") {
 		t.Fatalf("expected the node-shared disk label and the own-usage line, got:\n%s", result.Combined)
 	}
 	golden.Equal(t, "usage/real_run_local_agent_env_states_the_builds_caveat", normalize.Apply(result.Combined))
 }
 
-// real_run_warns_when_the_sidecars_throttling_is_material is the firing
-// half of the same verdict, and the reason the warning exists at all: a
-// sidecar whose own cap is genuinely binding is the starvation that turns
-// a lint step into a timeout, and it must still be named. The sidecar's
-// counters here are materially throttled -- 4,000 of its 20,000 periods
-// -- while the runtime container beside it stays at the immaterial 0.11%
-// the scenario above carries, so the two readings differ in the one way
-// that decides the verdict rather than in every way at once.
+// Only the sidecar is materially throttled (4,000 of 20,000 periods); the runtime stays
+// at 0.11%, so the readings differ only in what decides the verdict.
 func testUsageRealRunWarnsWhenTheSidecarsThrottlingIsMaterial(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -343,10 +288,7 @@ func testUsageRealRunWarnsWhenTheSidecarsThrottlingIsMaterial(t *testing.T) {
 }
 
 func testUsageRealRunCgroupV1ReportsUnavailableNotAnError(t *testing.T) {
-	// A cluster whose runtime image predates cgroup v2 (or any host where
-	// /sys/fs/cgroup is not cgroup2fs) must still succeed: CPU and memory
-	// report their own unavailability, matching the fail-soft posture
-	// runtime_resources.go already takes for kubectl-top-less clusters.
+	// Without cgroup v2 the command still succeeds, reporting CPU and memory unavailable.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
@@ -359,20 +301,13 @@ func testUsageRealRunCgroupV1ReportsUnavailableNotAnError(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// No disk_own_used_kb line was stubbed (e.g. `du`/`timeout` missing or
-	// the walk failed) -- own usage must report unavailable, not a
-	// fabricated zero, independently of cgroup type.
+	// Missing own usage must report unavailable, not zero.
 	if strings.Contains(result.Combined, `"ownUsedBytes"`) || strings.Contains(result.Combined, `"ownUsageObserved"`) {
 		t.Fatalf("an unread own-usage figure must omit both ownUsedBytes and ownUsageObserved, got:\n%s", result.Combined)
 	}
 	golden.Equal(t, "usage/real_run_cgroup_v1_reports_unavailable_not_an_error", normalize.Apply(result.Combined))
 }
 
-// real_run_warns_near_the_memory_limit is the "an agent notices it is
-// heading for an OOM kill before it is killed" case: a reading nobody
-// acts on is decoration, so a threshold crossing must show up as a named
-// warning field rather than requiring the caller to compute the
-// percentage itself.
 func testUsageRealRunWarnsNearTheMemoryLimit(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -402,11 +337,7 @@ func testUsageRealRunWarnsNearTheMemoryLimit(t *testing.T) {
 	}
 }
 
-// real_run_disk_warning_names_the_node_shared_scope is the disk sibling of
-// the memory-limit scenario above: the mount's used/total cross the
-// warning threshold, and the warning text must name the node-shared scope
-// so an operator does not clean up an environment that is not the real
-// cause of a shared-node disk pressure warning.
+// The disk warning names the node-shared scope so operators do not clean the wrong env.
 func testUsageRealRunDiskWarningNamesTheNodeSharedScope(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -422,7 +353,6 @@ func testUsageRealRunDiskWarningNamesTheNodeSharedScope(t *testing.T) {
 		"cpu_usage_after=0",
 		"cpu_time_before_ns=1000000000",
 		"cpu_time_after_ns=2000000000",
-		// used/total = 178410701/198234112 = 90.0%, at the warn threshold.
 		"disk_workspace=overlay 198234112 178410701 19823411 90% /home/erun",
 		"disk_own_used_kb=10000000",
 	})
@@ -437,10 +367,7 @@ func testUsageRealRunDiskWarningNamesTheNodeSharedScope(t *testing.T) {
 	golden.Equal(t, "usage/real_run_disk_warning_names_the_node_shared_scope", normalize.Apply(result.Combined))
 }
 
-// real_run_unreadable_peak_renders_unavailable_not_zero: an unreadable
-// memory.peak (an older cgroup v2 kernel, or cgroup v1) must render as
-// unavailable, not as a measured "peak 0B" -- the reassuring wrong answer
-// for the least known state.
+// An unreadable memory.peak must render unavailable, not "peak 0B".
 func testUsageRealRunUnreadablePeakRendersUnavailableNotZero(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -469,12 +396,7 @@ func testUsageRealRunUnreadablePeakRendersUnavailableNotZero(t *testing.T) {
 	golden.Equal(t, "usage/real_run_unreadable_peak_renders_unavailable_not_zero", normalize.Apply(result.Combined))
 }
 
-// real_run_unreadable_peak_json_omits_peak_fields is the JSON-mode sibling
-// of the scenario above: the wire shape must let a consumer tell "peak not
-// readable here" from "peak is zero" (peakObserved's presence), and the
-// close-to-OOM warning must not compute a percentage from a reading it
-// never took, even though current usage alone is nowhere near either
-// threshold in this fixture.
+// JSON must distinguish unreadable peak from zero, and not warn from an untaken reading.
 func testUsageRealRunUnreadablePeakJSONOmitsPeakFields(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -506,20 +428,8 @@ func testUsageRealRunUnreadablePeakJSONOmitsPeakFields(t *testing.T) {
 	golden.Equal(t, "usage/real_run_unreadable_peak_json_omits_peak_fields", normalize.Apply(result.Combined))
 }
 
-// real_run_genuine_zero_peak_renders_unchanged is the regression guard for
-// the sibling of the two scenarios above: a memory.peak that was actually
-// read as zero must keep rendering exactly as before this fix, since a
-// real zero is not the unknown state the two scenarios above cover.
-// real_run_dind_sidecar_usage_reported_separately is its own
-// regression scenario: an environment mid-release can read idle from the
-// runtime container while the erun-dind sidecar -- where the actual build
-// runs -- is close to its own memory limit, and before this fix nothing
-// in `erun usage`'s output let an operator tell the two apart. The stub
-// answers each container differently, matching the live measurement the
-// issue recorded (runtime container near-idle, sidecar under real load),
-// and asserts the sidecar's own reading -- and its own warning -- surface
-// distinctly rather than being silently dropped or conflated with the
-// runtime container's numbers.
+// The runtime can read idle while the dind sidecar nears its memory limit; each must
+// report separately.
 func testUsageRealRunDinDSidecarUsageReportedSeparately(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -597,19 +507,11 @@ func testUsageRealRunGenuineZeroPeakRendersUnchanged(t *testing.T) {
 	golden.Equal(t, "usage/real_run_genuine_zero_peak_renders_unchanged", normalize.Apply(result.Combined))
 }
 
-// stubUsagePodRequestsList is the `kubectl get pods -o json` answer the
-// reservation reading is stubbed with: the chart's own fixed 0.25 CPU /
-// 1024Mi requests on both containers against limits in the tens of GiB, which
-// is the shape an environment erun deploys actually has (deploy passes only
-// .limits.). The pod's reservation is therefore 0.5 CPU / 2GiB while its
-// ceiling is 27Gi/20Gi -- the two figures a sizing judgement has to tell apart.
+// stubUsagePodRequestsList mirrors the chart's fixed 0.25 CPU / 1024Mi requests against
+// large limits: reservation 0.5 CPU / 2GiB.
 const stubUsagePodRequestsList = `{"items": [{"metadata": {"name": "team-devops-7d9f-abcde"}, "spec": {"containers": [{"name": "erun-devops", "resources": {"limits": {"cpu": "14", "memory": "27Gi"}, "requests": {"cpu": "0.25", "memory": "1024Mi"}}}, {"name": "erun-dind", "resources": {"limits": {"cpu": "8", "memory": "20Gi"}, "requests": {"cpu": "0.25", "memory": "1024Mi"}}}], "initContainers": [{"name": "prepare-volumes", "resources": {"requests": {"cpu": "100m", "memory": "64Mi"}}}]}, "status": {"phase": "Running"}}]}`
 
-// stubUsagePodRequestsArm is the case arm every usage stub answers the pod-spec
-// read with. It matches both the argv a resolved environment produces
-// (context/namespace first) and the bare one, so a scenario whose env carries
-// no namespace still gets the reservation rather than an unexplained
-// unavailability.
+// stubUsagePodRequestsArm matches argv with and without context/namespace.
 func stubUsagePodRequestsArm() []string {
 	return []string{
 		`  *" get pods "*|"get pods "*)`,
@@ -618,15 +520,7 @@ func stubUsagePodRequestsArm() []string {
 	}
 }
 
-// stubUsageKubectlExec stubs `kubectl exec` to answer the usage reading
-// script with fixed key=value lines, regardless of which container argv
-// targets — the script itself only runs for real inside a live cgroup v2
-// container, which this harness does not have. The pod-spec read the
-// reservation comes from is answered from stubUsagePodRequestsList; every
-// other kubectl invocation exits 0 silently. Since RunRuntimeUsage now execs
-// the same script into both the runtime container and the erun-dind sidecar
-// on a build-capable env, this answers both identically; use
-// stubUsageKubectlExecPerContainer when a scenario needs them to differ.
+// stubUsageKubectlExec answers every container's usage exec identically.
 func stubUsageKubectlExec(t testing.TB, stubsDir string, lines []string) {
 	t.Helper()
 	body := make([]string, 0, len(lines)+8)
@@ -640,11 +534,8 @@ func stubUsageKubectlExec(t testing.TB, stubsDir string, lines []string) {
 	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", strings.Join(body, "\n"))
 }
 
-// stubUsageKubectlExecPerContainer is stubUsageKubectlExec's differentiated
-// sibling: the erun-dind exec (matched by the `-c erun-dind` argv it always
-// carries, checked before the generic `exec` case below it) answers with
-// dindLines, and every other exec (the runtime container) answers with
-// runtimeLines.
+// stubUsageKubectlExecPerContainer answers the `-c erun-dind` exec with dindLines and
+// other execs with runtimeLines.
 func stubUsageKubectlExecPerContainer(t testing.TB, stubsDir string, runtimeLines, dindLines []string) {
 	t.Helper()
 	body := make([]string, 0, len(runtimeLines)+len(dindLines)+10)

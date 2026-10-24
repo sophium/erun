@@ -43,9 +43,7 @@ func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 	return deps
 }
 
-// withDefaultCloudDeps supplies the one cloud default erun-common cannot fill
-// itself: CloudSecretStore has no usable zero value (it needs a real backing
-// directory), so Cloudflare token operations fail unless it is wired here.
+// withDefaultCloudDeps wires CloudSecretStore, which has no usable zero value.
 func withDefaultCloudDeps(deps erunUIDeps) erunUIDeps {
 	if deps.cloudDeps.CloudSecretStore == nil {
 		deps.cloudDeps.CloudSecretStore = cloud.DefaultCloudDependencies().CloudSecretStore
@@ -102,20 +100,10 @@ func withDefaultOrchestratorLaunchDeps(deps erunUIDeps) erunUIDeps {
 	return deps
 }
 
-// withDefaultReachabilityDeps supplies the two distinct liveness questions the
-// app asks: whether a local port is held at all, and whether an MCP port
-// actually carries traffic. They are separate because a stale port-forward
-// answers the first yes and the second no.
-//
-// Both probe a raw TCP port on the host, which is not namespaced by HOME/XDG:
-// the headless Playwright harness's isolated config store computes local
-// port ranges purely from its own (seeded) tenant/env list, so a seeded env
-// can land on the same port range a real environment on the same host has
-// genuinely bound (its own MCP/SSH forwards). Unforced, that reads as a real
-// answer about a seeded env that was never deployed.
-// ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE pins both probes to a fixed answer
-// for exactly that reason; it is set only by playwright/fixtures/seedRoot.ts,
-// never in production.
+// withDefaultReachabilityDeps supplies the port-held and MCP-traffic probes; a
+// stale port-forward answers yes to the first and no to the second.
+// ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE (set only by the Playwright harness) pins
+// both, since seeded envs can share port ranges with real ones on the host.
 func withDefaultReachabilityDeps(deps erunUIDeps) erunUIDeps {
 	if deps.canConnectLocalPort == nil {
 		deps.canConnectLocalPort = func(port int) bool {
@@ -136,8 +124,7 @@ func withDefaultReachabilityDeps(deps erunUIDeps) erunUIDeps {
 	return deps
 }
 
-// localPortReachabilityOverride parses ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE
-// ("0" or "1"). See withDefaultReachabilityDeps for why the harness needs it.
+// localPortReachabilityOverride parses ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE ("0" or "1").
 func localPortReachabilityOverride() (bool, bool) {
 	raw := strings.TrimSpace(os.Getenv("ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE"))
 	if raw == "" {
@@ -146,8 +133,7 @@ func localPortReachabilityOverride() (bool, bool) {
 	return raw == "1", true
 }
 
-// loadHostedRegistryWithTestOverride is the default loadHostedRegistry dep:
-// the test override wins when set, otherwise it defers to the real probe.
+// loadHostedRegistryWithTestOverride prefers the test override over the real probe.
 func loadHostedRegistryWithTestOverride(ctx context.Context) uiHostedRegistryStatus {
 	available, ok := hostedRegistryReachabilityOverride()
 	if !ok {
@@ -162,12 +148,7 @@ func loadHostedRegistryWithTestOverride(ctx context.Context) uiHostedRegistrySta
 }
 
 // hostedRegistryReachabilityOverride parses ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE
-// ("0" or "1"), pinning the new-environment dialog's hosted-registry probe to
-// a fixed answer instead of a real network call to registry.erunpaas.com.
-// Set only by playwright/fixtures/seedRoot.ts, never in production — the
-// headless harness has no route to stub a Go-side outbound HTTP call the way
-// page.route stubs a Wails method, so without this every spec that opens the
-// dialog would depend on real DNS/network behavior.
+// ("0" or "1"); set only by the Playwright harness, which cannot stub Go-side HTTP.
 func hostedRegistryReachabilityOverride() (bool, bool) {
 	raw := strings.TrimSpace(os.Getenv("ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE"))
 	if raw == "" {
@@ -215,9 +196,7 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 	return deps
 }
 
-// withDefaultOrchestratorDeps fills in what an orchestrator's own state —
-// where its durable records live, and the GitHub boundary its claim label is
-// provisioned through — defaults to.
+// withDefaultOrchestratorDeps fills in orchestrator state and GitHub defaults.
 func withDefaultOrchestratorDeps(deps erunUIDeps) erunUIDeps {
 	if deps.orchestratorRestoreDir == "" {
 		deps.orchestratorRestoreDir = defaultOrchestratorRestoreDir()

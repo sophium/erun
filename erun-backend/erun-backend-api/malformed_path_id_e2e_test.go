@@ -6,14 +6,8 @@ import (
 	"testing"
 )
 
-// malformedPathIDCases is every route shape that takes an externally visible
-// id, driven with a path segment that is not one. The list is deliberately
-// wider than the two routes the reports named: the defect was never
-// route-specific, and the routes where the id is a list filter rather than a
-// primary-key lookup -- /v1/reviews/{id}/builds, /comments, /releases,
-// /reviewers, and /v1/users/{id}/roles -- are the ones that still reached the
-// database and came back as a server fault once the by-id lookups had been
-// fixed.
+// Routes where the id is a list filter, not a primary-key lookup, are included:
+// they are the ones that reached the database.
 var malformedPathIDCases = []struct {
 	method string
 	path   string
@@ -35,28 +29,14 @@ var malformedPathIDCases = []struct {
 	{http.MethodPost, "/v1/invite-requests/not-a-uuid/approve"},
 }
 
-// absentPathIDs is the control both reports used: a well-formed id that names
-// nothing. It proves the handler and the not-found path both work, so a
-// failure above is isolated to parsing rather than to lookup.
 var absentPathIDs = []string{
 	"/v1/reviews/00000000-0000-0000-0000-000000000000",
 	"/v1/environments/00000000-0000-0000-0000-000000000000",
 	"/v1/contexts/00000000-0000-0000-0000-000000000000",
 }
 
-// TestMalformedPathIDInAnIDFilterIsNotAServerFault is the reproduction of the
-// reported failure: a path segment that is not an id still reached the
-// database, which rejected it at parse time with SQLSTATE 22P02, and that
-// driver error matched none of the repository's sentinels -- so the route
-// layer's generic fallback answered 500 INTERNAL_SERVER_ERROR for a mistyped
-// id, sending the reader to check the control plane's health for their own
-// typo and putting every such typo into the platform's 5xx rate.
-//
-// These are the routes where the id is a list filter rather than a
-// primary-key lookup, which is the half the by-id lookup fix never covered.
-// On the code before the routes layer's guard each one answers 500; the
-// assertion below is on the status class first, so the failure this test
-// reports is the one the reports described.
+// TestMalformedPathIDInAnIDFilterIsNotAServerFault: a malformed id must be refused before the
+// database, which would answer SQLSTATE 22P02 (a 500).
 func TestMalformedPathIDInAnIDFilterIsNotAServerFault(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -77,20 +57,12 @@ func TestMalformedPathIDInAnIDFilterIsNotAServerFault(t *testing.T) {
 		}
 	}
 
-	// The control the reports used: a well-formed id that names nothing is
-	// absent, not malformed, and keeps answering 404 on the same route family.
 	code, body := e2eRequest(t, srv.URL, http.MethodGet, "/v1/reviews/00000000-0000-0000-0000-000000000000/builds", nil)
 	if code != http.StatusOK {
 		t.Fatalf("well-formed absent id: HTTP %d (want 200, an empty build list): %s", code, body)
 	}
 }
 
-// TestMalformedPathIDIsAClientErrorOnEveryIDRoute is the same guard's
-// contract across every route shape that takes an id. It asserts the machine
-// code as well as the status, because "which id was wrong, and in what way"
-// is the part a caller can act on, and it keeps the two situations a client
-// branches on distinct: a malformed id is the caller's to fix, an absent one
-// is a 404.
 func TestMalformedPathIDIsAClientErrorOnEveryIDRoute(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -105,9 +77,7 @@ func TestMalformedPathIDIsAClientErrorOnEveryIDRoute(t *testing.T) {
 		}
 	}
 
-	// The control: only the spelling is judged. A well-formed id that names
-	// nothing must keep answering 404 -- collapsing it into the 400 above
-	// would tell a caller to fix an id that is already correct.
+	// A well-formed absent id must stay 404, not 400.
 	for _, path := range absentPathIDs {
 		code, body := e2eRequest(t, srv.URL, http.MethodGet, path, nil)
 		if code != http.StatusNotFound {
@@ -116,10 +86,8 @@ func TestMalformedPathIDIsAClientErrorOnEveryIDRoute(t *testing.T) {
 	}
 }
 
-// TestMalformedPathIDIsStillRejectedAsUnauthenticated: the guard sits inside
-// the authentication wrapper, so an anonymous caller gets 401 for every id
-// shape. Whether a given id parses must not be observable before the caller
-// is authorized.
+// TestMalformedPathIDIsStillRejectedAsUnauthenticated: the guard sits inside authentication, so id
+// parsing is not observable before authorization.
 func TestMalformedPathIDIsStillRejectedAsUnauthenticated(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)

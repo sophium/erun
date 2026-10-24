@@ -11,10 +11,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing verifies
-// that when the tenant image has no published versions, the upgrade target falls
-// back to the default ERun image so the env still gets a target instead of
-// resolving to "(unset)".
 func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *testing.T) {
 	const fallbackSnapshot = "1.0.86-snapshot-20260606082157"
 	app := NewApp(erunUIDeps{
@@ -37,8 +33,7 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 			}
 			switch repository {
 			case "petios-devops":
-				// A successful-but-empty lookup (not a failed one) is what triggers
-				// the fallback to the default image.
+				// A successful-but-empty lookup triggers the fallback; a failed one does not.
 				return registry.RuntimeRegistryVersions{}, nil
 			case config.DefaultRuntimeImageName:
 				return registry.RuntimeRegistryVersions{
@@ -73,10 +68,6 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 	}
 }
 
-// TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree verifies that when
-// registries publish different newer versions for the tracked channel, the env is
-// not auto-resolved: it carries each candidate for the operator to pick in the
-// Upgrade-all dialog, and the run skips it until they do.
 func TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree(t *testing.T) {
 	const tenantSnapshot = "1.0.90-snapshot-20260606090000"
 	const defaultSnapshot = "1.0.86-snapshot-20260606082157"
@@ -154,10 +145,6 @@ func assertCandidateVersions(t *testing.T, candidates []lifecycle.UpgradeVersion
 	}
 }
 
-// TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup verifies that a
-// failed tenant-registry lookup falls back to the canonical ERun image — the
-// tenant image is a wrapper the deploy rebuilds from canonical — so the env
-// upgrades instead of being parked on "latest unknown".
 func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T) {
 	const canonicalSnapshot = "1.0.86-snapshot-20260611061111"
 	app := NewApp(erunUIDeps{
@@ -198,10 +185,6 @@ func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T
 	}
 }
 
-// TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails verifies that when
-// neither the tenant nor the canonical image resolves, the member is "latest
-// unknown" with the registry failure as its reason, so the dialog renders it and
-// the run skips it.
 func TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{

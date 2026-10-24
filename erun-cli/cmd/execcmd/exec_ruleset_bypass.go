@@ -63,11 +63,7 @@ func newExecReconcileBypassCmd(store config.CloudReadStore, deps cloud.CloudDepe
 	return cmd
 }
 
-// newExecPlanRulesetBypassCmd builds `erun exec plan-ruleset-bypass`: the
-// read-only half of narrowing a protected branch's bypass grant to one
-// non-human identity. It resolves the edit from the live ruleset, proves the
-// identity can already push, and writes the payload each stage and the
-// rollback apply — it never changes repository settings itself.
+// newExecPlanRulesetBypassCmd plans narrowing a branch's bypass grant; it never changes settings.
 func newExecPlanRulesetBypassCmd() *cobra.Command {
 	var params review.PlanRulesetBypassParams
 	cmd := &cobra.Command{
@@ -122,10 +118,7 @@ func runExecPlanRulesetBypassCommand(ctx core.Context, params review.PlanRuleset
 	return ctx.WriteResult(result)
 }
 
-// writeRulesetBypassPlan renders the plan as the ordered set of commands an
-// operator runs: apply, verify, and — if any of it goes wrong — revert. A plan
-// that named the edit without naming its verification and its way back would
-// be exactly the dead end this command exists to avoid.
+// writeRulesetBypassPlan renders apply, verify, and revert commands.
 func writeRulesetBypassPlan(ctx core.Context, result review.PlanRulesetBypassResult) error {
 	out := new(strings.Builder)
 	fmt.Fprintf(out, "Ruleset %d (%q) on %s/%s\n", result.RulesetID, result.RulesetName, result.Owner, result.Repo)
@@ -169,8 +162,6 @@ func formatQueueActorAccess(access string) string {
 	return ", " + access + " access"
 }
 
-// orUnknown keeps a plan readable when GitHub answered nothing for a field
-// rather than printing a bare blank the reader cannot interpret.
 func orUnknown(value string) string {
 	if value == "" {
 		return "(unknown)"
@@ -178,11 +169,7 @@ func orUnknown(value string) string {
 	return value
 }
 
-// newExecRouteCheckCmd builds `erun exec route-check`: proves every route
-// erun-backend-api's router registers is actually reachable on a deployed
-// plane. A route can merge, get unit-tested, and close its issue while
-// still 404ing on the live control plane for months, because nothing but a
-// human running the CLI by hand had ever exercised the deployed route.
+// newExecRouteCheckCmd proves every erun-backend-api route is reachable on a deployed plane.
 func newExecRouteCheckCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	var (
 		routesDir string
@@ -238,9 +225,7 @@ func runExecRouteCheckCommand(ctx core.Context, store config.CloudReadStore, ali
 	return routeCheckExitError(result)
 }
 
-// writeRouteCheckReport prints one line per missing route -- the loud
-// failure this command exists to surface -- and a summary line always, so a
-// clean run is visibly clean rather than silent.
+// writeRouteCheckReport always prints a summary so a clean run is visibly clean.
 func writeRouteCheckReport(ctx core.Context, result expose.RouteCheckResult) error {
 	if !result.PlaneReachable {
 		_, err := fmt.Fprintf(ctx.Stdout, "%s did not answer the sanity probe (%s); no routes were checked.\n",
@@ -262,10 +247,7 @@ func writeRouteCheckReport(ctx core.Context, result expose.RouteCheckResult) err
 	return err
 }
 
-// routeCheckExitError makes a missing route (or a probe that could not even
-// complete) a non-zero exit, after the full report has already printed --
-// the same "print everything, then fail loudly" shape reconcileBypassExitError
-// uses.
+// routeCheckExitError fails after the full report has printed.
 func routeCheckExitError(result expose.RouteCheckResult) error {
 	if !result.PlaneReachable {
 		return fmt.Errorf("route-check: %s did not answer the sanity probe (%s); refusing to report on an unreachable plane",
@@ -304,10 +286,7 @@ func runExecReconcileBypassCommand(ctx core.Context, store config.CloudReadStore
 	return reconcileBypassExitError(result)
 }
 
-// reconcileBypassExitError turns the report's two distinct failures into one
-// non-zero exit, naming both rather than collapsing them: content nobody
-// built and an identity nobody expected are different problems with different
-// remedies.
+// reconcileBypassExitError names both failures; they have different remedies.
 func reconcileBypassExitError(result review.ReconcileBypassResult) error {
 	var problems []string
 	if result.Unreconciled > 0 {

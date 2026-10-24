@@ -13,8 +13,6 @@ func namedBlock(command string) map[string]any {
 	return map[string]any{"hooks": []any{map[string]any{"type": "command", "command": command}}}
 }
 
-// Ceasing to install the recorder leaves it installed on every machine that
-// already ran an older build, still writing a file nothing reads.
 func TestRetiredRecorderIsRemovedWhereverItIsInstalled(t *testing.T) {
 	out := pruneRetiredSessionRecorderHooks([]any{
 		namedBlock("echo busy > /x/orchestrator-activity/$ERUN_ORCHESTRATOR_ID.json"),
@@ -31,8 +29,7 @@ func TestRetiredRecorderIsRemovedWhereverItIsInstalled(t *testing.T) {
 	}
 }
 
-// It matches on what the command does, so a block is never removed for merely
-// mentioning one of the two markers -- the operator's hooks live here too.
+// The operator's hooks live here too.
 func TestPruneKeepsBlocksThatOnlyResembleTheRecorder(t *testing.T) {
 	keep := []any{
 		namedBlock("grep orchestrator-session /tmp/notes"),

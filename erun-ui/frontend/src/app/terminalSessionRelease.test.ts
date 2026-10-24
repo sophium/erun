@@ -10,13 +10,7 @@ import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import { thunkExtra } from './thunkExtra';
 import { handleTerminalExit } from './wailsEventThunks';
 
-// A session's retained output -- raw buffer, display buffer, snapshot -- used to
-// live for the whole life of the app, so a desktop left running with busy
-// terminals grew without bound. These pin when it is released: the raw buffer
-// once the exit is reported, everything once the session has exited and no tab
-// shows it. Neither condition alone is enough: a dead tab stays on screen until a
-// respawn replaces it, and a tab removed from the strip can belong to a live
-// session Go hands back to the next open of that tab.
+// Retained output is released only once the session exited and no tab shows it.
 
 const dispatch = store.dispatch;
 let sessions: TerminalSessionRegistry;
@@ -35,8 +29,6 @@ beforeEach(() => {
     focusTerminalSoon: () => undefined,
     queueTerminalResize: () => undefined,
   } as unknown as TerminalController;
-  // The pane shows some other session, so an exit below takes the
-  // not-the-pane's path and reports nothing.
   dispatch(setSessionId(1));
 });
 

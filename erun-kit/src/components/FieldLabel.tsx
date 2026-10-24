@@ -2,13 +2,8 @@ import * as React from 'react';
 
 import { Label } from './ui/label';
 
-// FieldLabel is the shared label for form fields in the app's dialogs. It renders
-// an explicit required marker so users can see at a glance which fields are
-// mandatory (recognition over recall) instead of discovering it only when a
-// disabled submit button names one missing value at a time. The asterisk is a
-// glyph, not a colour-only cue, and the visually-hidden "(required)" folds into
-// the control's accessible name via htmlFor, so the requirement is conveyed
-// non-visually too (WCAG 1.4.1).
+// FieldLabel marks required fields with a glyph plus a visually hidden "(required)" for
+// the accessible name (WCAG 1.4.1).
 export function FieldLabel({
   htmlFor,
   required,

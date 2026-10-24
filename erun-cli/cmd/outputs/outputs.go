@@ -137,8 +137,7 @@ type outputsDownloadCLIResult struct {
 	SHA256        string `json:"sha256"`
 	IsArchive     bool   `json:"isArchive"`
 	ArchiveFormat string `json:"archiveFormat,omitempty"`
-	// Signing is present only when host-side ad-hoc code signing had something to
-	// report; see common.SignHostArtifact.
+	// Signing is set only when host-side ad-hoc signing had something to report.
 	Signing *codesign.HostArtifactSigning `json:"signing,omitempty"`
 }
 
@@ -160,9 +159,7 @@ func runOutputsDownloadCommand(ctx core.Context, resolveOpen shared.OpenResolver
 	if err != nil {
 		return err
 	}
-	// The download is the point where a cross-built artifact becomes a file the
-	// operator runs, so it is where a darwin binary gets the signature macOS
-	// demands. A signing problem is reported, never fatal: the file has arrived.
+	// A darwin binary gets signed here, where it becomes runnable; signing problems are reported, never fatal.
 	signing := codesign.SignHostArtifact(destPath)
 	if ctx.Output == core.OutputJSON {
 		result := outputsDownloadCLIResult{
@@ -185,8 +182,7 @@ func runOutputsDownloadCommand(ctx core.Context, resolveOpen shared.OpenResolver
 	return nil
 }
 
-// resolveOutputsDest reduces the pod-side name to its base so a download can never
-// escape the chosen local directory.
+// resolveOutputsDest keeps only the base name so a download cannot escape dest.
 func resolveOutputsDest(dest, name string) string {
 	name = filepath.Base(filepath.FromSlash(name))
 	dest = strings.TrimSpace(dest)

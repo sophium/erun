@@ -6,8 +6,7 @@ import (
 	"testing"
 )
 
-// SeedReleaseRepo materializes the minimal erun-devops layout and a git repo
-// that release scenarios need as a project root.
+// SeedReleaseRepo writes a minimal erun-devops layout in a git repo at dir.
 func SeedReleaseRepo(t testing.TB, dir, branch string) string {
 	t.Helper()
 	releaseRoot := filepath.Join(dir, "erun-devops")
@@ -23,10 +22,8 @@ func SeedReleaseRepo(t testing.TB, dir, branch string) string {
 	}
 	mustWrite(t, filepath.Join(releaseRoot, "VERSION"), "1.4.2\n")
 	mustWrite(t, filepath.Join(releaseRoot, "k8s", "api", "Chart.yaml"), "apiVersion: v2\nname: api\nversion: 0.1.0\nappVersion: 0.1.0\n")
-	// base is a version-pinned base: its image carries its own VERSION (9.9.9),
-	// tagged and published at that version rather than the release's, same as
-	// its co-located chart, which publishes at the release version so platform
-	// deploys resolve it.
+	// base is version-pinned: its image publishes at its own VERSION (9.9.9),
+	// while its chart publishes at the release version.
 	mustWrite(t, filepath.Join(releaseRoot, "k8s", "base", "Chart.yaml"), "apiVersion: v2\nname: base\nversion: 0.1.0\nappVersion: 0.1.0\n")
 	mustWrite(t, filepath.Join(releaseRoot, "docker", "api", "Dockerfile"), "FROM alpine:3.22\n")
 	mustWrite(t, filepath.Join(releaseRoot, "docker", "base", "Dockerfile"), "FROM alpine:3.22\n")
@@ -50,13 +47,9 @@ func SeedReleaseRepo(t testing.TB, dir, branch string) string {
 	return dir
 }
 
-// SeedTerraformModuleImageReference adds a third release image
-// (erun-devops/docker/<imageName>) and a Terraform module under
-// erun-devops/terraform-erun that references it the way
-// terraform-erun-cluster-edge's real dns01_webhook_image references
-// ghcr.io/sophium/erun-dns01-webhook: through an interpolated version, not a
-// literal one. Release scenarios use this to exercise the
-// anonymous-pullability check's module-reference discovery.
+// SeedTerraformModuleImageReference adds a release image and a Terraform module
+// that references it through an interpolated version, like
+// terraform-erun-cluster-edge's dns01_webhook_image.
 func SeedTerraformModuleImageReference(t testing.TB, dir, imageName string) {
 	t.Helper()
 	dockerDir := filepath.Join(dir, "erun-devops", "docker", imageName)
@@ -75,8 +68,7 @@ func SeedTerraformModuleImageReference(t testing.TB, dir, imageName string) {
 `)
 }
 
-// SeedMarketplaceJSON writes a placeholder .claude-plugin/marketplace.json so
-// release scenarios can exercise the marketplace.json source.sha bump path.
+// SeedMarketplaceJSON writes a placeholder .claude-plugin/marketplace.json.
 func SeedMarketplaceJSON(t testing.TB, dir string) {
 	t.Helper()
 	dst := filepath.Join(dir, ".claude-plugin")
@@ -101,10 +93,7 @@ func SeedMarketplaceJSON(t testing.TB, dir string) {
 `)
 }
 
-// SeedScoopManifest writes bucket/erun.json with the given content so stable
-// release scenarios exercise the Scoop manifest validation and version/checksum
-// sync paths; a valid manifest reaches the happy path, a malformed one drives
-// the validation-failure branch.
+// SeedScoopManifest writes bucket/erun.json with content.
 func SeedScoopManifest(t testing.TB, dir, content string) {
 	t.Helper()
 	dst := filepath.Join(dir, "bucket")
@@ -114,10 +103,8 @@ func SeedScoopManifest(t testing.TB, dir, content string) {
 	mustWrite(t, filepath.Join(dst, "erun.json"), content)
 }
 
-// SeedHomebrewFormula writes Formula/erun.rb so stable release scenarios
-// exercise the Homebrew packaging path. The url/sha256 lines use the exact
-// two-space indentation the production regexes anchor on — reformatting them
-// breaks the match.
+// SeedHomebrewFormula writes Formula/erun.rb. The url/sha256 indentation is
+// what the production regexes anchor on.
 func SeedHomebrewFormula(t testing.TB, dir string) {
 	t.Helper()
 	dst := filepath.Join(dir, "Formula")
@@ -138,29 +125,19 @@ end
 `)
 }
 
-// ReleaseGitStubSpec configures StubReleaseGit, the argv-branching git stub for
-// real-run release scenarios: every mutation is a silent no-op so the captured
-// output stays deterministic without a real remote or network.
+// ReleaseGitStubSpec configures StubReleaseGit; every git mutation is a no-op.
 type ReleaseGitStubSpec struct {
-	// Branch is returned for `rev-parse --abbrev-ref HEAD`.
-	Branch string
-	// ShortCommit is returned for `rev-parse --short HEAD`.
+	Branch      string
 	ShortCommit string
-	// TagSHA, when non-empty, is returned for the `<tag>^{}` tag-existence
-	// probe and for `rev-parse HEAD`, so the release tag resolves to a
-	// commit and (for the non-force path) that commit equals HEAD. Empty
-	// makes the `^{}` probe exit 1: the tag does not exist yet.
+	// TagSHA answers the `<tag>^{}` probe and `rev-parse HEAD`; empty means the
+	// tag does not exist.
 	TagSHA string
-	// RemoteTag, when non-empty, makes `ls-remote --tags` report the tag as
-	// present on origin at TagSHA, so --force runs the remote tag deletion.
-	// Empty reports no remote tag.
+	// RemoteTag makes `ls-remote --tags` report the tag on origin at TagSHA.
 	RemoteTag string
 }
 
 // StubReleaseGit writes a git stub implementing spec and returns its
-// ERUN_GIT_BIN routing pair. show-ref --verify --quiet always exits 1 (no
-// develop branch) so stable releases skip the sync-develop stage and push only
-// the main branch.
+// ERUN_GIT_BIN pair. show-ref always fails, so no develop branch exists.
 func StubReleaseGit(t testing.TB, stubsDir string, spec ReleaseGitStubSpec) []string {
 	t.Helper()
 	tagProbe := `exit 1`

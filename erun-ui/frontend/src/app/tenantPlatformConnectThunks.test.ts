@@ -1,5 +1,4 @@
-// Side-effect imports: these apis inject their endpoints into the shared
-// wailsApi instance on import.
+// Side-effect imports register endpoints on wailsApi.
 import './api/tenantApi';
 import './api/cloudApi';
 import './api/tenantInviteRequestApi';
@@ -19,10 +18,6 @@ import tenantsReducer from './slices/tenantsSlice';
 import type { AppDispatch } from './store';
 import { connectTenantPlatform } from './tenantPlatformConnectThunks';
 
-// Mirrors bootThunks.test.ts's RPC-boundary stub: every wailsQueryFn-backed
-// endpoint calls through window.go.main.App.*, so standing that up by hand
-// drives the real production dispatch path (the actual endpoints, real RTK
-// Query middleware) rather than asserting dispatch shape and stopping there.
 function stubWailsBridge(app: Record<string, (...args: never[]) => Promise<unknown>>): void {
   (globalThis as unknown as { window: unknown }).window = { go: { main: { App: app } } };
 }
@@ -57,13 +52,7 @@ function seedDashboard(store: ReturnType<typeof buildTestStore>, tenant: string)
   );
 }
 
-// connectTenantPlatform's own doc says it is "a single click from 'not
-// connected' to 'working'". What shipped instead was a click that attached the
-// alias and then discarded the sign-in's outcome, so a failed or skipped grant
-// set no error at all and left the card byte-identical to the one before the
-// click — the operator's "the button does nothing". These two cases
-// are the ones the fix exists for, and they disagree on purpose: nothing was
-// attempted for a skipped grant, a failed one carries the grant's own reason.
+// A skipped grant sets no error; a failed one carries the grant's reason.
 test('a failed sign-in after a successful attach is reported on the card, not swallowed', async () => {
   stubWailsBridge({
     ConnectERunPlatform: () => Promise.resolve(attachedAlias()),
@@ -105,8 +94,6 @@ test('the click sends the tenant it was clicked from, so the attach lands where 
   assert.equal(sent.tenant, 'erun', 'the clicked tenant must travel with the attach');
   assert.equal(sent.apiUrl, API_URL);
 
-  // A successful sign-in clears the error and runs the recovery reload, so the
-  // operator is left on the connected dashboard rather than on a stale card.
   const state = store.getState().tenantDashboard;
   assert.equal(state.connectError, '');
   assert.equal(state.connecting, false);

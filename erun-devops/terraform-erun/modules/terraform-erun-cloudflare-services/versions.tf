@@ -9,9 +9,6 @@ terraform {
   }
 }
 
-# Authentication is delegated entirely to the Cloudflare provider's native
-# CLOUDFLARE_API_TOKEN environment variable, so this provider block is intentionally
-# empty. erun injects an account-scoped, delegated API token (account-level Zone:Edit
-# + DNS:Edit) into the runtime pod; do not hardcode the token here or accept it as a
-# Terraform variable.
+# Authenticates only via the CLOUDFLARE_API_TOKEN that erun injects into the pod;
+# never accept the token as a variable.
 provider "cloudflare" {}

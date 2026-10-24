@@ -31,27 +31,11 @@ func describeCloudContextPublicIP(ctx core.Context, deps CloudContextDependencie
 	return publicIP, nil
 }
 
-// kubectlContextConfigureExecutionOperation is the ExecutionModeFor/
-// ExecutionModeReport key for the three `kubectl config set-cluster`/
-// `set-credentials`/`set-context` calls configureCloudKubeContext issues to
-// point a cloud-context instance's kubeconfig entry at its own k3s API
-// server. Promoted for a sharper reason than the read/wait/apply cases
-// before it: `set-credentials --token <adminToken>` puts a cluster-admin
-// bearer token in the subprocess's own argv, readable by any co-resident
-// process via /proc/<pid>/cmdline for the life of the exec. The library path
-// (libraryConfigureCloudKubeContext) keeps the token in Go memory only and
-// never spawns that process at all. It writes the local kubeconfig file the
-// same way kubectl itself does — via k8s.io/client-go/tools/clientcmd's own
-// PathOptions/ModifyConfig — so this is not a reimplementation of kubectl's
-// config-writing logic, it is a reuse of it; there is no cluster API call
-// and so none of kubectl-secret-apply's server-side-vs-client-side-apply
-// equivalence question applies here.
+// kubectlContextConfigureExecutionOperation selects the library path, which keeps the
+// admin token out of a subprocess argv (readable via /proc/<pid>/cmdline).
 const kubectlContextConfigureExecutionOperation = "kubectl-context-configure"
 
-// cloudContextKubeconfigCommands is the single source of the three `kubectl
-// config` argv sets configureCloudKubeContext renders (redacted) and, in
-// subprocess mode, executes verbatim, so the trace can never drift from
-// either execution path.
+// cloudContextKubeconfigCommands is the single source for both the redacted trace and subprocess execution.
 func cloudContextKubeconfigCommands(config configpkg.CloudContextConfig) [][]string {
 	return [][]string{
 		{"config", "set-cluster", config.KubernetesContext, "--server", "https://" + config.PublicIP + ":6443", "--insecure-skip-tls-verify=true"},
@@ -89,16 +73,8 @@ func configureCloudKubeContext(ctx core.Context, deps CloudContextDependencies, 
 	return nil
 }
 
-// libraryConfigureCloudKubeContext is the library-backed alternative to
-// shelling out to `kubectl config set-cluster`/`set-credentials`/
-// `set-context`. It loads the same kubeconfig file kubectl itself would
-// (clientcmd.NewDefaultPathOptions honors KUBECONFIG/the default
-// ~/.kube/config path exactly as kubectl does), updates or creates the named
-// cluster/authinfo/context entries the same three fields the subprocess path
-// would, and writes back through clientcmd.ModifyConfig — the same function
-// kubectl's own `config set-*` subcommands call. Existing entries are
-// preserved and only the fields these three commands would set are
-// overwritten, matching kubectl's own per-field update behavior.
+// libraryConfigureCloudKubeContext writes the same fields as the three `kubectl config set-*`
+// calls via clientcmd.ModifyConfig, which kubectl itself uses.
 func libraryConfigureCloudKubeContext(config configpkg.CloudContextConfig) error {
 	name := strings.TrimSpace(config.KubernetesContext)
 	pathOptions := clientcmd.NewDefaultPathOptions()

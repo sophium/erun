@@ -8,18 +8,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// resourceQuotaExceededError marks a resourceQuota re-check failure as a
-// caller-facing 409 (naming which cap/budget is short), distinct from a
-// repository failure while resolving the inputs, which is a 500.
+// resourceQuotaExceededError marks a caller-facing 409, distinct from a repository 500.
 type resourceQuotaExceededError struct{ detail string }
 
 func (e *resourceQuotaExceededError) Error() string { return e.detail }
 
-// revalidateResourceQuota re-runs the two resource-quota checks a redeploy
-// must still satisfy: the per-environment floor and the tenant's aggregate
-// budget. A redeploy does not add a new environment — it is already
-// counted — so the aggregate projection uses the runtime count as-is, not
-// +1 the way a create does.
+// revalidateResourceQuota uses the runtime count as-is: a redeployed environment
+// is already counted.
 func (r EnvironmentRoutes) revalidateResourceQuota(ctx context.Context) error {
 	quota, err := r.quotas.Get(ctx)
 	if err != nil {
@@ -38,11 +33,7 @@ func (r EnvironmentRoutes) revalidateResourceQuota(ctx context.Context) error {
 	return nil
 }
 
-// enforceRuntimeResourceQuotaOnCreate is revalidateResourceQuota's create-time
-// counterpart: the same per-environment floor and aggregate budget checks,
-// against a quota createEnvironment has already fetched, and against
-// runtimeCount+1 — this new environment is not counted yet, unlike a
-// redeploy's recheck.
+// enforceRuntimeResourceQuotaOnCreate projects runtimeCount+1 for the new environment.
 func (r EnvironmentRoutes) enforceRuntimeResourceQuotaOnCreate(ctx context.Context, quota model.TenantQuota) error {
 	if err := validateNamespaceQuotaFloor(quota); err != nil {
 		return &resourceQuotaExceededError{detail: err.Error()}
@@ -57,21 +48,14 @@ func (r EnvironmentRoutes) enforceRuntimeResourceQuotaOnCreate(ctx context.Conte
 	return nil
 }
 
-// minRuntimeCPUMillicores/MemoryMB/StorageGB are the smallest tenant quota
-// that can host a stock runtime environment, derived from
-// config.MinimumRuntimeNamespaceQuota: the erun-devops runtime pod summed
-// across both its containers (a ResourceQuota counts every container in the
-// pod), plus its PVCs. Below this floor Kubernetes rejects the pod at
-// admission, so checking it before the deploy Job starts turns a silent
-// five-minute rollout timeout (cause hidden in a ReplicaSet FailedCreate
-// event) into a clear 409 naming the shortfall.
+// The runtime floor sums every container in the pod plus its PVCs, as a
+// ResourceQuota does; checking it early turns a silent rollout timeout into a 409.
 var minRuntimeCPUMillicores, minRuntimeMemoryMB, minRuntimeStorageGB = func() (int, int, int) {
 	cpu, memory, storage := config.MinimumRuntimeNamespaceQuota()
 	return int(cpu), int(memory), int(storage)
 }()
 
-// validateNamespaceQuotaFloor rejects a tenant quota that cannot fit the
-// stock runtime pod, naming which cap is insufficient and by how much.
+// validateNamespaceQuotaFloor names which cap is short and by how much.
 func validateNamespaceQuotaFloor(quota model.TenantQuota) error {
 	switch {
 	case quota.MaxCPUMillicores < minRuntimeCPUMillicores:
@@ -84,15 +68,8 @@ func validateNamespaceQuotaFloor(quota model.TenantQuota) error {
 	return nil
 }
 
-// validateAggregateResourceBudget refuses admitting a runtime environment
-// that would push the tenant's projected total CPU/memory/storage past its
-// aggregate budget. Every runtime environment gets the SAME
-// per-environment cap (quota.MaxCPUMillicores etc.), so the projection is
-// exact, not an estimate: projectedRuntimeCount * the per-environment cap.
-// The caller computes the count: existingCount+1 for a new environment not
-// yet persisted, or existingCount as-is for a redeploy of one already
-// counted. This is a tenant-wide ceiling distinct from the per-environment
-// floor validateNamespaceQuotaFloor checks above.
+// validateAggregateResourceBudget is exact because every runtime environment gets
+// the same per-environment cap.
 func validateAggregateResourceBudget(projected int, quota model.TenantQuota) error {
 	switch {
 	case projected*quota.MaxCPUMillicores > quota.MaxTotalCPUMillicores:
@@ -105,9 +82,6 @@ func validateAggregateResourceBudget(projected int, quota model.TenantQuota) err
 	return nil
 }
 
-// environmentQuotaUsage reports how many environments the caller's tenant has
-// and its full quota row. Creation enforces the env-count cap; the provision
-// preview reports it; the deploy path threads the resource caps to the Job.
 func environmentQuotaUsage(ctx context.Context, environments EnvironmentRepository, quotas TenantQuotaRepository) (count int, quota model.TenantQuota, err error) {
 	quota, err = quotas.Get(ctx)
 	if err != nil {

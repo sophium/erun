@@ -31,12 +31,8 @@ func NewSSHDActivator(runRemoteCommand kube.RemoteCommandRunnerFunc) shared.SSHD
 	}
 }
 
-// emitSSHDConnectionInfo prints the connection details for a human who ran
-// `open` at the terminal, so it is terminal-only. With --no-shell, stdout is
-// the shell script the documented `eval "$(erun open ... --no-shell)"` alias
-// executes, and this block is prose (`SSH:`, `host:`, ...) that eval would run
-// as commands. stderr is not the fallback: the alias does not capture it, and
-// keeping it quiet there is deliberate, so a piped run simply omits the block.
+// emitSSHDConnectionInfo prints connection details on a terminal only: under --no-shell
+// stdout is eval'd, and stderr stays quiet by design.
 func emitSSHDConnectionInfo(ctx core.Context, info open.SSHConnectionInfo) error {
 	if ctx.Stdout == nil || !shared.WriterIsTerminal(ctx.Stdout) {
 		return nil

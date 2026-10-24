@@ -64,8 +64,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 		},
 	}
 	app := NewApp(erunUIDeps{store: store})
-	// Cloud-context Status is no longer persisted; seed the in-memory
-	// cache that production code consults via linkedCloudContext.
+	// Cloud-context Status is not persisted; seed the in-memory cache instead.
 	app.setCloudContextStatusInCache("team-context", cloud.CloudContextStatusStopped)
 
 	loaded, err := app.LoadEnvironmentConfig(uiSelection{Tenant: " frs ", Environment: " prod "})
@@ -102,9 +101,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	assertStoredEnvironmentConfig(t, stored, projectRoot)
 }
 
-// TestSaveAndLoadDeployComponentsRoundTrip exercises the non-empty deploy-
-// selection path the Playwright checklist cannot reach: the headless baseline
-// vendors no local component charts to select.
+// Covers the non-empty selection path the headless Playwright baseline cannot reach.
 func TestSaveAndLoadDeployComponentsRoundTrip(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -145,15 +142,8 @@ func TestSaveAndLoadDeployComponentsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestLoadDeployComponentsRuntimeOnlyWhenNoLocalCharts covers the read model for
-// an inert env: with no repo-local charts it offers only the runtime item,
-// pre-selected as the bootstrap/heal default.
-// TestLoadDeployComponentsLocalAgentShowsPublishedVersionView asserts the
-// checklist is a published-version view for a LOCAL-agent env too: it lists the
-// canonical component charts published at the deploy version (by reference) plus
-// the runtime — identical to what a runtime env shows — never the env's local
-// working-tree chart directories. The version, not the env's local source,
-// decides which charts exist. The registry probe is injected so this is offline.
+// A local-agent env lists the charts published at the deploy version plus the
+// runtime, never its working-tree chart directories.
 func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -169,8 +159,6 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 			},
 		},
 	}
-	// All five component charts are published at 1.0.0; none at 1.0.106. The frs
-	// tenant publishes its own charts (frs-backend-*), not the canonical erun set.
 	chartTags := map[string][]string{
 		"charts/frs-backend-postgres": {"1.0.0"},
 		"charts/frs-backend-db":       {"1.0.0"},
@@ -196,8 +184,6 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 		return out
 	}
 
-	// At 1.0.0 the local-agent env offers the published component charts + runtime —
-	// the same list a runtime env would show, not local frs-* chart dirs.
 	at100, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "local", Version: "1.0.0"})
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(1.0.0) failed: %v", err)
@@ -214,8 +200,7 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 		t.Fatalf("runtime item = %+v, want {frs-devops runtime selected published-chart}", runtime)
 	}
 
-	// With no version-to-deploy the list uses the env's current version (1.0.106),
-	// which publishes no component charts here — runtime only.
+	// No version-to-deploy: the current version (1.0.106) publishes no component charts.
 	atCurrent, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(current) failed: %v", err)
@@ -225,11 +210,7 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 	}
 }
 
-// TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts covers the
-// version-aware checklist for a sourceless (runtime) env: only component charts
-// the registry publishes at the deploy version are offered, and the runtime item
-// is always kept. The registry probe cannot be driven from the headless
-// Playwright suite (it stubs the network), so the filtering is asserted here.
+// The registry probe cannot be driven from headless Playwright, so filtering is asserted here.
 func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -245,9 +226,6 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 			},
 		},
 	}
-	// charts/<component> tags per registry repo: postgres + api are published at
-	// 1.0.112 only; db, powerdns, docs are published nowhere in this fixture. The
-	// frs tenant publishes its own charts (frs-backend-*).
 	chartTags := map[string][]string{
 		"charts/frs-backend-postgres": {"1.0.112"},
 		"charts/frs-backend-api":      {"1.0.112"},
@@ -270,8 +248,6 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 		return out
 	}
 
-	// At 1.0.112 only postgres + api charts exist, so only those (in rank order)
-	// plus the always-kept runtime are offered.
 	at112, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "prod", Version: "1.0.112"})
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(1.0.112) failed: %v", err)
@@ -280,8 +256,6 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 		t.Fatalf("components at 1.0.112 = %v, want %v (runtime first; unpublished db/powerdns/docs filtered out)", got, want)
 	}
 
-	// With no version-to-deploy the list uses the env's current runtime version
-	// (1.0.106), which has no published component charts here — runtime only.
 	atCurrent, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "prod"})
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(current) failed: %v", err)
@@ -291,11 +265,7 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 	}
 }
 
-// TestLoadDeployComponentsRuntimeChartReflectsTenantChart asserts the runtime row
-// reports the chart a by-reference deploy actually installs: the tenant's own
-// <tenant>-devops chart when it is published at the version, else the canonical
-// erun-devops fallback. The picker labels the row from PublishedChart, so it must
-// match what resolvePublishedRuntimeChartReference installs.
+// The runtime row must name the chart resolvePublishedRuntimeChartReference installs.
 func TestLoadDeployComponentsRuntimeChartReflectsTenantChart(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -332,12 +302,9 @@ func TestLoadDeployComponentsRuntimeChartReflectsTenantChart(t *testing.T) {
 		return ""
 	}
 
-	// The tenant publishes its own frs-devops chart at the version → the runtime
-	// installs (and the picker names) frs-devops, not the canonical fallback.
 	if got := runtimePublishedChart(t, map[string][]string{"charts/frs-devops": {"1.0.20"}}); got != "frs-devops" {
 		t.Fatalf("runtime PublishedChart with tenant chart published = %q, want frs-devops", got)
 	}
-	// No tenant runtime chart at the version → the deploy falls back to erun-devops.
 	if got := runtimePublishedChart(t, map[string][]string{}); got != "erun-devops" {
 		t.Fatalf("runtime PublishedChart with no tenant chart = %q, want erun-devops (fallback)", got)
 	}

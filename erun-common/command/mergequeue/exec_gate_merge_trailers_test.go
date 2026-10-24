@@ -10,12 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// gateMergeTrailerSeam answers the git calls one squash makes: the branch's
-// own commits read back as body, one path appears staged so the source is a
-// real contribution, and the message the squash is committed with is recorded
-// in *committed. The carriage is asserted through that message rather than
-// through a real repository, because the message is what the commit is made
-// from and this seam holds that choice to account directly.
+// gateMergeTrailerSeam fakes one squash's git calls and records the committed message.
 func gateMergeTrailerSeam(body string, committed *string) GateMergeWorkingTreeDependencies {
 	return GateMergeWorkingTreeDependencies{
 		ResolveRef: func(core.Context, string, string) (string, error) { return "abc123", nil },
@@ -32,13 +27,6 @@ func gateMergeTrailerSeam(body string, committed *string) GateMergeWorkingTreeDe
 	}
 }
 
-// TestGateMergeOneSourceCarriesTheSourceBranchesTrailers is the reproduction
-// of the reported failure: a branch whose own commits declare "Closes #N"
-// landed through the merge queue with that declaration discarded, because the
-// squash commit's message was only ever the caller-supplied review name. The
-// issue stayed open with its fix already on the target, and no commit on the
-// target referenced it — so a later reader had no way to tell a fixed issue
-// from an open one.
 func TestGateMergeOneSourceCarriesTheSourceBranchesTrailers(t *testing.T) {
 	const branchBody = "Fix the widget\n\n" +
 		"The widget was assembled backwards, so every caller reading it got\n" +
@@ -74,15 +62,6 @@ func TestGateMergeOneSourceCarriesTheSourceBranchesTrailers(t *testing.T) {
 	}
 }
 
-// TestGateMergeTrailersFromBodyStopsAHardWrappedValueAtItsParagraph is the
-// other half of the wrapped-value contract, and the half a naive "keep
-// consuming lines until the next trailer" fix fails: a wrapped value must take
-// its own paragraph and no more. Two continuations are folded — an indented one
-// and a hard-wrapped one — and then the entry stops dead at the blank line
-// under it, at the "Closes #N" that follows, and at the unrecognised "Note:"
-// under that. A carriage that swallowed the rest of the message would be a
-// worse defect than the truncation it replaced, because it would put an
-// author's prose on an unattended commit on the target.
 func TestGateMergeTrailersFromBodyStopsAHardWrappedValueAtItsParagraph(t *testing.T) {
 	body := "Fix the widget\n\n" +
 		"Reproduces: the parts arrived in append order rather than the order they\n" +
@@ -109,19 +88,8 @@ func TestGateMergeTrailersFromBodyStopsAHardWrappedValueAtItsParagraph(t *testin
 	}
 }
 
-// TestGateMergeTrailersFromBodyStopsAClosingReferenceAtItsOwnLine is the
-// reproduction of the reported over-consumption: a body whose "Closes #N" is
-// followed on the very next line — no blank between them — by a sentence of
-// prose carried that sentence as part of the declaration, because every
-// non-blank line beneath a trailer was read as a continuation of it. The prose
-// then reached the unattended commit on the target inside the reported trailer
-// set as though the author had declared it.
-//
-// It is fixable where a continuation opening a "Token:" line is not, because a
-// "Closes #N" reference list has no second line to write: the pattern is
-// anchored at both ends and every alternative is on the one line, so the
-// declaration is complete where it stands. A line beneath it is therefore not a
-// reading of the value that is merely unlikely — there is nothing for it to be.
+// TestGateMergeTrailersFromBodyStopsAClosingReferenceAtItsOwnLine: "Closes #N" has no continuation,
+// so prose on the next line is not carried.
 func TestGateMergeTrailersFromBodyStopsAClosingReferenceAtItsOwnLine(t *testing.T) {
 	body := "Fix the widget\n\n" +
 		"Closes #2703\n" +
@@ -146,14 +114,6 @@ func TestGateMergeTrailersFromBodyStopsAClosingReferenceAtItsOwnLine(t *testing.
 	}
 }
 
-// TestGateMergeTrailersFromBodyStopsAContinuableValueAtAnUnrecognisedTrailer
-// pins the terminator on a value that is itself continuable, which is the case
-// the closing spelling stops exercising once it stands complete on its own line.
-// A "Token:" line this squash does not carry still ends the entry above it, so
-// the line stays out of the value rather than being folded into it. Treating
-// one as a continuation instead is what would carry a "Signed-off-by:" or
-// "Refs #N" onto the target as part of the declaration above it. The
-// "Defect-Fix:" beneath them is carried on its own line and folds nothing.
 func TestGateMergeTrailersFromBodyStopsAContinuableValueAtAnUnrecognisedTrailer(t *testing.T) {
 	body := "Fix the widget\n\n" +
 		"Reproduces: the parts arrived in append order rather than the order they\n" +
@@ -178,16 +138,8 @@ func TestGateMergeTrailersFromBodyStopsAContinuableValueAtAnUnrecognisedTrailer(
 	}
 }
 
-// TestGateMergeTrailersFromBodyReadsAColumnZeroTokenLineAsANewEntry records the
-// residual the wrap fix leaves open. It states what the carrier can decide
-// rather than holding the outcome up as wanted: a continuation that starts at
-// column 0 with a "Token:" spelling is the same bytes as a trailer entry
-// starting there, and a hand-wrapped value's continuation lines are exactly a
-// run of such lines, so no rule tells the two apart. Reading the line as an
-// entry truncates the value above it; reading it as a continuation is the only
-// way to carry a hard-wrapped value whole, and widening the entry to take it
-// would fold every genuine line of that shape — the "Defect-Fix: yes" and
-// "Refs #N" the terminator above exists for — into the declaration instead.
+// TestGateMergeTrailersFromBodyReadsAColumnZeroTokenLineAsANewEntry records a known residual: a
+// column-0 "Token:" continuation is indistinguishable from a new entry.
 func TestGateMergeTrailersFromBodyReadsAColumnZeroTokenLineAsANewEntry(t *testing.T) {
 	body := "Fix the widget\n\n" +
 		"Reproduces: the card closed under a stationary pointer, and\n" +
@@ -203,12 +155,6 @@ func TestGateMergeTrailersFromBodyReadsAColumnZeroTokenLineAsANewEntry(t *testin
 	}
 }
 
-// TestGateMergeTrailersFromBodyReadsEveryDeclaredTrailer pins the boundary that
-// replaced the block walk, and the two shapes the walk decided wrongly in both
-// directions. A declaration sitting above a trailing paragraph the walk did not
-// recognise is carried; a line the closed set does not name is not carried
-// wherever it sits, so dropping the boundary did not widen what lands on the
-// target.
 func TestGateMergeTrailersFromBodyReadsEveryDeclaredTrailer(t *testing.T) {
 	body := "Fix the widget\n\n" +
 		"The widget was assembled backwards, so every caller reading it got\n" +
@@ -237,9 +183,6 @@ func TestGateMergeTrailersFromBodyReadsEveryDeclaredTrailer(t *testing.T) {
 	}
 }
 
-// TestGateMergeTrailersFromBodyIsEmptyWhenTheBodyDeclaresNoTrailers pins the
-// ordinary case that must not regress: a message that declares nothing carried
-// yields nothing, so a body of ordinary prose is read as prose.
 func TestGateMergeTrailersFromBodyIsEmptyWhenTheBodyDeclaresNoTrailers(t *testing.T) {
 	body := "Fix the widget\n\n" +
 		"The widget was assembled backwards, so every caller reading it got\n" +
@@ -249,10 +192,6 @@ func TestGateMergeTrailersFromBodyIsEmptyWhenTheBodyDeclaresNoTrailers(t *testin
 	}
 }
 
-// TestGateMergeOneSourceDoesNotRepeatTrailersTheCallerAlreadyPassed covers the
-// other half of the same contract: a caller that supplies the branch's own
-// message verbatim — which is how the one squash known to carry trailers got
-// them — must not end up with every trailer twice.
 func TestGateMergeOneSourceDoesNotRepeatTrailersTheCallerAlreadyPassed(t *testing.T) {
 	var committed string
 	deps := gateMergeTrailerSeam("Fix the widget\n\nCloses #2601\n", &committed)
@@ -265,10 +204,6 @@ func TestGateMergeOneSourceDoesNotRepeatTrailersTheCallerAlreadyPassed(t *testin
 	}
 }
 
-// TestGateMergeOneSourceIgnoresTrailersThatAreNotLoadBearing pins the closed
-// set: the carriage exists to preserve the lines this repository's guidance
-// makes load-bearing for a landed commit, not to copy arbitrary trailing prose
-// from a branch onto an unattended commit on the target.
 func TestGateMergeOneSourceIgnoresTrailersThatAreNotLoadBearing(t *testing.T) {
 	var committed string
 	deps := gateMergeTrailerSeam("Fix the widget\n\nCloses #2601\nNote: this is a workaround for a quirk\n", &committed)
@@ -284,11 +219,6 @@ func TestGateMergeOneSourceIgnoresTrailersThatAreNotLoadBearing(t *testing.T) {
 	}
 }
 
-// TestGateMergeOneSourceSkipsADefectFixThatNamesNoReproduction is the seam
-// between the squash and the regression-test policy: a bug/ branch that
-// declares no reproduction is backed out with a hard reset, reported as a
-// skip naming the policy, and never committed, so the rest of the batch still
-// gates against a clean tree.
 func TestGateMergeOneSourceSkipsADefectFixThatNamesNoReproduction(t *testing.T) {
 	var gitCalls []string
 	var committed string

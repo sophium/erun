@@ -20,12 +20,8 @@ import (
 )
 
 func testJobAnAbandonedJobReadsAsUnknownNeverAsSuccess(t *testing.T) {
-	// A record whose supervisor is gone without an outcome — what a replaced
-	// runtime pod leaves behind. Seeded directly, because killing a supervisor
-	// mid-run would race the outcome it is about to write, and the state under
-	// test is the record, not the kill. A pid of 1 that erun is not is a
-	// process the record can be reconciled against; the seeded pid below is one
-	// that cannot exist.
+	// A running record whose supervisor pid cannot exist reads as unknown (exit
+	// 125), never success. Seeded, since killing a supervisor races its outcome.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	dir := filepath.Dir(jobRecordPath(setup, "team", "dev", "stranded"))
@@ -55,8 +51,7 @@ func testJobAnAbandonedJobReadsAsUnknownNeverAsSuccess(t *testing.T) {
 	}
 	golden.Equal(t, "job/an_abandoned_job_reads_as_unknown_never_as_success", normalize.Apply(status.Combined+await.Combined))
 
-	// The demotion is persisted, so every later read gives the same definite
-	// answer instead of re-deciding it.
+	// The demotion is persisted.
 	body, err := os.ReadFile(filepath.Join(dir, "stranded.json"))
 	if err != nil {
 		t.Fatalf("read reconciled record: %v", err)
@@ -66,8 +61,8 @@ func testJobAnAbandonedJobReadsAsUnknownNeverAsSuccess(t *testing.T) {
 	}
 }
 
-// seedRestartedJobOnThisPod records a job "restarted" as still running under
-// a dead pid on this host's own hostname, which it returns.
+// seedRestartedJobOnThisPod seeds a running job under a dead pid on this host's
+// hostname and returns the hostname.
 func seedRestartedJobOnThisPod(t *testing.T, setup env.Setup) string {
 	t.Helper()
 	hostname, err := os.Hostname()
@@ -96,14 +91,8 @@ func seedRestartedJobOnThisPod(t *testing.T, setup env.Setup) string {
 }
 
 func testJobAnAbandonedJobOnTheSamePodNamesAContainerRestartViaKubectlSubprocess(t *testing.T) {
-	// A stranded job whose recorded hostname matches this pod's own
-	// hostname rules out a pod replacement, so reconciliation asks
-	// Kubernetes whether the runtime container itself restarted
-	// (jobSupervisorContainerRestart, kubectl-pod-get execution mode).
-	// The kubectl stub answers `get pod <hostname> -o json` with a
-	// terminated erun-devops container, and the reported reason must name
-	// the real cause instead of falling back to "could not be
-	// determined".
+	// A stranded job on this pod's own hostname names the container restart that
+	// kubectl reports.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedRestartedJobOnThisPod(t, setup)
@@ -129,12 +118,8 @@ func testJobAnAbandonedJobOnTheSamePodNamesAContainerRestartViaKubectlSubprocess
 }
 
 func testJobAnAbandonedJobOnTheSamePodNamesAContainerRestartViaKubectlPodGetLibraryExecutionMode(t *testing.T) {
-	// Proves the library path (kubectl-pod-get=library) produces the same
-	// observable result as the subprocess path above -- a real client-go
-	// call against a fake API server instead of shelling out to kubectl.
-	// The kubectl stub fails loudly and distinctively only for a "get
-	// pod" argv, so a fallback to the subprocess path surfaces as a
-	// recognizable failure instead of silently passing.
+	// The library kubectl-pod-get mode reports the same restart via client-go; the
+	// kubectl stub fails distinctively if the subprocess path is used instead.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedExecutionMode(t, setup, "kubectl-pod-get", "library")
@@ -202,12 +187,8 @@ func testJobAnAbandonedJobOnTheSamePodNamesAContainerRestartViaKubectlPodGetLibr
 }
 
 func testJobAJobThatBackgroundsWorkAndExitsReadsAsAbandonedNotSuccess(t *testing.T) {
-	// The supervisor waits on its immediate child only; a child that
-	// backgrounds a grandchild and exits 0 would otherwise read as a clean
-	// success while the backgrounded work runs on unsupervised. Redirecting
-	// the grandchild's output away from the supervisor's captured pipe is
-	// what reproduces the shape -- a grandchild inheriting that pipe would
-	// block the immediate child's own exit instead.
+	// A job whose child backgrounds work and exits 0 reads as abandoned. The
+	// grandchild's output is redirected so it doesn't block the child's exit.
 	if runtime.GOOS == "windows" {
 		t.Skip("process-group survivor detection is POSIX-only; see erun-common/job_process_windows.go")
 	}
@@ -226,10 +207,7 @@ func testJobAJobThatBackgroundsWorkAndExitsReadsAsAbandonedNotSuccess(t *testing
 	if await.ExitCode != 1 {
 		t.Fatalf("expected an abandoned job to report a failure outcome, got %d:\n%s", await.ExitCode, await.Combined)
 	}
-	// : a raw exitCode of 0 sitting beside state "abandoned" is
-	// exactly the false-success shape a caller reading only exitCode would
-	// miss; succeeded must say so explicitly rather than leaving it to be
-	// re-derived from state.
+	// exitCode 0 beside "abandoned" must still report succeeded=false.
 	statusJSON := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "gate", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	var payload struct {
 		State     string `json:"state"`
@@ -246,13 +224,8 @@ func testJobAJobThatBackgroundsWorkAndExitsReadsAsAbandonedNotSuccess(t *testing
 }
 
 func testJobAJobStartedOnADifferentPodReadsBackAsPodReplacedNotAGuess(t *testing.T) {
-	// The supervisor stamps the pod's hostname at start, so a record
-	// read back from a different hostname is definitive proof of pod
-	// replacement, not the older "most likely" guess. Seeded directly for
-	// the same reason as the sibling "abandoned" scenario: the state under
-	// test is the record's hostname mismatch, not how a real pod eviction
-	// would produce one. hostname is a value this suite's own host can never
-	// report, so the mismatch is guaranteed.
+	// A record stamped with another pod's hostname reads as pod-replaced with a
+	// definite reason, not a guess.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	dir := filepath.Dir(jobRecordPath(setup, "team", "dev", "evicted"))

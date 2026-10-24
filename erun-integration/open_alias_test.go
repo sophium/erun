@@ -12,17 +12,13 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// zshAliasLine is the exact alias production appends for team/dev under
-// zsh; the tests assert the startup file gains this line verbatim.
 const zshAliasLine = `alias team-dev='eval "$(erun open team dev --no-shell)"'`
 
 func testOpenAliasPromptDryRunAcceptTracesAppend(t *testing.T) {
 	t.Parallel()
-	// ERUN_FORCE_TTY=1 lifts the stdout-TTY gate so the alias-setup flow
-	// runs in the piped harness; SHELL=/bin/zsh pins the startup file to
-	// ~/.zshrc. Accepting in --dry-run must trace the append but leave
-	// ~/.zshrc untouched. The alias confirm must stay the run's only
-	// prompt — readline read-ahead would starve a second one.
+	// ERUN_FORCE_TTY=1 lifts the TTY gate in the piped harness; SHELL pins ~/.zshrc.
+	// The alias confirm must be the only prompt, since readline read-ahead would
+	// starve a second one.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	zshrc := filepath.Join(setup.Home, ".zshrc")
@@ -32,8 +28,6 @@ func testOpenAliasPromptDryRunAcceptTracesAppend(t *testing.T) {
 	envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1", "SHELL=/bin/zsh")
 	result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "y\n"})
 	golden.Equal(t, "open/alias_prompt_dry_run_accept_traces_append", normalize.PromptConfirm(result.Combined))
-	// Dry-run must not mutate the startup file (side effect outside the
-	// captured streams).
 	body, err := os.ReadFile(zshrc)
 	if err != nil {
 		t.Fatalf("read ~/.zshrc: %v", err)
@@ -45,8 +39,6 @@ func testOpenAliasPromptDryRunAcceptTracesAppend(t *testing.T) {
 
 func testOpenAliasPromptDeclinePrintsHint(t *testing.T) {
 	t.Parallel()
-	// Declining ("n") must print the alias hint and write no file.
-	// ERUN_FORCE_TTY=1 lifts the TTY gate; SHELL=/bin/zsh pins ~/.zshrc.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	zshrc := filepath.Join(setup.Home, ".zshrc")
@@ -66,12 +58,7 @@ func testOpenAliasPromptDeclinePrintsHint(t *testing.T) {
 }
 
 func testOpenAliasPromptAcceptAppendsAliasRealRun(t *testing.T) {
-	// Real-run: accepting the confirm must append the alias line to
-	// ~/.zshrc. The kubectl stub reports deployed-and-matching so no helm
-	// deploy runs. SeedDevopsRepo keeps the runtime spec off the default
-	// chart path so the "create team-devops chart?" prompt never fires —
-	// the alias confirm must stay the subprocess's single prompt
-	// (readline read-ahead).
+	// SeedDevopsRepo keeps the "create team-devops chart?" prompt from firing.
 	skipIfPortsBusy(t, 26100, 26133)
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
@@ -94,8 +81,6 @@ func testOpenAliasPromptAcceptAppendsAliasRealRun(t *testing.T) {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "open/alias_prompt_accept_appends_alias_real_run", normalize.PromptConfirm(result.Combined))
-	// The append is a side effect outside the captured streams: the
-	// seeded content must survive and the alias line must follow it.
 	body, err := os.ReadFile(zshrc)
 	if err != nil {
 		t.Fatalf("read ~/.zshrc: %v", err)
@@ -107,11 +92,7 @@ func testOpenAliasPromptAcceptAppendsAliasRealRun(t *testing.T) {
 
 func testOpenAliasPromptSkippedWhenAliasConfigured(t *testing.T) {
 	t.Parallel()
-	// When ~/.zshrc already carries the team-dev alias,
-	// detectOpenNoShellAliasStartupFile reports it configured
-	// (startupFileHasAlias true branch) and the whole prompt is skipped:
-	// no confirm, no hint lines, just the setup script. No stdin is
-	// wired, so a leaked prompt would hang and trip the run timeout.
+	// No stdin is wired, so a leaked prompt would hang and trip the timeout.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	zshrc := filepath.Join(setup.Home, ".zshrc")
@@ -124,13 +105,7 @@ func testOpenAliasPromptSkippedWhenAliasConfigured(t *testing.T) {
 }
 
 func testOpenAliasPromptBashAcceptCreatesBashrc(t *testing.T) {
-	// SHELL=/bin/bash exercises openNoShellStartupFiles' bash arm: the
-	// candidate list is ~/.bashrc, ~/.bash_profile, ~/.profile, none of
-	// which exist, so detectOpenNoShellAliasStartupFile falls through
-	// every stat error and offers the preferred ~/.bashrc. Accepting in
-	// real-run drives appendOpenNoShellAlias's create-missing-file arm.
-	// Real-run shape mirrors alias_prompt_accept_appends_alias_real_run
-	// (deployed kubectl stub + port-forward sim on the 26100 range).
+	// None of the bash candidates exist, so ~/.bashrc is created.
 	skipIfPortsBusy(t, 26100, 26133)
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
@@ -160,12 +135,7 @@ func testOpenAliasPromptBashAcceptCreatesBashrc(t *testing.T) {
 
 func testOpenAliasPowershellDialectPrintsFunctionHint(t *testing.T) {
 	t.Parallel()
-	// SHELL=/bin/pwsh resolves the PowerShell dialect:
-	// detectOpenNoShellAliasStartupFile refuses a startup file, so the
-	// flow takes the hint-lines-only arm — "one-liner function:" plus the
-	// Invoke-Expression wrapper — and the stdout setup script switches to
-	// the PowerShell form (powerShellQuote). No prompt fires, so no
-	// stdin is wired.
+	// PowerShell has no startup file to offer, so only hint lines print.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1", "SHELL=/bin/pwsh")

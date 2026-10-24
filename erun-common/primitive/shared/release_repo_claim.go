@@ -11,48 +11,19 @@ import (
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
-// The exclusive activity lease release_claim.go added scopes its claim to one
-// environment's own on-disk store, so two orchestrators driving different
-// environments take their claims in different scopes and are structurally
-// invisible to each other — the collision that actually happens in
-// production, since a release can run from any environment. The resource
-// genuinely being contended is the repository itself: one VERSION, one tag
-// namespace, one main. This file adds a second, repository-global claim on a
-// remote git ref, which every orchestrator that can push to the release's
-// origin can see and contend on, with no shared store beyond the repository
-// they are already racing to change.
-//
-// A plain `git push <object>:<ref>` for a ref that does not yet exist is
-// git's own compare-and-swap: the client claims the ref currently has no
-// value, and the server rejects the update the instant somebody else's push
-// already gave it one — the same atomicity O_CREATE|O_EXCL gives the local
-// exclusive lease's file create. `--force-with-lease=<ref>:<expected>` gives
-// the identical compare-and-swap for a renewal or a reclaim, so a stale
-// holder can never be overwritten by a caller racing another live one.
+// The local version lease is per environment, so releases from different environments
+// cannot see each other. A remote claim ref is repository-global: creating a missing ref
+// and --force-with-lease are git's compare-and-swap.
 const (
-	// ReleaseRepoClaimRemote is the remote every release publishes through,
-	// so it is the one namespace every orchestrator racing this repository
-	// can actually reach.
-	ReleaseRepoClaimRemote = "origin"
-	// releaseRepoClaimRefPrefix namespaces the claim refs away from tags and
-	// branches a human would create.
+	// ReleaseRepoClaimRemote is the remote every release publishes through, so all racers see it.
+	ReleaseRepoClaimRemote    = "origin"
 	releaseRepoClaimRefPrefix = "refs/erun/release-claim/"
-	// releaseRepoClaimProbeRefPrefix is a throwaway local ref used only to
-	// read a remote claim's content without writing FETCH_HEAD, which the
-	// release's own git commands (running concurrently with this claim's
-	// renewal ticker, in the same checkout) read and rely on.
+	// releaseRepoClaimProbeRefPrefix avoids writing FETCH_HEAD, which concurrent release git commands read.
 	releaseRepoClaimProbeRefPrefix = "refs/erun/_release-claim-probe/"
-	// releaseRepoClaimMaxAttempts bounds the retry when a create or a reclaim
-	// loses a race: one retry re-reads and reacts to whoever just won.
-	releaseRepoClaimMaxAttempts = 3
+	releaseRepoClaimMaxAttempts    = 3
 )
 
-// ReleaseRepoClaimRecord is the JSON stored in the claim ref's blob. It
-// carries Environment rather than PID: every environment that can push to
-// the release's origin can race this claim, so the environment is what
-// actually identifies a losing caller's counterpart, while a pid only ever
-// named a process in a pod that may already be gone by the time anyone reads
-// it back.
+// ReleaseRepoClaimRecord carries Environment, not a pid: the holder may be in any environment.
 type ReleaseRepoClaimRecord struct {
 	Holder      activity.EnvironmentActivityLeaseHolder `json:"holder"`
 	Environment string                                  `json:"environment,omitempty"`
@@ -60,13 +31,7 @@ type ReleaseRepoClaimRecord struct {
 	ExpiresAt   time.Time                               `json:"expiresAt"`
 }
 
-// ReleaseRepoClaimConflictError names the still-live holder of the
-// repository-global claim, in the same wording the local lease's refusal
-// uses, so a second orchestrator sees one consistent message regardless of
-// which of the two claims refused it. Now is carried alongside StartedAt
-// (rather than computing a duration with time.Now() inside Error) so the
-// message is a pure function of the refusal's own fields and stays testable
-// against a fixed clock.
+// ReleaseRepoClaimConflictError carries Now so Error is a pure function of its fields.
 type ReleaseRepoClaimConflictError struct {
 	Version     string
 	Holder      activity.EnvironmentActivityLeaseHolder
@@ -76,14 +41,8 @@ type ReleaseRepoClaimConflictError struct {
 	Now         time.Time
 }
 
-// Error names both remedies, and neither promises more than the reclaim rule
-// delivers. A holder in the refusing environment is reclaimed by that
-// environment's own liveness probe as soon as its process is gone (see
-// releaseRepoClaimHeld); a holder in another environment can only be waited
-// out to the claim's lapse, since nothing here can see whether its process is
-// still there. The ref itself is named as the deliberate escape hatch: it is
-// the only handle a claim has, and an operator who has established that the
-// holder is gone needs it to clear a version rather than abandon it.
+// Error names both remedies: a same-environment holder is reclaimed once gone, another
+// environment's must lapse; the ref is the manual escape hatch.
 func (e *ReleaseRepoClaimConflictError) Error() string {
 	return fmt.Sprintf("%s is already being released by %s (running for %s) — a holder in this environment is reclaimed automatically on the next attempt once its process is gone, and a holder in another environment once its claim lapses. If you have established that holder is gone, clear it with: git push %s --delete %s",
 		strings.TrimSpace(e.Version),
@@ -93,12 +52,7 @@ func (e *ReleaseRepoClaimConflictError) Error() string {
 		ReleaseRepoClaimRef(e.Version))
 }
 
-// releaseClaimRunningFor reports how long the holder has been running,
-// rounded to the second for a stable, readable duration. StartedAt can be
-// zero for a claim record predating this field, or a previous format that
-// only ever carried ExpiresAt; a zero value is reported as "an unknown
-// duration" rather than the enormous, misleading span time.Since(zero) would
-// compute.
+// releaseClaimRunningFor reports a zero StartedAt (older records) as an unknown duration.
 func releaseClaimRunningFor(startedAt, now time.Time) string {
 	if startedAt.IsZero() {
 		return "an unknown duration"
@@ -106,12 +60,7 @@ func releaseClaimRunningFor(startedAt, now time.Time) string {
 	return now.Sub(startedAt).Round(time.Second).String()
 }
 
-// ReleaseClaimHolderDescription renders a holder together with the
-// environment racing it, which is the pair that actually lets a losing
-// caller find their counterpart. Either half can be absent — an older
-// claim record predating this field, or a holder with no other identifying
-// fields set — so each is only appended when present, never leaving a
-// dangling separator or an empty fragment.
+// ReleaseClaimHolderDescription appends each half only when present.
 func ReleaseClaimHolderDescription(holder activity.EnvironmentActivityLeaseHolder, environment string) string {
 	desc := holder.String()
 	environment = strings.TrimSpace(environment)
@@ -132,26 +81,13 @@ func releaseRepoClaimProbeRef(version string) string {
 	return releaseRepoClaimProbeRefPrefix + core.SanitizeForFilename(strings.TrimSpace(version))
 }
 
-// releaseRepoClaimLocalHolder answers whether the caller's own environment
-// still has a live holder of the version being claimed. Only a caller in that
-// same environment can answer it at all — which is why it is a probe rather
-// than a field on the claim record, whose subject may live in an environment
-// nothing here can see. nil means the caller cannot tell, and the record's own
-// expiry is then the only rule.
+// releaseRepoClaimLocalHolder reports whether the caller's environment still has a live holder;
+// nil means unknown, leaving expiry as the only rule.
 type releaseRepoClaimLocalHolder func() bool
 
-// TakeReleaseRepoClaim resolves the remote claim ref's current state and
-// either creates it, reclaims it from a dead or expired holder, or refuses in
-// favor of a still-live one. An empty sha with a nil error means the remote
-// could not be read at all (no network, no origin, no push access) —
-// indistinguishable from a solo caller with nothing to contend against, so it
-// is treated the same way: proceed without the repository-global claim rather
-// than invent a refusal nothing confirms.
-//
-// localHolderAlive is consulted only for a claim the caller's own environment
-// recorded, and must be read before the caller takes its own local claim: what
-// it reports is whether somebody else in this environment is still holding the
-// version.
+// TakeReleaseRepoClaim creates, reclaims, or refuses the remote claim. An empty sha with nil
+// error means the remote was unreadable and the release proceeds without it.
+// localHolderAlive must be read before the caller takes its own local claim.
 func TakeReleaseRepoClaim(ctx core.Context, projectRoot, environment, version string, holder activity.EnvironmentActivityLeaseHolder, now time.Time, localHolderAlive releaseRepoClaimLocalHolder) (string, error) {
 	ref := ReleaseRepoClaimRef(version)
 
@@ -163,8 +99,6 @@ func TakeReleaseRepoClaim(ctx core.Context, projectRoot, environment, version st
 		}
 
 		if !exists {
-			// A fresh claim: nobody held this version before, so now is a
-			// genuine StartedAt.
 			newSHA, err := WriteReleaseRepoClaimBlob(ctx, projectRoot, environment, holder, now, now)
 			if err != nil {
 				return "", err
@@ -183,9 +117,7 @@ func TakeReleaseRepoClaim(ctx core.Context, projectRoot, environment, version st
 			return "", &ReleaseRepoClaimConflictError{Version: version, Holder: record.Holder, Environment: record.Environment, StartedAt: record.StartedAt, ExpiresAt: record.ExpiresAt, Now: now}
 		}
 
-		// A reclaim — of a holder whose claim lapsed, or one this environment
-		// can no longer see: this is a new holder, so it gets its own
-		// StartedAt rather than inheriting the dead holder's.
+		// A reclaim is a new holder with its own StartedAt.
 		newSHA, err := WriteReleaseRepoClaimBlob(ctx, projectRoot, environment, holder, now, now)
 		if err != nil {
 			return "", err
@@ -193,24 +125,13 @@ func TakeReleaseRepoClaim(ctx core.Context, projectRoot, environment, version st
 		if err := gitPushUpdateRefWithLease(ctx, projectRoot, ReleaseRepoClaimRemote, newSHA, ref, existingSHA); err == nil {
 			return newSHA, nil
 		}
-		// somebody else's reclaim (or fresh claim) landed first; loop and re-read.
+		// Somebody else's push landed first; re-read.
 	}
 	return "", fmt.Errorf("release: could not take the repository-global claim for %s: contended", version)
 }
 
-// RenewReleaseRepoClaim extends the caller's own claim, compare-and-swapping
-// against the sha it last wrote so a claim that was reclaimed out from under
-// it (its own renewal having lapsed past the TTL) is never silently
-// overwritten. A failure here is best-effort, matching the local lease's
-// renewal: the caller keeps its last-known sha and tries again next tick.
-//
-// A renewal is the same holder extending the same claim, so it must carry
-// the original StartedAt forward rather than resetting it to now: currentSHA
-// names the blob this process itself wrote (originally or on a prior
-// renewal), and that object already exists locally — reading it is a plain
-// local git object lookup, not a network call, and it happens before the
-// push below, so it neither reads nor writes the ref and cannot weaken the
-// force-with-lease compare-and-swap that follows.
+// RenewReleaseRepoClaim CAS-extends the caller's own claim, best-effort, carrying the
+// original StartedAt forward from its own locally-present blob.
 func RenewReleaseRepoClaim(ctx core.Context, projectRoot, environment, version string, holder activity.EnvironmentActivityLeaseHolder, now time.Time, currentSHA string) (string, error) {
 	existing, err := ReadReleaseRepoClaimBlob(ctx, projectRoot, currentSHA)
 	if err != nil {
@@ -227,11 +148,7 @@ func RenewReleaseRepoClaim(ctx core.Context, projectRoot, environment, version s
 	return newSHA, nil
 }
 
-// deleteReleaseRepoClaim drops the caller's own claim so the next release
-// does not have to wait out the TTL. Idempotent by construction: the
-// force-with-lease only removes the ref if it still holds the caller's own
-// sha, so a claim already reclaimed by someone else (this caller's TTL having
-// lapsed) is left alone rather than deleting a legitimate new holder.
+// deleteReleaseRepoClaim only removes the ref if it still holds the caller's sha.
 func deleteReleaseRepoClaim(ctx core.Context, projectRoot, version, currentSHA string) error {
 	ref := ReleaseRepoClaimRef(version)
 	lease := fmt.Sprintf("--force-with-lease=%s:%s", ref, currentSHA)
@@ -239,27 +156,9 @@ func deleteReleaseRepoClaim(ctx core.Context, projectRoot, version, currentSHA s
 	return runReleaseClaimPush(ctx, projectRoot, "push", lease, ReleaseRepoClaimRemote, "--delete", ref)
 }
 
-// releaseRepoClaimHeld reports whether record still stands in the way of a
-// caller releasing version from environment.
-//
-// Its expiry is not the whole answer for a claim this same environment
-// recorded. A holder that is cancelled, crashes, or loses its pod never runs
-// the deferred release that deletes the claim, so the claim outlived the
-// holder it names and refused every retry for the rest of its twenty-minute
-// TTL — while the refusal itself promised to reclaim exactly those holders on
-// the next attempt. A pid cannot fix that: it names a process in one pod of
-// one environment, and the claim is deliberately readable from every
-// environment that can push to the release's origin.
-//
-// The liveness that is observable is the environment's own: every release also
-// takes a local exclusive lease for the same version, keyed to the process
-// holding it and reclaimed the moment that process is gone. So for a claim
-// recorded against the caller's own environment, that local store answers "is
-// the holder still there", and the claim is reclaimable as soon as it is not.
-// A claim recorded against any other environment keeps the expiry-only rule,
-// because nothing here can see whether that holder is alive. A record with no
-// environment at all (one written before that field existed) keeps it too,
-// rather than being treated as the caller's own.
+// releaseRepoClaimHeld: a claim from the caller's own environment is reclaimable as soon as
+// the local lease shows no live holder (crashed holders never delete it). Other or
+// unrecorded environments fall back to expiry only.
 func releaseRepoClaimHeld(record ReleaseRepoClaimRecord, now time.Time, environment string, localHolderAlive releaseRepoClaimLocalHolder) bool {
 	if record.ExpiresAt.IsZero() || !now.Before(record.ExpiresAt) {
 		return false
@@ -294,11 +193,7 @@ func WriteReleaseRepoClaimBlob(ctx core.Context, projectRoot, environment string
 	return strings.TrimSpace(string(output)), nil
 }
 
-// ReadReleaseRepoClaimBlob reads a claim record blob this process itself
-// wrote earlier via writeReleaseRepoClaimBlob, by its git object sha. The
-// object is already present in the local object database — no fetch, no ref
-// read — which is what lets the renewal path recover the original StartedAt
-// without touching the CAS in takeReleaseRepoClaim/renewReleaseRepoClaim.
+// ReadReleaseRepoClaimBlob reads a blob this process wrote, from the local object database.
 func ReadReleaseRepoClaimBlob(ctx core.Context, projectRoot, sha string) (ReleaseRepoClaimRecord, error) {
 	ctx.TraceCommand(projectRoot, "git", "cat-file", "-p", sha)
 	output, err := core.Command("git", "-C", projectRoot, "cat-file", "-p", sha).Output()
@@ -312,11 +207,8 @@ func ReadReleaseRepoClaimBlob(ctx core.Context, projectRoot, sha string) (Releas
 	return record, nil
 }
 
-// GitLsRemoteRef reads a single ref's current sha directly from the remote,
-// with no local repo state written — safe to call while the release's own
-// git commands run concurrently in the same checkout. ok is false both when
-// the ref does not exist and when the read failed outright; the caller tells
-// these apart via err.
+// GitLsRemoteRef reads one remote ref without writing local state. ok is false when missing
+// or unreadable; err tells them apart.
 func GitLsRemoteRef(ctx core.Context, projectRoot, remote, ref string) (sha string, ok bool, err error) {
 	ctx.TraceCommand(projectRoot, "git", "ls-remote", remote, ref)
 	output, err := core.Command("git", "-C", projectRoot, "ls-remote", remote, ref).Output()
@@ -334,10 +226,7 @@ func GitLsRemoteRef(ctx core.Context, projectRoot, remote, ref string) (sha stri
 	return fields[0], true, nil
 }
 
-// LoadReleaseRepoClaimRecord fetches ref's current object into a throwaway
-// local probe ref (never FETCH_HEAD — see releaseRepoClaimProbeRefPrefix)
-// and reads its content back, cleaning up the probe ref afterward regardless
-// of outcome.
+// LoadReleaseRepoClaimRecord fetches ref into a throwaway probe ref and always removes it.
 func LoadReleaseRepoClaimRecord(ctx core.Context, projectRoot, remote, ref, version string) (ReleaseRepoClaimRecord, error) {
 	probe := releaseRepoClaimProbeRef(version)
 	defer func() {
@@ -374,12 +263,8 @@ func gitPushUpdateRefWithLease(ctx core.Context, projectRoot, remote, sha, ref, 
 	return runReleaseClaimPush(ctx, projectRoot, "push", lease, remote, sha+":"+ref)
 }
 
-// runReleaseClaimPush runs one push of the repository-global claim ref,
-// reporting a ruleset bypass GitHub wrote on its stderr. The claim ref lands on
-// the same origin as the release's own refs, so it is held to the same report
-// rather than staying the one push erun makes that could be admitted by a
-// bypass in silence. These pushes deliberately do not go through the injected
-// git seam, so the capture is wired onto the command here.
+// runReleaseClaimPush reports a ruleset bypass on the claim push too; it bypasses the git seam,
+// so the capture is wired here.
 func runReleaseClaimPush(ctx core.Context, projectRoot string, args ...string) error {
 	var pushOutput strings.Builder
 	cmd := core.Command("git", append([]string{"-C", projectRoot}, args...)...)
@@ -389,8 +274,6 @@ func runReleaseClaimPush(ctx core.Context, projectRoot string, args ...string) e
 	return err
 }
 
-// readReleaseRepoClaimRef reads ref on the claim remote, reporting readable
-// false when the remote could not be read at all.
 func readReleaseRepoClaimRef(ctx core.Context, projectRoot, ref string) (sha string, exists, readable bool) {
 	sha, exists, err := GitLsRemoteRef(ctx, projectRoot, ReleaseRepoClaimRemote, ref)
 	return sha, exists, err == nil

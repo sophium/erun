@@ -67,9 +67,6 @@ func testExecReconcileBypassDryRunMissingRulesetIdTracesThenRefuses(t *testing.T
 }
 
 func testExecReconcileBypassRealRunFailsCleanlyWithoutAToken(t *testing.T) {
-	// No gh CLI and no GITHUB_TOKEN/GH_TOKEN in this sandbox: the no-token
-	// refusal fires before any network call, so this exercises real-mode
-	// resolution up through token lookup without ever reaching GitHub.
 	setup := env.New(t)
 	seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
 	result := erun.Run(t, []string{
@@ -83,10 +80,7 @@ func testExecReconcileBypassRealRunFailsCleanlyWithoutAToken(t *testing.T) {
 	golden.Equal(t, "exec/reconcile_bypass_real_run_fails_cleanly_without_a_token", normalize.Apply(result.Combined))
 }
 
-// TestExecRulesetBypass drives the two ruleset-bypass commands against stub
-// GitHub and platform servers: reconcile-bypass's own accounting (a gated
-// merge, a release push, a foreign ruleset's bypass, an unaccounted push, an
-// unexpected identity) and plan-ruleset-bypass's resolved two-stage edit.
+// TestExecRulesetBypass drives the ruleset-bypass commands against stub GitHub and platform servers.
 func TestExecRulesetBypass(t *testing.T) {
 	t.Parallel()
 	t.Run("reconcile_bypass_real_run_accounts_for_a_gated_merge_and_a_release_push", testExecRulesetBypassReconcileBypassRealRunAccountsForAGatedMergeAndAReleasePush)
@@ -121,9 +115,7 @@ func testExecRulesetBypassReconcileBypassRealRunAccountsForAGatedMergeAndAReleas
 }
 
 func testExecRulesetBypassReconcileBypassRealRunFlagsABypassByAnUnexpectedIdentity(t *testing.T) {
-	// Naming the expected identity is what turns a narrowed bypass grant
-	// from configuration into something observable: the human's push is
-	// reported UNEXPECTED_ACTOR even though its content is unchanged.
+	// Naming the expected identity flags a push by anyone else as UNEXPECTED_ACTOR.
 	setup := env.New(t)
 	github := githubRulesetStubServer(t, githubRulesetStubOptions{})
 	platform := successfulBuildsStubServer(t)
@@ -231,9 +223,7 @@ func testExecRulesetBypassPlanRulesetBypassRealRunWritesBothStagesAndTheRollback
 	}
 	golden.Equal(t, "exec/plan_ruleset_bypass_real_run_writes_both_stages_and_the_rollback",
 		normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
-	// The payload files are the artifact an operator actually applies, and
-	// they are a side effect outside the captured streams, so they need
-	// their own assertion: the golden above only proves the plan named them.
+	// The payload files are written outside the captured streams.
 	for _, stage := range []string{"rollback", "stage1", "stage2"} {
 		golden.Equal(t, "exec/plan_ruleset_bypass_payload_"+stage,
 			normalize.Apply(mustReadFile(t, filepath.Join(setup.Cwd, "plan", "ruleset-11081432-"+stage+".json"))))
@@ -275,9 +265,7 @@ func testExecRulesetBypassPlanRulesetBypassRealRunRefusesWhenTheRulesetDoesNotGo
 }
 
 func testExecRulesetBypassPlanRulesetBypassRealRunRefusesWhenGithubHidesTheBypassActors(t *testing.T) {
-	// GitHub only returns bypass_actors to a token with write access to
-	// the ruleset. Planning from a response without them would emit an
-	// edit that silently drops every actor the ruleset already has.
+	// GitHub hides bypass_actors from tokens without write access; planning without them would drop every actor.
 	setup := env.New(t)
 	github := githubRulesetStubServer(t, githubRulesetStubOptions{HideBypassActors: true})
 	envVars := append(setup.Env(), githubStubEnv(github)...)

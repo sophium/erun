@@ -9,16 +9,8 @@ import (
 	"github.com/adrg/xdg"
 )
 
-// ValidateStatePathSegment refuses a value the state tree cannot name a single
-// directory after. Every path under the config root is keyed by a tenant and an
-// environment, so each has to be one plain path segment: a value carrying
-// whitespace, a separator, a NUL, or no characters at all is not a name, and
-// joining a path with it does not fail -- it creates a directory beside the
-// real one. That is how display-shaped strings accumulate as stray state
-// directories nobody ever writes into: "<tenant> <environment>", or that pair
-// with a port appended, is how a label and a port-forward read, not how a path
-// is spelled. Refusing at the point the path is built tells the caller instead
-// of leaving the residue behind.
+// ValidateStatePathSegment refuses a value that is not one plain path segment,
+// since joining it would silently create a stray directory beside the real one.
 func ValidateStatePathSegment(kind, value string) error {
 	switch {
 	case strings.TrimSpace(value) == "":
@@ -41,10 +33,8 @@ func ValidateStatePathSegment(kind, value string) error {
 	return nil
 }
 
-// validateReadableStatePathSegment is validateStatePathSegment for a read:
-// a name the state tree cannot hold is reported the way an environment that was
-// never configured is, so listing the tree skips a stray directory instead of
-// failing on it, and no read resolves outside the tree.
+// validateReadableStatePathSegment reports an unusable name as ErrNotInitialized,
+// so listing skips stray directories and no read resolves outside the tree.
 func validateReadableStatePathSegment(kind, value string) error {
 	if err := ValidateStatePathSegment(kind, value); err != nil {
 		return fmt.Errorf("%w: %w", ErrNotInitialized, err)
@@ -60,12 +50,8 @@ func ERunConfigDir() (string, error) {
 	return filepath.Join(configHome, ConfigRoot), nil
 }
 
-// ResolveConfigFilePath resolves the on-disk path of a config file under
-// configHome without creating anything. xdg.ConfigFile's own path resolution
-// creates the parent directory as a side effect of resolving the path, which
-// runs even for a read or a dry-run trace and before any caller has decided
-// the write should actually happen. Callers that are about to write still
-// need os.MkdirAll immediately before the write.
+// ResolveConfigFilePath resolves a config path without creating the parent
+// directory, unlike xdg.ConfigFile; writers must still os.MkdirAll first.
 func ResolveConfigFilePath(relPath string) (string, error) {
 	configHome := strings.TrimSpace(xdg.ConfigHome)
 	if configHome == "" {
@@ -74,11 +60,7 @@ func ResolveConfigFilePath(relPath string) (string, error) {
 	return filepath.Join(configHome, relPath), nil
 }
 
-// ResolveCacheFilePath is resolveConfigFilePath's cache-directory
-// counterpart: xdg.CacheFile has the same create-the-parent-directory side
-// effect on resolution as xdg.ConfigFile, which a mere read or a dry-run
-// trace must not trigger. Callers that are about to write still need
-// os.MkdirAll immediately before the write.
+// ResolveCacheFilePath is ResolveConfigFilePath for the cache directory.
 func ResolveCacheFilePath(relPath string) (string, error) {
 	cacheHome := strings.TrimSpace(xdg.CacheHome)
 	if cacheHome == "" {

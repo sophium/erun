@@ -15,17 +15,11 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// deploymentAbsentErrorForTest builds the exact "runtime ... is not deployed"
-// error ensureRuntimeDeployed (erun-cli/cmd/open.go) raises for a genuinely
-// absent deployment, so a test exercises the real marker
-// runtimeCheckFoundDeploymentAbsent looks for rather than an ad hoc string.
+// deploymentAbsentErrorForTest builds ensureRuntimeDeployed's exact "is not deployed" error.
 func deploymentAbsentErrorForTest(tenant, environment string) error {
 	return fmt.Errorf("runtime for %s/%s %s %q not found in namespace %q); run `erun deploy %s %s` first",
 		tenant, environment, deploy.KubernetesDeploymentAbsentMessageMarker, tenant+"-devops", tenant+"-"+environment, tenant, environment)
 }
-
-// These tests lock the per-env ensure dedupe: opening an env and respawning
-// its tabs must run the shared ensure once per (re)start window, not once per tab.
 
 func envEnsureTestApp(t *testing.T, ensures *int32, ensuresMu *sync.Mutex) *App {
 	t.Helper()
@@ -52,9 +46,7 @@ func envEnsureTestApp(t *testing.T, ensures *int32, ensuresMu *sync.Mutex) *App 
 			return nil
 		},
 	})
-	// A non-nil ctx un-gates the ensure (it no-ops while ctx is nil); the emitter
-	// must be stubbed alongside it, or emits reach the real Wails runtime and fatal
-	// outside a lifecycle context.
+	// A non-nil ctx enables the ensure; the emitter must be stubbed or emits hit the real Wails runtime.
 	app.ctx = context.Background()
 	app.SetEmitter(func(string, ...any) {})
 	t.Cleanup(func() { app.shutdown(context.Background()) })
@@ -93,8 +85,6 @@ func TestEnsureEnvRuntimeOnceDedupesAcrossTabs(t *testing.T) {
 	}
 	waitForEnsureCount(t, &ensures, &ensuresMu, 1, 2*time.Second)
 
-	// Still one after a settling beat — the AI spawn must not have queued a
-	// second ensure behind the first.
 	time.Sleep(100 * time.Millisecond)
 	ensuresMu.Lock()
 	got := ensures
@@ -113,7 +103,7 @@ func TestEnsureEnvRuntimeOnceRunsAgainAfterTheWindow(t *testing.T) {
 	app.ensureEnvRuntimeOnce(selection)
 	waitForEnsureCount(t, &ensures, &ensuresMu, 1, 2*time.Second)
 
-	// Age the completed window out by hand instead of sleeping out the TTL.
+	// Age the window out by hand instead of sleeping out the TTL.
 	key := selectionKey(normalizeSelection(selection))
 	app.envEnsureMu.Lock()
 	app.envEnsureDone[key] = time.Now().Add(-envEnsureTTL)
@@ -123,12 +113,6 @@ func TestEnsureEnvRuntimeOnceRunsAgainAfterTheWindow(t *testing.T) {
 	waitForEnsureCount(t, &ensures, &ensuresMu, 2, 2*time.Second)
 }
 
-// TestEnsureFailureNotificationDedupesPerEpisode: a runtime
-// that stays unreachable must surface its "Could not reach the runtime"
-// notification once per failure episode, not on every ensure retry — otherwise
-// the banner re-appears the instant the user dismisses it. The sidebar row is
-// still flagged failed on every attempt, and reaching the env again ends the
-// episode so a later failure surfaces afresh.
 func TestEnsureFailureNotificationDedupesPerEpisode(t *testing.T) {
 	emits := newCapturedEmits()
 	var ensures int32
@@ -205,9 +189,7 @@ func waitForFailEpisodeCleared(t *testing.T, app *App, key string, timeout time.
 	t.Fatal("successful ensure did not clear the failure episode")
 }
 
-// capturedEnsureApp builds an ensure-focused app. readRunState is optional; a
-// nil one leaves the cluster unreadable, which the stopped check reads as "not
-// stopped" so a failure surfaces as a failure.
+// capturedEnsureApp: a nil readRunState reads as "not stopped".
 func capturedEnsureApp(
 	t *testing.T,
 	reconnect func(context.Context, config.OpenResult, func(string)) error,
@@ -240,12 +222,6 @@ func capturedEnsureApp(
 	return app, emits
 }
 
-// TestSurfaceEnsureFailureSuppressedWhileDeployInFlight: a
-// deploy for the env being in flight IS the recovery the runtime-unreachable
-// banner would recommend ("Deploy the environment …"), and the deploy-progress
-// overlay already communicates it, so the failure must stay quiet rather than
-// show a contradictory failed status + banner while a deploy locks the env's
-// terminals.
 func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
@@ -284,25 +260,15 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 	if !ok {
 		t.Fatalf("notification payload has unexpected type %T", notes[0])
 	}
-	// Kind "warning" (not "warn") is the contract the frontend maps to the
-	// attention icon; an unrecognized kind renders as a neutral info ⓘ.
 	if note.Kind != "warning" || note.Source != notificationSourceRuntimeUnreachable {
 		t.Fatalf("notification = %+v, want kind=warning source=%q", note, notificationSourceRuntimeUnreachable)
 	}
-	// The message names "Deploy the environment ..." as the fix, and the app
-	// can perform it, so the notification must carry the action the frontend
-	// renders a button for rather than leaving the remedy unreachable.
 	if note.Action != notificationActionDeploy {
 		t.Fatalf("notification action = %q, want %q", note.Action, notificationActionDeploy)
 	}
 }
 
-// TestSurfaceEnsureFailureRendersAStoppedRuntimeAsStopped locks the outcome an
-// operator sees after stopping an env with tabs open. The forwarder rebind runs
-// `erun open --reconnect`, which refuses to start a stopped runtime by design,
-// so its error is the operator's own Stop coming back — rendering it as failed
-// would report their command as an outage and offer a deploy that is not the
-// recovery. The row reads stopped and the banner names opening as the way back.
+// `open --reconnect` refuses to start a stopped runtime; that error is the operator's own Stop.
 func TestSurfaceEnsureFailureRendersAStoppedRuntimeAsStopped(t *testing.T) {
 	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
@@ -328,18 +294,12 @@ func TestSurfaceEnsureFailureRendersAStoppedRuntimeAsStopped(t *testing.T) {
 	if !strings.Contains(note.Message, "Open it to start it again") {
 		t.Fatalf("notification must name the way back, got %q", note.Message)
 	}
-	// The remedy here is opening the env, which the row itself already offers
-	// on click — not a deploy — so this notification must carry no action:
-	// an action-less remedy must not get a manufactured button.
+	// Opening is the remedy and the row already offers it, so no action button.
 	if note.Action != "" {
 		t.Fatalf("notification action = %q, want none", note.Action)
 	}
 }
 
-// TestEnsureSuccessClearsRuntimeUnreachableNotification: once
-// the runtime is reachable again, the "Could not reach the runtime …" banner is
-// stale, so a successful ensure clears it (tagged by env + source so an
-// unrelated toast is left alone).
 func TestEnsureSuccessClearsRuntimeUnreachableNotification(t *testing.T) {
 	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
@@ -368,9 +328,6 @@ func TestEnsureSuccessClearsRuntimeUnreachableNotification(t *testing.T) {
 	}
 }
 
-// TestSurfaceEnsureFailureOffersDeployForGenuinelyAbsentDeployment locks the
-// one branch that still earns the Deploy action: ensureRuntimeDeployed found
-// no deployment at all.
 func TestSurfaceEnsureFailureOffersDeployForGenuinelyAbsentDeployment(t *testing.T) {
 	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
@@ -395,12 +352,7 @@ func TestSurfaceEnsureFailureOffersDeployForGenuinelyAbsentDeployment(t *testing
 	}
 }
 
-// TestSurfaceEnsureFailureOffersNoDeployForACheckThatCouldNotAsk reproduces
-// The reported production case: the deployment is healthy but the
-// check could not resolve an answer because the kube context was unavailable.
-// Following a Deploy button here would roll a healthy runtime, so the
-// notification must not carry the deploy action, and must not claim
-// unreachability the check never established.
+// The kube context was unavailable; a Deploy button would roll a healthy runtime.
 func TestSurfaceEnsureFailureOffersNoDeployForACheckThatCouldNotAsk(t *testing.T) {
 	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
@@ -429,9 +381,6 @@ func TestSurfaceEnsureFailureOffersNoDeployForACheckThatCouldNotAsk(t *testing.T
 	}
 }
 
-// TestSurfaceEnsureFailureOffersNoDeployForAnUnclassifiedFailure locks the
-// The closing principle: an error erun does not recognize must still
-// read as unknown and must not default to offering deploy.
 func TestSurfaceEnsureFailureOffersNoDeployForAnUnclassifiedFailure(t *testing.T) {
 	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil

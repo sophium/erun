@@ -7,36 +7,20 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// A failed `docker build` returns nothing but "exit status 1". That is enough
-// when a human is watching the stream it also printed, and useless in the case
-// erun actually needs it for: a build running detached in a merge queue, whose
-// durable timing record is read long after the stream is gone. Every failure
-// therefore carries a reason extracted from BuildKit's own output, so
-// ~/.erun/timing/build-*.json says what went wrong rather than that something
-// did.
+// A failed `docker build` returns only "exit status 1", so failures carry a reason read
+// from BuildKit output for the durable timing record.
 
 // buildkitStepErrorPattern matches BuildKit's per-step failure line, e.g.
 //
 //	#6 ERROR: process "/bin/sh -c curl ..." did not complete successfully: exit code: 28
-//
-// The step number is what ties the failure back to the output lines that
-// explain it.
 var buildkitStepErrorPattern = regexp.MustCompile(`(?m)^#(\d+) ERROR: (.*)$`)
 
 const (
-	// buildFailureReasonMaxLines bounds how much of the failing step's tail is
-	// kept. The explanation is essentially always the last thing it printed;
-	// more than a few lines turns a record meant to be skimmed into a log.
-	buildFailureReasonMaxLines = 3
-	// buildFailureReasonMaxLength keeps one record's error field readable when
-	// a step's last line is a wall of text.
+	buildFailureReasonMaxLines  = 3
 	buildFailureReasonMaxLength = 500
 )
 
-// dockerBuildFailureReason summarises why a `docker build` failed, from the
-// captured BuildKit output. It returns "" when the output carries no
-// recognisable failure, in which case the caller keeps the plain process error
-// rather than inventing a reason for it.
+// dockerBuildFailureReason summarises a failed build's output, or "" when none is recognisable.
 func dockerBuildFailureReason(output string) string {
 	step, headline, ok := lastBuildkitStepError(output)
 	if !ok {
@@ -46,15 +30,10 @@ func dockerBuildFailureReason(output string) string {
 	if detail == "" {
 		return truncateReason(headline)
 	}
-	// The step's own last words first: "curl: (28) Connection timed out" is the
-	// reason, and "did not complete successfully: exit code: 28" is only how
-	// BuildKit reported it.
+	// The step's own last words are the reason; the headline is only how BuildKit reported it.
 	return truncateReason(detail + " (" + headline + ")")
 }
 
-// lastBuildkitStepError returns the step number and headline of the last
-// per-step failure BuildKit reported, which for a sequential build is the one
-// that stopped it.
 func lastBuildkitStepError(output string) (step, headline string, ok bool) {
 	matches := buildkitStepErrorPattern.FindAllStringSubmatch(output, -1)
 	if len(matches) == 0 {
@@ -64,8 +43,6 @@ func lastBuildkitStepError(output string) (step, headline string, ok bool) {
 	return last[1], strings.TrimSpace(last[2]), true
 }
 
-// buildkitStepOutputTail returns the last few lines the named step printed
-// before it failed, oldest first.
 func buildkitStepOutputTail(output, step string) []string {
 	var lines []string
 	for _, line := range strings.Split(output, "\n") {
@@ -85,9 +62,7 @@ func buildkitStepOutputTail(output, step string) []string {
 	return lines
 }
 
-// lastMeaningfulErrorLine is the fallback for output BuildKit never got far
-// enough to frame -- a daemon that refused the build, an unresolvable base
-// image -- where the last ERROR line is all there is to go on.
+// lastMeaningfulErrorLine covers output BuildKit never framed per step.
 func lastMeaningfulErrorLine(output string) string {
 	var found string
 	for _, line := range strings.Split(output, "\n") {
@@ -102,9 +77,7 @@ func lastMeaningfulErrorLine(output string) string {
 	return found
 }
 
-// joinFailureReason puts a diagnosis after the step's own words rather than in
-// place of them: the diagnosis explains the cause, but only the step's output
-// identifies which step and which download actually stopped.
+// joinFailureReason keeps the step's words: only they identify which step stopped.
 func joinFailureReason(reason, diagnosis string) string {
 	if reason == "" {
 		return diagnosis
@@ -123,11 +96,8 @@ func truncateReason(reason string) string {
 	return strings.TrimSpace(reason[:buildFailureReasonMaxLength]) + "…"
 }
 
-// DockerBuildStepError wraps a failed `docker build` with the reason read out
-// of its own output. Its Error() is that reason, so the message a caller prints
-// and the message the timing record persists both say what failed instead of
-// "exit status 1". The underlying process error stays reachable through
-// errors.Unwrap for anything matching on exit codes.
+// DockerBuildStepError carries the reason read from a failed build's output; the process
+// error stays reachable via errors.Unwrap.
 type DockerBuildStepError struct {
 	Reason string
 	Err    error

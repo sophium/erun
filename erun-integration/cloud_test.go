@@ -46,12 +46,7 @@ func TestCloud(t *testing.T) {
 		t.Run(scenario.name, scenario.run)
 	}
 
-	// The device flow's token round-trip can succeed while the platform still
-	// rejects the resulting bearer at the actual API (e.g. a backend-side
-	// authorization mismatch, a not-yet-provisioned tenant, a conflicting
-	// concurrent request, or an unconfigured executor) — platformStatusError's
-	// mapping, distinct from the token endpoint's own error mapping
-	// (oauthTokenError), which a passing token exchange never reaches here.
+	// The token exchange succeeds but the platform API rejects the bearer.
 	for _, statusCase := range []struct {
 		name   string
 		status int
@@ -61,8 +56,6 @@ func TestCloud(t *testing.T) {
 		{"not_found", http.StatusNotFound},
 		{"conflict", http.StatusConflict},
 		{"not_implemented", http.StatusNotImplemented},
-		// Unmapped status: platformStatusError's default branch, a generic
-		// error carrying the server's message with no sentinel to match.
 		{"internal_server_error", http.StatusInternalServerError},
 	} {
 		t.Run("login_erun_real_run_whoami_verification_maps_platform_error_"+statusCase.name, func(t *testing.T) {
@@ -221,14 +214,8 @@ func seedCloudProviderAlias(t testing.TB, setup env.Setup, alias, profile string
 	}
 }
 
-// seedExecutionMode appends an execution.modes override to the root
-// config.yaml, preserving whatever seedCloudProviderAlias or another fixture
-// already wrote — config.yaml is plain YAML, so appending a distinct
-// top-level key is enough, without needing to parse and re-merge the existing
-// document. A second call (a scenario opting two operations into library mode
-// at once) inserts its line into the existing "modes:" map instead of adding
-// a second "execution:" top-level key, which yaml.Unmarshal rejects as a
-// duplicate key.
+// seedExecutionMode appends to config.yaml; a second call inserts into the
+// existing "modes:" map, since a duplicate "execution:" key fails to parse.
 func seedExecutionMode(t testing.TB, setup env.Setup, operation, mode string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -251,10 +238,7 @@ func seedExecutionMode(t testing.TB, setup env.Setup, operation, mode string) {
 	}
 }
 
-// seedAWSStaticCredentialProfile writes a real ~/.aws/config + credentials
-// profile with static keys, standing in for a completed `aws configure sso`
-// so the aws-sdk-go-v2 library path (which reads the real shared config files
-// rather than trusting a stubbed CLI's exit code) has a profile to resolve.
+// seedAWSStaticCredentialProfile writes a real static-key profile for the SDK library path.
 func seedAWSStaticCredentialProfile(t testing.TB, setup env.Setup, profile string) {
 	t.Helper()
 	dir := filepath.Join(setup.Home, ".aws")
@@ -271,11 +255,7 @@ func seedAWSStaticCredentialProfile(t testing.TB, setup env.Setup, profile strin
 	}
 }
 
-// erunPlatformStubServer runs a minimal hosted erun platform + OIDC provider
-// for real-run `cloud init erun`/`cloud login` scenarios: the unauthenticated
-// GET /v1/platform discovery endpoint, OIDC discovery, the device
-// authorization grant, and the token endpoint's device_code grant. The
-// device flow's interval is 1s so the real-run scenario stays fast.
+// erunPlatformStubServer fakes the hosted platform and its OIDC device flow.
 func erunPlatformStubServer(t testing.TB) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -301,10 +281,7 @@ func erunPlatformStubServer(t testing.TB) *httptest.Server {
 			"interval":                  1,
 		})
 	})
-	// The first device-token poll answers authorization_pending — the poll
-	// loop's ordinary steady state — and only the second succeeds, so the
-	// scenario exercises pollERunDeviceToken's retry branch for free instead
-	// of only ever reaching the loop on its first iteration.
+	// The first poll answers authorization_pending to exercise the retry branch.
 	deviceTokenPolls := 0
 	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
 		if r.FormValue("refresh_token") != "" {
@@ -348,10 +325,7 @@ func erunPlatformStubServer(t testing.TB) *httptest.Server {
 			"contexts":     []any{},
 		})
 	})
-	// Assign the issuer before Start: httptest.NewServer begins serving before
-	// it returns, so writing server.URL afterwards has no happens-before edge
-	// with the handler goroutines that read it. The listener address is fixed
-	// when it is allocated, so this is the same URL NewServer would report.
+	// Assign the URL before Start so handler goroutines read it with a happens-before edge.
 	server := httptest.NewUnstartedServer(mux)
 	issuer = "http://" + server.Listener.Addr().String()
 	server.Start()
@@ -377,10 +351,6 @@ func seedERunCloudProviderAlias(t testing.TB, setup env.Setup, alias, issuer, cl
 	}
 }
 
-// seedTwoERunCloudProviderAliases writes two erun-type aliases in one
-// config.yaml, for scenarios asserting the ambiguous-alias refusal
-// (ResolveERunPlatformAlias refuses to guess between them without an
-// explicit --erun-alias).
 func seedTwoERunCloudProviderAliases(t testing.TB, setup env.Setup) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -405,11 +375,7 @@ func seedTwoERunCloudProviderAliases(t testing.TB, setup env.Setup) {
 	}
 }
 
-// eraseCachedERunAccessToken deletes the cached access token file for alias
-// (ref "erun/access/<alias>", hashed the same way erun-common's file-backed
-// CloudSecretStore names it) without touching the refresh token, forcing the
-// next status check or bearer-token resolution through the refresh_token
-// grant.
+// eraseCachedERunAccessToken keeps the refresh token, forcing the refresh_token grant.
 func eraseCachedERunAccessToken(t testing.TB, setup env.Setup, alias string) {
 	t.Helper()
 	sum := sha256.Sum256([]byte("erun/access/" + alias))
@@ -420,9 +386,7 @@ func eraseCachedERunAccessToken(t testing.TB, setup env.Setup, alias string) {
 }
 
 func testCloudInitErunDryRunTracesDiscoveryPlan(t *testing.T) {
-	// No server is started: a dry run must never depend on the platform
-	// being reachable, unlike AWS/Cloudflare init whose identity/verify
-	// calls always run for real regardless of --dry-run.
+	// No server is started: a dry run must not need the platform.
 	setup := env.New(t)
 	args := []string{"cloud", "init", "erun", "--api-url", "https://api.example.test", "--dry-run"}
 	result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -433,25 +397,13 @@ func testCloudInitErunDryRunTracesDiscoveryPlan(t *testing.T) {
 }
 
 func testCloudInitErunRealRunAndLoginCompletesDeviceFlow(t *testing.T) {
-	// A real hosted-platform + OIDC provider stub, reached over real
-	// loopback HTTP (erun's design takes the API URL as an explicit
-	// input, so no ERUN_*_BASE_URL seam or stub binary is needed): init
-	// discovers the platform and persists the alias, then login runs the
-	// device authorization grant end to end and persists the resulting
-	// refresh token.
 	setup := env.New(t)
 	server := erunPlatformStubServer(t)
 
 	alias := initERunAliasAndLogin(t, setup, server)
 	assertERunAliasPersisted(t, setup, alias)
 
-	// Erase only the cached access token (not the refresh token config
-	// just persisted above) so the next `cloud login` is forced through
-	// the refresh_token grant instead of finding an already-active
-	// cache — exercising the token-refresh path end to end, including
-	// the whoami/config re-verification with the freshly refreshed
-	// token. No confirm prompt is expected: a successful refresh reports
-	// "active" before the command ever reaches that prompt.
+	// A successful refresh reports active before any confirm prompt.
 	eraseCachedERunAccessToken(t, setup, alias)
 	refreshLoginResult := erun.Run(t, []string{"cloud", "login", "--alias", alias}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if refreshLoginResult.ExitCode != 0 {
@@ -461,10 +413,6 @@ func testCloudInitErunRealRunAndLoginCompletesDeviceFlow(t *testing.T) {
 		t.Fatalf("expected refreshed login to report active status, got:\n%s", refreshLoginResult.Combined)
 	}
 
-	// `erun list` must agree with `cloud login` about this alias —
-	// before ListCloudProviderStatuses was given a real CloudDependencies,
-	// this row read "expired" with "cloud secret store is not configured"
-	// even though the platform login above is demonstrably working.
 	listResult := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if listResult.ExitCode != 0 {
 		t.Fatalf("list exit %d: %s", listResult.ExitCode, listResult.Combined)
@@ -474,8 +422,6 @@ func testCloudInitErunRealRunAndLoginCompletesDeviceFlow(t *testing.T) {
 	}
 }
 
-// initERunAliasAndLogin initialises the platform alias and signs in through
-// the device flow, returning the alias both report on.
 func initERunAliasAndLogin(t *testing.T, setup env.Setup, server *httptest.Server) string {
 	t.Helper()
 	initResult := erun.Run(t, []string{"cloud", "init", "erun", "--api-url", server.URL}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -498,14 +444,10 @@ func initERunAliasAndLogin(t *testing.T, setup env.Setup, server *httptest.Serve
 	if !strings.Contains(loginResult.Combined, alias+": active") {
 		t.Fatalf("expected login to report active status, got:\n%s", loginResult.Combined)
 	}
-	// The end-to-end proof: login also calls GET /v1/whoami against the
-	// real platform stub, so a token that merely decodes but doesn't
-	// authenticate would fail here.
+	// Login also calls /v1/whoami, so a token that only decodes would fail here.
 	if !strings.Contains(loginResult.Combined, "Signed in to "+alias+" as test-user (tenant test-tenant-id)") {
 		t.Fatalf("expected login to confirm sign-in via whoami, got:\n%s", loginResult.Combined)
 	}
-	// Same proof, one step further: GET /v1/config also round-trips
-	// against the real platform stub.
 	if !strings.Contains(loginResult.Combined, "Tenant test-tenant: 1 environment(s), 0 cloud context(s)") {
 		t.Fatalf("expected login to confirm config readback, got:\n%s", loginResult.Combined)
 	}
@@ -541,9 +483,6 @@ func testCloudLoginErunDryRunTracesDiscoveryAndDeviceFlowPlan(t *testing.T) {
 }
 
 func testCloudOidcErunAliasFails(t *testing.T) {
-	// `cloud oidc` is AWS-only web-identity federation setup; an erun
-	// alias's issuer is already set at `cloud init erun` and never uses
-	// this path.
 	setup := env.New(t)
 	seedERunCloudProviderAlias(t, setup, "test+host@erun", "https://auth.example.test", "cli-test")
 	result := erun.Run(t, []string{"cloud", "oidc", "--alias", "test+host@erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -553,8 +492,6 @@ func testCloudOidcErunAliasFails(t *testing.T) {
 	golden.Equal(t, "cloud/oidc_erun_alias_fails", normalize.Apply(result.Combined))
 }
 
-// testCloudLoginErunWhoamiVerificationMapsPlatformError completes the device
-// flow against a platform whose whoami answers status, which login must surface.
 func testCloudLoginErunWhoamiVerificationMapsPlatformError(t *testing.T, status int) {
 	setup := env.New(t)
 	mux := http.NewServeMux()
@@ -578,8 +515,7 @@ func testCloudLoginErunWhoamiVerificationMapsPlatformError(t *testing.T, status 
 	mux.HandleFunc("GET /v1/whoami", func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, http.StatusText(status), status)
 	})
-	// Assigned before Start so it happens-before every handler
-	// goroutine that reads it; see erunPlatformStubServer.
+	// Assigned before Start; see erunPlatformStubServer.
 	server := httptest.NewUnstartedServer(mux)
 	issuer = "http://" + server.Listener.Addr().String()
 	server.Start()

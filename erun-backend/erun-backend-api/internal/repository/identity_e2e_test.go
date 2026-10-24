@@ -13,9 +13,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// Empty-database bootstrap runs SQL with real transaction-local RLS role
-// switches (SET LOCAL ROLE), so it is exercised against a real migrated
-// PostgreSQL rather than a fake that agrees with itself.
+// Bootstrap uses SET LOCAL ROLE, so it needs a real migrated PostgreSQL.
 func identityBootstrapDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -54,19 +52,11 @@ func TestBootstrapFirstIdentityEnrolsPlatformTenantWhenERUNTenantSet(t *testing.
 	assertHasReadAllAndWriteAll(t, db, user.UserID)
 }
 
-// TestFirstTenantUserBootstrapGrantsTenantAdminForACompanyTenant proves the
-// per-tenant-first-user path (a token resolving to an already-registered
-// tenant with zero users) grants a COMPANY tenant's first user TenantAdmin --
-// full administration of that tenant, without the platform-operator reach
-// ReadAll/WriteAll would also carry inside an OPERATIONS tenant (see
-// insertTenantFirstUserAccess).
 func TestFirstTenantUserBootstrapGrantsTenantAdminForACompanyTenant(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
 	repo := NewIdentityRepository(db, DialectPostgres, "frs")
 
-	// Bootstrap the platform's own OPERATIONS tenant first, then register a
-	// second, ordinary tenant with zero users of its own.
 	_, _, err := repo.ResolveIdentity(context.Background(), security.Claims{
 		Issuer:  "https://issuer.example/frs",
 		Subject: "operator-subject",
@@ -97,22 +87,13 @@ func TestFirstTenantUserBootstrapGrantsTenantAdminForACompanyTenant(t *testing.T
 	assertHasExactlyRoles(t, db, user.UserID, "TenantAdmin")
 }
 
-// TestSecondOperationsTenantFirstUserBootstrapGrantsItsOwnRoles: a second
-// OPERATIONS-type tenant's per-tenant-first-user bootstrap runs as
-// erun_operations, whose RLS policy is cross-tenant (USING (true)), so a
-// role lookup that relies on RLS scoping would find a foreign tenant's
-// "ReadAll" role and violate role_permissions' composite foreign key.
-// Registering a second OPERATIONS tenant is a legitimate action
-// (POST /v1/tenants with type=OPERATIONS), so this must succeed and grant the
-// new tenant's *own* roles.
+// erun_operations RLS is cross-tenant, so a role lookup relying on RLS would
+// find a foreign tenant's "ReadAll" and violate role_permissions' FK.
 func TestSecondOperationsTenantFirstUserBootstrapGrantsItsOwnRoles(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
 	repo := NewIdentityRepository(db, DialectPostgres, "frs")
 
-	// Bootstrap the platform's own OPERATIONS tenant first, so a "ReadAll" and
-	// "WriteAll" role already exist somewhere in the database before the
-	// second OPERATIONS tenant below ever bootstraps its own.
 	_, _, err := repo.ResolveIdentity(context.Background(), security.Claims{
 		Issuer:  "https://issuer.example/frs-second-ops",
 		Subject: "operator-subject",
@@ -145,10 +126,7 @@ func TestSecondOperationsTenantFirstUserBootstrapGrantsItsOwnRoles(t *testing.T)
 	}
 }
 
-// assertHasExactlyRoles locks in exactly which predefined roles a bootstrap
-// path granted a user, so a fine-grained role-assignment API added alongside
-// it stays additive rather than changing the default. want must already be in
-// the alphabetical order the underlying query sorts by.
+// want must be in the query's alphabetical order.
 func assertHasExactlyRoles(t *testing.T, db *sql.DB, userID string, want ...string) {
 	t.Helper()
 	var names []string
@@ -177,20 +155,11 @@ func assertHasExactlyRoles(t *testing.T, db *sql.DB, userID string, want ...stri
 	}
 }
 
-// assertHasReadAllAndWriteAll locks in that bootstrap keeps granting exactly
-// the predefined ReadAll+WriteAll shape, so the fine-grained role-assignment
-// API added alongside it stays additive rather than changing the default.
 func assertHasReadAllAndWriteAll(t *testing.T, db *sql.DB, userID string) {
 	t.Helper()
 	assertHasExactlyRoles(t, db, userID, "ReadAll", "WriteAll")
 }
 
-// TestBootstrapFirstIdentityRegistersSharedIssuerOrgScopedWithCallersOrgAsFirstMapping
-// proves that bootstrapping against a token
-// that carries the shipped Zitadel org claim must register the issuer
-// org-scoped (issuers.org_field_key set), with the bootstrap caller's own org
-// as the first tenant_issuers mapping's org_field_value — not single-tenant,
-// which would permanently block every later tenant on that issuer.
 func TestBootstrapFirstIdentityRegistersSharedIssuerOrgScopedWithCallersOrgAsFirstMapping(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	repo := NewIdentityRepository(db, DialectPostgres, "frs")
@@ -223,10 +192,6 @@ func TestBootstrapFirstIdentityRegistersSharedIssuerOrgScopedWithCallersOrgAsFir
 	}
 }
 
-// TestSecondTenantOnSharedIssuerWithDifferentOrgIsAcceptedNotConflict proves
-// that once bootstrap has registered a shared issuer org-scoped (previous
-// test), a second tenant created on that same issuer with a different org
-// value succeeds rather than conflicting.
 func TestSecondTenantOnSharedIssuerWithDifferentOrgIsAcceptedNotConflict(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	repo := NewIdentityRepository(db, DialectPostgres, "frs")
@@ -276,7 +241,6 @@ func TestBootstrapFirstIdentityLeavesAlreadyBootstrappedDatabaseAlone(t *testing
 	db := identityBootstrapDatabase(t)
 	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
 
-	// A platform already bootstrapped under the old fictional name.
 	seeded := NewIdentityRepository(db, DialectPostgres, "")
 	original, _, err := seeded.ResolveIdentity(context.Background(), security.Claims{
 		Issuer:  "https://issuer.example/already-bootstrapped",
@@ -284,8 +248,7 @@ func TestBootstrapFirstIdentityLeavesAlreadyBootstrappedDatabaseAlone(t *testing
 	})
 	mustNoErr(t, err, "seed an already-bootstrapped tenant")
 
-	// A second caller, from an unregistered issuer, with ERUN_TENANT now set,
-	// must not rename the existing tenant or mint a second bootstrap tenant.
+	// Setting ERUN_TENANT later must not rename or duplicate the bootstrap tenant.
 	second := NewIdentityRepository(db, DialectPostgres, "frs")
 	_, _, err = second.ResolveIdentity(context.Background(), security.Claims{
 		Issuer:  "https://issuer.example/unregistered",
@@ -307,14 +270,6 @@ func TestBootstrapFirstIdentityLeavesAlreadyBootstrappedDatabaseAlone(t *testing
 	}
 }
 
-// TestSecondTenantOnSharedIssuerDoesNotBreakFirstTenantsResolution: org-scoping
-// an issuer must not leave the first tenant's mapping behind.
-// TenantIssuerRepository.UpdateOrgScope backfills it atomically as one
-// explicit, operations-only step (see
-// TestTenantIssuerRepositoryUpdateOrgScopeConvertsAndBackfills), and this
-// proves that backfill keeps the first tenant's already-enrolled user
-// resolving once a second tenant shares the issuer -- registering tenant B
-// must never change how tenant A resolves.
 func TestSecondTenantOnSharedIssuerDoesNotBreakFirstTenantsResolution(t *testing.T) {
 	db := identityBootstrapDatabase(t)
 	t.Cleanup(func() { clearIdentityBootstrap(t, db) })
@@ -325,26 +280,17 @@ func TestSecondTenantOnSharedIssuerDoesNotBreakFirstTenantsResolution(t *testing
 	const firstOrg = "386994597030592700"
 	const secondOrg = "388520359030161586"
 
-	// The first tenant bootstraps single-tenant (no org claim on this token) --
-	// the state a platform's own OPERATIONS tenant is in before any other
-	// tenant ever shares its issuer.
 	firstTenant, firstUser, err := repo.ResolveIdentity(context.Background(), security.Claims{
 		Issuer:  issuer,
 		Subject: "rihards@frs.lv",
 	})
 	mustNoErr(t, err, "bootstrap the first tenant single-tenant")
 
-	// Convert the issuer to org-scoped, backfilling the first tenant's own
-	// mapping to its org value -- the documented, explicit remedy
-	// (PATCH /v1/tenant-issuers), never a silent side effect of registering
-	// the second tenant below.
 	issuers := NewTenantIssuerRepository(NewTxManager(db, DialectPostgres))
 	opsCtx := security.WithContext(context.Background(), security.Context{TenantID: firstTenant.TenantID, TenantType: string(model.TenantTypeOperations)})
 	_, err = issuers.UpdateOrgScope(opsCtx, firstTenant.TenantID, issuer, orgClaimKey, firstOrg)
 	mustNoErr(t, err, "convert the issuer to org-scoped and backfill the first tenant's mapping")
 
-	// Register a second tenant on the same issuer under a different org --
-	// the action that must not break the first tenant.
 	tenants := NewTenantRepository(NewTxManager(db, DialectPostgres))
 	_, err = tenants.Create(opsCtx, CreateTenantParams{
 		Name:          "validationagent",
@@ -355,8 +301,6 @@ func TestSecondTenantOnSharedIssuerDoesNotBreakFirstTenantsResolution(t *testing
 	})
 	mustNoErr(t, err, "register the second tenant on the shared issuer")
 
-	// The first tenant's already-enrolled user must still resolve, presenting
-	// the org claim their token actually carries.
 	resolvedTenant, resolvedUser, err := repo.ResolveIdentity(context.Background(), security.Claims{
 		Issuer:  issuer,
 		Subject: "rihards@frs.lv",
@@ -371,8 +315,6 @@ func TestSecondTenantOnSharedIssuerDoesNotBreakFirstTenantsResolution(t *testing
 	}
 }
 
-// clearIdentityBootstrap resets every table empty-database bootstrap writes to,
-// so each scenario starts from a genuinely empty tenants table.
 func clearIdentityBootstrap(t *testing.T, db *sql.DB) {
 	t.Helper()
 	for _, stmt := range []string{

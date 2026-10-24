@@ -16,44 +16,25 @@ type ERunConfig struct {
 	CloudProviders  []CloudProviderConfig `yaml:"cloudproviders,omitempty"`
 	CloudContexts   []CloudContextConfig  `yaml:"cloudcontexts,omitempty"`
 	RuntimeRegistry RuntimeRegistryConfig `yaml:"runtimeregistry,omitempty"`
-	// Orchestrators are the operator's persisted host-side AI orchestrator
-	// definitions (see OrchestratorConfig). They live in root config so the same
-	// set reappears across desktop restarts; the running session itself is
-	// ephemeral and re-spawned on demand.
+	// Orchestrators are the persisted host-side AI orchestrator definitions.
 	Orchestrators []OrchestratorConfig `yaml:"orchestrators,omitempty" json:"orchestrators,omitempty"`
-	// Whip overrides the pacing nudge's message/threshold/cap/automatic-pass
-	// defaults (see WhipConfig, ResolveWhipConfig). Nil keeps every unconfigured
-	// install on exactly today's behaviour.
+	// Whip overrides the pacing nudge defaults; nil keeps the defaults.
 	Whip *WhipConfigOverride `yaml:"whip,omitempty" json:"whip,omitempty"`
-	// Execution holds per-operation subprocess/library execution mode
-	// overrides (see execution_mode.go). Absent keeps every operation on the
-	// subprocess path it has always used.
+	// Execution holds per-operation subprocess/library execution mode overrides.
 	Execution ExecutionConfig `yaml:"execution,omitempty" json:"execution,omitempty"`
-	// OpenRouter holds the operator's erun-level gateway catalog (see
-	// openrouter.go): the gateway an environment's Claude Code is routed
-	// through, and the models an environment may select from it. Nil keeps an
-	// install that has not configured a gateway on exactly today's behaviour.
+	// OpenRouter is the erun-level gateway catalog; nil means no gateway.
 	OpenRouter *OpenRouterConfig `yaml:"openrouter,omitempty" json:"openRouter,omitempty"`
 }
 
-// RuntimeRegistryConfig lets operators running an internal mirror of `erun-devops`
-// (Harbor, ECR, Artifactory, self-hosted GHCR) keep `erun version`'s image check
-// off the public registries baked into the binary. All fields are optional; unset
-// defaults to `ghcr.io/sophium/erun-devops` on the standard ghcr.io endpoints.
+// RuntimeRegistryConfig points `erun version`'s image check at an internal mirror; unset uses ghcr.io/sophium/erun-devops.
 type RuntimeRegistryConfig struct {
 	Namespace  string `yaml:"namespace,omitempty"`
 	Repository string `yaml:"repository,omitempty"`
-	// BaseURL default depends on the namespace: hub.docker.com for Docker Hub,
-	// ghcr.io for ghcr.io namespaces.
+	// BaseURL defaults to hub.docker.com or ghcr.io depending on the namespace.
 	BaseURL string `yaml:"baseurl,omitempty"`
-	// TokenURL is consulted only on the GHCR flow; defaults to https://ghcr.io.
+	// TokenURL is used only for GHCR; defaults to https://ghcr.io.
 	TokenURL string `yaml:"tokenurl,omitempty"`
-	// Insecure marks Namespace as plain HTTP (a cluster registry marked
-	// `insecure: true`), so an unset BaseURL resolves to http:// instead of
-	// https:// for it. Never persisted -- only a caller that already knows the
-	// registry is insecure (e.g. probing a tenant's own published chart) sets
-	// it; the operator-configured mirror this struct otherwise describes is
-	// always addressed over HTTPS.
+	// Insecure makes an unset BaseURL resolve to http://. Never persisted; the configured mirror is always HTTPS.
 	Insecure bool `yaml:"-"`
 }
 
@@ -94,7 +75,6 @@ var (
 	ErrConfigCorrupted    = errors.New("config file cannot be unmarshaled")
 	ErrFailedToSaveConfig = errors.New("could not save struct to yaml file")
 	ErrNotInGitRepository = errors.New("cannot find git project")
-	// ErrUnusableStateName reports a tenant or environment that cannot name
-	// exactly one directory in the state tree. See validateStatePathSegment.
+	// ErrUnusableStateName reports a name that cannot map to exactly one state directory.
 	ErrUnusableStateName = errors.New("unusable tenant or environment name")
 )

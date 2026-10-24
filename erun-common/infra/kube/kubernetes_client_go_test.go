@@ -11,12 +11,8 @@ import (
 	"testing"
 )
 
-// fakeKubernetesAPIServer starts a plain-HTTP fake API server and writes a
-// kubeconfig pointing KUBECONFIG at it, so libraryKubernetesNamespaceExists
-// can be exercised through the exact same clientcmd loading path real kubectl
-// use goes through — no daemon, no real cluster needed. Plain HTTP (not TLS)
-// keeps the fixture to a single seam, mirroring stsCallerIdentityFixture's use
-// of AWS_ENDPOINT_URL for the aws-sdk-go-v2 equivalence tests.
+// fakeKubernetesAPIServer points KUBECONFIG at a plain-HTTP fake API server so the
+// real clientcmd loading path runs without a cluster.
 func fakeKubernetesAPIServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -67,12 +63,7 @@ func namespaceNotFoundHandler(name string) http.HandlerFunc {
 	}
 }
 
-// TestLibraryKubernetesNamespaceExistsMatchesSubprocessObservableResult pins
-// the same equivalence property cloud_aws_sdk_test.go's
-// TestLibraryResolveAWSIdentityMatchesSubprocessObservableResult does: the
-// library path's returned bool must agree with what
-// defaultKubernetesNamespaceExists derives from kubectl's exit code (found -> exit
-// 0, not found -> "NotFound" stderr).
+// The library path's bool must match kubectl's exit-code result.
 func TestLibraryKubernetesNamespaceExistsMatchesSubprocessObservableResult(t *testing.T) {
 	fakeKubernetesAPIServer(t, namespaceFoundHandler("team-dev"))
 
@@ -97,11 +88,6 @@ func TestLibraryKubernetesNamespaceExistsReportsNotFoundAsAbsentNotError(t *test
 	}
 }
 
-// TestLibraryKubernetesNamespaceExistsPropagatesOtherErrors proves a refusal
-// distinct from NotFound (Forbidden here) surfaces as an error rather than
-// being folded into "does not exist" — the same distinction
-// defaultKubernetesNamespaceExists's KubernetesResourceNotFound check draws
-// against kubectl's own stderr.
 func TestLibraryKubernetesNamespaceExistsPropagatesOtherErrors(t *testing.T) {
 	fakeKubernetesAPIServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -119,9 +105,6 @@ func TestLibraryKubernetesNamespaceExistsPropagatesOtherErrors(t *testing.T) {
 	}
 }
 
-// TestLibraryKubernetesNamespaceExistsHonorsContextOverride proves the
-// context-name argument actually selects the kubeconfig context, the same way
-// `kubectl --context X` does, rather than always following current-context.
 func TestLibraryKubernetesNamespaceExistsHonorsContextOverride(t *testing.T) {
 	fakeKubernetesAPIServer(t, namespaceFoundHandler("team-dev"))
 
@@ -173,12 +156,6 @@ func pvcNotFoundHandler(name string) http.HandlerFunc {
 	}
 }
 
-// TestLibraryPersistentVolumeClaimExistsMatchesSubprocessObservableResult pins
-// the same equivalence property
-// TestLibraryKubernetesNamespaceExistsMatchesSubprocessObservableResult does:
-// the library path's returned bool must agree with what
-// defaultWorktreeClaimExists derives from kubectl's exit code (found -> exit
-// 0, not found -> "NotFound" stderr).
 func TestLibraryPersistentVolumeClaimExistsMatchesSubprocessObservableResult(t *testing.T) {
 	fakeKubernetesAPIServer(t, pvcFoundHandler("team-dev", "team-devops-worktree"))
 
@@ -203,11 +180,6 @@ func TestLibraryPersistentVolumeClaimExistsReportsNotFoundAsAbsentNotError(t *te
 	}
 }
 
-// TestLibraryPersistentVolumeClaimExistsPropagatesOtherErrors proves a
-// refusal distinct from NotFound (Forbidden here) surfaces as an error rather
-// than being folded into "does not exist" — the same distinction
-// defaultWorktreeClaimExists's KubernetesResourceNotFound check draws against
-// kubectl's own stderr.
 func TestLibraryPersistentVolumeClaimExistsPropagatesOtherErrors(t *testing.T) {
 	fakeKubernetesAPIServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -225,9 +197,6 @@ func TestLibraryPersistentVolumeClaimExistsPropagatesOtherErrors(t *testing.T) {
 	}
 }
 
-// TestLibraryPersistentVolumeClaimExistsHonorsContextOverride proves the
-// context-name argument actually selects the kubeconfig context, the same way
-// `kubectl --context X` does, rather than always following current-context.
 func TestLibraryPersistentVolumeClaimExistsHonorsContextOverride(t *testing.T) {
 	fakeKubernetesAPIServer(t, pvcFoundHandler("team-dev", "team-devops-worktree"))
 
@@ -244,9 +213,6 @@ func TestLibraryPersistentVolumeClaimExistsHonorsContextOverride(t *testing.T) {
 	}
 }
 
-// secretGetResponseJSON renders the `kubectl get secret -o json` /
-// client-go Secret body a Secret carrying the given (already-encoded)
-// .dockerconfigjson value would return.
 func secretGetResponseJSON(namespace, name, dockerConfigJSON string) string {
 	encoded := base64.StdEncoding.EncodeToString([]byte(dockerConfigJSON))
 	return fmt.Sprintf(`{"kind":"Secret","apiVersion":"v1","metadata":{"name":%q,"namespace":%q},"data":{".dockerconfigjson":%q}}`,
@@ -275,13 +241,7 @@ func secretNotFoundHandler(name string) http.HandlerFunc {
 	}
 }
 
-// TestLibraryImagePullSecretAuthsMatchesSubprocessObservableResult pins the
-// same equivalence property the namespace/PVC tests do: the library path's
-// decoded auths must agree with what defaultExistingImagePullSecretAuths
-// derives from kubectl's own base64-encoded JSON output. A typed Secret's
-// Data field arrives already base64-decoded, so the library path needs no
-// separate decode step -- the property under test is that it lands on the
-// same auths document regardless.
+// Secret.Data arrives already decoded, so the library path needs no base64 step.
 func TestLibraryImagePullSecretAuthsMatchesSubprocessObservableResult(t *testing.T) {
 	fakeKubernetesAPIServer(t, secretFoundHandler("team-dev", "regcred", `{"auths":{"ghcr.io":{"auth":"alice:s3cret"}}}`))
 
@@ -306,11 +266,7 @@ func TestLibraryImagePullSecretAuthsReportsNotFoundAsNilNotError(t *testing.T) {
 	}
 }
 
-// TestLibraryImagePullSecretAuthsPropagatesOtherErrors proves a refusal
-// distinct from NotFound (Forbidden here) surfaces as an error rather than
-// being folded into "no existing coverage" -- collapsing the two would let a
-// merge silently drop credentials the operator's RBAC only stopped it from
-// reading, not from actually needing.
+// Folding Forbidden into "no coverage" would let a merge drop credentials RBAC only hid.
 func TestLibraryImagePullSecretAuthsPropagatesOtherErrors(t *testing.T) {
 	fakeKubernetesAPIServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -328,12 +284,6 @@ func TestLibraryImagePullSecretAuthsPropagatesOtherErrors(t *testing.T) {
 	}
 }
 
-// TestLibraryImagePullSecretAuthsRefusesMalformedDockerConfig proves a
-// Secret that exists but whose .dockerconfigjson does not decode is refused
-// rather than silently read as no existing coverage -- the same
-// don't-guess-and-destroy-coverage contract
-// TestExistingImagePullSecretAuthsRefusesMalformedSecret pins for the
-// subprocess path.
 func TestLibraryImagePullSecretAuthsRefusesMalformedDockerConfig(t *testing.T) {
 	fakeKubernetesAPIServer(t, secretFoundHandler("team-dev", "regcred", "not valid json"))
 
@@ -346,10 +296,6 @@ func TestLibraryImagePullSecretAuthsRefusesMalformedDockerConfig(t *testing.T) {
 	}
 }
 
-// TestLibraryImagePullSecretAuthsHonorsContextOverride proves the
-// context-name argument actually selects the kubeconfig context, the same
-// way `kubectl --context X` does, rather than always following
-// current-context.
 func TestLibraryImagePullSecretAuthsHonorsContextOverride(t *testing.T) {
 	fakeKubernetesAPIServer(t, secretFoundHandler("team-dev", "regcred", `{"auths":{"ghcr.io":{"auth":"alice:s3cret"}}}`))
 

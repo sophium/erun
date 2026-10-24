@@ -39,8 +39,6 @@ func (s BootstrapRunner) resolveKubernetesContext(params open.BootstrapInitParam
 }
 
 func (s BootstrapRunner) ResolveContainerRegistry(params open.BootstrapInitParams, tenant, envName, projectRoot, current string, creating bool) (string, error) {
-	// A cluster registry is written as a resolvable cluster: entry, not a static
-	// string, so short-circuit the string resolution/prompt entirely.
 	if params.ClusterRegistry != nil {
 		return "", nil
 	}
@@ -69,16 +67,11 @@ func (s BootstrapRunner) ResolveContainerRegistry(params open.BootstrapInitParam
 	return s.promptContainerRegistry(tenant, envName)
 }
 
-// resolveHostedRegistry resolves erun's hosted container registry reference,
-// probing its reachability so a choice nothing can push to is refused at
-// selection time rather than surfacing at the first build far from the flag
-// that chose it.
+// resolveHostedRegistry probes reachability so an unpushable choice is refused
+// at selection time.
 func (s BootstrapRunner) resolveHostedRegistry(tenant string) (string, error) {
 	reference := configpkg.HostedRegistryReference(tenant)
-	// A dry-run resolves and traces without touching the world, so it does
-	// not probe. Saying so is the point: a dry-run that printed the resolved
-	// reference alone would read as "this choice works", which is the very
-	// impression the probe exists to stop the real run from giving.
+	// A dry-run does not probe, and says so, rather than imply the choice works.
 	if s.Context.DryRun {
 		s.Context.Trace("init: --erun-registry resolves to " + reference + "; the real run probes " + configpkg.HostedRegistryHost + " and refuses the choice if it is not reachable")
 		return reference, nil
@@ -138,8 +131,8 @@ func (s BootstrapRunner) resolveCloudProviderAlias(kubernetesContext, current st
 }
 
 func (s BootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, registry string, params open.BootstrapInitParams) error {
-	// Remote envs record the registry on the env config only; the shared project
-	// config is for local-agent envs whose worktree lives in this repo.
+	// The shared project config is only for local-agent envs whose worktree lives
+	// in this repo.
 	if params.Remote {
 		return nil
 	}
@@ -216,8 +209,6 @@ func (s BootstrapRunner) ensureKubernetesNamespace(tenant, envName, currentConte
 	return s.EnsureKubernetesNamespace(nextContext, namespace)
 }
 
-// probeHostedRegistry runs the availability probe the hosted-registry choice is
-// gated on, defaulting to the real one when no dependency was injected.
 func (s BootstrapRunner) probeHostedRegistry() HostedRegistryStatus {
 	probe := s.ProbeHostedRegistry
 	if probe == nil {

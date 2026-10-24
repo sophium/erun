@@ -15,27 +15,15 @@ import (
 	"github.com/sophium/erun/internal"
 )
 
-// mcpChannelUnreachableExitCode marks a channel that stayed unreachable even
-// after one transparent reattach — distinct from a normal error so a caller
-// looping on this command cannot misread "the channel is down" as "the job
-// finished" or "the tool failed", which is exactly the misread a naive
-// treat-anything-not-running-as-terminal watcher falls into.
+// mcpChannelUnreachableExitCode marks a channel still unreachable after one reattach,
+// so a polling caller cannot mistake it for a finished job or failed tool.
 const mcpChannelUnreachableExitCode = 126
 
-// ReattachMCPChannel is the spawn the reattach path performs. It is a variable
-// so the decision that keeps a --dry-run from starting real work can be tested
-// by asserting the spawn is never invoked, which is the only observable a
-// preview leaves behind.
+// ReattachMCPChannel is a variable so tests can assert --dry-run never spawns it.
 var ReattachMCPChannel = ReattachEnvironmentMCPChannel
 
-// CallMCPToolWithReattach is the shared choke point for every host-side call
-// into an environment's MCP edge (mcp call and the job/idle/activity verbs
-// via callEnvironmentTool): a channel that has dropped or gone stale gets
-// exactly one transparent reattach via `erun open --reconnect` before the
-// failure is surfaced, so a caller doesn't have to rediscover the two traps a
-// hand-rolled retry loop falls into — probing the port binding is worthless
-// (a stale forward still accepts the connection), and a bare `erun open`
-// would silently start an environment the operator deliberately stopped.
+// CallMCPToolWithReattach calls an environment's MCP edge, reattaching once via
+// `erun open --reconnect` on a dropped channel; a bare `erun open` would restart a stopped env.
 func CallMCPToolWithReattach(ctx context.Context, commandCtx core.Context, target McpEdgeTarget, tool string, arguments map[string]any, idleProbe bool) (mcp.MCPToolCallResult, error) {
 	call := func() (mcp.MCPToolCallResult, error) {
 		return mcp.CallMCPTool(ctx, mcp.MCPToolCallParams{
@@ -49,10 +37,7 @@ func CallMCPToolWithReattach(ctx context.Context, commandCtx core.Context, targe
 	}
 	result, err := call()
 	if err != nil && errors.Is(err, mcp.ErrMCPEndpointUnreachable) {
-		// A preview resolves and traces; it never executes. Reattaching spawns a
-		// real `erun open --reconnect` child that keeps running past the
-		// preview, so a --dry-run reports the channel as unreachable instead of
-		// re-establishing it.
+		// Reattaching spawns a real child process, so a dry run reports unreachable instead.
 		if commandCtx.DryRun {
 			return result, err
 		}
@@ -63,8 +48,7 @@ func CallMCPToolWithReattach(ctx context.Context, commandCtx core.Context, targe
 	return result, err
 }
 
-// McpEdgeErrorWithExitCode is mcpEdgeError plus the exit code an unrecovered
-// channel-unreachable failure must carry (see mcpChannelUnreachableExitCode).
+// McpEdgeErrorWithExitCode is McpEdgeError carrying mcpChannelUnreachableExitCode.
 func McpEdgeErrorWithExitCode(target McpEdgeTarget, err error) error {
 	wrapped := McpEdgeError(target, err)
 	if errors.Is(err, mcp.ErrMCPEndpointUnreachable) {
@@ -73,8 +57,7 @@ func McpEdgeErrorWithExitCode(target McpEdgeTarget, err error) error {
 	return wrapped
 }
 
-// McpEdgeTarget is one environment's resolved MCP edge: where it answers and
-// which audience a bearer for it must carry.
+// McpEdgeTarget is one environment's resolved MCP endpoint and token audience.
 type McpEdgeTarget struct {
 	Tenant      string
 	Environment string
@@ -101,25 +84,15 @@ func ResolveMCPEdgeTarget(ctx core.Context, resolveOpen OpenResolver, params sha
 	return target, nil
 }
 
-// McpEdgeTokenMinter mints per request rather than once per command, so a tool
-// call that runs longer than the token's lifetime still starts with a fresh one.
+// McpEdgeTokenMinter mints per request so long tool calls still start with a fresh token.
 func McpEdgeTokenMinter(target McpEdgeTarget) mcp.MCPTokenMinter {
 	return func() (string, error) {
 		return mcpauth.MintDesktopMCPToken(core.DefaultDesktopIdentityDir(), target.Tenant, target.Environment, time.Now())
 	}
 }
 
-// McpEdgeError turns the failures an operator can act on into instructions: a
-// missing port-forward, an edge that does not trust this machine's identity,
-// and the one that is not about the environment at all — a live edge that will
-// not hold this client's session.
-//
-// The session loss is the case that has to say which side broke. Every other
-// branch here sends the operator to the tunnel or to the environment, and that
-// reading of a lost session is what leaves a dispatchable environment sitting
-// idle: the edge answered this very call, so nothing about the environment is
-// in question, and the CLI — which dispatches through the same edge without
-// this client's session — keeps working meanwhile.
+// McpEdgeError turns actionable edge failures into instructions. A lost session is
+// reported as a client-side problem: the edge answered, so the environment is fine.
 func McpEdgeError(target McpEdgeTarget, err error) error {
 	switch {
 	case errors.Is(err, mcp.ErrMCPTargetNotAnswering):

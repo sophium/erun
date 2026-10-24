@@ -11,24 +11,19 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
-// dns01TokenTTL is long-lived on purpose: a DNS-01 token is injected once at edge
-// setup and must keep working across cert renewals (~60-day cadence). Its blast
-// radius is bounded not by expiry but by the broker, which authorizes every
-// write against the token's own tenant subzone.
+// DNS-01 tokens are injected once and must survive cert renewals; the broker's
+// per-subzone authorization bounds them, not expiry.
 const dns01TokenTTL = 365 * 24 * time.Hour
 
 const dns01AudiencePrefix = "erun-dns01:"
 
-// DNS01Audience is the per-env audience a DNS-01 broker token carries and the
-// broker authorizes against. Deliberately distinct from the MCP audience so a
-// token minted for one capability cannot be replayed against the other.
+// DNS01Audience is the per-env broker audience, distinct from the MCP audience
+// so tokens cannot be replayed across capabilities.
 func DNS01Audience(tenant, environment string) string {
 	return dns01AudiencePrefix + strings.TrimSpace(tenant) + "/" + strings.TrimSpace(environment)
 }
 
-// ParseDNS01Audience extracts (tenant, environment) from a DNS-01 audience,
-// reporting ok=false for anything that is not a well-formed erun-dns01 audience —
-// including an MCP-audience token presented to the broker.
+// ParseDNS01Audience extracts tenant and environment from a DNS-01 audience.
 func ParseDNS01Audience(audience string) (tenant, environment string, ok bool) {
 	rest, found := strings.CutPrefix(strings.TrimSpace(audience), dns01AudiencePrefix)
 	if !found {
@@ -41,12 +36,9 @@ func ParseDNS01Audience(audience string) (tenant, environment string, ok bool) {
 	return tenant, environment, true
 }
 
-// SignDNS01 mints a long-lived per-env DNS-01 token the webhook shim presents to
-// the broker. The broker self-verifies it (VerifyDNS01) and authorizes writes
-// against the (tenant, environment) encoded in its audience.
+// SignDNS01 mints a long-lived per-env DNS-01 broker token.
 func (s *Signer) SignDNS01(tenant, environment string, now time.Time) (string, string, error) {
 	audience := DNS01Audience(tenant, environment)
-	// M2M token: the subject is the env identity, not an ERun user.
 	token, err := mcpauth.SignMCPToken(s.privatePEM, mcpauth.MCPTokenClaims{
 		Issuer:    mcpauth.DesktopMCPIssuer(),
 		Subject:   audience,
@@ -60,11 +52,7 @@ func (s *Signer) SignDNS01(tenant, environment string, now time.Time) (string, s
 	return token, audience, nil
 }
 
-// VerifyDNS01 verifies a DNS-01 token against the backend's own public key — the
-// backend both signs and verifies these, so there is no file:// or JWKS
-// indirection — enforcing the EdDSA alg lock and expiry, and returns the
-// (tenant, environment) the token authorizes. A malformed, expired, wrong-key,
-// or non-erun-dns01 token is rejected.
+// VerifyDNS01 verifies a DNS-01 token against the backend's own public key.
 func (s *Signer) VerifyDNS01(token string, now time.Time) (tenant, environment string, err error) {
 	signingInput, claims, signature, err := parseEdDSAToken(token)
 	if err != nil {
@@ -88,12 +76,7 @@ type eddsaHeader struct {
 	Type      string `json:"typ"`
 }
 
-// parseEdDSAToken splits and decodes an EdDSA JWT, hard-requiring alg=EdDSA
-// (closing the alg-confusion class) and returning the signing input, claims, and
-// raw signature for the caller to verify against a known key. It duplicates a
-// little of erun-common's file:// parse deliberately: the DNS-01 path is
-// backend-only and lives here rather than widening erun-common (whose coverage
-// is gated by the CLI integration suite, which never reaches this code).
+// parseEdDSAToken decodes a JWT, requiring alg=EdDSA to block alg confusion.
 func parseEdDSAToken(token string) (signingInput string, claims mcpauth.MCPTokenClaims, signature []byte, err error) {
 	segments := strings.Split(strings.TrimSpace(token), ".")
 	if len(segments) != 3 {

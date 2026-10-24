@@ -7,14 +7,8 @@ import (
 	"time"
 )
 
-// AISessionState is what a caller actually wants to know about an AI CLI
-// session: is it thinking, is it waiting on the human, or is it gone.
-//
-// A PTY output-volume heuristic (busy while bytes keep arriving, idle after a
-// few seconds of silence) cannot represent AwaitingInput: a session waiting on
-// a human produces no output at all, which is exactly what Idle also looks
-// like. The two are only distinguishable from a direct signal about which
-// state the tool is actually in, which is what AISessionEventKind carries.
+// AISessionState is an AI session's state as reported by the tool's own hooks;
+// output silence cannot distinguish AwaitingInput from Idle.
 type AISessionState string
 
 const (
@@ -25,35 +19,23 @@ const (
 	AISessionStateOOMKilled     AISessionState = "oom-killed"
 )
 
-// AISessionEventKind is a turn-boundary signal the AI tool itself reports,
-// each mapped to the hook event that fires it in Claude Code / Codex: a
-// session reports its own state rather than having it guessed from output.
+// AISessionEventKind is a turn-boundary event reported by the AI tool's hooks.
 type AISessionEventKind string
 
 const (
-	// AISessionEventTurnStart fires when the human hands control to the tool
-	// (Claude Code's UserPromptSubmit, Codex's equivalent turn start).
+	// AISessionEventTurnStart: UserPromptSubmit.
 	AISessionEventTurnStart AISessionEventKind = "turn-start"
-	// AISessionEventToolUse fires while the tool is still working a turn
-	// (PreToolUse/PostToolUse). It keeps a long turn's state fresh so a slow
-	// tool call in the middle of it does not read as stale.
+	// AISessionEventToolUse: Pre/PostToolUse; keeps a long turn fresh.
 	AISessionEventToolUse AISessionEventKind = "tool-use"
-	// AISessionEventTurnEnd fires when the tool returns control to the human
-	// (Claude Code's Stop). This is the direct signal for AwaitingInput.
+	// AISessionEventTurnEnd: Stop; resolves to AwaitingInput.
 	AISessionEventTurnEnd AISessionEventKind = "turn-end"
-	// AISessionEventNotify fires when the tool is explicitly blocked on the
-	// human mid-turn - a permission prompt or a clarifying question (Claude
-	// Code's Notification). Also resolves to AwaitingInput.
+	// AISessionEventNotify: Notification (a prompt mid-turn); resolves to AwaitingInput.
 	AISessionEventNotify AISessionEventKind = "notify"
 	// AISessionEventExit fires once, when the tool's process ends.
 	AISessionEventExit AISessionEventKind = "exit"
 )
 
-// AISessionExitReasonOOM is the ExitReason value that maps an exit event to
-// AISessionStateOOMKilled instead of a plain AISessionStateExited. Detecting
-// the OOM kill itself (cgroup memory.events, a dmesg scan) is a wiring concern
-// for whatever process observes the exit; this model only records what it is
-// told.
+// AISessionExitReasonOOM maps an exit event to AISessionStateOOMKilled.
 const AISessionExitReasonOOM = "oom"
 
 var validAISessionEventKinds = []AISessionEventKind{
@@ -64,9 +46,7 @@ var validAISessionEventKinds = []AISessionEventKind{
 	AISessionEventExit,
 }
 
-// AISessionRecord is the on-disk state for one AI session: the last event it
-// reported, and when. One writer per session file, the session's own hook
-// invocation, so there is never a competing update to reconcile.
+// AISessionRecord is the on-disk last event of one session; only that session's hook writes it.
 type AISessionRecord struct {
 	SessionID  string             `json:"sessionId"`
 	Tool       string             `json:"tool,omitempty"`
@@ -76,17 +56,13 @@ type AISessionRecord struct {
 	ExitReason string             `json:"exitReason,omitempty"`
 }
 
-// AISessionStatus is the resolved, caller-facing view of an AI session: the
-// read model derived from the last recorded event, never from silence.
+// AISessionStatus is the caller-facing view of a session.
 type AISessionStatus struct {
 	SessionID string         `json:"sessionId"`
 	Tool      string         `json:"tool,omitempty"`
 	State     AISessionState `json:"state"`
 	Reason    string         `json:"reason"`
-	// `omitzero` rather than `omitempty`: a session that has recorded no
-	// activity carries no lastActivity field at all, instead of Go's zero
-	// instant rendered as though it were a real time. Same rule as the idle
-	// markers' timestamps, so a consumer reads one convention.
+	// omitzero: no activity omits the field rather than rendering the zero time.
 	LastActivity time.Time `json:"lastActivity,omitzero"`
 	ExitCode     *int      `json:"exitCode,omitempty"`
 }
@@ -103,11 +79,8 @@ type AISessionEventParams struct {
 	Now         time.Time
 }
 
-// ResolveAISessionStatus derives the current state purely from the last
-// reported event and its own carried fields - never from how long it has
-// been since that event, which is the property that makes AwaitingInput
-// representable at all. A session that reported TurnEnd an hour ago is still
-// AwaitingInput: nothing said otherwise since.
+// ResolveAISessionStatus derives state from the last event only, never from
+// elapsed time, so AwaitingInput persists until another event.
 func ResolveAISessionStatus(record AISessionRecord) AISessionStatus {
 	status := AISessionStatus{
 		SessionID:    record.SessionID,
@@ -150,9 +123,8 @@ func exitReason(record AISessionRecord) string {
 	return "exited"
 }
 
-// ValidateAISessionID rejects anything that is not a plain path segment, so a
-// session id cannot be used to escape the AI-sessions directory it is filed
-// under.
+// ValidateAISessionID requires a plain path segment so the id cannot escape the
+// sessions directory.
 func ValidateAISessionID(sessionID string) error {
 	if sessionID == "" {
 		return fmt.Errorf("AI session id is required")

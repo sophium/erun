@@ -40,9 +40,6 @@ func testReviewRecordBuildFailedDryRunTracesFailureDetail(t *testing.T) {
 }
 
 func testReviewRecordBuildRealRunMovesReviewToReady(t *testing.T) {
-	// create -> record-build (successful) -> show (status=READY), covering
-	// PlatformClient.CreateBuild's request/response handling and the
-	// backend's build-drives-status contract end to end.
 	setup := env.New(t)
 	server := reviewAPIStubServer(t)
 	platformAlias(t, setup, server)
@@ -92,9 +89,7 @@ func testReviewRecordBuildFailedRealRunMovesReviewToFailed(t *testing.T) {
 }
 
 func testReviewRecordBuildWithoutVersionRefused(t *testing.T) {
-	// Every recorded build carries the version its build minted, the merge
-	// queue's own build of a merge commit included, so an omitted --version
-	// is refused before alias resolution or any platform call.
+	// An omitted --version is refused before alias resolution or any platform call.
 	setup := env.New(t)
 	args := []string{
 		"review", "record-build", "review-1",
@@ -108,13 +103,8 @@ func testReviewRecordBuildWithoutVersionRefused(t *testing.T) {
 }
 
 func testReviewRecordBuildFailedKnownInfrastructureSignatureRefused(t *testing.T) {
-	// A failed build whose --failure-detail names one of erun's own known
-	// infrastructure signatures (see primitive/build/build_failure_classifier.go)
-	// is refused locally -- before any network call -- rather than recorded
-	// FAILED: a build has no INCONCLUSIVE result, so recording it would move
-	// the review out of the merge queue for a network/registry blip that is
-	// not a verdict about the change. The remedy is to re-run the build. No
-	// alias is seeded: the refusal fires before alias resolution.
+	// A known infrastructure failure signature is refused locally rather than recorded FAILED:
+	// builds have no INCONCLUSIVE result. No alias is seeded since the refusal comes first.
 	setup := env.New(t)
 	args := []string{
 		"review", "record-build", "review-1",
@@ -175,10 +165,7 @@ func testReviewRequeueDryRunTracesResolvedCall(t *testing.T) {
 }
 
 func testReviewRequeueRealRunMovesMergeBackToReady(t *testing.T) {
-	// create -> record-build (READY) -> queue advance (MERGE) -> requeue
-	// (READY), covering the real MERGE -> READY recovery round trip: a review wedged at MERGE (e.g. by a batched
-	// gate-merge whose sibling landed but was never promoted) can be
-	// freed without a raw HTTP call.
+	// requeue frees a review wedged at MERGE without a raw HTTP call.
 	setup := env.New(t)
 	server := reviewAPIStubServer(t)
 	platformAlias(t, setup, server)

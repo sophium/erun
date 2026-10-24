@@ -7,12 +7,6 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestEnvironmentConfigGatewayChoiceReachesTheLaunch pins the desktop half of
-// the reported flow. An environment's gateway choice must survive a save, the
-// AI tab must be offered the models the environment will actually launch from,
-// and the launch signature the AI tab reopens on must move when the choice
-// does — so a save that takes an environment off the gateway reopens its AI
-// tabs on the new launch.
 func TestEnvironmentConfigGatewayChoiceReachesTheLaunch(t *testing.T) {
 	store := stubUIStore{
 		config: &configpkg.ERunConfig{OpenRouter: &configpkg.OpenRouterConfig{

@@ -9,11 +9,7 @@ import { ScopeSelector } from './ScopeSelector';
 import type { ConsoleSection, ConsoleSectionId } from './sections';
 import { type CurrentTenant, TenantSwitcher } from './TenantSwitcher';
 
-// NavBadge is the nav-level pending-count pill: a pending count must be
-// visible without opening the view. It is console-shell-owned, not a kit
-// widget -- a nav badge has no caller outside this sidebar, and erun-kit's
-// AGENTS.md reserves new shared components for a second real consumer, not
-// a speculative one.
+// Shell-owned rather than in erun-kit: it has no second consumer.
 function NavBadge({ count }: { count: number }): React.ReactElement {
   return (
     <span
@@ -60,9 +56,6 @@ function NavItem({
   );
 }
 
-// ConsoleSidebar is the persistent navigation: a single `active` section drives
-// which item is marked current, so exactly one is ever selected at once:
-// selection is never derived from more than one field.
 export function ConsoleSidebar({
   brand,
   token,

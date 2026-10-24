@@ -13,11 +13,8 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// runtime-init is the erun-devops image's ENTRYPOINT. Its real run is an
-// init that only makes sense inside the Linux runtime container (it is covered
-// there by erun-common's runtime_supervisor_linux_test.go); what this suite pins
-// is the plan a dry run shows for the injected environment and the refusal
-// anywhere else.
+// TestRuntimeInit pins the dry-run plan and the non-Linux refusal; the real run is
+// covered in erun-common.
 func TestRuntimeInit(t *testing.T) {
 	t.Parallel()
 
@@ -31,9 +28,6 @@ func TestRuntimeInit(t *testing.T) {
 	})
 
 	t.Run("dry_run_lists_the_devops_boot_for_the_injected_environment", func(t *testing.T) {
-		// A cloud-managed runtime environment with sshd and the MCP edge on:
-		// every step that applies is listed with its concrete paths and the
-		// exact emcp invocation, and nothing is written.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"runtime-init", "--dry-run"}, erun.RunOptions{
 			Cwd: setup.Cwd,
@@ -52,8 +46,6 @@ func TestRuntimeInit(t *testing.T) {
 	})
 
 	t.Run("dry_run_runs_a_command_after_the_common_preparation", func(t *testing.T) {
-		// Any command other than devops gets the preparation every mode shares
-		// and then runs as the supervised foreground process.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"runtime-init", "--dry-run", "--", "sh", "-c", "exit 3"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -63,9 +55,7 @@ func TestRuntimeInit(t *testing.T) {
 	})
 
 	t.Run("refuses_a_host_that_is_not_linux", func(t *testing.T) {
-		// An init's duties are Linux process semantics; anywhere else the
-		// command names its one venue. Pinned to darwin so the golden holds on
-		// every host.
+		// Pinned to darwin so the golden holds on every host.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"runtime-init", "--", "true"}, erun.RunOptions{
 			Cwd: setup.Cwd,
@@ -78,8 +68,7 @@ func TestRuntimeInit(t *testing.T) {
 	})
 }
 
-// seedGoBuildCache lays out count go cache entries of size bytes each, the
-// lowest index the least recently used.
+// seedGoBuildCache writes count entries of size bytes, lowest index least recently used.
 func seedGoBuildCache(t *testing.T, dir string, count, size int) {
 	t.Helper()
 	for i := 0; i < count; i++ {
@@ -117,8 +106,7 @@ func TestTrimCache(t *testing.T) {
 	})
 
 	t.Run("dry_run_counts_the_entries_it_would_evict", func(t *testing.T) {
-		// Ten 1000-byte entries (plus 3-byte action files) against a 5000-byte
-		// cap: the five oldest would go, and nothing is removed.
+		// Dry run: the five oldest would go, and nothing is removed.
 		setup := env.New(t)
 		cache := filepath.Join(setup.Home, "go-build")
 		seedGoBuildCache(t, cache, 10, 1000)
@@ -133,10 +121,6 @@ func TestTrimCache(t *testing.T) {
 	})
 
 	t.Run("real_run_evicts_the_least_recently_used_entries", func(t *testing.T) {
-		// The cap and the cache come from the environment the runtime chart
-		// renders (GOCACHE, ERUN_GO_BUILD_CACHE_MAX_BYTES); the oldest entries
-		// go, the newest and the cache's bookkeeping stay, and --output json
-		// carries the result.
 		setup := env.New(t)
 		cache := filepath.Join(setup.Home, "go-build")
 		seedGoBuildCache(t, cache, 10, 1000)
@@ -159,8 +143,7 @@ func TestTrimCache(t *testing.T) {
 	})
 
 	t.Run("a_cap_of_zero_is_no_bound", func(t *testing.T) {
-		// The chart renders 0 to turn the bound off; read as a bound of zero it
-		// would clear the cache.
+		// The chart renders 0 to disable the bound; reading it as zero would clear the cache.
 		setup := env.New(t)
 		cache := filepath.Join(setup.Home, "go-build")
 		seedGoBuildCache(t, cache, 2, 1000)
@@ -227,9 +210,7 @@ func TestInstallSkills(t *testing.T) {
 	})
 
 	t.Run("installs_then_keeps_an_operator_edit", func(t *testing.T) {
-		// The first run installs into both assistants; after the source moves
-		// on and the operator edits the installed skill, the second run keeps
-		// the edit and still refreshes the untouched agent.
+		// A second run keeps the operator's edit to an installed skill and still refreshes the other agent.
 		setup := env.New(t)
 		skills, agents := seedAgentAssets(t, filepath.Join(setup.Cwd, "erun-skills"))
 		args := []string{"install-skills", "--skills-dir", skills, "--agents-dir", agents}

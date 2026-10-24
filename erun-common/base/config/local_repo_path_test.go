@@ -7,13 +7,8 @@ import (
 	"testing"
 )
 
-// hostRepoPathFixture is one value a caller might be handed as a host-machine
-// repository path, with the verdict every caller must reach for it.
-//
-// The same fixture set is driven through the desktop's Manage save path in
-// erun-ui/environment_config_localrepo_test.go, which asserts its verdict
-// against this package's — so the two sides are held to one verdict per value
-// rather than to two hand-written expectation lists that can drift apart.
+// hostRepoPathFixture is a candidate path and its verdict; the desktop's Manage
+// save path is held to the same fixtures.
 type hostRepoPathFixture struct {
 	name     string
 	path     string
@@ -40,7 +35,6 @@ func hostRepoPathFixtures(t *testing.T) []hostRepoPathFixture {
 	}
 }
 
-// TestValidateHostRepoPathVerdicts pins the shared definition both callers use.
 func TestValidateHostRepoPathVerdicts(t *testing.T) {
 	for _, envType := range []EnvironmentType{EnvironmentTypeLocalAgent, EnvironmentTypeHost} {
 		for _, tc := range hostRepoPathFixtures(t) {
@@ -58,9 +52,6 @@ func TestValidateHostRepoPathVerdicts(t *testing.T) {
 	}
 }
 
-// TestValidateEnvRepoPathLeavesOtherTypesAlone keeps the requirement on the two
-// types that actually use a host directory: a remote or runtime env records an
-// in-pod path that has no business existing on this machine.
 func TestValidateEnvRepoPathLeavesOtherTypesAlone(t *testing.T) {
 	for _, envType := range []EnvironmentType{EnvironmentTypeRemoteAgent, EnvironmentTypeRuntime} {
 		for _, tc := range hostRepoPathFixtures(t) {

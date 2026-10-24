@@ -33,12 +33,8 @@ func TestRawToolRunsFromTheGivenDir(t *testing.T) {
 	if !output.Wait {
 		t.Fatalf("a plain call must run in the foreground, got %+v", output)
 	}
-	// Compare canonical paths: on macOS t.TempDir() hands back the TMPDIR form
-	// (/var/folders/...), while a shell's pwd reports where the directory really
-	// is (/private/var/folders/...), so the two spellings differ for the same
-	// directory. Trim before resolving -- EvalSymlinks on a path still carrying
-	// its trailing newline fails, which would leave that side unresolved and
-	// reintroduce exactly the mismatch this comparison exists to avoid.
+	// macOS TempDir and pwd spell the same directory differently (/var vs /private/var).
+	// Trim the newline first or EvalSymlinks fails.
 	got := subdir
 	if resolved, evalErr := filepath.EvalSymlinks(got); evalErr == nil {
 		got = resolved
@@ -64,12 +60,7 @@ func TestRawToolRefusesEnvInTheForeground(t *testing.T) {
 	}
 }
 
-// TestRawToolRefusesForeignEnvironmentInTheForeground guards the exact gap
-// this was filed for: exec_raw's foreground path (wait true, the default)
-// ran a command locally and reported success even when tenant/environment
-// named a different environment, since nothing checked them. A caller whose
-// first probe was something as generic as `echo hello` had no way to notice
-// it had run in the wrong place; only printing the hostname revealed it.
+// Foreground exec_raw must refuse a foreign target rather than run locally.
 func TestRawToolRefusesForeignEnvironmentInTheForeground(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a POSIX shell command")
@@ -89,10 +80,7 @@ func TestRawToolRefusesForeignEnvironmentInTheForeground(t *testing.T) {
 	}
 }
 
-// TestRawToolAcceptsItsOwnScopeInTheForeground is the flip side of the refusal
-// above: restating or omitting tenant/environment in the foreground must keep
-// working exactly as before, since plenty of existing callers pass them
-// redundantly.
+// Many callers restate tenant/environment redundantly.
 func TestRawToolAcceptsItsOwnScopeInTheForeground(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a POSIX shell command")

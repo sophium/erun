@@ -10,13 +10,8 @@ import (
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// The job verbs run the work inside the environment wherever they are invoked
-// from. Off-environment that means the environment's own job tools: the work,
-// its log, and the activity lease that keeps idle-stop off it all belong to the
-// environment, and a job supervised on the operator's laptop has none of them.
-//
-// These payloads mirror what the environment's job tools return. erun-cli and
-// erun-mcp must not import each other, so the wire shape is restated here.
+// Off-environment, job verbs use the environment's job tools. erun-cli and erun-mcp
+// must not import each other, so these payloads restate the wire shape.
 
 type environmentJobResult struct {
 	Tenant      string                   `json:"tenant"`
@@ -25,10 +20,7 @@ type environmentJobResult struct {
 	Executed    bool                     `json:"executed"`
 }
 
-// environmentJobEnvelopeResult mirrors exec_raw's response, which -- unlike
-// exec_agent's -- does not carry the full job record inline: exec_raw is
-// also called synchronously (wait: true), so its response shape has to cover
-// both cases, and the terse one only confirms a background start happened.
+// environmentJobEnvelopeResult mirrors exec_raw's response, which carries no job record.
 type environmentJobEnvelopeResult struct {
 	JobID string `json:"jobId"`
 	State string `json:"state"`
@@ -48,12 +40,8 @@ type environmentJobCancelResult struct {
 	Cancel      jobs.CancelEnvironmentJobResult `json:"cancel"`
 }
 
-// startJobInEnvironment starts job_start's replacement remotely: exec_agent
-// for an agent run, exec_raw with wait: false for a plain command. Neither
-// tool's immediate response carries the full job record the way job_start's
-// did (exec_raw's does not carry one at all, since it is also used
-// synchronously), so the command branch follows up with one exec_job_status
-// call to return the same complete record callers of this function expect.
+// startJobInEnvironment starts via exec_agent or exec_raw (wait: false); the command
+// branch follows up with exec_job_status for the full record.
 func startJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobs.StartEnvironmentJobParams) (sharedpkg.EnvironmentJob, bool, error) {
 	if err := jobs.ValidateEnvironmentJobStart(params); err != nil {
 		return sharedpkg.EnvironmentJob{}, false, err
@@ -84,13 +72,8 @@ func startAgentJobInEnvironment(ctx context.Context, commandCtx core.Context, re
 	return result.Job, resolved, nil
 }
 
-// startedByJobIDForOffEnvironmentStart is what an off-environment start (this
-// call itself reaches the target through its MCP edge, which is a long-lived
-// process with no ERUN_JOB_ID of its own to inherit -- see
-// sharedpkg.CurrentEnvironmentJobID) threads explicitly so the new job still
-// records its real parent: an explicit params.StartedByJobID wins when the
-// caller already resolved one (e.g. a re-exec of this same path), otherwise
-// this process's own job id, if it is itself running as one, applies.
+// startedByJobIDForOffEnvironmentStart threads the parent job id explicitly, since
+// the MCP edge has no ERUN_JOB_ID to inherit.
 func startedByJobIDForOffEnvironmentStart(params jobs.StartEnvironmentJobParams) string {
 	if params.StartedByJobID != "" {
 		return params.StartedByJobID

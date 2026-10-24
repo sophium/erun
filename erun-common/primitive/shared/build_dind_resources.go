@@ -14,38 +14,16 @@ var (
 	dockerfileDindMemoryLimitPattern = regexp.MustCompile(`(?m)^\s*ARG\s+DIND_MEMORY_LIMIT_MIB\b`)
 )
 
-// DindCPULimitEnvVar / DindMemoryLimitMiBEnvVar name the env vars the runtime
-// chart's downward API populates on the main container from the erun-dind
-// sidecar's own resource limits (erun-devops/k8s/erun-devops/templates/service.yaml),
-// so an in-pod build can read the budget the operator provisioned for it
-// instead of through the config store, which has no environment entry inside
-// the pod. `erun resize --dind-cpu` moves the sidecar's configured limit, but
-// a build's test stage kept sizing off the config-store fallback default because the
-// in-pod config store resolves no environment and envConfig was always nil in
-// that context.
-//
-// These values are a sizing budget, not the cap itself: the Dockerfile only
-// feeds them to its own test-concurrency arithmetic, because a RUN step in the
-// test stage runs as a sibling of the sidecar's limited cgroup and so cannot
-// read the sidecar's real limit off the filesystem itself. The
-// limit they are resolved from is nonetheless enforced on that same build work
-// by a separate mechanism: buildContainerCPUCapCgroupParent nests every
-// RUN-instruction container under /docker/erun-build-cpu-cap-<pod>, whose
-// cpu.max `erun dind-entrypoint` mirrors from the sidecar's own kubelet-enforced
-// quota. So `erun resize --dind-cpu` moves both the concurrency this value
-// sizes and the ceiling the build actually runs under; it is only this ARG
-// read on its own that is not that ceiling. Memory is the one left uncapped
-// (see DefaultRuntimeDindCPU's note in runtime_resources.go).
+// DindCPULimitEnvVar / DindMemoryLimitMiBEnvVar carry the dind sidecar's
+// limits via the downward API, since the in-pod config store has no
+// environment. They size test concurrency only; the CPU cap itself is enforced
+// through buildContainerCPUCapCgroupParent.
 const (
 	DindCPULimitEnvVar       = "ERUN_DIND_CPU_LIMIT"
 	DindMemoryLimitMiBEnvVar = "ERUN_DIND_MEMORY_LIMIT_MIB"
 )
 
-// dockerfileConsumesDindCPULimit / dockerfileConsumesDindMemoryLimit report
-// whether a Dockerfile declares the DIND_CPU_LIMIT / DIND_MEMORY_LIMIT_MIB
-// ARGs (erun-devops/docker/erun-devops/Dockerfile and any tenant `-devops`
-// Dockerfile derived from it). Only such a Dockerfile gets the matching
-// --build-arg; every other build's docker command is unchanged.
+// Only a Dockerfile declaring the ARG gets the matching --build-arg.
 func dockerfileConsumesDindCPULimit(dockerfilePath string) bool {
 	data, err := os.ReadFile(dockerfilePath)
 	if err != nil {
@@ -62,13 +40,8 @@ func dockerfileConsumesDindMemoryLimit(dockerfilePath string) bool {
 	return dockerfileDindMemoryLimitPattern.Match(data)
 }
 
-// ApplyDindResourceBuildArgs threads the building environment's actual
-// erun-dind sidecar resource limits (EnvConfig.RuntimeDindPod) into build's
-// DindCPULimit/DindMemoryLimitMiB fields when its Dockerfile declares the
-// matching ARG. Without it, a test stage sizes its concurrency off either the
-// ARG's hardcoded default or the host node's raw capacity, since a RUN step in the test stage runs in a cgroup that is a sibling of
-// the dind sidecar's own limited cgroup, not a descendant of it, and so
-// cannot read the sidecar's real limit off the filesystem itself.
+// ApplyDindResourceBuildArgs passes the sidecar's limits because a RUN step's
+// cgroup is a sibling of the sidecar's and cannot read them itself.
 func ApplyDindResourceBuildArgs(store DockerStore, projectRoot, environment string, build *DockerBuildSpec) {
 	needsCPU := dockerfileConsumesDindCPULimit(build.DockerfilePath)
 	needsMemory := dockerfileConsumesDindMemoryLimit(build.DockerfilePath)
@@ -87,22 +60,9 @@ func ApplyDindResourceBuildArgs(store DockerStore, projectRoot, environment stri
 	}
 }
 
-// ResolveDockerBuildDindPodResources resolves the building environment's
-// configured erun-dind sidecar resources. It prefers the downward-API env
-// vars (DindCPULimitEnvVar/DindMemoryLimitMiBEnvVar) field-by-field when they
-// parse as valid Kubernetes quantities, since those are projected from the
-// sidecar's configured limits and are the only source available to an in-pod
-// build, whose config store has no environment entry to read. Any field an env var
-// does not resolve (absent, or malformed) falls back to the config-store
-// lookup a host-driven build already relies on, and a field neither resolves
-// falls back further to NormalizeRuntimeDindPodResources' own defaults
-// (DefaultRuntimeDindCPU/Memory) — the same numbers the sidecar's own chart
-// defaults to and this Dockerfile's ARG defaults already hardcode — never to
-// the host node's real capacity, which is the exact bug this function exists
-// to avoid reintroducing. Note what "the default" means for CPU: it is a
-// value sized for a node (RuntimeDindCPULimit), not an accident of the
-// machine this resolution happens to run on. The two are different questions
-// and only the second is forbidden.
+// ResolveDockerBuildDindPodResources prefers the downward-API vars per field,
+// then the config store, then the normalized defaults — never the host node's
+// capacity.
 func ResolveDockerBuildDindPodResources(store DockerStore, projectRoot, environment string) config.RuntimePodResources {
 	fallback := config.RuntimePodResources{}
 	if envConfig := ResolveDockerBuildEnvConfigForProject(store, projectRoot, environment); envConfig != nil {
@@ -111,14 +71,7 @@ func ResolveDockerBuildDindPodResources(store DockerStore, projectRoot, environm
 	return config.NormalizeRuntimeDindPodResources(dindPodResourcesPreferEnv(fallback))
 }
 
-// dindPodResourcesPreferEnv overrides each field of fallback with its
-// downward-API env var when the var is set and parses as a valid Kubernetes
-// quantity. A malformed or absent var leaves that field on the fallback
-// rather than masking a real config-store value (or the eventual hardcoded
-// default) with a bad literal. DindMemoryLimitMiBEnvVar carries a plain MiB
-// integer (matching the DIND_MEMORY_LIMIT_MIB build-arg it feeds), so it is
-// suffixed with "Mi" before being validated/stored as a Kubernetes memory
-// quantity.
+// dindPodResourcesPreferEnv ignores malformed vars; the memory var is plain MiB.
 func dindPodResourcesPreferEnv(fallback config.RuntimePodResources) config.RuntimePodResources {
 	resources := fallback
 	if cpu := strings.TrimSpace(os.Getenv(DindCPULimitEnvVar)); cpu != "" {
@@ -135,13 +88,8 @@ func dindPodResourcesPreferEnv(fallback config.RuntimePodResources) config.Runti
 	return resources
 }
 
-// dindResourceBuildArgValues converts RuntimePodResources into the plain
-// integers DIND_CPU_LIMIT/DIND_MEMORY_LIMIT_MIB expect: whole cores (the
-// Dockerfile divides this in shell integer arithmetic, so a fractional core
-// count would break it — floored, with a 1-core minimum) and whole MiB. A
-// value that fails to parse (should not happen for an already-normalized
-// RuntimePodResources) yields an empty string, which applyDindResourceBuildArgs
-// leaves off the docker command entirely rather than passing a bad literal.
+// dindResourceBuildArgValues floors CPU to whole cores (min 1) because the
+// Dockerfile uses shell integer arithmetic.
 func dindResourceBuildArgValues(resources config.RuntimePodResources) (cpuLimit, memoryLimitMiB string) {
 	if milli, err := config.ParseKubernetesCPUToMilli(resources.CPU); err == nil {
 		cores := milli / 1000

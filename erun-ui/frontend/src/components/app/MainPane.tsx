@@ -28,11 +28,7 @@ export function MainPane({
     <main
       ref={terminalPaneRef}
       className={cn(
-        // grid-cols-[minmax(0,1fr)] pins the single implicit column to the
-        // element's own width. Without it, a grid's column defaults to
-        // "auto" sizing, which grows to fit a wide descendant (e.g. the
-        // tenant dashboard's data tables) instead of letting that descendant
-        // scroll within the width the shell actually gave <main>.
+        // minmax(0,1fr) stops a wide descendant from growing the auto-sized column.
         'grid h-full min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] overflow-hidden bg-terminal',
         dashboardOpen
           ? 'grid-rows-[minmax(0,1fr)] bg-background'
@@ -42,11 +38,7 @@ export function MainPane({
       )}
     >
       {dashboardOpen && (
-        // TenantDashboardView's own root does not shrink below its content's
-        // natural width (a wide data table can widen it past what a narrow
-        // <main> has to give). Contain that here with a scrollbar rather than
-        // <main>'s own overflow-hidden silently clipping it: a control the
-        // shell can't yet lay out within the viewport must still be reachable.
+        // Scroll rather than let <main>'s overflow-hidden clip content wider than the viewport.
         <div className="min-h-0 min-w-0 overflow-x-auto">
           <TenantDashboardView />
         </div>

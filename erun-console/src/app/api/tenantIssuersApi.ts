@@ -1,10 +1,5 @@
-// RTK Query endpoint for GET /v1/tenant-issuers (erun-backend-api/internal/
-// routes/tenant_issuers.go): the caller's own tenant's issuer mappings by
-// default, or another tenant's when the caller is operations-scoped and
-// passes tenantId. The console's enroll-into-another-org flow (identityApi's
-// EnrollForm) reads this to resolve a target tenant's org value before
-// creating an identity provider account in it — orgFieldValue is the
-// org id Zitadel expects.
+// RTK Query endpoint for GET /v1/tenant-issuers; tenantId is honored for operations
+// callers only. orgFieldValue is the org id Zitadel expects.
 import { asOptionalString, asString, isRecord } from 'erun-kit';
 
 import { platformApi } from './platformApi';

@@ -4,28 +4,18 @@ import (
 	"strings"
 )
 
-// Execution mode lets a handful of operations that shell out to a CLI (aws,
-// helm, kubectl, ...) instead call the equivalent Go library, while keeping
-// the exact same CLI invocation as the dry-run/audit trace either way. Each
-// ported operation is keyed by its own name rather than by tool, since a tool
-// is rarely ported all at once — e.g. "aws-sts" covers only the `aws sts
-// get-caller-identity` call sites, not `aws sso login` or `aws configure
-// set`, which stay subprocess-only.
+// Operations that can call a Go library instead of a CLI, keyed per operation
+// since a tool is rarely ported whole. The trace shows the CLI either way.
 const (
 	ExecutionModeSubprocess = "subprocess"
 	ExecutionModeLibrary    = "library"
 )
 
-// ExecutionConfig holds the per-operation execution mode overrides. Absent
-// from config.yaml (the default) or set to anything other than "library"
-// keeps an operation on the subprocess path.
+// ExecutionConfig holds per-operation overrides; anything but "library" means subprocess.
 type ExecutionConfig struct {
 	Modes map[string]string `yaml:"modes,omitempty" json:"modes,omitempty"`
 }
 
-// knownExecutionOperations lists every operation with a library-backed
-// alternative today, so ExecutionModeReport can enumerate them without
-// depending on config.yaml already naming them explicitly.
 var knownExecutionOperations = []string{
 	"aws-sts",
 	"aws-sts-web-identity-token",
@@ -41,9 +31,7 @@ var knownExecutionOperations = []string{
 	"kubectl-context-configure",
 }
 
-// ExecutionModeFor resolves which path a promoted operation should take.
-// Unset or unrecognized values normalize to subprocess so a typo in
-// config.yaml cannot silently switch an operation into library mode.
+// ExecutionModeFor resolves an operation's mode; unknown values mean subprocess.
 func ExecutionModeFor(config ERunConfig, operation string) string {
 	if config.Execution.Modes == nil {
 		return ExecutionModeSubprocess
@@ -54,10 +42,8 @@ func ExecutionModeFor(config ERunConfig, operation string) string {
 	return ExecutionModeSubprocess
 }
 
-// CurrentExecutionMode reads the root config to resolve operation's mode,
-// tolerating an uninitialized or unreadable config by defaulting to
-// subprocess — the same tolerant-load convention DefaultCloudDependencies
-// uses for CloudSecretStore.
+// CurrentExecutionMode resolves operation's mode from the root config, defaulting
+// to subprocess when it cannot be read.
 func CurrentExecutionMode(operation string) string {
 	config, _, err := LoadERunConfig()
 	if err != nil {
@@ -66,17 +52,13 @@ func CurrentExecutionMode(operation string) string {
 	return ExecutionModeFor(config, operation)
 }
 
-// ExecutionModeStatus is one operation's resolved mode, for `erun doctor` to
-// report so "it behaves differently on my machine" has an answer.
+// ExecutionModeStatus is one operation's resolved mode, for `erun doctor`.
 type ExecutionModeStatus struct {
 	Operation string
 	Mode      string
 }
 
-// ExecutionModeReport lists config's resolved mode for every promoted
-// operation, for `erun doctor` to print. Takes config explicitly (rather than
-// loading it internally) so it stays a pure function callers can test without
-// touching the filesystem.
+// ExecutionModeReport lists every operation's resolved mode for `erun doctor`.
 func ExecutionModeReport(config ERunConfig) []ExecutionModeStatus {
 	statuses := make([]ExecutionModeStatus, 0, len(knownExecutionOperations))
 	for _, operation := range knownExecutionOperations {

@@ -41,8 +41,6 @@ func TestUpdateOrgSettingsPassesOnlyProvidedFields(t *testing.T) {
 	}
 }
 
-// TestUpdateOrgSettingsThreadsAllowRegister: closing (or reopening) self-registration must reach the
-// Zitadel client's params, the same way forceMfa already does.
 func TestUpdateOrgSettingsThreadsAllowRegister(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
 	routes := IdentityRoutes{admin: admin}
@@ -59,10 +57,6 @@ func TestUpdateOrgSettingsThreadsAllowRegister(t *testing.T) {
 	}
 }
 
-// TestCreateUserReportsMailNotConfiguredWithATemporaryPassword locks the
-// honest-failure behaviour: when Enroll reports mail delivery
-// as unconfigured, the response must carry the temporary password and a
-// warning explaining why, not silently look identical to a normal invite.
 func TestCreateUserReportsMailNotConfiguredWithATemporaryPassword(t *testing.T) {
 	enroller := &stubIdentityEnroller{result: service.EnrollIdentityResult{
 		IdPUser:                zitadel.User{ID: "idp-5", Username: "erin"},
@@ -87,8 +81,6 @@ func TestCreateUserReportsMailNotConfiguredWithATemporaryPassword(t *testing.T) 
 	}
 }
 
-// TestCreateUserReportsMailConfiguredWithNoWarning is the positive-path
-// counterpart: a normal invite carries no warning and no password.
 func TestCreateUserReportsMailConfiguredWithNoWarning(t *testing.T) {
 	enroller := &stubIdentityEnroller{result: service.EnrollIdentityResult{
 		IdPUser:                zitadel.User{ID: "idp-6", Username: "frank"},
@@ -119,9 +111,6 @@ func TestGetSMTPSettingsForbidsNonOperationsTenant(t *testing.T) {
 	}
 }
 
-// TestGetSMTPSettingsReportsUnconfigured: the platform must be able to report "mail is not configured"
-// through this surface, cleanly, rather than only via Zitadel's own
-// unhandled 404.
 func TestGetSMTPSettingsReportsUnconfigured(t *testing.T) {
 	admin := &stubIdentityAdminClient{smtpStatus: zitadel.SMTPStatus{Configured: false}}
 	routes := IdentityRoutes{admin: admin}
@@ -159,9 +148,6 @@ func TestUpdateSMTPSettingsPassesDeclaredFields(t *testing.T) {
 	}
 }
 
-// An org is the per-tenant identity boundary an org-scoped issuer resolves
-// by, so being unable to create one left tenant onboarding dependent on a
-// hand-made org in Zitadel's own console.
 func TestIdentityRoutesCreateOrg(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
 	routes := IdentityRoutes{admin: admin}
@@ -198,8 +184,6 @@ func TestIdentityRoutesCreateOrgRequiresName(t *testing.T) {
 	}
 }
 
-// Administering the platform's own IdP is not a company tenant's business,
-// and creating orgs least of all.
 func TestIdentityRoutesCreateOrgRequiresOperationsTenant(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
 	rec := httptest.NewRecorder()

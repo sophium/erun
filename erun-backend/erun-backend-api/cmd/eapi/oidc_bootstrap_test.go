@@ -23,8 +23,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/oidcbootstrap"
 )
 
-// The erun-zitadel chart drives the sidecar entirely through these variables;
-// a rename on either side leaves the sidecar unconfigured.
+// The variable names are a contract with the erun-zitadel chart.
 func TestOIDCBootstrapConfigReadsTheChartEnvironment(t *testing.T) {
 	t.Setenv("CORE_PORT", "9090")
 	t.Setenv("EXTERNAL_DOMAIN", "auth.example.test")
@@ -66,7 +65,6 @@ func TestOIDCBootstrapConfigNamesWhatIsMissing(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "--external-domain (EXTERNAL_DOMAIN)") || !strings.Contains(err.Error(), "--namespace (POD_NAMESPACE)") {
 		t.Fatalf("err = %v", err)
 	}
-	// Restoring needs only the Secret and where to write it.
 	_, err = resolveOIDCBootstrapConfig([]string{"--restore-pats", "--namespace", "erun", "--pats-secret-name", "erun-zitadel-pats"})
 	if err != nil {
 		t.Fatalf("restore-pats config: %v", err)
@@ -87,10 +85,6 @@ func TestRunDispatchesTheOIDCBootstrapSubcommand(t *testing.T) {
 	}
 }
 
-// One --once tick through the command's own wiring: the PAT the sidecar
-// authenticates with is read from the bootstrap directory, every call reaches
-// the loopback core with the external domain as Host, and the client ids land
-// in the ConfigMap.
 func TestOIDCBootstrapOnceReconcilesAgainstTheLoopbackCore(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "admin-sa.pat"), []byte("pat\n"), 0o600); err != nil {
@@ -122,8 +116,7 @@ func TestOIDCBootstrapOnceReconcilesAgainstTheLoopbackCore(t *testing.T) {
 	}
 }
 
-// fakeCore is a Management API with no projects or apps yet: every create
-// succeeds with a fresh id.
+// fakeCore is an empty Management API where every create succeeds.
 type fakeCore struct {
 	mu       sync.Mutex
 	nextID   int

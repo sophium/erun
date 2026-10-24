@@ -15,18 +15,8 @@ import {
   type UITenantPlatformEnrollmentStatus,
 } from '@/types';
 
-// Sidebar.TenantEnrollmentStatus.tsx is the tenant row's platform-enrollment
-// status icon: the whole request/approve flow reduces to one status icon on
-// the tenant row, carrying both the state and the control at every stage. It
-// is a THIRD row-kind status glyph, deliberately not built on
-// Sidebar.StatusDot.tsx's StatusDotGlyph -- that component's own doc comment
-// scopes it to the env/orchestrator "condition" vocabulary (running / busy /
-// stopped / failed), and repurposing its exported union for an unrelated
-// domain (platform enrollment) would make a future env-only change silently
-// affect this glyph too. Shape still carries the state, not colour alone
-// (WCAG 1.4.1), and the pending glyph deliberately mirrors StatusDotGlyph's
-// busy treatment pixel-for-pixel: "a request is being worked on" is the same
-// concept as "a command is running in there".
+// Tenant row's platform-enrollment status icon. Deliberately not StatusDotGlyph,
+// whose union is scoped to env/orchestrator conditions.
 
 type TenantEnrollmentGlyphState =
   | 'local-only'
@@ -62,11 +52,7 @@ function EnrollmentGlyph({ state }: { state: TenantEnrollmentGlyphState }): Reac
     return <CircleHelp aria-hidden="true" className="size-2.5 text-muted-foreground" />;
   }
   if (state === 'tenant-mismatch') {
-    // The same building glyph the dashboard renders for this state
-    // (TenantPlatformState.tsx's TenantMismatchState): one situation, one
-    // shape. It shares declined's colour and is told apart by shape, never by
-    // colour alone (WCAG 1.4.1) -- and its label carries the whole meaning
-    // anyway.
+    // Same glyph as the dashboard's TenantMismatchState: one situation, one shape.
     return <Building2 aria-hidden="true" className="size-2.5 text-amber-500" />;
   }
   return (
@@ -77,12 +63,8 @@ function EnrollmentGlyph({ state }: { state: TenantEnrollmentGlyphState }): Reac
   );
 }
 
-// enrollmentPlatformName is what the copy calls the platform behind this
-// status: the host the row's credential actually reached, or the generic
-// "the hosted platform" when it reached none. A literal hostname here was
-// only ever correct on a machine talking to that one platform, and this app
-// is happy to be configured against several -- so it names the one that
-// answered, and claims no hostname at all when none did.
+// Names the host the credential actually reached; this app may be configured
+// against several platforms.
 function enrollmentPlatformName(status: UITenantPlatformEnrollmentStatus): string {
   const host = status.platformHost?.trim() ?? '';
   return host === '' ? 'the hosted platform' : host;
@@ -106,11 +88,7 @@ function enrollmentGlyphLabel(
     case 'unknown':
       return `${tenant}'s platform enrollment status could not be checked`;
     case 'tenant-mismatch': {
-      // The enrolled claim this state replaces was false in one specific way,
-      // so this says the true thing instead of only negating it: the
-      // credential authenticated and resolved, to a tenant that is not this
-      // one. The Go side never sets this state without a name; the fallback
-      // keeps a hand-built status from rendering "the tenant ".
+      // The Go side always sets a name; the fallback guards hand-built statuses.
       const resolved = status.platformTenant?.trim();
       return resolved
         ? `${tenant}'s connection to ${platform} belongs to the tenant ${resolved}`
@@ -119,13 +97,8 @@ function enrollmentGlyphLabel(
   }
 }
 
-// LocalOnlyPopoverBody: clicking this state is described as "opens the
-// dialog" for requesting an invitation or signing in with an existing
-// account. The request FORM itself belongs in the tenant dashboard's
-// NotEnrolledState, which is a parallel, in-flight piece of work this file
-// must not duplicate -- so both actions here navigate to that dashboard
-// rather than re-implementing the request or sign-in flow inline in the
-// sidebar.
+// The request form belongs to the dashboard's NotEnrolledState; both actions
+// navigate there rather than duplicating it.
 function LocalOnlyPopoverBody({
   tenant,
   platform,
@@ -188,17 +161,8 @@ function DeclinedPopoverBody({
   );
 }
 
-// TenantMismatchPopoverBody explains the one state whose remedy is not in this
-// popover: the credential is fine, it just resolves to another tenant, and
-// changing that means connecting this local tenant to the platform that
-// serves it -- a form the dashboard already owns (TenantPlatformState.tsx's
-// TenantMismatchState). So this states the situation and hands the operator
-// there, rather than offering a second, drifting way to do the same thing.
-//
-// It is the sidebar's half of a sentence erun-console already says for the
-// same verdict: a tenant reachable only by an account belonging elsewhere
-// cannot be reached by signing in again. Naming that here is what keeps the
-// operator from retrying the one action that cannot possibly work.
+// The remedy lives in the dashboard's TenantMismatchState; signing in again
+// cannot fix a tenant reachable only by an account belonging elsewhere.
 function TenantMismatchPopoverBody({
   tenant,
   platform,
@@ -227,12 +191,7 @@ function TenantMismatchPopoverBody({
   );
 }
 
-// TenantEnrollmentStatusButton is the row's own hit target, a sibling of
-// TenantSelectButton/TenantManageButton in Sidebar.TenantGroup.tsx -- never
-// hover-gated, since a status indicator must stay visible (mirrors
-// Sidebar.EnvironmentRow.tsx's EnvStatusIndicator). It never intercepts the
-// row's own click (toggleTenantCollapsed/openTenantDashboard): every branch
-// below stops propagation before doing anything.
+// Every branch stops propagation so the row's own click is never intercepted.
 export function TenantEnrollmentStatusButton({
   tenantName,
 }: {
@@ -252,10 +211,6 @@ export function TenantEnrollmentStatusButton({
     dispatch(openTenantDashboard(tenantName));
   };
 
-  // Enrolled has nothing left to act on, and unknown has nothing yet
-  // resolved to act on -- both render as a plain button that opens the
-  // dashboard (where a genuine failure gets a real retry path) rather than a
-  // popover with actions that would not apply.
   if (state === TENANT_ENROLLMENT_ENROLLED || state === TENANT_ENROLLMENT_UNKNOWN) {
     return (
       <IconTooltip label={label}>
@@ -311,10 +266,6 @@ export function TenantEnrollmentStatusButton({
   );
 }
 
-// EnrollmentPopoverBody selects the body for the states that have something to
-// say beyond their label: a separate component so the button above stays under
-// the module's complexity budget, which is what it was already at the limit of
-// before the mismatch state joined the vocabulary.
 function EnrollmentPopoverBody({
   state,
   status,
@@ -351,9 +302,6 @@ function EnrollmentPopoverBody({
         />
       );
     default:
-      // Unreachable behind the guard above, which sends enrolled and unknown
-      // down the plain-button branch; a popover with no body rather than a
-      // body chosen by falling through into a case it does not match.
       return null;
   }
 }

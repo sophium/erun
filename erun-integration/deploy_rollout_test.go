@@ -16,15 +16,8 @@ import (
 )
 
 func testDeployRealRunRecreatesDeploymentOnImmutableSelectorChange(t *testing.T) {
-	// Real-run deploy where the installed Deployment's immutable
-	// spec.selector differs from the chart's: helm aborts the first
-	// upgrade with "field is immutable". DeployHelmChart classifies that as
-	// a HelmImmutableSelectorError and RunHelmDeploy recovers — deleting the
-	// named Deployment (its PVCs are separate objects and survive) and
-	// retrying the upgrade, which the fail-first helm stub lets succeed.
-	// This branch is reachable only in real-run (the recovery fires on a
-	// helm side-effect failure, not a pre-action decision), so it is a
-	// stub-driven non-dry-run scenario. It locks the recover+retry trace.
+	// Real run only: the immutable-selector recovery fires on helm's failure. PVCs
+	// survive the Deployment delete.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	stubs := setup.Cwd + "/stubs"
@@ -32,8 +25,7 @@ func testDeployRealRunRecreatesDeploymentOnImmutableSelectorChange(t *testing.T)
 	fixture.StubBinaryFailFirstThenSucceed(t, stubs, "helm",
 		`Error: UPGRADE FAILED: cannot patch "team-devops" with kind Deployment: Deployment.apps "team-devops" is invalid: spec.selector: Invalid value: {"matchLabels":{"app":"erun-devops"}}: field is immutable`, 1)
 	fixture.StubBinary(t, stubs, "docker", "")
-	// The ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam marks erun-devops published
-	// so the runtime chart ladder confirms it instead of refusing.
+	// The probe override marks erun-devops published so the runtime chart ladder confirms it.
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 	envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 	result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
@@ -44,13 +36,7 @@ func testDeployRealRunRecreatesDeploymentOnImmutableSelectorChange(t *testing.T)
 }
 
 func testDeployProjectK8sPlanGroupsParallelStep(t *testing.T) {
-	// When .erun/config.yaml declares a k8s.deployments plan with a
-	// parallel-group step (a list as the item), deploy must group those
-	// charts into one step and emit a single "step N (parallel): ..."
-	// trace line. Other steps stay serial. Order across steps matches
-	// the config, not the alphabetical chart-discovery order. The runtime
-	// (team-devops) is selected explicitly so the parallel step's two members
-	// both deploy (opt-in-only: an unselected runtime would not).
+	// The runtime is selected explicitly so both parallel members deploy.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -66,9 +52,6 @@ func testDeployProjectK8sPlanGroupsParallelStep(t *testing.T) {
 }
 
 func testDeployRealRunViaStubs(t *testing.T) {
-	// Drive the non-dry-run helm/kubectl runners via stub binaries so
-	// the deploy execution path (deploy.go's run* helpers, post-helm
-	// kubectl waits, helm-recovery branches) gets covered.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -82,19 +65,8 @@ func testDeployRealRunViaStubs(t *testing.T) {
 }
 
 func testDeployRealRunFailureShowsDeployFailedHeaderAtDefaultVerbosity(t *testing.T) {
-	// A report claimed the "==> Deploy failed tenant/env: reason" header
-	// (activityDeployFailedLineRe's contract in the desktop) went through
-	// ctx.Trace and was invisible below -vv, making the parser dead code.
-	// That does not hold against this codebase: common.Context.Trace
-	// has aliased Logger.Info (visible at default verbosity; only
-	// TraceCommand's raw argv is gated to -vv) since the primitives split in
-	// #559, well before this issue was filed. This scenario locks that
-	// contract in — the header must appear at default verbosity (no
-	// --dry-run, no -v/-vv) on a real helm failure — as a regression guard,
-	// not a fix. A whole-output golden is deliberately not used here: the
-	// helm stub's stderr capture through cmd.Run()'s buffer is not always
-	// flushed by the time the process exits, so the detail after "reason:"
-	// is not reliably reproducible; the header itself is.
+	// The failure header must appear at default verbosity. No whole-output golden:
+	// the helm stub's stderr is not reliably flushed before exit.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -116,12 +88,7 @@ func testDeployRealRunFailureShowsDeployFailedHeaderAtDefaultVerbosity(t *testin
 }
 
 func testDeployRealRunHelmPendingRecoveryViaAutoRecoverEnv(t *testing.T) {
-	// Exercises wrapHelmDeployWithReleaseRecovery + the production
-	// helm-recovery path: a stubbed `helm` exits with the pending
-	// upgrade error message on the first invocation, succeeds on
-	// the retry, and exits 0 for the recovery rollback. The new
-	// ERUN_AUTO_RECOVER_HELM=1 env var bypasses the interactive
-	// confirmation prompt so this can run from the harness.
+	// ERUN_AUTO_RECOVER_HELM=1 bypasses the interactive confirmation.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -153,14 +120,8 @@ func testDeployRealRunHelmPendingRecoveryViaAutoRecoverEnv(t *testing.T) {
 }
 
 func testDeployRealRunPendingHelmLockFailsAndNamesTheRecovery(t *testing.T) {
-	// The reported silent no-op: a deploy against a release an earlier
-	// failed rollout left locked in pending-upgrade exited without
-	// complaint and replaced no pods. helm does fail on that state, but the
-	// recovery prompt is the only thing the deploy did with the failure,
-	// and a caller with no terminal -- the harness's own stdin, an
-	// orchestrator, a CI job, the desktop's piped shell -- reads EOF, so
-	// the prompt's own EOF error replaced the diagnosis. The deploy must
-	// fail with what is actually wrong and the command that clears it.
+	// Without a terminal the recovery prompt reads EOF; the deploy must still
+	// report the pending-upgrade lock and the command that clears it.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -193,25 +154,14 @@ func testDeployRealRunPendingHelmLockFailsAndNamesTheRecovery(t *testing.T) {
 }
 
 func testDeployRealRunPublishedChartNotFoundReportsActionableError(t *testing.T) {
-	// Safety net: when the resolved published runtime chart is not pullable
-	// at the requested version (a registry that has since evicted the tag, or
-	// a race between the probe and the pull), helm upgrade exits non-zero with
-	// a registry "not found" on stderr. DeployHelmChart must classify that
-	// into a PublishedChartNotFoundError naming the version + registry and
-	// pointing at the recovery (deploy a released version / publish first),
-	// instead of surfacing a bare "exit status 1". The
-	// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam confirms erun-devops published
-	// so resolution proceeds to the real pull instead of refusing up front;
-	// the helm stub then fails that pull with a 404-shaped message, so the
-	// failure is isolated to the chart pull, not the search that precedes it.
+	// The probe override passes resolution so the failure is isolated to the
+	// chart pull, which must map to PublishedChartNotFoundError.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	stubs := setup.Cwd + "/stubs"
 	fixture.StubBinary(t, stubs, "kubectl", "")
 	fixture.StubBinary(t, stubs, "docker", "")
-	// helm errors land on stderr; the stub scans every arg (the real argv
-	// carries --install, --wait, … before "upgrade") and fails the upgrade
-	// with a registry 404 shape.
+	// The real argv carries flags before "upgrade", so the stub scans every arg.
 	fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
 		`for a in "$@"; do`,
 		`  if [ "$a" = "upgrade" ]; then`,
@@ -231,14 +181,8 @@ func testDeployRealRunPublishedChartNotFoundReportsActionableError(t *testing.T)
 }
 
 func testDeployRealRunParallelStepDeploysChartsConcurrently(t *testing.T) {
-	// Exercises runDeployStep's real-run parallel branch (the goroutine
-	// fan-out + errors.Join), which dry-run never takes because dry-run
-	// always runs specs serially for stable trace ordering. The project
-	// k8s plan groups the runtime chart and erun-backend-postgres into one
-	// parallel step; both helm releases deploy via exit-0 stubs. The two
-	// goroutines interleave their Info lines nondeterministically, so the
-	// whole stream cannot be goldened — assert the deterministic
-	// parallel-step trace line and count both rollouts instead.
+	// Dry-run is always serial, so only a real run takes the parallel branch;
+	// interleaved output cannot be goldened.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -257,10 +201,7 @@ func testDeployRealRunParallelStepDeploysChartsConcurrently(t *testing.T) {
 	if !strings.Contains(out, "deploy: step 1 (parallel): team-devops, erun-backend-postgres") {
 		t.Fatalf("expected parallel-step trace line, got:\n%s", out)
 	}
-	// The runtime chart names only the env, while the non-runtime
-	// component names itself after a ` · ` separator so a component
-	// rollout is not mistaken for a full-env redeploy. Both rollouts
-	// still appear; exactly one of each pair names the component.
+	// A component rollout names itself after ` · ` so it isn't mistaken for a full-env redeploy.
 	if got := strings.Count(out, "==> Deploying team/dev"); got != 2 {
 		t.Fatalf("expected 2 parallel ==> Deploying lines, got %d:\n%s", got, out)
 	}
@@ -276,16 +217,8 @@ func testDeployRealRunParallelStepDeploysChartsConcurrently(t *testing.T) {
 }
 
 func testDeployRealRunReportsStaleRuntimePortForward(t *testing.T) {
-	// Regression: a runtime rollout replaces the pod, which orphans the
-	// env's `kubectl port-forward` — the local socket keeps listening while
-	// every request fails with EOF, so the MCP endpoint looks broken rather
-	// than disconnected, and the deploy said nothing. deploy does not own
-	// port-forward lifecycle (`erun open` starts and tracks them), so it
-	// reports the condition and names the repair command.
-	//
-	// The orphan is modelled faithfully: a listener that accepts and closes
-	// without answering, exactly what a forward to a deleted pod does. It
-	// binds :0 so the scenario never contends for a fixed host port.
+	// A runtime rollout orphans the env's port-forward; deploy reports it and names
+	// the repair. The listener accepts and closes, like a forward to a deleted pod.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -304,10 +237,6 @@ func testDeployRealRunReportsStaleRuntimePortForward(t *testing.T) {
 }
 
 func testDeployRealRunSilentWhenEnvHasNoTrackedPortForward(t *testing.T) {
-	// An env nobody opened on this host has no tracked forward, so there is
-	// nothing to repair and the deploy stays quiet. Together with
-	// real_run_reports_stale_runtime_port_forward this locks both arms; the
-	// only difference between the two goldens is the warning.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -323,8 +252,6 @@ func testDeployRealRunSilentWhenEnvHasNoTrackedPortForward(t *testing.T) {
 	golden.Equal(t, "deploy/real_run_silent_when_env_has_no_tracked_port_forward", normalize.Apply(result.Combined))
 }
 
-// seedMCPPortForwardState records a tracked MCP port-forward for the env, the
-// state `erun open` writes when it starts or adopts one.
 func seedMCPPortForwardState(t *testing.T, setup env.Setup, tenant, environment string, localPort int) {
 	t.Helper()
 	path := portForwardStateFile(setup, "mcp", tenant, environment)
@@ -336,9 +263,7 @@ func seedMCPPortForwardState(t *testing.T, setup env.Setup, tenant, environment 
 		tenant, environment, tenant, environment, localPort))
 }
 
-// startOrphanedPortForwardListener binds a local port that accepts connections
-// and closes them without answering — what a kubectl port-forward to a deleted
-// pod does, and the condition deploy must report.
+// startOrphanedPortForwardListener accepts and closes connections without answering.
 func startOrphanedPortForwardListener(t *testing.T) int {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

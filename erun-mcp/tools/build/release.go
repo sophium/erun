@@ -25,9 +25,7 @@ func ReleaseTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Cal
 		execute := func(preview bool, log io.Writer) (sharedpkg.CommandOutput, error) {
 			var spec shared.ReleaseSpec
 			output, err := sharedpkg.RunRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, workDir string) error {
-				// Release marks source control only: it stamps, tags and pushes the
-				// version and never builds or publishes an artifact. Build and
-				// publish are `build --release` and `push --version`.
+				// Release only stamps, tags and pushes; it never builds or publishes.
 				execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, "", "", true, false, nil)
 				if err != nil {
 					return err

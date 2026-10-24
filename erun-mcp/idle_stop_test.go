@@ -12,9 +12,6 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// TestIdleStopRecordToolWritesHostManualEntry covers the desktop Stop
-// button's happy path: the recorded row must be host-manual so the
-// History tab labels it "Desktop manual stop".
 func TestIdleStopRecordToolWritesHostManualEntry(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -49,10 +46,6 @@ func TestIdleStopRecordToolWritesHostManualEntry(t *testing.T) {
 	}
 }
 
-// TestIdleStopRecordToolFoldsPendingArmedGrace covers a manual Stop
-// while the in-pod monitor has already armed a grace window: the row
-// stays host-manual but folds in the pending grace so History can show
-// what would have fired and that the user pre-empted it.
 func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -104,13 +97,10 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 	if len(entry.Markers) != 2 {
 		t.Fatalf("expected 2 markers, got %d", len(entry.Markers))
 	}
-	// Cleared so a follow-up stop-ready tick re-arms a fresh grace; the
-	// path check also guards against writing under the developer's real HOME.
+	// Cleared so the next tick re-arms; the path check guards the developer's real HOME.
 	assertStopPendingCleared(t, "tenant-a", "dev", home)
 }
 
-// TestIdleStopRecordToolRequiresTenantAndEnvironment guards against
-// the desktop calling the tool before it has resolved an env target.
 func TestIdleStopRecordToolRequiresTenantAndEnvironment(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	handler := idleStopRecordTool(shared.RuntimeConfig{})

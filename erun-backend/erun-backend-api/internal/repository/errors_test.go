@@ -9,13 +9,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// TestNormalizeNoRowsMapsMalformedInputToErrInvalidInput is the regression
-// test for a syntactically malformed id: a value like "not-a-uuid" against
-// a UUID column produces PostgreSQL SQLSTATE 22P02
-// (invalid_text_representation), which every Get-by-id repository method
-// routes through normalizeNoRows. Before the fix this fell through
-// unclassified and writeRepositoryError's default case reported it as a 500;
-// it must report ErrInvalidInput (400) instead, same as any other bad input.
 func TestNormalizeNoRowsMapsMalformedInputToErrInvalidInput(t *testing.T) {
 	err := normalizeNoRows(&pgconn.PgError{Code: pgerrcode.InvalidTextRepresentation})
 	if !errors.Is(err, ErrInvalidInput) {
@@ -23,9 +16,6 @@ func TestNormalizeNoRowsMapsMalformedInputToErrInvalidInput(t *testing.T) {
 	}
 }
 
-// TestNormalizeNoRowsStillMapsNoRowsToErrNotFound guards the existing
-// well-formed-but-absent behavior so the new classification above cannot
-// collapse the two distinct outcomes into one.
 func TestNormalizeNoRowsStillMapsNoRowsToErrNotFound(t *testing.T) {
 	err := normalizeNoRows(sql.ErrNoRows)
 	if !errors.Is(err, ErrNotFound) {
@@ -33,10 +23,6 @@ func TestNormalizeNoRowsStillMapsNoRowsToErrNotFound(t *testing.T) {
 	}
 }
 
-// TestNormalizeNoRowsPassesThroughOtherErrors guards against over-eager
-// classification: a genuine server-side failure (an unrelated PG error, or a
-// plain Go error) must still reach the caller unclassified so
-// writeRepositoryError's default 500 case still fires for real faults.
 func TestNormalizeNoRowsPassesThroughOtherErrors(t *testing.T) {
 	other := &pgconn.PgError{Code: pgerrcode.UniqueViolation}
 	if got := normalizeNoRows(other); !errors.Is(got, other) {

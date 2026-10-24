@@ -9,70 +9,27 @@ import (
 	"strings"
 )
 
-// The hosted environment definition is the portable subset of an
-// EnvConfig: the settings that describe an environment rather than the machine
-// it happens to be authored on. It is transferable between hosts, so it can be
-// uploaded to the platform and pulled back down onto a second machine.
-//
-// The rule is a positive allowlist and it is default-deny. A field travels only
-// if portableEnvConfigFields lists it as portable; anything absent from that
-// table is never uploaded AND never written by a pull. That direction matters:
-// the failure mode a deny-list invites is a *new* EnvConfig field silently
-// joining the payload because nobody remembered to exclude it, and the field
-// most likely to be added next is another host-local secret reference. With an
-// allowlist a new field is invisible until somebody deliberately opts it in.
-// TestEveryEnvConfigFieldIsClassified is what keeps the table honest: adding a
-// field to EnvConfig fails that test until it is classified here.
-//
-// Two classes of field are therefore excluded, and they are excluded for
-// different reasons:
-//
-//   - host-owned fields describe this machine or name a cluster-local object.
-//     They are never merged: the host always wins, because the platform never
-//     carried them in the first place.
-//   - platform-owned fields mirror real columns on the environment row and are
-//     fixed at registration. A local value that differs is not merged and not
-//     overwritten — it is a refusal, because the two are records of the same
-//     fact and only one of them can be right.
-//
-// The root config.yaml and the secret store are permanently out of scope. The
-// root file holds CloudContextConfig.AdminToken in plaintext — `json:"-"` hides
-// it from JSON only, never from its own yaml tag — and a definition transfer
-// that could reach it would be a credential-exfiltration path, not a
-// convenience.
+// EnvConfigFieldClass classifies EnvConfig fields for definition transfer. The table
+// is default-deny so a new field never travels until opted in; the root config.yaml
+// (plaintext AdminToken) is permanently out of scope.
 type EnvConfigFieldClass string
 
 const (
-	// EnvFieldPortable is a field that travels in the definition payload.
 	EnvFieldPortable EnvConfigFieldClass = "portable"
-	// EnvFieldHostOwned is a field that describes the machine the environment
-	// is authored on, or names a cluster-local Kubernetes object. It is never
-	// uploaded and never written by a pull.
+	// EnvFieldHostOwned fields describe this machine or a cluster-local object; never transferred.
 	EnvFieldHostOwned EnvConfigFieldClass = "host-owned"
-	// EnvFieldPlatformOwned is a field the platform owns outright: it mirrors
-	// a column on the environment row and is fixed at registration. A locally
-	// differing value refuses rather than merging.
+	// EnvFieldPlatformOwned fields mirror the environment row; a local difference refuses.
 	EnvFieldPlatformOwned EnvConfigFieldClass = "platform-owned"
 )
 
-// envConfigField is one row of the classification table.
 type envConfigField struct {
 	Class EnvConfigFieldClass
-	// Note is the operator-facing reason this field carries its class. It is
-	// rendered by the refusal messages and by the docs' "which settings never
-	// leave the machine" list, so it is written for an operator, not a reader
-	// of this file.
+	// Note is operator-facing: it is rendered in refusals and the docs.
 	Note string
 }
 
-// portableEnvConfigFields classifies every top-level EnvConfig field.
-//
-// A field name here is a Go field name, matched exactly. Nesting is expressed
-// where the nested value is genuinely one decision (`SSHD` is host-owned in all
-// three sub-fields) and split where it is not (`Deploy`, whose timeout is
-// portable and whose components list is the operator's per-machine selection).
+// portableEnvConfigFields classifies every top-level EnvConfig field by Go name.
 var portableEnvConfigFields = map[string]envConfigField{
-	// Portable: authored intent about the environment itself.
 	"RuntimeVersion": {EnvFieldPortable, "the release this environment runs"},
 	"RuntimeImage":   {EnvFieldPortable, "which runtime image, when it is not the stock default"},
 	"RuntimeChart":   {EnvFieldPortable, "which runtime chart the environment rides"},
@@ -84,19 +41,14 @@ var portableEnvConfigFields = map[string]envConfigField{
 	"AITool":         {EnvFieldPortable, "which AI tool the environment uses"},
 	"AutoUpgrade":    {EnvFieldPortable, "whether the environment rides upgrades"},
 	"UpgradeChannel": {EnvFieldPortable, "which channel it rides"},
-	// ContainerRegistries is portable, but note init's own saveEnvConfig
-	// wrapper nulls it for anything that is not a remote worktree — a sync
-	// reading a just-inited config therefore sees cleared registries and must
-	// not read that absence as "the operator removed them".
+	// init nulls ContainerRegistries for non-remote worktrees, so a sync must not
+	// read that absence as a removal.
 	"ContainerRegistries": {EnvFieldPortable, "the marked registry list"},
 
-	// Platform-owned: mirrors a column on the environment row, fixed at
-	// registration.
 	"Name":              {EnvFieldPlatformOwned, "the environment row's name, and the local config path derived from it"},
 	"Type":              {EnvFieldPlatformOwned, "the environment row's type"},
 	"KubernetesContext": {EnvFieldPlatformOwned, "the Kubernetes context the environment row was registered with"},
 
-	// Host-owned: this machine, or a cluster-local reference.
 	"LocalRepoPath":                {EnvFieldHostOwned, "where this machine keeps the checkout"},
 	"LocalPortRangeStart":          {EnvFieldHostOwned, "this machine's local port allocation"},
 	"SSHD":                         {EnvFieldHostOwned, "host keys, ports and paths for tunnelling into this machine"},
@@ -115,14 +67,12 @@ var portableEnvConfigFields = map[string]envConfigField{
 	"Stopped":                      {EnvFieldHostOwned, "the durable half of a stop this machine performed"},
 	"DisableBuildScript":           {EnvFieldHostOwned, "how this machine builds"},
 	"Hosted":                       {EnvFieldHostOwned, "the local marker of which platform row this environment corresponds to"},
-	// Default-deny: absent from the portable table, so never transferred.
-	"MountSource": {EnvFieldHostOwned, "how the local worktree is populated"},
-	"RepoURL":     {EnvFieldHostOwned, "the remote this machine's checkout came from"},
-	"Deploy":      {EnvFieldHostOwned, "deploy.components is this machine's saved selection; deploy.timeout travels separately"},
+	"MountSource":                  {EnvFieldHostOwned, "how the local worktree is populated"},
+	"RepoURL":                      {EnvFieldHostOwned, "the remote this machine's checkout came from"},
+	"Deploy":                       {EnvFieldHostOwned, "deploy.components is this machine's saved selection; deploy.timeout travels separately"},
 }
 
-// PortableEnvConfigFieldNames returns the names of every EnvConfig field a
-// definition transfers, sorted so callers can render a stable list.
+// PortableEnvConfigFieldNames returns the transferred field names, sorted.
 func PortableEnvConfigFieldNames() []string {
 	names := make([]string, 0, len(portableEnvConfigFields))
 	for name, entry := range portableEnvConfigFields {
@@ -134,9 +84,7 @@ func PortableEnvConfigFieldNames() []string {
 	return names
 }
 
-// HostOwnedEnvConfigFieldNames returns the names of every host-owned field,
-// sorted. It backs the "which settings never leave the machine" list the docs
-// publish and the error text a refusal renders.
+// HostOwnedEnvConfigFieldNames returns the host-owned field names, sorted.
 func HostOwnedEnvConfigFieldNames() []string {
 	names := make([]string, 0, len(portableEnvConfigFields))
 	for name, entry := range portableEnvConfigFields {
@@ -148,10 +96,7 @@ func HostOwnedEnvConfigFieldNames() []string {
 	return names
 }
 
-// PopulatedPortableEnvConfigFields returns the portable fields this config
-// carries a value for, sorted. It is what a push reports as travelling, so an
-// operator auditing an upload reads the same list the payload was built from
-// rather than a second enumeration that could drift from it.
+// PopulatedPortableEnvConfigFields returns the portable fields config sets, sorted.
 func PopulatedPortableEnvConfigFields(config EnvConfig) []string {
 	value := reflect.ValueOf(config)
 	names := make([]string, 0, len(portableEnvConfigFields))
@@ -160,7 +105,7 @@ func PopulatedPortableEnvConfigFields(config EnvConfig) []string {
 			names = append(names, name)
 		}
 	}
-	// Deploy travels as its timeout alone; its components list stays here.
+	// Only Deploy.Timeout travels.
 	if strings.TrimSpace(config.Deploy.Timeout) != "" {
 		names = append(names, "Deploy.Timeout")
 	}
@@ -168,10 +113,7 @@ func PopulatedPortableEnvConfigFields(config EnvConfig) []string {
 	return names
 }
 
-// unclassifiedEnvConfigFields reports the EnvConfig top-level fields the
-// classification table does not mention. It is the allowlist's own guard: a
-// field added to EnvConfig lands here, and the test that calls it fails, until
-// somebody writes down which class it belongs to.
+// unclassifiedEnvConfigFields returns EnvConfig fields missing from the table.
 func unclassifiedEnvConfigFields() []string {
 	configType := reflect.TypeOf(EnvConfig{})
 	var missing []string
@@ -185,46 +127,27 @@ func unclassifiedEnvConfigFields() []string {
 	return missing
 }
 
-// PlatformEnvDefinition is the portable subset of an EnvConfig as it travels to
-// and from the platform.
-//
-// Every field is a pointer so that "the platform has no opinion about this" is
-// distinguishable from "the platform recorded an empty value". That distinction
-// is what lets a pull leave a local setting alone instead of clearing it, and
-// it is why this type does not embed or alias EnvConfig.
-//
-// The JSON keys are written out here rather than inherited from EnvConfig's own
-// tags, deliberately. Eight EnvConfig fields carry no json tag at all (Name,
-// KubernetesContext, CloudProviderAlias, RuntimeVersion, RuntimePod,
-// RuntimeDindPod, SSHD, Idle), so a payload that inherited Go's marshalling
-// defaults would emit `RuntimeVersion` beside every camelCase sibling. A wire
-// contract whose key names depend on which struct field happens to have a tag
-// today is not a contract.
+// PlatformEnvDefinition is the portable EnvConfig subset on the wire. Pointers let
+// a pull leave unset fields alone; JSON keys are explicit because several
+// EnvConfig fields have no json tag.
 type PlatformEnvDefinition struct {
-	RuntimeVersion *string `json:"runtimeVersion,omitempty"`
-	RuntimeImage   *string `json:"runtimeImage,omitempty"`
-	RuntimeChart   *string `json:"runtimeChart,omitempty"`
-	// RuntimePod and RuntimeDindPod are authored sizing. `deploy` may still
-	// resolve them live; the definition carries the authored intent.
-	RuntimePod     *RuntimePodResources     `json:"runtimePod,omitempty"`
-	RuntimeDindPod *RuntimePodResources     `json:"runtimeDindPod,omitempty"`
-	NamespaceQuota *NamespaceResourceQuota  `json:"namespaceQuota,omitempty"`
-	Idle           *EnvironmentIdleConfig   `json:"idle,omitempty"`
-	Claude         *EnvironmentClaudeConfig `json:"claude,omitempty"`
-	AITool         *string                  `json:"aiTool,omitempty"`
-	AutoUpgrade    *bool                    `json:"autoUpgrade,omitempty"`
-	UpgradeChannel *string                  `json:"upgradeChannel,omitempty"`
-	// ContainerRegistries is the marked registry list. See the portable table's
-	// note on init's registry-nulling wrapper.
-	ContainerRegistries *ContainerRegistries `json:"containerRegistries,omitempty"`
-	// DeployTimeout is the portable half of EnvConfig.Deploy. Deploy.Components
-	// stays on the machine that saved it.
+	RuntimeVersion      *string                  `json:"runtimeVersion,omitempty"`
+	RuntimeImage        *string                  `json:"runtimeImage,omitempty"`
+	RuntimeChart        *string                  `json:"runtimeChart,omitempty"`
+	RuntimePod          *RuntimePodResources     `json:"runtimePod,omitempty"`
+	RuntimeDindPod      *RuntimePodResources     `json:"runtimeDindPod,omitempty"`
+	NamespaceQuota      *NamespaceResourceQuota  `json:"namespaceQuota,omitempty"`
+	Idle                *EnvironmentIdleConfig   `json:"idle,omitempty"`
+	Claude              *EnvironmentClaudeConfig `json:"claude,omitempty"`
+	AITool              *string                  `json:"aiTool,omitempty"`
+	AutoUpgrade         *bool                    `json:"autoUpgrade,omitempty"`
+	UpgradeChannel      *string                  `json:"upgradeChannel,omitempty"`
+	ContainerRegistries *ContainerRegistries     `json:"containerRegistries,omitempty"`
+	// DeployTimeout is the portable half of EnvConfig.Deploy.
 	DeployTimeout *string `json:"deployTimeout,omitempty"`
 }
 
 // BuildPlatformEnvDefinition projects the portable subset out of an EnvConfig.
-// It walks the same table the apply and the diff walk, so a field can reach the
-// payload only by appearing there — there is no second list to keep in step.
 func BuildPlatformEnvDefinition(config EnvConfig) PlatformEnvDefinition {
 	definition := PlatformEnvDefinition{}
 	for _, field := range platformDefinitionFields {
@@ -233,29 +156,12 @@ func BuildPlatformEnvDefinition(config EnvConfig) PlatformEnvDefinition {
 	return definition
 }
 
-// DefinitionDigest fingerprints a definition payload: the same portable
-// settings always produce the same value, and any changed setting produces a
-// different one.
-//
-// It is what lets a machine answer "have my settings moved since the platform
-// last heard them?" without a platform read, which matters because that
-// question is asked on paths that must not spend a network round-trip — the
-// config watcher deciding whether a file change is worth an upload, and the
-// marker panel on a machine that is offline. It is a fingerprint of the
-// *portable subset*, so it covers exactly what a transfer would carry and
-// nothing a host-owned field could leak into it.
-//
-// The encoding is canonical for this type: PlatformEnvDefinition is a closed
-// struct of strings, bools and slices with explicit JSON tags, so field order
-// and key spelling come from the declaration rather than from Go's
-// marshalling defaults.
+// DefinitionDigest fingerprints the portable subset so a machine can tell whether
+// its settings changed without a platform round-trip.
 func DefinitionDigest(definition PlatformEnvDefinition) string {
 	encoded, err := json.Marshal(definition)
 	if err != nil {
-		// Unreachable for this type. A caller about to write a marker must
-		// still get a value rather than a panic, and an empty digest is never
-		// equal to a recorded one — so the copy reads as diverged rather than
-		// as in step with a transfer that was never fingerprinted.
+		// Unreachable; an empty digest never matches a recorded one.
 		return ""
 	}
 	sum := sha256.Sum256(encoded)
@@ -300,34 +206,19 @@ func containerRegistriesPointerOrNil(registries ContainerRegistries) *ContainerR
 	return &clone
 }
 
-// platformDefinitionField is one portable field, expressed once so the
-// projection, the apply, and the conflict diff cannot disagree about which
-// fields travel or how each one is spelled.
-//
-// Deploy is the reason this exists as a table rather than three parallel
-// switch statements: its timeout travels and its components list does not, so
-// the field that is split across classes needs one row that names the half
-// which moves.
+// platformDefinitionField is one portable field, shared by projection, apply and
+// diff so they cannot disagree.
 type platformDefinitionField struct {
-	// Field is the EnvConfig field name — "Deploy.Timeout" for the split half.
+	// Field is the EnvConfig field name, "Deploy.Timeout" for the split half.
 	Field string
-	// Label is the operator-facing name the conflict diff renders.
 	Label string
-	// Stored reports the value the definition carries and whether the
-	// definition has an opinion about this field at all.
-	Stored func(PlatformEnvDefinition) (string, bool)
-	// Local renders the config's own value for the same field.
-	Local func(EnvConfig) string
-	// Apply writes the definition's value onto the config, and only when the
-	// definition carries one.
-	Apply func(*EnvConfig, PlatformEnvDefinition)
-	// Project writes the config's value into a definition, so the payload is
-	// built from the same row the apply and the diff read.
+	// Stored reports the definition's value and whether it carries one.
+	Stored  func(PlatformEnvDefinition) (string, bool)
+	Local   func(EnvConfig) string
+	Apply   func(*EnvConfig, PlatformEnvDefinition)
 	Project func(*PlatformEnvDefinition, EnvConfig)
 }
 
-// platformDefinitionFields is the ordered list every projection, apply, and
-// diff walks. A portable field reaches a payload only by appearing here.
 var platformDefinitionFields = []platformDefinitionField{
 	{
 		Field: "RuntimeVersion", Label: "runtime version",
@@ -498,9 +389,7 @@ func setStruct[T any](target *T, value *T) {
 	}
 }
 
-// setContainerRegistries copies the value rather than aliasing the caller's
-// slice: a caller that later mutates the definition it passed must not be able
-// to reach through this config and change it.
+// setContainerRegistries copies so later mutation of the definition cannot reach the config.
 func setContainerRegistries(target *ContainerRegistries, value *ContainerRegistries) {
 	if value == nil {
 		return
@@ -510,10 +399,7 @@ func setContainerRegistries(target *ContainerRegistries, value *ContainerRegistr
 	*target = registries
 }
 
-// ApplyPlatformEnvDefinition returns base with every portable field the
-// definition carries replaced by the definition's value, and every field the
-// definition is silent about — plus every host-owned and platform-owned field —
-// left exactly as base had it.
+// ApplyPlatformEnvDefinition overwrites only the portable fields the definition carries.
 func ApplyPlatformEnvDefinition(base EnvConfig, definition PlatformEnvDefinition) (EnvConfig, error) {
 	applied := base
 	for _, field := range platformDefinitionFields {

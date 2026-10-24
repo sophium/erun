@@ -66,8 +66,7 @@ func ResolveCurrentDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, projectR
 		return "", false, nil
 	}
 
-	// A configured paths.k8s override is authoritative over the -devops
-	// convention discovery, and applies from any cwd inside the project.
+	// A configured paths.k8s wins over convention from any cwd in the project.
 	if k8sDir, ok, err := configuredK8sDirForDeploy(findProjectRoot, projectRootOverride); err != nil || ok {
 		return k8sDir, ok, err
 	}
@@ -75,9 +74,6 @@ func ResolveCurrentDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, projectR
 	return resolveConventionDevopsK8sDir(findProjectRoot, dir, projectRootOverride)
 }
 
-// resolveConventionDevopsK8sDir is the convention discovery used when no
-// paths.k8s override applies: the cwd -devops dir, an ancestor -devops dir, then
-// the project-root <tenant>-devops/k8s scan.
 func resolveConventionDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, projectRootOverride string) (string, bool, error) {
 	if k8sDir, ok, err := resolveDirDevopsK8sDir(dir); err != nil || ok {
 		return k8sDir, ok, err
@@ -102,9 +98,6 @@ func resolveConventionDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, proje
 	return ResolveProjectRootDevopsK8sDir(findProjectRoot, projectRoot)
 }
 
-// configuredK8sDirForDeploy resolves the project root from the deploy chain's
-// override (or the git root) and returns the configured paths.k8s directory
-// when set. It is the deploy-side entry to the shared configuredK8sDir check.
 func configuredK8sDirForDeploy(findProjectRoot ProjectFinderFunc, projectRootOverride string) (string, bool, error) {
 	projectRoot := strings.TrimSpace(projectRootOverride)
 	if projectRoot == "" {
@@ -120,11 +113,7 @@ func configuredK8sDirForDeploy(findProjectRoot ProjectFinderFunc, projectRootOve
 	return ConfiguredK8sDir(projectRoot)
 }
 
-// ConfiguredK8sDir resolves the project-global paths.k8s override. It returns
-// (dir, true, nil) when configured and a usable Helm chart module, (,false,nil)
-// when unset, and an error when configured but not a chart module — a
-// misconfigured override fails loudly rather than silently falling back to
-// convention.
+// ConfiguredK8sDir fails on a non-chart override rather than fall back to convention.
 func ConfiguredK8sDir(projectRoot string) (string, bool, error) {
 	paths, err := configpkg.LoadProjectPaths(projectRoot)
 	if err != nil {
@@ -144,8 +133,6 @@ func ConfiguredK8sDir(projectRoot string) (string, bool, error) {
 	return k8sDir, true, nil
 }
 
-// resolveDirDevopsK8sDir returns dir/k8s when dir is itself a "-devops" module
-// directory whose k8s subdir holds helm charts.
 func resolveDirDevopsK8sDir(dir string) (string, bool, error) {
 	if !strings.HasSuffix(filepath.Base(dir), "-devops") {
 		return "", false, nil
@@ -254,9 +241,7 @@ func IsKubernetesDeployModuleDir(dir string) (bool, error) {
 		if err.Error() == "helm chart not found in current directory" {
 			return false, nil
 		}
-		// An absent directory is simply not a deploy-module dir. Every caller
-		// probes a conventional <…>-devops/k8s location that need not exist,
-		// so a missing path answers the predicate rather than failing it.
+		// Callers probe conventional paths that need not exist.
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
 		}
@@ -273,8 +258,6 @@ func HasHelmChart(chartFilePath string) bool {
 	return !info.IsDir()
 }
 
-// DetectedProjectTenant reports the detected project's tenant when that
-// project is projectRoot; a failed detection is simply no match.
 func DetectedProjectTenant(findProjectRoot ProjectFinderFunc, projectRoot string) (string, bool) {
 	tenant, detectedProjectRoot, err := findProjectRoot()
 	if err != nil || filepath.Clean(strings.TrimSpace(detectedProjectRoot)) != projectRoot || strings.TrimSpace(tenant) == "" {

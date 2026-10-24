@@ -18,12 +18,8 @@ func DockerPushExecutionSpecFromSpecs(builds []shared.DockerBuildSpec, pushes []
 	return shared.DockerPushExecutionSpec{Builds: builds, Pushes: pushes}
 }
 
-// resolveComponentChartSpecs discovers every Helm chart under a k8s/ directory in
-// the project and resolves a publish spec for each at the build's version and
-// registry. Charts are module-level source: a chart publishes whether or not a
-// same-named image exists. The version and registry come from the resolved builds
-// (componentChartPublishVersion / the first build's registry+root); a project with
-// charts but no image build yields no specs.
+// resolveComponentChartSpecs resolves a publish spec for every chart under k8s/,
+// whether or not a same-named image exists.
 func resolveComponentChartSpecs(builds []shared.DockerBuildSpec) ([]helm.HelmChartPublishSpec, error) {
 	version := push.ComponentChartPublishVersion(builds)
 	registry, projectRoot := componentChartRegistryAndRoot(builds)
@@ -58,14 +54,8 @@ func componentChartRegistryAndRoot(builds []shared.DockerBuildSpec) (registry, p
 	return registry, projectRoot
 }
 
-// publishDockerTarget pins a push target to every platform erun supports,
-// before any build spec resolves. A push is the step that puts a version's
-// artifacts in the registry, so the .erun/config.yaml docker.platforms pin --
-// which exists so a machine confirmed to be one architecture stops paying for
-// emulated cross-builds on every local build -- must not narrow what is
-// published. It is the same override ResolveDockerBuildTarget applies to a
-// release build; without it here, the pin reaches the registry and a version
-// ships a manifest the fleet's other architecture cannot pull.
+// publishDockerTarget pins a push to every supported platform: the
+// docker.platforms pin narrows local builds only, never what is published.
 func publishDockerTarget(target shared.DockerCommandTarget) shared.DockerCommandTarget {
 	target.Platforms = slices.Clone(shared.MultiPlatformDockerBuilds)
 	return target
@@ -83,9 +73,7 @@ func ResolveDockerPushExecution(ctx core.Context, store shared.DockerStore, find
 	builds := make([]shared.DockerBuildSpec, 0, len(buildContexts))
 	pushes := make([]shared.DockerPushSpec, 0, len(buildContexts))
 	for _, buildContext := range buildContexts {
-		// A multi-arch image has no arch-less version tag to `docker push`, so the
-		// build itself publishes the per-arch manifest list; the separate push
-		// entry is skipped once the build is marked pushed.
+		// A multi-arch image has no arch-less tag to `docker push`, so the build publishes it.
 		build, err := buildpkg.ResolveDockerBuildSpec(ctx, store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 		if err != nil {
 			return shared.DockerPushExecutionSpec{}, err
@@ -120,9 +108,6 @@ func ResolveDockerPushSpec(ctx core.Context, store shared.DockerStore, findProje
 		return shared.DockerPushSpec{}, nil, fmt.Errorf("dockerfile not found in current directory")
 	}
 
-	// A multi-arch image has no arch-less version tag to `docker push`, so the
-	// build itself publishes the manifest; the single-tag push is skipped once
-	// Push is set.
 	resolvedBuild, err := buildpkg.ResolveDockerBuildSpec(ctx, store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 	if err != nil {
 		return shared.DockerPushSpec{}, nil, err

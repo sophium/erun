@@ -2,11 +2,7 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
 import type { OidcConfig } from '../../auth/auth';
 
-// The console's sign-in lifecycle: OIDC discovery, then the bearer token
-// (an OIDC callback exchange, a token already held this session, or the
-// dev-token fallback). `tokenError` is set only when resolving the token
-// itself failed (an invalid OIDC callback, a broken discovery/exchange) —
-// distinct from a signed-out caller, which is the expected "no token" case.
+// `tokenError` is set only when resolving the token failed, not when signed out.
 export interface AuthState {
   oidcResolved: boolean;
   oidc?: OidcConfig;

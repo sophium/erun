@@ -29,12 +29,8 @@ const titlebarButtonClassName =
 const activeTitlebarButtonClassName =
   'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground';
 
-// macOS overlays the window traffic-light controls at the top-left, so the
-// sidebar toggle must be inset to clear them. Windows/Linux put window controls
-// on the right, so that inset would just push the toggle away from the edge and
-// misalign it.
+// macOS traffic lights sit top-left, so only there is the sidebar toggle inset.
 
-// TitlebarLeftControls renders the leftmost titlebar cluster: the sidebar toggle.
 export function TitlebarLeftControls(): React.ReactElement {
   const dispatch = useAppDispatch();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
@@ -65,13 +61,8 @@ export function TitlebarLeftControls(): React.ReactElement {
   );
 }
 
-// TitlebarEnvControls renders the controls that act on the SIDEBAR's selected
-// environment: the two IDE buttons and the contribute toggle.
-//
-// Rendered only when the active session is an environment tab. They are hidden
-// rather than disabled in orchestrator mode, following the tab strip's
-// precedent of swapping content: disabling would leave dead icons whose
-// tooltips describe an environment the operator is not working in.
+// TitlebarEnvControls acts on the sidebar's selected environment and is hidden,
+// not disabled, in orchestrator mode.
 function TitlebarEnvControls(): React.ReactElement {
   const dispatch = useAppDispatch();
   const selected = useAppSelector((state) => state.selection.selected);
@@ -105,16 +96,9 @@ function TitlebarEnvControls(): React.ReactElement {
   );
 }
 
-// TitlebarRightControls renders the right titlebar cluster. In orchestrator mode
-// it keeps only the diff panel toggle: that is the one control meaningful for a
-// cross-env session, and the three env-scoped ones act on whichever
-// environment the sidebar happens to have selected — independent of which
-// terminal tab is active, so with an orchestrator focused they would target an
-// environment it may not even be linked to.
-//
-// The changed-files sub-toggle stays: it renders only when the diff panel is
-// open and toggles that panel's own file tree, so it is diff-panel chrome
-// rather than a fourth control.
+// TitlebarRightControls keeps only the diff-panel controls in orchestrator mode:
+// the env-scoped ones would target the sidebar's selection, which the
+// orchestrator may not be linked to.
 export function TitlebarRightControls(): React.ReactElement {
   const dispatch = useAppDispatch();
   const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);

@@ -10,20 +10,15 @@ interface AIOccupancyBannerProps {
   onShowJobs?: () => void;
 }
 
-// AIOccupancyBanner is the "while in the tab" half of AI occupancy: a persistent,
-// non-blocking reminder — not a one-time toast — that another job is still
-// working in this environment while the operator's own AI tab is open.
-// Visually mirrors ActivityLockOverlay so a comparable "something else is
-// happening here" condition reads the same way across the terminal pane.
+// AIOccupancyBanner is a persistent reminder that another job is working in
+// this environment while its AI tab is open.
 export function AIOccupancyBanner({
   leases,
   selection,
   onShowJobs,
 }: AIOccupancyBannerProps): React.ReactElement {
   const names = leases.map((lease) => lease.name).join(', ');
-  // Only a lease a job holds can be acted on; anything else has no job behind
-  // it to stop, so the banner names the occupancy and offers nothing it cannot
-  // deliver.
+  // Only a job-held lease can be stopped.
   const cancellable = leases.filter((lease) => !!lease.jobId);
   return (
     <div

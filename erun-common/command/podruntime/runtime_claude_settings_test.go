@@ -21,9 +21,6 @@ func relayTestSettings(t *testing.T, env map[string]string, existing string) (ma
 	return readTestJSON(t, path), string(data)
 }
 
-// A configured gateway relays the model list (which makes the catalog
-// selectable), the default model and the model's context window into settings;
-// the credential stays in the pod environment and never reaches a file.
 func TestRelayRuntimeClaudeSettingsRelaysAGatewaysRouting(t *testing.T) {
 	_, raw := relayTestSettings(t, map[string]string{
 		"ANTHROPIC_BASE_URL":             "https://openrouter.ai/api",
@@ -45,8 +42,6 @@ func TestRelayRuntimeClaudeSettingsRelaysAGatewaysRouting(t *testing.T) {
 	}
 }
 
-// An install with no gateway and no Bedrock must land in exactly the settings
-// shape it had, apart from the session settings every pod gets.
 func TestRelayRuntimeClaudeSettingsWritesNoRoutingWithoutARelay(t *testing.T) {
 	_, raw := relayTestSettings(t, nil, "")
 	for _, name := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "CLAUDE_CODE_MAX_CONTEXT_TOKENS", "AWS_REGION", "availableModels"} {
@@ -56,8 +51,6 @@ func TestRelayRuntimeClaudeSettingsWritesNoRoutingWithoutARelay(t *testing.T) {
 	}
 }
 
-// Bedrock is relayed for an AWS environment with a region; the use flags are
-// present-or-absent to Claude Code, so a disabled one is removed, never "0".
 func TestRelayRuntimeClaudeSettingsRelaysBedrock(t *testing.T) {
 	settings, _ := relayTestSettings(t, map[string]string{
 		"ERUN_CLOUD_PROVIDER_ALIAS": "operator@aws", "ERUN_CLOUD_REGION": "eu-west-2",
@@ -73,10 +66,7 @@ func TestRelayRuntimeClaudeSettingsRelaysBedrock(t *testing.T) {
 	}
 }
 
-// settings.json lives on the persistent volume, so a pod redeployed off the
-// gateway would otherwise keep launching the gateway's model. This pod predates
-// the ownership record: its earlier relay evidently ran (both token defaults are
-// there), so what it wrote goes and what the operator wrote stays.
+// This pod predates the ownership record but both token defaults show its relay ran.
 func TestRelayRuntimeClaudeSettingsRemovesWhatItRelayedAfterLeavingTheGateway(t *testing.T) {
 	_, raw := relayTestSettings(t, nil, `{
   "theme": "dark",
@@ -101,9 +91,6 @@ func TestRelayRuntimeClaudeSettingsRemovesWhatItRelayedAfterLeavingTheGateway(t 
 	}
 }
 
-// A settings file the relay never touched owns nothing, and once the record
-// exists an entry the relay did not write survives even under a name it could
-// own.
 func TestRelayRuntimeClaudeSettingsNeverRemovesTheOperatorsOwnEntries(t *testing.T) {
 	_, raw := relayTestSettings(t, nil, `{"env": {"ANTHROPIC_MODEL": "sonnet", "MAX_THINKING_TOKENS": "4096"}, "availableModels": ["sonnet"]}`)
 	for _, kept := range []string{`"ANTHROPIC_MODEL": "sonnet"`, `"MAX_THINKING_TOKENS": "4096"`, "availableModels"} {
@@ -124,9 +111,6 @@ func TestRelayRuntimeClaudeSettingsNeverRemovesTheOperatorsOwnEntries(t *testing
 	}
 }
 
-// The hooks are the writer the AI-session status model needs: every binding is
-// installed with the event it reports, a reboot replaces its own block rather
-// than stacking another, and an operator's own hook on the same event is kept.
 func TestRuntimeClaudeSessionSettingsInstallEveryAISessionHook(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	writeAssetFile(t, path, `{"permissions": {"allow": ["Bash"]}, "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "printf 'operator hook\n'"}]}]}}`)

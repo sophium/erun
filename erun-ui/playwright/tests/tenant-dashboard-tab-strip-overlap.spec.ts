@@ -10,35 +10,10 @@ import {
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
 
-// The tenant dashboard's tab strip must not overlap itself between ~700px and
-// ~1000px. The strip is deliberately wrapping — the desktop overrides the
-// primitive's single-row layout so a narrow <main> gets a second line rather
-// than tabs pushed off-screen — but the primitive pins the list's height
-// under a variant-scoped selector (group-data-[orientation=horizontal]/tabs:h-9),
-// which outranks a plain h-auto on specificity. If the box stays one row tall,
-// the overflowing second row paints over the panel beneath it and can make
-// controls like "+ New review" unclickable.
-//
-// narrow-viewport-shell.spec.ts's isFullyOnScreen only checks each tab is
-// fully on screen *horizontally*, which a tab on an overflowing second row
-// satisfies; the failure is vertical. So this spec asserts
-// the strip actually contains the rows it wraps into, that no tab overlaps
-// another, that no tab overlaps the panel controls below it, and that every
-// tab still wins its own hit test.
-//
-// Widths cover both boundaries of the reported band (1000 and 700), two
-// widths inside it (900 — the reported reproduction — and 820), the sidebar
-// collapse breakpoint that sits inside it (758), and one width on each side
-// of the band (1200, 640), so a fix that merely moves the broken band rather
-// than removing it still fails here.
-//
-// Staging mirrors tenant-dashboard-reviews.spec.ts: a throwaway env with an
-// apiUrl plus a stubbed LoadTenantDashboard, since the inert harness
-// deliberately has no collaboration API to read. Every panel is
-// unrestricted, because the defect is a property of the full-length strip.
-//
-// A tab added later is exactly the change that can push a wrapped second row
-// back over the panel controls, so the count is pinned.
+// The wrapping tab strip must grow to hold its rows between ~700px and ~1000px:
+// the primitive's variant-scoped h-9 outranks h-auto, so a second row would
+// paint over the panel. Widths cover both band edges, the inside, the 758px
+// sidebar breakpoint, and one width either side. The tab count is pinned.
 
 const DEFAULT_VIEWPORT = { width: 1440, height: 1200 };
 
@@ -60,8 +35,7 @@ async function fulfillDashboard(route: Route, environment: string): Promise<void
         apiUrl: 'http://127.0.0.1:1/unreachable',
         user: { tenantId: 't1', userId: 'u1', username: 'operator' },
         canCreateReview: true,
-        // A non-zero pending count widens the Requests tab to "Requests (2)",
-        // the label an operator with a real queue actually sees.
+        // Widens the tab to "Requests (2)".
         pendingInviteRequestCount: 2,
         mineReviewCount: 1,
         waitingOnMeReviewCount: 1,
@@ -108,10 +82,8 @@ async function openReviewsTab(app: AppShell, page: Page, environment: string): P
 
   await waitForSeededRow(app, SEED_TENANT, environment);
 
-  // Below the collapse breakpoint the sidebar starts folded, so the row has
-  // to be reached the way an operator would reach it — reopen, navigate,
-  // then let it fold back, so what gets measured is the steady state for
-  // this width rather than the momentary reopen.
+  // Reopen a collapsed sidebar to navigate, then fold it back to measure the
+  // steady state.
   const wasCollapsed = await sidebarCollapsed(app);
   if (wasCollapsed) {
     await app.titlebar.toggleSidebar();
@@ -125,9 +97,7 @@ async function openReviewsTab(app: AppShell, page: Page, environment: string): P
   await expect(app.tenantDashboard.newReviewButton()).toBeVisible();
 }
 
-// Boxes overlap when they share real area. 1px of tolerance absorbs sub-pixel
-// layout rounding; the defect this guards is tens of pixels of overlap, so
-// nothing real hides under that tolerance.
+// 1px absorbs sub-pixel rounding; the defect is tens of pixels.
 function overlaps(a: ElementBox, b: ElementBox): boolean {
   const horizontal = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
   const vertical = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
@@ -140,10 +110,7 @@ function describeBox(label: string, box: ElementBox): string {
   return `${label} [x ${box.x.toFixed(0)}-${right.toFixed(0)}, y ${box.y.toFixed(0)}-${bottom.toFixed(0)}]`;
 }
 
-// A wrapped row must be part of the strip's own box. A tab hanging below the
-// list's bottom edge is the defect itself: the strip kept one row's height
-// while its content took two, so the second row paints over the panel
-// instead of pushing it down.
+// A tab below the list's bottom edge means the strip kept one row's height.
 function escapesStrip(list: ElementBox, tab: TabBox): boolean {
   return tab.y < list.y - 1 || tab.y + tab.height > list.y + list.height + 1;
 }
@@ -184,11 +151,7 @@ async function panelControls(app: AppShell): Promise<{ label: string; box: Eleme
   ];
 }
 
-// layoutViolations is the whole invariant in one sample: every tab inside the
-// strip that holds it, no tab over another tab, no tab over the panel's own
-// controls, no tab off the side of the window, and every tab still the hit
-// target at its own centre. It returns descriptions rather than a boolean so
-// a failure names which tab landed where.
+// layoutViolations describes every broken invariant so a failure names the tab.
 async function layoutViolations(app: AppShell, viewportWidth: number): Promise<string[]> {
   const { list, tabs } = await app.tenantDashboard.tabStripGeometry();
   const controls = await panelControls(app);
@@ -217,9 +180,7 @@ async function layoutViolations(app: AppShell, viewportWidth: number): Promise<s
         ),
     );
   }
-  // The reported symptom is a tab rendered *underneath* a button, which is
-  // the same intersection seen from the other side — only a hit test proves
-  // which of the two wins.
+  // Only a hit test proves which of two intersecting elements wins.
   return [...found, ...tabPairViolations(tabs), ...(await app.tenantDashboard.coveredTabs())];
 }
 
@@ -258,17 +219,11 @@ test.describe('tenant dashboard tab strip — the reported tab stays clickable (
     try {
       await openReviewsTab(app, page, environment);
 
-      // Playwright hit-tests an element before clicking it, so a tab a
-      // button has covered fails here rather than silently clicking the
-      // button. This is a guard, not the reproduction: a small overlap can
-      // leave the tab's own centre clear, so the geometry above is what
-      // catches it; this keeps the tab clickable as the strip's layout changes.
+      // A guard, not the reproduction: a small overlap can leave the centre clear.
       await app.tenantDashboard.selectTab('API log');
       await expect(app.tenantDashboard.tab('API log')).toHaveAttribute('aria-selected', 'true');
       await expect(app.tenantDashboard.activePanel()).toBeVisible();
 
-      // And back again: the strip must stay usable in both directions, not
-      // only for the one tab the report named.
       await app.tenantDashboard.selectTab('Reviews');
       await expect(app.tenantDashboard.newReviewButton()).toBeVisible();
     } finally {

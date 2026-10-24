@@ -8,29 +8,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// guardInPodRuntimeDeploy refuses to deploy an env's runtime chart from inside
-// that env's own runtime pod, whatever the env's type.
-//
-// What makes such a resolve untrustworthy is not the environment's type but
-// where the configuration came from: the in-pod store is only the projection
-// the chart injects (see doctor --sync-config), holding a thin subset of the
-// env's real shape. A field the host owns and the projection never received
-// silently falls back to a default or to an in-pod observation — an
-// unprojected port block derives from the 17000 base, an unconfigured runtime
-// pod reads this pod's own cgroup limit, and sshd and the chart registry take
-// whatever the projection happens to carry — and the resulting rollout
-// reshapes the environment and can cut the very channel that asked for it (an
-// in-pod deploy that resolves sshdEnabled=false turns off the sshd serving
-// workspace-sync). None of those fields depend on where the worktree lives, so
-// none of them are made safe by a remote-agent env owning its worktree in the
-// pod. Nothing on the read side can repair this either: the projection is
-// deliberately not reconciled with the host's runtime pod sizing, so until the
-// authoritative env config is threaded into the pod, the host CLI is the only
-// place this deploy can be resolved correctly.
-//
-// Deliberately narrow in what it blocks: only the runtime chart, and only in
-// that env's own pod. A component-only deploy carries no environment shape and
-// is untouched, so an env's pod keeps deploying its own components.
+// guardInPodRuntimeDeploy refuses a runtime-chart deploy from the env's own pod:
+// the in-pod config is a thin projection, so host-owned fields (ports, sshd,
+// resources) would resolve to defaults and could cut the calling channel.
 func guardInPodRuntimeDeploy(env func(string) string, resolvedTarget config.OpenResult, specs []DeploySpec) error {
 	podTenant, podEnvironment, inPod := core.InjectedRuntimePodIdentity(env)
 	if !inPod {

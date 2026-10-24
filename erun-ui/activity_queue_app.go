@@ -6,21 +6,14 @@ import (
 )
 
 const (
-	// activityQueueStateEvent lets the frontend refresh the queue drawer and
-	// per-card container statuses reactively instead of polling.
 	activityQueueStateEvent = "activity:state"
 
-	// activityQueueLockEvent drives the frontend's per-terminal lock overlay.
 	activityQueueLockEvent = "activity:lock"
 
-	// activityQueuePollInterval trades responsiveness against poll load: short
-	// enough that the user sees pods transition, long enough to stay negligible
-	// against modest clusters.
 	activityQueuePollInterval = 2 * time.Second
 )
 
-// activityLockEvent carries a terminal lock transition; the frontend keys its
-// overlays by SessionID.
+// activityLockEvent is keyed by SessionID on the frontend.
 type activityLockEvent struct {
 	SessionID    int    `json:"sessionId"`
 	Tenant       string `json:"tenant"`
@@ -31,8 +24,7 @@ type activityLockEvent struct {
 	DeployTarget string `json:"deployTarget,omitempty"`
 }
 
-// ListDeploys returns the current and recent deploy entries (newest first).
-// Wails-exported.
+// ListDeploys returns current and recent entries, newest first.
 func (a *App) ListDeploys() []activityQueueEntry {
 	if a.activityQueue == nil {
 		return nil
@@ -40,8 +32,7 @@ func (a *App) ListDeploys() []activityQueueEntry {
 	return a.activityQueue.list()
 }
 
-// GetDeploy returns a single deploy entry by ID, or zero value if not found.
-// Wails-exported.
+// GetDeploy returns an entry by ID, or the zero value.
 func (a *App) GetDeploy(id string) activityQueueEntry {
 	if a.activityQueue == nil {
 		return activityQueueEntry{}
@@ -54,9 +45,7 @@ func (a *App) GetDeploy(id string) activityQueueEntry {
 	return activityQueueEntry{}
 }
 
-// DismissDeploy removes a finished deploy from history. Returns false when
-// the ID names an active deploy (which the user must wait for) or no longer
-// exists. Wails-exported.
+// DismissDeploy removes a finished deploy; false for an active or unknown ID.
 func (a *App) DismissDeploy(id string) bool {
 	if a.activityQueue == nil {
 		return false
@@ -64,11 +53,7 @@ func (a *App) DismissDeploy(id string) bool {
 	return a.activityQueue.dismiss(id)
 }
 
-// ForceDismissActivity removes any entry — active or finished — from the
-// queue. Used for stuck active entries the user has confirmed are no
-// longer running (e.g. a stale shell whose PID exited unnoticed, or a
-// deploy entry whose helm release was deleted out from under the
-// poller). Wails-exported.
+// ForceDismissActivity removes any entry, for stuck entries the user confirmed are dead.
 func (a *App) ForceDismissActivity(id string) bool {
 	if a.activityQueue == nil {
 		return false
@@ -82,9 +67,7 @@ func (a *App) ForceDismissActivity(id string) bool {
 	return true
 }
 
-// FindActiveDeployForSelection returns the active entry for (tenant, env)
-// when one exists; the frontend uses this for deploy-button gating without
-// having to walk the full ListDeploys snapshot. Wails-exported.
+// FindActiveDeployForSelection returns the active entry for the selection, if any.
 func (a *App) FindActiveDeployForSelection(selection uiSelection) activityQueueEntry {
 	if a.activityQueue == nil {
 		return activityQueueEntry{}
@@ -96,14 +79,8 @@ func (a *App) FindActiveDeployForSelection(selection uiSelection) activityQueueE
 	return activityQueueEntry{}
 }
 
-// finishActivityTracking finalizes the active "deploy" entry for the
-// selection. Both callers observe a deploy-failure trace line that carries no
-// tenant/env (a bare "==> Deploy failed after <elapsed>", or a
-// "==> Deployed"/"==> Deploy failed" line finishDeployByTenantEnv could not
-// parse tenant/env out of), so the command is always "deploy" here — keyed by
-// command, like finishCommandBySelection, rather than plain findActive, whose
-// Go map iteration order picks an arbitrary entry when a build and a deploy
-// are both active for the same tenant/env — the wrong card finalizing.
+// finishActivityTracking finalizes the selection's "deploy" entry, keyed by command
+// so a concurrent build's entry is never finalized instead.
 func (a *App) finishActivityTracking(selection uiSelection, status activityQueueStatus, errMsg string) {
 	if a.activityQueue == nil {
 		return
@@ -121,9 +98,7 @@ func (a *App) emitActivityState(entry activityQueueEntry) {
 	a.emitEvent(activityQueueStateEvent, entry)
 }
 
-// lockTerminalsForActivity locks the terminals that exist now for the deploy's
-// selection; sessions that join later are locked individually by
-// lockTerminalForActivity.
+// lockTerminalsForActivity locks existing sessions; later joiners go through lockTerminalForActivity.
 func (a *App) lockTerminalsForActivity(entry activityQueueEntry) {
 	if entry.ID == "" {
 		return
@@ -157,14 +132,11 @@ func (a *App) lockTerminalsForActivity(entry activityQueueEntry) {
 		a.emitEvent(activityQueueLockEvent, ev)
 	}
 	if len(events) > 0 {
-		// A deploy just started, so retire any env-scoped warning that told the
-		// operator to act — that guidance is now stale.
+		// The deploy makes any env-scoped warning stale.
 		a.emitClearEnvNotification(entry.Tenant, entry.Environment, "")
 	}
 }
 
-// lockTerminalForActivity locks a session that joined an in-flight deploy after
-// it had already started.
 func (a *App) lockTerminalForActivity(sessionID int, entry activityQueueEntry) {
 	if entry.ID == "" || sessionID <= 0 {
 		return
@@ -193,19 +165,12 @@ func (a *App) lockTerminalForActivity(sessionID int, entry activityQueueEntry) {
 	a.mu.Unlock()
 	if event != nil {
 		a.emitEvent(activityQueueLockEvent, *event)
-		// A late-joining session locked onto an in-flight deploy — the runtime is
-		// being (re)deployed, so clear any env-scoped warning for it.
 		a.emitClearEnvNotification(entry.Tenant, entry.Environment, "")
 	}
 }
 
-// lockNewlyJoinedSessionIfDeployInFlight locks a session the instant it joins,
-// rather than leaving it unlocked until the deploy's poller or completion
-// handler next touches the queue: a session created after a deploy has
-// already started otherwise shows no lock overlay at all, since
-// lockTerminalsForActivity only locks the sessions that existed at deploy
-// start. Callers are runOpenSession/runAISession, the only two kinds
-// sessionMatchesActivity locks for a deploy.
+// lockNewlyJoinedSessionIfDeployInFlight locks a session as it joins, since
+// lockTerminalsForActivity only covered sessions present at deploy start.
 func (a *App) lockNewlyJoinedSessionIfDeployInFlight(selection uiSelection, sessionID int) {
 	if a.activityQueue == nil {
 		return
@@ -243,10 +208,8 @@ func (a *App) unlockTerminalsForActivity(entry activityQueueEntry) {
 	}
 }
 
-// sessionMatchesActivity gates which activities lock sibling terminals. Only a
-// deploy does: it rolls out the runtime hosting the env/AI shells, so those
-// shells are meaningless until it finishes. Builds, releases, and other
-// activities leave the running runtime intact, so they never lock.
+// sessionMatchesActivity: only a deploy locks sibling terminals, since it
+// replaces the runtime hosting them.
 func sessionMatchesActivity(managed *managedTerminal, entry activityQueueEntry) bool {
 	if managed == nil {
 		return false
@@ -267,8 +230,7 @@ func sessionMatchesActivity(managed *managedTerminal, entry activityQueueEntry) 
 	}
 }
 
-// releaseNameForTenant must match the runtime chart's helm release name,
-// `<tenant>-devops`.
+// releaseNameForTenant must match the runtime chart's release name.
 func releaseNameForTenant(tenant string) string {
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {
@@ -277,8 +239,7 @@ func releaseNameForTenant(tenant string) string {
 	return tenant + "-devops"
 }
 
-// namespaceForTenantEnv must mirror the deploy resolver's per-tenant namespace
-// pattern, `<tenant>-<environment>`.
+// namespaceForTenantEnv must match the deploy resolver's namespace pattern.
 func namespaceForTenantEnv(tenant, environment string) string {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)

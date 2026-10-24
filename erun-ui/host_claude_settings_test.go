@@ -25,18 +25,12 @@ func TestHostGatewayDefaultsFromEnvReads(t *testing.T) {
 	if got.Context != 1048576 {
 		t.Fatalf("context = %d, want 1048576", got.Context)
 	}
-	// The credential is not carried here at all. Whether a key on this machine
-	// can be reused depends on which gateway it belongs to, so that answer lives
-	// behind LoadGatewayCredentialStatus — which applies the endpoint check —
-	// rather than in a second, ungated claim about the same file.
 	if strings.Contains(fmt.Sprintf("%+v", got), "sk-or-v1") {
 		t.Fatalf("a credential value reached the defaults read model: %+v", got)
 	}
 }
 
 func TestCredentialHintWithholdsShortValues(t *testing.T) {
-	// A value short enough that a suffix would be most of it yields no hint at
-	// all, rather than one that gives the credential away.
 	for _, value := range []string{"", "  ", "abc", "abcd"} {
 		if got := credentialHint(value); got != "" {
 			t.Fatalf("credentialHint(%q) = %q, want empty", value, got)
@@ -56,8 +50,6 @@ func TestHostGatewayDefaultsFromEnvTrims(t *testing.T) {
 }
 
 func TestHostGatewayDefaultsFromEnvNoBaseURLOffersNothing(t *testing.T) {
-	// A machine that has not configured a gateway has nothing to offer, which is
-	// the ordinary case rather than an error.
 	for _, env := range []map[string]string{
 		nil,
 		{},
@@ -71,8 +63,6 @@ func TestHostGatewayDefaultsFromEnvNoBaseURLOffersNothing(t *testing.T) {
 }
 
 func TestHostGatewayDefaultsFromEnvUnusableWindow(t *testing.T) {
-	// The catalog leaves the window to the operator rather than recording a
-	// figure the settings never stated.
 	for _, raw := range []string{"", "  ", "not-a-number", "0", "-5"} {
 		got := hostGatewayDefaultsFromEnv(map[string]string{
 			"ANTHROPIC_BASE_URL":             "https://openrouter.ai/api",
@@ -85,9 +75,6 @@ func TestHostGatewayDefaultsFromEnvUnusableWindow(t *testing.T) {
 	}
 }
 
-// withSettingsDir points the Claude Code settings lookup at a directory holding
-// the given file body, so the read is exercised against a real file rather than
-// a stub.
 func withSettingsDir(t *testing.T, body string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -111,9 +98,6 @@ func TestLoadHostGatewayDefaultsReadsSettingsFile(t *testing.T) {
 }
 
 func TestLoadHostGatewayDefaultsOffersNothingWithoutOne(t *testing.T) {
-	// Every case below is "no gateway to offer" rather than a failure: a machine
-	// with no settings file, an unparseable one Claude Code would itself ignore,
-	// and one that carries no env block all mean the same thing to the catalog.
 	for name, body := range map[string]string{
 		"no settings file":      "",
 		"malformed settings":    "{not json",

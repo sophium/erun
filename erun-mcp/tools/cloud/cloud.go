@@ -63,11 +63,7 @@ type CloudSetInput struct {
 	Verbosity   int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
-// CloudListResult is cloud_list's structured result. CloudProviders carries no
-// omitempty: omitempty drops a slice of length zero as well as a nil one, so an
-// environment with no configured aliases answered a bare {}, and a caller could
-// not tell "no aliases are configured" -- the diagnosis this tool exists to
-// confirm -- from "this tool does not report aliases".
+// CloudListResult omits omitempty on CloudProviders so "no aliases" answers [] rather than {}.
 type CloudListResult struct {
 	CloudProviders []cloud.CloudProviderStatus `json:"cloudProviders"`
 }

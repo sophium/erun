@@ -15,9 +15,7 @@ import (
 // envTraceLogMaxBytes caps each trace file so the rotated pair stays under ~2× this.
 const envTraceLogMaxBytes = 5 * 1024 * 1024
 
-// EnvTraceLogPath resolves the per-env trace log the runtime appends every
-// env-scoped invocation to, so the desktop Diagnostics console can show history
-// even for commands that ran before it was opened.
+// EnvTraceLogPath resolves the per-env trace log every env-scoped invocation appends to.
 func EnvTraceLogPath(tenant, environment string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -31,14 +29,8 @@ func EnvTraceLogPath(tenant, environment string) (string, error) {
 	return filepath.Join(home, ".erun", tenant, environment, "trace.log"), nil
 }
 
-// ActivateEnvTrace turns on the per-env trace tee for this invocation. Capture
-// is always on so diagnostics exist for the first failure, not only after an
-// operator opts in.
-//
-// The tee is diagnostics, never a failure source, so any setup error degrades
-// to the un-tee'd context. In dry-run nothing is written, but the trace still
-// names the resolved path so the plan stays auditable (the integration-golden
-// contract).
+// ActivateEnvTrace tees this invocation's trace into the per-env log. Setup
+// errors degrade to the un-tee'd context; dry-run writes nothing but still traces the path.
 func ActivateEnvTrace(ctx core.Context, tenant, environment string) (core.Context, func()) {
 	noop := func() {}
 	tenant = strings.TrimSpace(tenant)
@@ -69,8 +61,7 @@ func openEnvTraceLog(path string) (*os.File, error) {
 	return core.OpenBoundedAppendLog(path, envTraceLogMaxBytes, 0o600)
 }
 
-// stampedLineWriter stamps each line so interleaved invocations stay
-// attributable in the shared per-env log.
+// stampedLineWriter stamps each line so concurrent invocations sharing the log stay attributable.
 type stampedLineWriter struct {
 	out io.Writer
 	now func() time.Time

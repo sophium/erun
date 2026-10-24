@@ -89,9 +89,6 @@ func NewExposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, de
 	return cmd
 }
 
-// exposeCommandArgs bundles runExposeCommand's growing input set — TLS/DNS-01
-// cert provisioning added five related flags at once, past the point
-// a flat parameter list stays readable.
 type exposeCommandArgs struct {
 	tenant, environment, service                                                 string
 	targetIP                                                                     string
@@ -116,20 +113,11 @@ func findExposeProjectRoot(findProjectRoot sharedpkg.ProjectFinderFunc) (string,
 func runExposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot sharedpkg.ProjectFinderFunc, a exposeCommandArgs) error {
 	servicesZone := strings.TrimSpace(a.servicesZone)
 	platformNamespace := strings.TrimSpace(a.platformNamespace)
-	// --services-zone/--platform-namespace supply what a project checkout would
-	// otherwise resolve, precisely so a caller with no checkout at all (the
-	// hosted deploy Job, which has no git repo to find) can still run
-	// expose. Skip the project lookup entirely in that case, rather than failing
-	// on it before RunExposeService even gets a chance to use the override.
+	// The zone/namespace overrides let a caller with no checkout (the hosted deploy Job) run expose.
 	projectRoot := ""
 	if servicesZone == "" && platformNamespace == "" {
 		root, err := findExposeProjectRoot(findProjectRoot)
-		// --skip-if-unconfigured exists to make expose a no-op when the
-		// target is not set up for exposure — no project at all is the
-		// strongest case of that, not a reason to fail before
-		// RunExposeService gets to decide. Fall through with an
-		// empty ProjectRoot: its platform-configured check on "" resolves
-		// to false, same as a project with no platform block.
+		// With --skip-if-unconfigured, no project resolves as "not configured" rather than failing.
 		if err != nil && !a.skipIfUnconfigured {
 			return err
 		}

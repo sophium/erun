@@ -38,10 +38,8 @@ func TestCreateEnvironmentRejectsInvalidInput(t *testing.T) {
 }
 
 func TestCreateEnvironmentPersistsAndReturnsRow(t *testing.T) {
-	// Only remote-agent/local-agent environments accept a context reference on
-	// create: they are never server-side deployed, so the v1 single-cluster
-	// placement refusal (TestCreateEnvironmentRejectsCrossClusterPlacement)
-	// does not apply to them.
+	// Agent environments accept a context reference: they are never deployed, so
+	// runtime placement rules do not apply.
 	for _, envType := range []string{"remote-agent", "local-agent"} {
 		t.Run(envType, func(t *testing.T) {
 			environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentType(envType)}}
@@ -59,7 +57,6 @@ func TestCreateEnvironmentPersistsAndReturnsRow(t *testing.T) {
 			if environments.createCalls != 1 {
 				t.Fatalf("expected exactly one Create call, got %d", environments.createCalls)
 			}
-			// Tenant binding comes from RLS, not the request body.
 			if environments.createInput.ContextID != "ctx-1" || environments.createInput.RuntimeVersion != "1.2.3" {
 				t.Fatalf("unexpected create input: %+v", environments.createInput)
 			}
@@ -75,9 +72,7 @@ func TestCreateEnvironmentPersistsAndReturnsRow(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentRejectsRawKubernetesContext: naming an existing
-// cluster is by contextId — a bare kubernetesContext string has no known
-// credential to authenticate with, so it is refused for a runtime environment.
+// A bare kubernetesContext has no known credential, so runtime placement refuses it.
 func TestCreateEnvironmentRejectsRawKubernetesContext(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime}}
 	rec := postCreateEnvironment(t, environments, underCapQuota, `{"name":"prod","type":"runtime","kubernetesContext":"primary","runtimeVersion":"1.2.3"}`)
@@ -90,9 +85,6 @@ func TestCreateEnvironmentRejectsRawKubernetesContext(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentPlacesOnExplicitContext: a runtime environment naming
-// a registered, running contextId with room is placed there; only a bare
-// kubernetesContext string is refused.
 func TestCreateEnvironmentPlacesOnExplicitContext(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, ContextID: "ctx-1"}}
 	contexts := &stubContextRepository{cloudContext: model.Context{
@@ -112,10 +104,7 @@ func TestCreateEnvironmentPlacesOnExplicitContext(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentRejectsUnknownContext: a contextId that does not
-// resolve for the caller's tenant (unregistered, or belonging to another
-// tenant — PlacementContextRepository's reads are RLS-scoped) is a caller
-// mistake, not a server fault.
+// A contextId from another tenant is RLS-invisible, so it reads as unknown (400).
 func TestCreateEnvironmentRejectsUnknownContext(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime}}
 	contexts := &stubContextRepository{err: repository.ErrNotFound}
@@ -132,9 +121,6 @@ func TestCreateEnvironmentRejectsUnknownContext(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentRejectsContextAtCapacity: an explicit contextId with
-// no room fails clearly (409, naming the context and its ceiling) rather
-// than persisting a row and failing inside the Job.
 func TestCreateEnvironmentRejectsContextAtCapacity(t *testing.T) {
 	environments := &stubEnvironmentRepository{
 		created:        model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime},
@@ -157,9 +143,6 @@ func TestCreateEnvironmentRejectsContextAtCapacity(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentAutoSelectsRunningContextWithRoom: a runtime
-// environment naming no context auto-selects the tenant's own registered
-// context when one is running and has room.
 func TestCreateEnvironmentAutoSelectsRunningContextWithRoom(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, ContextID: "ctx-1"}}
 	contexts := &stubContextRepository{contexts: []model.Context{
@@ -178,9 +161,6 @@ func TestCreateEnvironmentAutoSelectsRunningContextWithRoom(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentWithNoRegisteredContextsPlacesOnThePlatformCluster: a
-// tenant with no registered contexts keeps the default — the
-// platform's own cluster (empty contextId) — rather than being refused.
 func TestCreateEnvironmentWithNoRegisteredContextsPlacesOnThePlatformCluster(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime}}
 	rec := postCreateEnvironment(t, environments, underCapQuota, `{"name":"prod","type":"runtime","runtimeVersion":"1.2.3"}`)
@@ -193,11 +173,7 @@ func TestCreateEnvironmentWithNoRegisteredContextsPlacesOnThePlatformCluster(t *
 	}
 }
 
-// TestCreateEnvironmentRefusesWhenAllRegisteredContextsAreFull: once a
-// tenant has registered contexts, exhausting all of them fails clearly
-// rather than silently
-// falling back to the platform's own cluster, which the caller never asked
-// for.
+// Never silently falls back to the platform cluster once contexts are registered.
 func TestCreateEnvironmentRefusesWhenAllRegisteredContextsAreFull(t *testing.T) {
 	environments := &stubEnvironmentRepository{
 		created:        model.Environment{EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime},
@@ -220,11 +196,7 @@ func TestCreateEnvironmentRefusesWhenAllRegisteredContextsAreFull(t *testing.T) 
 }
 
 func TestCreateEnvironmentSurfacesRepositoryError(t *testing.T) {
-	// A context_id from another tenant violates the composite foreign key; the
-	// repository error is surfaced as a clean HTTP error, not a SQL leak.
-	// remote-agent (not runtime) so the request clears the v1 single-cluster
-	// placement check, which now refuses a runtime environment's contextId
-	// outright before the repository is ever reached.
+	// remote-agent so the request reaches the repository; the FK error must not leak SQL.
 	environments := &stubEnvironmentRepository{err: foreignKeyError{}}
 	rec := postCreateEnvironment(t, environments, underCapQuota, `{"name":"prod","type":"remote-agent","contextId":"ctx-other"}`)
 	if rec.Code != http.StatusInternalServerError {
@@ -235,7 +207,6 @@ func TestCreateEnvironmentSurfacesRepositoryError(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentRejectsAtQuota enforces the per-tenant environment-count cap.
 func TestCreateEnvironmentRejectsAtQuota(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 10}
 	rec := postCreateEnvironment(t, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{"name":"prod","type":"runtime"}`)
@@ -247,7 +218,6 @@ func TestCreateEnvironmentRejectsAtQuota(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentAllowsUnderQuota lets registration proceed below the environment cap.
 func TestCreateEnvironmentAllowsUnderQuota(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 9}
 	rec := postCreateEnvironment(t, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{"name":"prod","type":"runtime"}`)

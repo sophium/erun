@@ -10,33 +10,14 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// Every agent task that clones the repo into a work directory leaves that
-// clone behind once its job finishes -- nothing ever reclaimed it, so the
-// work directory grows without bound. The obvious fix, sweeping the whole
-// directory on a timer or `rm -rf`ing anything old, is destructive: a clone
-// can hold commits that exist nowhere else (never pushed) or a dirty tree
-// (never committed at all), and losing either is real work gone, not disk
-// reclaimed. This file is the safety check that has to hold before any clone
-// is removed, plus the one place it is actually acted on: the same job-finish
-// hook that already checkpoints a dirty tree (job_worktree.go).
-//
-// "Finished" is answered by construction rather than by a timestamp or a
-// directory scan: reclaim only ever runs once, from inside finishEnvironmentJob,
-// at the exact moment the supervisor that owns this job observes its process
-// exit. There is no window in which a running job's directory could be
-// mistaken for an idle one, because nothing here ever looks at an arbitrary
-// directory's mtime to guess whether work on it has stopped.
+// Agent work clones are reclaimed only from finishEnvironmentJob, once the job's process has
+// exited, and only when nothing unpushed or uncommitted would be lost.
 
-// WorkCloneUserHomeDir is the seam a test overrides to point workCloneRoot at
-// a fixture home directory instead of the real one.
+// WorkCloneUserHomeDir is a test seam for WorkCloneRoot's home directory.
 var WorkCloneUserHomeDir = os.UserHomeDir
 
-// WorkCloneRoot resolves the directory that holds per-task agent clones
-// (conventionally /home/erun/work), distinct from the tenant's own runtime
-// repository (/home/erun/git/<tenant>). Reclaim only ever acts on a path
-// under this root -- see isUnderWorkRoot -- which is what keeps the runtime
-// repo itself unreachable no matter what a caller happens to set a job's Dir
-// to.
+// WorkCloneRoot is the per-task clone root (/home/erun/work); reclaim acts only under it,
+// keeping the runtime repository unreachable.
 func WorkCloneRoot(homeDir string) (string, error) {
 	resolved := strings.TrimSpace(homeDir)
 	if resolved == "" {
@@ -49,14 +30,8 @@ func WorkCloneRoot(homeDir string) (string, error) {
 	return filepath.Join(resolved, "work"), nil
 }
 
-// ResolveBranchUpstreamCandidate answers "what would branch be compared
-// against to know it is safe" -- branch's configured @{u} when it has one,
-// falling back to a same-named branch on origin otherwise. The fallback
-// matters because a plain `git push origin branch:branch` (exactly what the
-// job-finish checkpoint in job_worktree.go does) lands the commit on the
-// remote without ever configuring `@{u}`, so a missing upstream is not proof
-// nothing was pushed -- it is only proof that *if* something was pushed, it
-// was not pushed the way `-u` would have recorded it.
+// ResolveBranchUpstreamCandidate returns branch's @{u}, else origin/<branch>: the job-finish
+// checkpoint pushes without -u, so a missing upstream is not proof nothing was pushed.
 func ResolveBranchUpstreamCandidate(ctx core.Context, dir, branch string) (string, bool) {
 	if upstream, ok := gitUpstreamRef(ctx, dir, branch); ok {
 		return upstream, true

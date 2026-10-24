@@ -104,9 +104,7 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 	}
 }
 
-// TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig pins that
-// editing a local-agent env's registry list writes to the project config —
-// where the build/deploy resolvers read it — not to the env config.
+// Local-agent registry lists live in the project config, where build/deploy read them.
 func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -149,8 +147,6 @@ func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *tes
 	}
 }
 
-// TestSaveEnvironmentConfigRejectsInvalidRegistryList confirms marker invariants
-// are enforced before persistence: a list with no deploy registry is rejected.
 func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -175,10 +171,7 @@ func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 	}
 }
 
-// TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry pins that a registry
-// marked deploy-only is valid: the image it serves may be published there
-// externally (a runtime env pulling a released image), so erun must not force
-// a build or to role on it.
+// A deploy-only registry may serve externally published images, so it is valid.
 func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -205,11 +198,7 @@ func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 	}
 }
 
-// The chart the runtime is installed from is one of the four deploy coordinates,
-// stated by the operator rather than derived, so the dialog must both show what
-// the env rides and write a change back. Clearing it means "the chart published
-// with the deployed version", which must reach the env config as an empty field
-// rather than being ignored as a no-op.
+// Clearing the runtime chart must persist as an empty field, not be ignored.
 func TestSaveEnvironmentConfigRoundTripsRuntimeChart(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{

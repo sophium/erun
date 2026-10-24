@@ -9,9 +9,7 @@ func IsHelmReleaseNotFound(stderr string) bool {
 	return strings.Contains(strings.ToLower(stderr), "release: not found")
 }
 
-// ObserveHelmReadErrorMessage classifies a failed helm read into an actionable
-// message: an orchestrator reading "the release cannot be read" with no reason
-// has nowhere to go, per root AGENTS.md's "Smooth, Seamless, No Dead Ends".
+// ObserveHelmReadErrorMessage classifies a failed helm read into an actionable message.
 func ObserveHelmReadErrorMessage(releaseName, namespace, stderr string, err error) string {
 	lower := strings.ToLower(stderr)
 	switch {

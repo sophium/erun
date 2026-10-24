@@ -15,12 +15,8 @@ const (
 	testMemoryWarn = 6 * testGiB
 )
 
-// memoryReadingForPercent builds a memory reading the way the reader does, from
-// the raw counters, rather than assembling one field by field: a fixture that
-// states percentOfLimit itself can disagree with the bytes under it, and the
-// whole property here lives on the boundary those two meet at. current is the
-// smallest whole byte count that reaches percent, so the crossing itself is
-// what gets tested.
+// memoryReadingForPercent derives the reading from raw counters, using the smallest byte
+// count that reaches percent, so the crossing itself is tested.
 func memoryReadingForPercent(currentPercent, peakPercent float64, limit int64, oomKills int64) config.RuntimeUsage {
 	bytesFor := func(percent float64) int64 {
 		return int64(math.Ceil(float64(limit) * percent / 100))
@@ -42,10 +38,6 @@ func memoryReadingForPercent(currentPercent, peakPercent float64, limit int64, o
 	return usage
 }
 
-// saturatingReading is the reading this contract exists for: an environment
-// sustained against its memory ceiling, peak at the limit, no OOM kill recorded
-// yet. It is the case where the warning fired and the recommendation had
-// nothing to say.
 func saturatingReading(current, limit int64) config.RuntimeUsage {
 	return config.RuntimeUsage{
 		Tenant:      "erun",
@@ -73,19 +65,10 @@ func memoryVerdict(t *testing.T, recommendation deploy.RuntimeSizingRecommendati
 	return deploy.RuntimeSizingVerdict{}
 }
 
-// TestSaturationWarningAlwaysCarriesItsRecommendation is the property this
-// change exists to keep: an environment told it is saturated is never left
-// without the sizing advice that answers it. Every reading that fires a memory
-// warning -- current usage, or a peak that came within a hair of the limit --
-// must come back with a raise, from evidence no longer than the single reading
-// itself. A host that has never retained history is the case that regressed,
-// so the history here is empty on purpose.
+// The history is empty on purpose: a host with no retained history is the case at risk.
 func TestSaturationWarningAlwaysCarriesItsRecommendation(t *testing.T) {
 	limit := 6 * testGiB
 
-	// The first figure is the threshold itself, crossed by the smallest byte
-	// count that crosses it. That is the boundary the alarm and the advisory
-	// have to agree on, and the one an integer byte count can fall off.
 	for _, percent := range []float64{deploy.RuntimeUsageMemoryWarnPercent, 86, 88, 90, 95, 100} {
 		usage := memoryReadingForPercent(percent, percent, limit, 0)
 		if len(usage.Warnings) == 0 {
@@ -114,9 +97,6 @@ func TestSaturationWarningAlwaysCarriesItsRecommendation(t *testing.T) {
 	}
 }
 
-// TestPeakOnlyWarningAlsoCarriesARaise covers the reading that has already
-// fallen back down: current usage is idle, memory.peak is at the ceiling. The
-// peak warning fires, so the recommendation has to speak too.
 func TestPeakOnlyWarningAlsoCarriesARaise(t *testing.T) {
 	usage := saturatingReading(200*1024*1024, testMemoryWarn)
 	warnings := runtimeUsageWarnings(usage)
@@ -137,20 +117,12 @@ func TestPeakOnlyWarningAlsoCarriesARaise(t *testing.T) {
 	}
 }
 
-// TestRetainedHistoryAndLiveReadingCannotDisagree pins the "never a second
-// engine" half of the property. A recommendation scored from retained history
-// plus the same reading handed in as Live must reach one verdict, and a live
-// reading that is worse than everything retained must win -- otherwise the
-// history-based answer `erun list` shows and the reading-based answer
-// `erun usage` shows could name different sizes for one environment.
 func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
 	limit := 6 * testGiB
 	history := deploy.RuntimeUsageHistory{
 		Samples:                 []config.RuntimeUsage{saturatingReading(1024*1024*1024, limit)},
 		ObservedPeakMemoryBytes: 1024 * 1024 * 1024,
 	}
-	// The retained history alone says the environment is nowhere near its
-	// limit, and has not been watched long enough to shrink.
 	fromHistory, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history})
 	if !ok {
 		t.Fatal("a retained sample produced no recommendation")
@@ -159,8 +131,6 @@ func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
 		t.Fatalf("expected the retained history to say insufficient-evidence, got %q", got)
 	}
 
-	// The live reading shows the environment pinned at the ceiling. One
-	// recommendation, scored over both, must not miss it.
 	live := saturatingReading(limit*99/100, limit)
 	fromBoth, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history, Live: &live})
 	if !ok {
@@ -181,9 +151,6 @@ func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
 	}
 }
 
-// TestLiveReadingIsTheSizeScoredAgainst guards the stale-limit case: history
-// retained under an older, smaller runtimepod must not size the environment
-// against a limit it no longer runs under.
 func TestLiveReadingIsTheSizeScoredAgainst(t *testing.T) {
 	oldLimit := 3 * testGiB
 	history := deploy.RuntimeUsageHistory{
@@ -204,9 +171,6 @@ func TestLiveReadingIsTheSizeScoredAgainst(t *testing.T) {
 	}
 }
 
-// TestNoEvidenceIsStillSilence keeps the one case that must not gain a
-// recommendation: an environment erun has never observed gets silence, not a
-// guess. The threshold alignment must not turn "nothing known" into advice.
 func TestNoEvidenceIsStillSilence(t *testing.T) {
 	if _, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{}); ok {
 		t.Fatal("an environment with no reading and no history produced a recommendation")

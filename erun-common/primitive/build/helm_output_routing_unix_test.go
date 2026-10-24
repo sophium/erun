@@ -12,9 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
-// Helm's "Successfully packaged chart …" is progress, not data: on erun's
-// stdout it lands ahead of `erun build --output json` and the result no longer
-// parses, which is what erun-merge reads the minted version from.
+// Helm's progress line on stdout would break `erun build --output json` parsing.
 func TestHelmProgressStaysOffStdout(t *testing.T) {
 	binDir := t.TempDir()
 	script := "#!/bin/sh\necho \"Successfully packaged chart and saved it to: x.tgz\"\necho \"helm stderr\" >&2\n"
@@ -34,8 +32,7 @@ func TestHelmProgressStaysOffStdout(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			// helm's two streams are copied by separate goroutines onto one
-			// writer, so the stderr side must be safe for concurrent writes.
+			// helm's two streams are copied concurrently onto one writer.
 			var stdout syncBuffer
 			var stderr syncBuffer
 			ctx := core.Context{Stdout: &stdout, Stderr: &stderr}

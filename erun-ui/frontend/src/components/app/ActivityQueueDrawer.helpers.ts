@@ -5,8 +5,7 @@ import {
 } from '@/app/activityQueueState';
 import type { UISelection } from '@/types';
 
-// deployUiSelection builds the uiSelection a deploy recovery action needs from an
-// activity entry; fields left empty are resolved by the backend from the env config.
+// Empty fields are resolved by the backend from the env config.
 export function deployUiSelection(entry: ActivityQueueEntry): UISelection {
   return {
     tenant: entry.tenant,
@@ -28,8 +27,6 @@ export function isHistoryStatus(status: ActivityQueueEntry['status']): boolean {
   );
 }
 
-// A visible, readable-by-assistive-tech label for a status that is otherwise
-// conveyed only by an aria-hidden icon and a border color (WCAG 1.4.1).
 export function activityStatusLabel(status: ActivityQueueEntry['status']): string {
   switch (status) {
     case 'waiting':
@@ -102,13 +99,12 @@ export function commandBadgeClassName(command: string): string {
     case 'deploy':
       return 'bg-blue-500/15 text-blue-700';
     case 'build':
-      // Amber is build's badge color, not a status warning — status has its own border + icon.
+      // Build's badge colour, not a warning.
       return 'bg-amber-500/15 text-amber-700';
     case 'release':
       return 'bg-purple-500/15 text-purple-700';
     case 'open':
-      // Long-running session, not a success — sky avoids the green/READY
-      // collision that made open shells look like succeeded deploys.
+      // Sky, not green, so open shells don't look like successful deploys.
       return 'bg-sky-500/15 text-sky-700';
     case 'init':
       return 'bg-slate-500/15 text-slate-700';
@@ -151,11 +147,6 @@ export function commandSubtitle(entry: ActivityQueueEntry): string {
   return parts.length > 0 ? parts.join(' · ') : '—';
 }
 
-// activitySubtitle is commandSubtitle's caller-facing wrapper: an
-// 'invite-approval' entry carries no command/release/namespace to
-// summarize, only its own message, so it branches here rather
-// than growing commandSubtitleParts a case for a field type that isn't a
-// cluster/host command at all.
 export function activitySubtitle(entry: ActivityQueueEntry): string {
   if (entry.origin === 'invite-approval') {
     return entry.message ?? '';
@@ -164,9 +155,6 @@ export function activitySubtitle(entry: ActivityQueueEntry): string {
 }
 
 export function activityTargetLabel(entry: ActivityQueueEntry): string {
-  // An invite-approval entry may carry no environment (the request may not
-  // have named one) -- "tenant/" with nothing after the slash reads as a
-  // truncated label, so fall back to the tenant alone.
   if (!entry.environment) {
     return entry.tenant;
   }
@@ -211,8 +199,7 @@ export function containerPhaseLabel(container: ActivityQueueContainerStatus): st
   }
 }
 
-// Kubelet reasons that mean the container is stuck in a failure, not
-// legitimately waiting (e.g. ContainerCreating), so the UI can flag them.
+// Kubelet reasons that mean a container is stuck, not legitimately waiting.
 const failingContainerReasons = new Set([
   'ImagePullBackOff',
   'ErrImagePull',
@@ -318,8 +305,6 @@ function failureReportContainerLines(entry: ActivityQueueEntry): string[] {
   return ['', 'Containers:', ...entry.containers.map(failureReportContainerLine)];
 }
 
-// buildFailureReport assembles a paste-ready report so a user can hand a deploy
-// failure to developers/admins without scraping the terminal.
 export function buildFailureReport(entry: ActivityQueueEntry): string {
   const lines = [...failureReportContextLines(entry), ...failureReportContainerLines(entry)];
   if (entry.error) lines.push('', `Error: ${entry.error}`);
@@ -329,7 +314,7 @@ export function buildFailureReport(entry: ActivityQueueEntry): string {
 
 export async function copyToClipboard(text: string): Promise<void> {
   try {
-    // navigator.clipboard is typed as always-present but can be missing in Wails embeddings.
+    // navigator.clipboard can be missing in Wails embeddings.
     const nav = navigator as Omit<Navigator, 'clipboard'> & { clipboard?: Clipboard };
     if (nav.clipboard !== undefined) {
       await nav.clipboard.writeText(text);

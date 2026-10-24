@@ -18,10 +18,7 @@ import (
 )
 
 func NewExecCmd(findProjectRoot sharedpkg.ProjectFinderFunc, runGit gitx.GitCommandRunnerFunc, runRaw core.RawCommandRunnerFunc, resolveOpen shared.OpenResolver, store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
-	// job's supervise leaf is mounted only here, under exec, since
-	// environmentJobSupervisorArgs always re-execs `exec job supervise`
-	// regardless of which entry point (this one, or the deprecated top-level
-	// `erun job` alias) actually started the job.
+	// supervise mounts only under exec; supervisor re-execs always use `exec job supervise`.
 	jobCmd := newJobCmd(resolveOpen)
 	jobCmd.AddCommand(newJobSuperviseCmd())
 
@@ -99,10 +96,8 @@ func newExecRawCmd(findProjectRoot sharedpkg.ProjectFinderFunc, runRaw core.RawC
 	return cmd
 }
 
-// rawCommandWantsHelp intercepts help for `exec raw` itself: DisableFlagParsing
-// stops cobra from handling --help, so without this `erun exec raw --help` would
-// try to exec a binary named "--help". A literal `--` ends the scan so the
-// wrapped command keeps its own --help.
+// rawCommandWantsHelp handles help for `exec raw` itself, since DisableFlagParsing
+// bypasses cobra's; a literal `--` ends the scan.
 func rawCommandWantsHelp(args []string) bool {
 	for _, arg := range args {
 		if arg == "--" {
@@ -115,10 +110,8 @@ func rawCommandWantsHelp(args []string) bool {
 	return false
 }
 
-// extractDryRunFlag pulls erun's own --dry-run out of the pass-through args:
-// DisableFlagParsing hands the whole arg list through verbatim, so without this
-// --dry-run would reach the wrapped command instead of enabling erun's dry-run.
-// A literal `--` ends the scan so the wrapped command keeps its own --dry-run.
+// extractDryRunFlag takes erun's own --dry-run out of the pass-through args;
+// a literal `--` ends the scan.
 func extractDryRunFlag(args []string) ([]string, bool) {
 	cleaned := make([]string, 0, len(args))
 	dryRun := false
@@ -278,10 +271,7 @@ func runExecPushCommand(ctx core.Context, findProjectRoot sharedpkg.ProjectFinde
 	if err != nil {
 		return err
 	}
-	// The unqueued-branch warning is best-effort and never fails the push: it
-	// is a signal about work that will not land, not a reason to refuse work
-	// that already has. A dry run traces the check it would make without
-	// making it, the same way the push itself is traced.
+	// The unqueued-branch warning is best-effort and never fails the push.
 	if ctx.DryRun {
 		review.WarnPushedBranchWithoutReview(ctx, store, cloudDeps, review.PushedBranchReviewNoticeParams{
 			ProjectRoot: projectRoot,

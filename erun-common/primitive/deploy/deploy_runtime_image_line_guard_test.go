@@ -8,10 +8,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// TestGuardRuntimeImageLineSwitchAllowsExplicitLineChange proves an operator's
-// own --runtime-image/--runtime-chart (or a build --deploy of the working
-// tree's own image) always proceeds: moving release lines on purpose is
-// exactly what those inputs are for, and must never gain new friction.
 func TestGuardRuntimeImageLineSwitchAllowsExplicitLineChange(t *testing.T) {
 	target := config.OpenResult{
 		Tenant: "frs",
@@ -25,9 +21,6 @@ func TestGuardRuntimeImageLineSwitchAllowsExplicitLineChange(t *testing.T) {
 	}
 }
 
-// TestGuardRuntimeImageLineSwitchProceedsWithNoPriorDeploy covers a brand-new
-// environment's first deploy: there is no RuntimeRunningImage yet, so there is
-// nothing to disagree with.
 func TestGuardRuntimeImageLineSwitchProceedsWithNoPriorDeploy(t *testing.T) {
 	target := config.OpenResult{Tenant: "frs", EnvConfig: config.EnvConfig{}}
 	err := guardRuntimeImageLineSwitch(core.Context{}, target, "ghcr.io/sophium/frs-devops:1.0.86", false)
@@ -46,20 +39,17 @@ func TestGuardRuntimeChartLineSwitch(t *testing.T) {
 		wantErrContains []string
 	}{
 		{
-			// The umbrella and the image are the same line: nothing to refuse.
 			name:          "proceeds when the chart is on the environment's own line",
 			runningImage:  "ghcr.io/sophium/frs-devops:1.0.138",
 			resolvedChart: "frs-devops",
 		},
 		{
-			// Moving release lines on purpose is what --runtime-chart is for.
 			name:           "an explicit line change is never refused",
 			runningImage:   "ghcr.io/sophium/frs-devops:1.0.138",
 			resolvedChart:  "erun-devops",
 			explicitChange: true,
 		},
 		{
-			// No prior deploy to disagree with.
 			name:          "proceeds with no prior deploy recorded",
 			resolvedChart: "erun-devops",
 		},
@@ -126,11 +116,6 @@ func TestRuntimeImageReleaseLine(t *testing.T) {
 	}
 }
 
-// The stock chart runs its init containers and dind sidecar on the runtime
-// image's own erun, so a stock image from an earlier release than the chart
-// cannot start under it and must be refused before the rollout tears the
-// running pod down. The same release in any of its tag forms, a newer image, a
-// tenant's own image and an unclassifiable tag all proceed.
 func TestRuntimeImageOlderThanTheStockChartIsRefused(t *testing.T) {
 	err := guardRuntimeImageNotOlderThanChart("ghcr.io/sophium/erun-devops:1.0.296", config.DevopsComponentName, "1.0.307")
 	if err == nil || !strings.Contains(err.Error(), "older than the erun-devops 1.0.307 chart") || !strings.Contains(err.Error(), "--runtime-chart erun-devops:1.0.296") {

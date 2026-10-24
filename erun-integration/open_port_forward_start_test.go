@@ -16,11 +16,8 @@ import (
 )
 
 func testOpenRealRunMigratesARecordFromTheUserConfigDirLayout(t *testing.T) {
-	// An earlier release kept forward records beside os.UserConfigDir,
-	// which on macOS is not the config home once XDG_CONFIG_HOME is set.
-	// The first real open after the upgrade must move that record, its log
-	// and the log's rotated generation into the config tree rather than
-	// leave them stranded where nothing reads them again.
+	// Forward records under os.UserConfigDir (not the config home once
+	// XDG_CONFIG_HOME is set on macOS) must move into the config tree on open.
 	skipIfPortsBusy(t, 26100, 26133)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithPortRange(t, setup, "team", "dev", 26100)
@@ -40,9 +37,7 @@ func testOpenRealRunMigratesARecordFromTheUserConfigDirLayout(t *testing.T) {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "open/real_run_migrates_a_record_from_the_user_config_dir_layout", normalize.Apply(result.Combined))
-	// Filesystem state outside the captured streams: nothing is left at
-	// the legacy layout, and the canonical log still carries what was
-	// written before the upgrade, which a fresh log would not.
+	// The canonical log keeps what was written before the move.
 	legacyLog := strings.TrimSuffix(legacyState, ".json") + ".log"
 	for _, path := range []string{legacyState, legacyLog, legacyLog + ".1"} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -67,17 +62,8 @@ func testOpenRealRunMigratesARecordFromTheUserConfigDirLayout(t *testing.T) {
 
 func testOpenRealRunPortForwardStartRecoversFromATransientFailure(t *testing.T) {
 	t.Parallel()
-	// A real erun open once exited 0 while the mcp port-forward state
-	// file was never written -- a transient OS resource squeeze (fd or
-	// process-table exhaustion under heavy parallel load) failed the
-	// forward's own start (opening its log file / forking kubectl)
-	// silently, since open treats a forwarder failure as best-effort and
-	// degrades rather than failing the whole command. This scenario
-	// forces exactly one synthetic transient failure per forwarder via
-	// the ERUN_PORT_FORWARD_FORCE_TRANSIENT_FAILURES test seam
-	// (port_forward_start_retry.go) -- fewer than the 3-attempt retry
-	// budget -- so both the mcp and sshd forwards must still end up
-	// established.
+	// One forced transient failure per forwarder, below the 3-attempt retry
+	// budget, so every forward must still come up.
 	skipIfPortsBusy(t, 26100, 26122, 26133)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", 26100)
@@ -114,11 +100,7 @@ func testOpenRealRunPortForwardStartRecoversFromATransientFailure(t *testing.T) 
 
 func testOpenRealRunPortForwardStartDegradesAfterPersistentTransientFailures(t *testing.T) {
 	t.Parallel()
-	// The other half of the contract above: a transient failure that
-	// outlasts the retry budget must still leave open exiting 0
-	// (best-effort forwarders never fail the whole command), but must
-	// name the degraded forward in its own trace rather than staying
-	// silent about the state file it never wrote.
+	// Past the retry budget open still exits 0 but names the degraded forward.
 	skipIfPortsBusy(t, 26100, 26122, 26133)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", 26100)
@@ -155,27 +137,11 @@ func testOpenRealRunPortForwardStartDegradesAfterPersistentTransientFailures(t *
 	}
 }
 
-// Not parallel: these two bind the fixture's fixed 26100 range for real,
-// and a sibling scenario serving those ports would make an unreachable
-// forward look reachable (canReachLocalMCPEndpoint answers off whatever
-// holds the port). A sequential subtest never overlaps a paused parallel
-// one, so it is isolated from the parallel real-run scenarios above.
+// Not parallel: binds the fixed 26100 range, and another scenario serving
+// those ports would make an unreachable forward look reachable.
 func testOpenRealRunPortForwardStartSurvivesADyingListenersSocket(t *testing.T) {
-	// The reported failure, end to end and for real: a reattach starts its
-	// replacement kubectl moments after stopping the predecessor, and the
-	// predecessor's listening socket outlives the process that held it, so
-	// the replacement's bind is refused and kubectl exits. Measured at
-	// roughly 58% of reattachments, each one costing a whole retry window
-	// during which the environment is unreachable.
-	//
-	// The race cannot be staged on demand — it is a kernel socket teardown
-	// completing a few milliseconds after a kill — so the kubectl stub is
-	// made to produce exactly its observable shape, deterministically, for
-	// the first bind of every local port: kubectl's own two "Unable to
-	// listen" lines on stderr and exit 1, then a real simulator on the next
-	// attempt. All three forwarders are driven through it at once, since
-	// they share this code path, and the assertion is that erun absorbs it:
-	// every forward comes up, and open never reports one unavailable.
+	// A replacement kubectl's bind can be refused while the predecessor's socket
+	// is still closing. The stub reproduces that once per port; erun must absorb it.
 	skipIfPortsBusy(t, 26100, 26122, 26133)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", 26100)
@@ -208,8 +174,7 @@ func testOpenRealRunPortForwardStartSurvivesADyingListenersSocket(t *testing.T) 
 			t.Fatalf("expected %s port-forward state to be written once the bind was retried: %v", kind, err)
 		}
 	}
-	// The MCP simulator is the one the retry brought up: prove the tunnel is
-	// really serving, not merely recorded.
+	// Prove the retried tunnel really serves.
 	conn, err := netDialTimeout("tcp", "127.0.0.1:26100", time.Second)
 	if err != nil {
 		t.Fatalf("MCP port-forward must be listening once the refused bind was retried: %v", err)
@@ -218,15 +183,8 @@ func testOpenRealRunPortForwardStartSurvivesADyingListenersSocket(t *testing.T) 
 }
 
 func testOpenRealRunPortForwardStartReportsAPortThatNeverComesFree(t *testing.T) {
-	// Not parallel: fixed ports, and it asserts the forwards are down.
-	// See the note on the scenario above.
-	// The bound on the retry above, and the diagnosis it replaces: a port
-	// held by something that is not a socket on its way closed must still
-	// fail — after a retry window, not forever — and must say what actually
-	// happened. Before this, a refused bind was indistinguishable from a pod
-	// that never answered: the wait spent its whole startup timeout and
-	// reported "timed out waiting for MCP port-forward", which sends the
-	// operator looking for a pod problem they do not have.
+	// Not parallel: fixed ports. A port held by a non-socket must fail after a
+	// retry window and say the bind was refused, not report a startup timeout.
 	skipIfPortsBusy(t, 26100, 26122, 26133)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", 26100)
@@ -247,8 +205,7 @@ func testOpenRealRunPortForwardStartReportsAPortThatNeverComesFree(t *testing.T)
 		SSHPort:                26122,
 		ListenConflictAttempts: 1000,
 	})...)
-	// --no-shell because the forwards are the whole request: a run whose
-	// forwards never came up must fail rather than read as success.
+	// --no-shell: failed forwards must fail the run.
 	result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt", "--no-shell"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode == 0 {
 		t.Fatalf("expected a non-zero exit when every bind is refused, got 0:\n%s", result.Combined)
@@ -261,9 +218,7 @@ func testOpenRealRunPortForwardStartReportsAPortThatNeverComesFree(t *testing.T)
 	if strings.Contains(result.Combined, "timed out waiting for") {
 		t.Fatalf("a refused bind must not be reported as a startup timeout, got:\n%s", result.Combined)
 	}
-	// Nothing came up: the state file records the attempt that was made
-	// (the launch itself succeeded), so liveness — not the record — is what
-	// says the forward is down.
+	// The state file records the attempt, so liveness says the forward is down.
 	for _, port := range []int{26100, 26122, 26133} {
 		conn, err := netDialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 250*time.Millisecond)
 		if err == nil {

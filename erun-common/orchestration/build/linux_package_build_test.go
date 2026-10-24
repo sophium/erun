@@ -35,8 +35,6 @@ const (
 		"RUN dpkg-deb --build /pkg /erun.deb\n"
 )
 
-// linuxPackageProject lays out a <tenant>-devops tree with one image under
-// docker/ and two packages under linux/: one with tests, one without.
 func linuxPackageProject(t *testing.T) (projectRoot, uiDir, cliDir string) {
 	t.Helper()
 	projectRoot = t.TempDir()
@@ -49,7 +47,6 @@ func linuxPackageProject(t *testing.T) (projectRoot, uiDir, cliDir string) {
 	writeTestDockerfile(t, uiDir, testedLinuxPackageDockerfile)
 	cliDir = filepath.Join(projectRoot, "team-devops", "linux", "erun-cli")
 	writeTestDockerfile(t, cliDir, untestedLinuxPackageDockerfile)
-	// A leftover script-based package directory is not a package.
 	if err := os.MkdirAll(filepath.Join(projectRoot, "team-devops", "linux", "legacy"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -67,8 +64,6 @@ func linuxPackageNames(packages []shared.LinuxPackageSpec) []string {
 	return names
 }
 
-// A package directory holds a Dockerfile, but it is never an image: a build
-// from it resolves no docker build, and a push from it is refused by name.
 func TestLinuxPackageDockerfileIsNeverAnImage(t *testing.T) {
 	projectRoot, uiDir, _ := linuxPackageProject(t)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, uiDir)
@@ -89,8 +84,6 @@ func TestLinuxPackageDockerfileIsNeverAnImage(t *testing.T) {
 	}
 }
 
-// From the project root a plain build tests the packages beside the images,
-// each with the project root as its context.
 func TestPlainBuildResolvesLinuxPackagesBesideImages(t *testing.T) {
 	projectRoot, _, _ := linuxPackageProject(t)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, projectRoot)

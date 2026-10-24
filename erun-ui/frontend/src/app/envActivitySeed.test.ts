@@ -11,10 +11,6 @@ function tenant(name: string, environments: UITenant['environments']): UITenant 
   return { name, environments };
 }
 
-// The env-activity Wails event only fires on a transition, so a boot with no
-// prior transition to replay (a page reload via ErrorBoundary's "Reload app",
-// not a process restart) must seed a still-busy env's row from the poller's
-// last observation carried on uiEnvironment, with no event required.
 test('an env with a busy observation seeds its activity from the snapshot alone', () => {
   const seed = planEnvActivitySeed([
     tenant('acme', [

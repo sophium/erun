@@ -11,37 +11,16 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// errOrchestratorNudgeHistoryUnreadable is returned by the write helpers when
-// the existing file cannot be parsed, so a caller can log the refusal to
-// write rather than treat it as a silent no-op.
+// errOrchestratorNudgeHistoryUnreadable is returned when the existing file cannot be parsed.
 var errOrchestratorNudgeHistoryUnreadable = errors.New("orchestrator nudge history file is unreadable")
 
-// The cumulative pacing history (orchestrator.go's pacingAutoNudgeCount /
-// pacingWhipCount / pacingLastCappedAtUnix and their timestamps) must survive a
-// desktop restart, because the orchestrator's terminal session -- and the pacer
-// nudging it -- carries on regardless; otherwise the hover card reads "Not
-// nudged" for a session that has been nudged continuously. This file is the
-// durable half: written on every nudge and read back whenever a session for
-// that orchestrator id is (re)spawned.
-//
-// It is keyed by orchestrator id and kept as one file, the same shape as
-// orchestrator-open.json (orchestrator_open_state.go), for the same reason:
-// one small read/write per poll rather than one file per orchestrator.
-//
-// An orchestrator id is a name-derived slug (uniqueOrchestratorID), not a
-// uuid, so deleting an orchestrator and later creating a new one with the
-// same name reuses it. DeleteOrchestrator clears this record when it removes
-// the definition, so a reused id starts "never nudged" again rather than
-// inheriting a stranger's history. Stopping and restarting the same
-// orchestrator is not a delete: its record is left alone and restored on the
-// next spawn, which is the "reattach" case the persistence exists for.
+// Cumulative pacing history survives a desktop restart because the session and
+// its pacer carry on regardless. Ids are name-derived and reused, so
+// DeleteOrchestrator clears the record; stop/start keeps it.
 
 const orchestratorNudgeHistoryFileName = "orchestrator-nudge-history.json"
 
-// orchestratorNudgeHistoryEntry is one orchestrator's cumulative pacing
-// record. It carries only the fields that never reset on rearm — the live
-// cap gauge (pacingNudgeCount/pacingCapped/pacingLastNudgeAtUnix) is not
-// here, because it is meaningless once nothing is running.
+// orchestratorNudgeHistoryEntry holds only the fields that never reset on rearm.
 type orchestratorNudgeHistoryEntry struct {
 	OrchestratorID      string `json:"orchestratorId"`
 	AutoNudgeCount      int    `json:"autoNudgeCount,omitempty"`
@@ -55,8 +34,6 @@ type orchestratorNudgeHistoryState struct {
 	Orchestrators []orchestratorNudgeHistoryEntry `json:"orchestrators,omitempty"`
 }
 
-// defaultOrchestratorNudgeHistoryPath is a sibling of orchestrator-open.json
-// under UserConfigDir()/ERun.
 func defaultOrchestratorNudgeHistoryPath() string {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
@@ -65,11 +42,8 @@ func defaultOrchestratorNudgeHistoryPath() string {
 	return filepath.Join(configDir, "ERun", orchestratorNudgeHistoryFileName)
 }
 
-// readOrchestratorNudgeHistoryEntries returns every persisted entry, oldest
-// first. unreadable is true only when the file exists but its content could
-// not be parsed -- a missing file is a real, ordinary absence (nothing has
-// ever been nudged, or nothing has ever been persisted yet) and reports no
-// entries with unreadable=false, never the reverse.
+// readOrchestratorNudgeHistoryEntries returns entries oldest first; unreadable
+// is true only when the file exists but cannot be parsed.
 func readOrchestratorNudgeHistoryEntries(path string) (entries []orchestratorNudgeHistoryEntry, unreadable bool) {
 	if path == "" {
 		return nil, false
@@ -86,10 +60,7 @@ func readOrchestratorNudgeHistoryEntries(path string) (entries []orchestratorNud
 	return state.Orchestrators, false
 }
 
-// orchestratorNudgeHistoryFor looks up one orchestrator's persisted record,
-// reading the file itself. Prefer orchestratorNudgeHistoryEntryIn when the
-// caller already has the entries in hand (e.g. ListOrchestrators, which reads
-// the file once for every orchestrator it lists rather than once per one).
+// orchestratorNudgeHistoryFor reads the file and looks up one record.
 func orchestratorNudgeHistoryFor(path, orchestratorID string) (entry orchestratorNudgeHistoryEntry, found, unreadable bool) {
 	entries, unreadable := readOrchestratorNudgeHistoryEntries(path)
 	if unreadable {
@@ -99,11 +70,7 @@ func orchestratorNudgeHistoryFor(path, orchestratorID string) (entry orchestrato
 	return entry, found, false
 }
 
-// orchestratorNudgeHistoryEntryIn looks up one orchestrator's record within
-// an already-read entry set. found is false when there is no entry for id --
-// a clean "never nudged, as far as we know" -- which the caller distinguishes
-// from "unreadable" using the flag readOrchestratorNudgeHistoryEntries
-// returned alongside these entries.
+// orchestratorNudgeHistoryEntryIn looks up one record in already-read entries.
 func orchestratorNudgeHistoryEntryIn(entries []orchestratorNudgeHistoryEntry, orchestratorID string) (entry orchestratorNudgeHistoryEntry, found bool) {
 	orchestratorID = strings.TrimSpace(orchestratorID)
 	if orchestratorID == "" {
@@ -117,13 +84,8 @@ func orchestratorNudgeHistoryEntryIn(entries []orchestratorNudgeHistoryEntry, or
 	return orchestratorNudgeHistoryEntry{}, false
 }
 
-// restoreOrchestratorNudgeHistory seeds a freshly constructed session's
-// cumulative pacing fields from the persisted record for its id, called from
-// spawnOrchestratorSession on every (re)spawn -- the "reattach" this issue's
-// persistence exists for. A transient (Investigate) session is skipped, the
-// same as orchestratorNudgeHistoryEntryFromSession's write side: it has no
-// persisted definition to reattach to. An unreadable file marks the session
-// rather than silently leaving it at a confident zero.
+// restoreOrchestratorNudgeHistory seeds a (re)spawned session from its persisted
+// record; transient sessions are skipped and an unreadable file marks the session.
 func (a *App) restoreOrchestratorNudgeHistory(session *orchestratorSession) {
 	if session.transient {
 		return
@@ -143,11 +105,8 @@ func (a *App) restoreOrchestratorNudgeHistory(session *orchestratorSession) {
 	session.pacingLastCappedAtUnix = history.LastCappedAtUnix
 }
 
-// orchestratorNudgeHistoryEntryFromSession builds the persisted-history entry
-// for a session's current cumulative pacing counters. persist is false for a
-// transient (Investigate) session: it has no persisted definition and its id
-// is minted fresh per investigation, so it has nothing to reattach a record
-// to and would only leave a one-off entry behind forever.
+// orchestratorNudgeHistoryEntryFromSession builds the entry to persist; persist
+// is false for a transient session, whose id is never reused.
 func orchestratorNudgeHistoryEntryFromSession(session *orchestratorSession) (entry orchestratorNudgeHistoryEntry, persist bool) {
 	if session.transient {
 		return orchestratorNudgeHistoryEntry{}, false
@@ -162,11 +121,7 @@ func orchestratorNudgeHistoryEntryFromSession(session *orchestratorSession) (ent
 	}, true
 }
 
-// persistOrchestratorNudgeHistory writes an entry built by
-// orchestratorNudgeHistoryEntryFromSession, logging rather than failing the
-// caller: a nudge that could not be persisted still landed in the pane and
-// still counted against the live cap, so the operator-visible half of the
-// nudge must not be undone by a write failure in the durable half.
+// persistOrchestratorNudgeHistory logs rather than fails: the nudge already landed.
 func (a *App) persistOrchestratorNudgeHistory(entry orchestratorNudgeHistoryEntry, persist bool) {
 	if !persist {
 		return
@@ -176,15 +131,8 @@ func (a *App) persistOrchestratorNudgeHistory(entry orchestratorNudgeHistoryEntr
 	}
 }
 
-// writeOrchestratorNudgeHistoryEntry upserts one orchestrator's record and
-// persists the full set atomically (config.WriteFileAtomic: temp file +
-// rename) so a crash mid-write never leaves this file
-// half-written for every OTHER orchestrator's history along with this one's.
-//
-// If the existing file is unreadable, this refuses to write rather than
-// silently replacing every other orchestrator's history with a set
-// containing only this one entry: better to miss one update (the live
-// session keeps counting in memory regardless) than to destroy the rest.
+// writeOrchestratorNudgeHistoryEntry upserts atomically and refuses to write over
+// an unreadable file rather than destroy every other orchestrator's history.
 func writeOrchestratorNudgeHistoryEntry(path string, entry orchestratorNudgeHistoryEntry) error {
 	entry.OrchestratorID = strings.TrimSpace(entry.OrchestratorID)
 	if path == "" || entry.OrchestratorID == "" {
@@ -205,10 +153,7 @@ func writeOrchestratorNudgeHistoryEntry(path string, entry orchestratorNudgeHist
 	return writeOrchestratorNudgeHistoryEntries(path, out)
 }
 
-// clearOrchestratorNudgeHistoryEntry removes one orchestrator's record, used
-// when its definition is deleted so a later orchestrator that reuses the same
-// name-derived id starts "never nudged" rather than inheriting history that
-// belonged to a different, deleted orchestrator.
+// clearOrchestratorNudgeHistoryEntry removes one record so a reused id starts fresh.
 func clearOrchestratorNudgeHistoryEntry(path, orchestratorID string) error {
 	orchestratorID = strings.TrimSpace(orchestratorID)
 	if path == "" || orchestratorID == "" {

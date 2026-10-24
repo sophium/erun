@@ -1,7 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
 
-// CreateReviewDialog is the "Open a review" dialog: pushing the
-// selected environment's branch, then creating the review itself.
 export class CreateReviewDialog {
   constructor(public readonly page: Page) {}
 
@@ -15,9 +13,7 @@ export class CreateReviewDialog {
       .waitFor({ state: 'visible' });
   }
 
-  // Scoped to this dialog's own heading, not "no role=dialog at all": a
-  // successful create opens the review detail dialog right behind this one
-  // closing, and that is a *different* role="dialog" element still visible.
+  // Scoped to this heading: a successful create opens the review detail dialog behind it.
   async waitForClosed(): Promise<void> {
     await this.page.getByRole('heading', { name: 'Open a review' }).waitFor({ state: 'hidden' });
   }
@@ -30,8 +26,7 @@ export class CreateReviewDialog {
     return this.locator().getByLabel('Review name');
   }
 
-  // By role, not by label: the field's chevron is labelled "Show target branch
-  // choices", which getByLabel('Target branch') also matches.
+  // By role: the chevron label also matches getByLabel('Target branch').
   targetBranchInput(): Locator {
     return this.locator().getByRole('combobox', { name: /^Target branch/ });
   }
@@ -60,8 +55,6 @@ export class CreateReviewDialog {
     return this.locator().getByRole('button', { name: 'Create review' });
   }
 
-  // The hint that replaces a dead Create button: it names what the review
-  // still needs instead of leaving the operator to guess.
   requirementHint(): Locator {
     return this.locator().getByText('Add a name to open the review.');
   }

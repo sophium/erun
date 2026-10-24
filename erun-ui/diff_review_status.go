@@ -9,21 +9,10 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// diff_review_status.go resolves the diff panel's review-status chip: where
-// a source/target branch pair sits on the review ladder, reusing the exact
-// platform reads the Reviews tab and merge queue already make
-// (loadTenantDashboardReviews, loadTenantDashboardReviewThreadCounts,
-// loadReviewDetailQueuePosition) rather than a parallel query path. Before
-// this, StartReviewFromDiffAction rendered one fixed "Start a review" button
-// unconditionally and discovered an existing review only from the 409
-// submitCreateReview's catch block reports, after the operator had already
-// committed and pushed.
+// Resolves the diff panel's review-status chip from the same platform reads the Reviews tab uses.
 
-// Chip states this side ever returns. The frontend adds one more of its own,
-// "checking" (set locally while this call is in flight) -- "unavailable" is
-// the honest not-yet-known answer from this side, distinct from "none",
-// which is a confirmed one (no live review for this pair), so the chip never
-// renders an absence as a fact it has not actually established.
+// Chip states returned here; the frontend adds "checking". "unavailable" means not
+// yet known, unlike "none", which is confirmed.
 const (
 	diffReviewStateUnavailable = "unavailable"
 	diffReviewStateNone        = "none"
@@ -42,18 +31,13 @@ type uiDiffReviewStatusInput struct {
 	TargetBranch string `json:"targetBranch"`
 }
 
-// uiDiffReviewStatus is the chip's own read model. CanAdvanceMergeQueue lets
-// the diff panel's "Advance queue" action degrade by permission the same way
-// the Reviews tab's does, instead of rendering an enabled control that fails
-// with a 403 after the click.
+// uiDiffReviewStatus is the chip's read model; CanAdvanceMergeQueue avoids a control that would 403.
 type uiDiffReviewStatus struct {
 	State         string `json:"state"`
 	PlatformState string `json:"platformState,omitempty"`
 	ReviewID      string `json:"reviewId,omitempty"`
 	Name          string `json:"name,omitempty"`
-	// Repository is the review's own repository identity, carried to the
-	// panel's "Advance queue" action so it advances that review's queue rather
-	// than whichever repository's queue happens to share its target branch.
+	// Repository targets this review's own queue, not another repo sharing the target branch.
 	Repository           string `json:"repository,omitempty"`
 	QueuePosition        int    `json:"queuePosition,omitempty"`
 	UnresolvedThreads    *int   `json:"unresolvedThreads,omitempty"`
@@ -62,11 +46,8 @@ type uiDiffReviewStatus struct {
 	CanAdvanceMergeQueue bool   `json:"canAdvanceMergeQueue"`
 }
 
-// DiffReviewStatus resolves the chip for one source/target branch pair. A
-// missing precondition (no tenant, no resolvable branch) reports "unavailable"
-// rather than erroring: this is a background enrichment read the diff panel
-// makes for every environment section, not a caller-driven action, so a
-// precondition gap is a state to render, not a failure to surface as one.
+// DiffReviewStatus resolves the chip for a branch pair. Missing preconditions report
+// "unavailable" rather than an error: this is a background enrichment read.
 func (a *App) DiffReviewStatus(input uiDiffReviewStatusInput) (uiDiffReviewStatus, error) {
 	tenant := strings.TrimSpace(input.Tenant)
 	sourceBranch := strings.TrimSpace(input.SourceBranch)
@@ -113,19 +94,14 @@ func (a *App) DiffReviewStatus(input uiDiffReviewStatusInput) (uiDiffReviewStatu
 	return status, nil
 }
 
-// diffReviewPlatform is the ready-to-use client and capabilities
-// resolveDiffReviewPlatform resolved, once past every state where the chip
-// has nothing further to read.
 type diffReviewPlatform struct {
 	client       *platformclient.PlatformClient
 	capabilities model.PlatformCapabilities
 	canAdvance   bool
 }
 
-// resolveDiffReviewPlatform resolves the platform client and the caller's
-// capabilities, or an early status to return as-is: the platform not being
-// ready, or the caller lacking read access to reviews at all -- "a read the
-// caller may not make is not attempted" (erun-ui/AGENTS.md, Professional UX).
+// resolveDiffReviewPlatform returns the client and capabilities, or an early status when
+// the platform is not ready or reviews are not readable (erun-ui/AGENTS.md, Professional UX).
 func (a *App) resolveDiffReviewPlatform(ctx context.Context, tenant string) (diffReviewPlatform, *uiDiffReviewStatus, error) {
 	resolution, err := a.resolveTenantPlatform(tenant, "")
 	if err != nil {
@@ -149,7 +125,6 @@ func (a *App) resolveDiffReviewPlatform(ctx context.Context, tenant string) (dif
 	return diffReviewPlatform{client: resolution.client, capabilities: whoami.Capabilities, canAdvance: canAdvance}, nil, nil
 }
 
-// applyDiffReviewLadderState fills in the state a review actually occupies.
 func applyDiffReviewLadderState(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review platformclient.PlatformReview, status *uiDiffReviewStatus) {
 	switch strings.ToUpper(strings.TrimSpace(review.Status)) {
 	case "OPEN":
@@ -169,10 +144,8 @@ func applyDiffReviewLadderState(ctx context.Context, client *platformclient.Plat
 	}
 }
 
-// applyDiffReviewReadyState resolves what a READY review actually is from the
-// chip's vantage: Blocked when its comment threads are unresolved (mirrors
-// AdvanceMergeQueueAction's own gate -- merge-queue/advance refuses the same
-// review for the same reason), Ready with its queue position otherwise.
+// applyDiffReviewReadyState marks a READY review Blocked when threads are unresolved,
+// matching merge-queue/advance's gate; otherwise Ready with its queue position.
 func applyDiffReviewReadyState(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review platformclient.PlatformReview, status *uiDiffReviewStatus) {
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadComments) == "" {
 		if comments, err := client.ListComments(ctx, review.ReviewID); err == nil {
@@ -186,9 +159,6 @@ func applyDiffReviewReadyState(ctx context.Context, client *platformclient.Platf
 	}
 	status.State = diffReviewStateReady
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadMergeQueue) == "" {
-		// The review's own repository's queue: a review's queue position is
-		// meaningless against another repository's queue that happens to share
-		// the target branch.
 		if queue, err := client.ListMergeQueue(ctx, platformclient.PlatformMergeQueueParams{
 			Repository: review.Repository, TargetBranch: review.TargetBranch,
 		}); err == nil {
@@ -197,10 +167,7 @@ func applyDiffReviewReadyState(ctx context.Context, client *platformclient.Platf
 	}
 }
 
-// mostRecentPlatformReview picks the pair's own current review: ListReviews
-// can return more than one across the pair's history (a prior review closed
-// or merged, then reopened), and the most recently updated one is the one the
-// chip should describe.
+// mostRecentPlatformReview picks the most recently updated of the pair's reviews.
 func mostRecentPlatformReview(reviews []platformclient.PlatformReview) (platformclient.PlatformReview, bool) {
 	var best platformclient.PlatformReview
 	found := false

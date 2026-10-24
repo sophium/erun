@@ -10,40 +10,19 @@ import {
 } from './fixtures/artifacts.js';
 import { backendEnv, e2eK3dEnabled, isolatedRoot } from './fixtures/seedRoot.js';
 
-// ERUN_PLAYWRIGHT_PORT overrides the preferred port for this config and the
-// worker fixture alike; the default stays clear of wails dev's 34115. It is the port
-// the one shared e2e-k3d backend is asked for; each worker in the default mode
-// prefers BASE_PORT + its own parallelIndex (see fixtures/workerBackend.ts)
-// instead of every spec sharing this one port, and serves whatever address its
-// own backend announced rather than the one it asked for.
+// Default stays clear of wails dev's 34115; workers prefer BASE_PORT + parallelIndex.
 const HEADLESS_PORT = Number(process.env.ERUN_PLAYWRIGHT_PORT) || 34123;
 
 const E2E_K3D = e2eK3dEnabled();
 
-// Refuse an unusable artifact directory here, before any worker starts, so the
-// run reports the directory rather than failing inside a spec two minutes in
-// (fixtures/artifacts.ts owns the check and the message).
+// Fail fast on an unusable artifact directory before any worker starts.
 assertArtifactDirectoriesUsable();
 
-// Resolve (and, unless ERUN_PLAYWRIGHT_HOME names one, create) the isolated
-// root at config-load time, before workers fork, so every process in the run agrees on the same
-// starting point. In the default parallel mode this is the PARENT directory
-// each worker mints its own subdirectory under (fixtures/workerBackend.ts —
-// one headless backend per worker, replacing the old shared singleton). In
-// the opt-in e2e-k3d mode (workers: 1, one real cluster for the whole run) it
-// stays the flat single root the one shared backend below boots against.
+// Resolved before workers fork so every process agrees on the root.
 isolatedRoot();
 
-// Each worker in the default mode is a full desktop backend plus a headless
-// Chromium instance, so the ceiling is memory, not cores. Measured ~550MiB of
-// growth per worker on the reference agent pod; WORKER_BUDGET_MIB leaves room
-// for Chromium alongside each backend.
-//
-// Derived rather than fixed: a constant tuned to one pod silently oversubscribes
-// a smaller one. os.availableParallelism() honours the cgroup CPU quota (unlike
-// os.cpus().length, which reports the host's cores), and the memory ceiling is
-// read from the cgroup when present so a container limit is respected rather
-// than the node's total RAM.
+// Memory-bound: each worker is a backend plus Chromium (~550MiB measured per backend).
+// Limits come from the cgroup so container quotas are respected.
 const WORKER_BUDGET_MIB = 900;
 
 function cgroupMemoryLimitMib(): number | null {
@@ -56,7 +35,7 @@ function cgroupMemoryLimitMib(): number | null {
         return Math.floor(bytes / (1024 * 1024));
       }
     } catch {
-      // Not a cgroup v2/v1 host (macOS, Windows); fall through to os.totalmem.
+      // Not a cgroup host; fall through to os.totalmem.
     }
   }
   return null;
@@ -67,11 +46,7 @@ function defaultWorkers(): number {
   if (Number.isInteger(override) && override > 0) {
     return override;
   }
-  // Two cores per worker, not one: a worker is a Go backend *and* a headless
-  // Chromium, and they compete. Measured on a 4-core environment, 3 workers
-  // (cores - 1) failed two specs on timeouts while 2 workers passed clean; the
-  // 12-core environment runs 6 without a contention failure. Both land on
-  // cores/2, so that is the rule rather than a number picked per machine.
+  // A worker is a Go backend and a Chromium competing for CPU; cores/2 measured stable.
   const byCpu = Math.max(1, Math.floor(os.availableParallelism() / 2));
   const limitMib = cgroupMemoryLimitMib() ?? Math.floor(os.totalmem() / (1024 * 1024));
   const byMemory = Math.max(1, Math.floor((limitMib * 0.6) / WORKER_BUDGET_MIB));
@@ -81,61 +56,35 @@ function defaultWorkers(): number {
 const DEFAULT_WORKERS = defaultWorkers();
 
 export default defineConfig({
-  // The k3d e2e specs need a real cluster and the un-stubbed backend, so they
-  // must never run in the default inert mode, and the inert specs assume stubs,
-  // so they must never run against the real-tool backend. Choosing the
-  // directory here (not per-spec test.skip) keeps each mode from ever
-  // collecting the other's specs.
+  // Each mode must never collect the other's specs.
   testDir: E2E_K3D ? './tests/e2e' : './tests',
   testIgnore: E2E_K3D ? [] : ['**/tests/e2e/**'],
   globalSetup: './global-setup',
   globalTeardown: './global-teardown',
-  // The e2e-k3d mode drives one real cluster and one shared backend, so it
-  // stays serial exactly as before parallelism existed for the default mode.
   fullyParallel: !E2E_K3D,
   workers: E2E_K3D ? 1 : DEFAULT_WORKERS,
   forbidOnly: !!process.env.CI,
-  // No retries: a spec that only passes on a retry is flaky, and flakiness is a
-  // determinism defect to fix, never to mask (see AGENTS.md "No flaky tests").
+  // No retries: flakiness is a defect to fix (AGENTS.md "No flaky tests").
   retries: 0,
-  // Both of the reporter's destinations resolve through the artifact root, the
-  // same one the specs' own captures use (fixtures/artifacts.ts): a run that
-  // redirects its artifacts through ERUN_PLAYWRIGHT_ARTIFACTS_DIR must not
-  // leave the HTML report behind in the tree it was told to stay out of.
+  // Honour ERUN_PLAYWRIGHT_ARTIFACTS_DIR for the reports too.
   outputDir: artifactPath(TEST_RESULTS_DIRNAME),
-  // The third reporter is a legibility surface, not a results one: a browser
-  // that dies at launch is reported by Playwright as a cause-free generic,
-  // charged to whichever spec happened to ask for the worker's browser first,
-  // with the diagnosis (the browser's own stderr and its process-exit line)
-  // buried several lines down the error. reporters/browserLaunchFailure.ts
-  // re-states that death as its own block, led by the cause, so it is not
-  // quoted away by its first line — see that file's own header.
+  // Surfaces a browser launch death with its cause, which Playwright otherwise buries.
   reporter: [
     ['list'],
     ['./reporters/browserLaunchFailure.ts'],
     ['html', { open: 'never', outputFolder: artifactPath(PLAYWRIGHT_REPORT_DIRNAME) }],
   ],
-  // Windows runs the heavier full Chromium build (see the chromium project) and
-  // its ConPTY-backed sessions are slower than a unix pty, so under the full
-  // suite's shared-backend load a borderline spec can exceed the POSIX-tuned
-  // budgets. Give the auto-retrying assertions more room on Windows to absorb
-  // the loaded machine (AGENTS.md: raise the wait, never lower it, and never add
-  // retries) — the POSIX budgets are unchanged.
+  // Windows runs full Chromium and ConPTY, which are slower; raise waits, never add retries.
   timeout: process.platform === 'win32' ? 90_000 : 30_000,
   expect: {
     timeout: process.platform === 'win32' ? 20_000 : 10_000,
   },
   use: {
-    // baseURL is not set here: fixtures/workerBackend.ts overrides the
-    // baseURL fixture per worker (each worker's own port in the default
-    // mode; the one shared HEADLESS_PORT below in e2e-k3d mode).
+    // baseURL is set per worker by fixtures/workerBackend.ts.
     headless: true,
-    // The env-init and manage dialogs render all sections inline and can
-    // be taller than a normal 900px viewport. Bump the height so footer
-    // buttons stay reachable without artificial scrolling.
+    // Tall enough for the inline dialogs' footer buttons.
     viewport: { width: 1440, height: 1200 },
-    // Retries are off, so capture the trace on every failure (not just on a
-    // retry that never happens) to keep failures debuggable via `yarn report`.
+    // Retries are off, so retain traces on every failure.
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
@@ -144,32 +93,20 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        // devices['Desktop Chrome'] resets the viewport, so re-apply the tall
-        // one (see top-level use.viewport) to keep dialog footer buttons reachable.
+        // devices['Desktop Chrome'] resets the viewport.
         viewport: { width: 1440, height: 1200 },
-        // On Windows, run the full Chromium build instead of the default minimal
-        // chrome-headless-shell: an endpoint-security agent intermittently
-        // access-violation-crashes the headless-shell process mid-suite
-        // (exitCode 0xC0000005), which the full build does not trigger. Left as
-        // the default (headless shell) elsewhere.
+        // Endpoint security intermittently crashes chrome-headless-shell on Windows (0xC0000005).
         ...(process.platform === 'win32' ? { channel: 'chromium' } : {}),
       },
     },
   ],
-  // The default mode has no webServer block at all: fixtures/workerBackend.ts
-  // spawns one headless backend per worker instead of one shared singleton.
-  // Only the opt-in e2e-k3d mode (workers: 1, one real cluster + one shared
-  // backend for the whole run) still declares one here.
+  // The default mode spawns a backend per worker instead (fixtures/workerBackend.ts).
   webServer: E2E_K3D
     ? {
-        // Windows produces bin/erun-app.exe; POSIX produces an extensionless
-        // bin/erun-app. cwd is erun-ui (one level up from this playwright dir).
         command: `${process.platform === 'win32' ? '.\\bin\\erun-app.exe' : './bin/erun-app'} --headless --port ${HEADLESS_PORT}`,
         url: `http://127.0.0.1:${HEADLESS_PORT}/`,
         cwd: '..',
-        // The backend must boot against this run's isolated root. A leftover
-        // dev server on the same port would be pointed at a stale (or worse,
-        // the developer's real) config root, so never reuse one.
+        // Never reuse a server that may point at a stale or real config root.
         reuseExistingServer: false,
         timeout: 30_000,
         stdout: 'pipe',

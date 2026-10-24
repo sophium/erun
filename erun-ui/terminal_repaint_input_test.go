@@ -5,13 +5,8 @@ import (
 	"time"
 )
 
-// The AI repaint nudge shrinks the backend pty by a row and holds it. That is
-// invisible when the pane is the blank reattached screen the nudge exists to
-// redraw, and destructive when someone is typing into it: the TUI reflows the
-// line being edited, and the submitted prompt holds several concatenated
-// snapshots of it. These tests pin that a pane receiving
-// input is left alone, and -- the control -- that a quiet pane still gets its
-// repaint, so the guard cannot pass by disabling the feature.
+// The repaint nudge must leave a pane being typed into alone, yet still
+// repaint a quiet one.
 
 func shortenRepaintTimings(t *testing.T) {
 	t.Helper()
@@ -68,9 +63,6 @@ func waitForResizes(t *testing.T, session *stubTerminalSession, n int, within ti
 	return false
 }
 
-// TestRepaintSessionSkipsPaneBeingTypedInto covers the tab switch:
-// RepaintSession fires on EVERY switch into an AI pane, so switch-then-type
-// is the reachable sequence and it must not resize the pty underneath it.
 func TestRepaintSessionSkipsPaneBeingTypedInto(t *testing.T) {
 	shortenRepaintTimings(t)
 	app := NewApp(erunUIDeps{})
@@ -83,16 +75,12 @@ func TestRepaintSessionSkipsPaneBeingTypedInto(t *testing.T) {
 		t.Fatalf("RepaintSession failed: %v", err)
 	}
 
-	// Give an errant nudge every chance to land before declaring it absent.
 	if waitForResizes(t, session, 1, 300*time.Millisecond) {
 		got, _ := session.lastResize()
 		t.Fatalf("a pane being typed into must not be resized, got resize %v", got)
 	}
 }
 
-// TestRepaintSessionNudgesQuietPane is the control: with no recent input the
-// repaint must still happen, shrinking by one row and restoring. Without this,
-// the guard above could pass by never nudging at all.
 func TestRepaintSessionNudgesQuietPane(t *testing.T) {
 	shortenRepaintTimings(t)
 	app := NewApp(erunUIDeps{})
@@ -125,10 +113,8 @@ func newOrchestratorTerminalForRepaint(app *App, serial int) (*managedTerminal, 
 	return managed, session
 }
 
-// TestRepaintSessionNudgesOrchestratorPane: an orchestrator pane runs the same
-// main-screen TUI (claude) an AI tab does, but isAITabKind only recognizes
-// sessionKindAI/sessionKindContributeAI, so RepaintSession must gate on
-// needsWINCHRepaint for the WINCH nudge to reach it.
+// isAITabKind excludes orchestrators, so RepaintSession must gate on
+// needsWINCHRepaint.
 func TestRepaintSessionNudgesOrchestratorPane(t *testing.T) {
 	shortenRepaintTimings(t)
 	app := NewApp(erunUIDeps{})
@@ -145,10 +131,7 @@ func TestRepaintSessionNudgesOrchestratorPane(t *testing.T) {
 	}
 }
 
-// TestMaybeNudgeAIRepaintSkipsPaneBeingTypedInto covers the attach-marker half.
-// It also pins that the skip does NOT consume repaintNudged: this attach has
-// not been repainted, so a later chunk must still be able to do it once the
-// user stops typing.
+// Skipping must not consume repaintNudged.
 func TestMaybeNudgeAIRepaintSkipsPaneBeingTypedInto(t *testing.T) {
 	shortenRepaintTimings(t)
 	app := NewApp(erunUIDeps{})
@@ -170,10 +153,7 @@ func TestMaybeNudgeAIRepaintSkipsPaneBeingTypedInto(t *testing.T) {
 	}
 }
 
-// TestNudgeAIRepaintRestoresEarlyWhenInputArrives pins the third window: input
-// that lands AFTER the shrink is already applied. The pty must not be held a
-// row short for the rest of the settle -- it has to be restored promptly, since
-// every millisecond it is wrong is a millisecond the TUI can reflow a line.
+// Input after the shrink must restore the pty early, not after the settle.
 func TestNudgeAIRepaintRestoresEarlyWhenInputArrives(t *testing.T) {
 	shortenRepaintTimings(t)
 	app := NewApp(erunUIDeps{})
@@ -206,9 +186,6 @@ func TestNudgeAIRepaintRestoresEarlyWhenInputArrives(t *testing.T) {
 	if got, _ := session.lastResize(); got != [2]int{120, 40} {
 		t.Fatalf("the pty must always end restored, ended at %v", got)
 	}
-	// The point is not merely that it restores, but that it restores EARLY.
-	// Waiting out the settle is the bug: every millisecond the pty is a row
-	// short is a millisecond the TUI can reflow the line being typed.
 	if elapsed := time.Since(started); elapsed >= aiRepaintNudgeSettle {
 		t.Fatalf("input must cut the hold short, but it ran the full settle (%v >= %v)",
 			elapsed, aiRepaintNudgeSettle)

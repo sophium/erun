@@ -56,10 +56,7 @@ func assertStructuredDiffOutput(t *testing.T, output lifecycle.DiffResult, proje
 	}
 }
 
-// dangerousExecContent carries the constructs a shell would reinterpret —
-// backticks, command substitution, embedded quotes, a trailing newline — so a
-// round trip through write/commit demonstrates the property that justifies
-// bypassing raw for these two operations: nothing here is ever shell-parsed.
+// dangerousExecContent would be reinterpreted by a shell; write/commit must never shell-parse it.
 const dangerousExecContent = "line one\n`echo pwned` $(echo pwned) \"quoted\" 'quoted'\ntrailing\n\n"
 
 func TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot(t *testing.T) {
@@ -75,9 +72,7 @@ func TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot(t *testing.T
 	if output.Write == nil {
 		t.Fatalf("expected Write result, got %+v", output)
 	}
-	// Canonical, for the same reason exec_test.go compares canonical paths: on
-	// macOS t.TempDir() returns the TMPDIR spelling (/var/folders/...) while the
-	// tool reports the real one (/private/var/folders/...).
+	// macOS t.TempDir() is under /var while the tool reports /private/var.
 	wantPath := filepath.Join(projectRoot, "config", "values.yaml")
 	if resolved, evalErr := filepath.EvalSymlinks(wantPath); evalErr == nil {
 		wantPath = resolved
@@ -105,11 +100,7 @@ func TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot(t *testing.T
 	}
 }
 
-// TestWriteToolRefusesWriteThroughInTreeSymlink proves the write tool cannot
-// be pointed outside the repo root through a symlink planted inside it — a
-// lexical containment check alone does not follow symlinks, so this asserts
-// on the actual filesystem outcome, not just the handler's error, since the
-// whole defect is that a lexical check reports success incorrectly.
+// A lexical containment check does not follow symlinks, so assert on the filesystem.
 func TestWriteToolRefusesWriteThroughInTreeSymlink(t *testing.T) {
 	projectRoot := t.TempDir()
 	outside := t.TempDir()
@@ -198,11 +189,7 @@ func mustWriteTestFile(t *testing.T, path, content string) {
 	}
 }
 
-// seedCommitToolScopedPathsRepo prepares the motivating scenario: the caller
-// wrote values.yaml and wants to commit only that, but the tree also carries
-// unrelated.txt from some other writer. Before path scoping existed, the tool
-// had no way to express "only these paths" at all, so `git add -A` would
-// have swept both in.
+// seedCommitToolScopedPathsRepo leaves unrelated.txt dirty beside values.yaml.
 func seedCommitToolScopedPathsRepo(t *testing.T) string {
 	t.Helper()
 	projectRoot := t.TempDir()
@@ -254,11 +241,7 @@ func TestCommitToolScopedPathsCommitsOnlyTheDeclaredFile(t *testing.T) {
 	}
 }
 
-// TestCommitToolRejectsBlankPathEntries proves a Paths list of only blank
-// strings is refused rather than silently degrading to the unscoped
-// "commit everything" behavior — the exact failure path scoping exists to
-// prevent, reintroduced through a caller passing blanks instead of
-// omitting Paths entirely.
+// Blank-only Paths must not degrade to committing everything.
 func TestCommitToolRejectsBlankPathEntries(t *testing.T) {
 	projectRoot := seedCommitToolScopedPathsRepo(t)
 	handler := exectool.CommitTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{

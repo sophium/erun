@@ -6,10 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAppStore } from '../app/store';
 import { AppShell } from './AppShell';
 
-// Mocked so the scope-selector tests below can assert the negative: unlike
-// the tenant switcher, changing scope must never reach the OIDC redirect
-// path. Type-only elsewhere in this module, so mocking the runtime export
-// changes nothing for the tests that don't touch it.
+// Mocked so scope-selector tests can assert scope changes never reach the OIDC redirect.
 vi.mock('../auth/auth', () => ({
   beginLogin: vi.fn(),
 }));
@@ -22,11 +19,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
-// The identity panels and Tenants fetch on mount (Users, Org settings,
-// Outbound mail, Tenants); every other section fetches only on submit. A
-// blanket 200-empty response is enough to let navigating into any of them
-// without erroring. whoamiBody defaults to an empty object (no username) so
-// tests that don't care about the header's identity label are unaffected.
+// Mount-time fetches need only a blanket 200-empty response.
 function stubFetch(whoamiBody: Record<string, unknown> = {}): void {
   vi.stubGlobal(
     'fetch',
@@ -43,9 +36,6 @@ function stubFetch(whoamiBody: Record<string, unknown> = {}): void {
   );
 }
 
-// fakeToken builds a decodable (unsigned) JWT-shaped string carrying the
-// given claims -- readTokenIdentity only decodes the payload, so a real
-// signature is unnecessary here.
 function fakeToken(payload: Record<string, unknown>): string {
   const segment = (value: unknown): string =>
     btoa(JSON.stringify(value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -102,10 +92,6 @@ describe('AppShell navigation', () => {
     expect(nav.getByRole('button', { name: /Outbound mail/ })).toBeInTheDocument();
   });
 
-  // The negative case matters as much as the positive one here: Tenants
-  // registration is the one action only an OPERATIONS tenant may take, so a
-  // COMPANY-tenant Operator must not even see a control that would refuse
-  // them, the same rule Users/Org settings/Outbound mail already follow.
   it('hides the operations-only sections, including Tenants, for a non-OPERATIONS tenant', () => {
     stubFetch();
     renderShell(COMPANY_CONFIG);
@@ -121,16 +107,12 @@ describe('AppShell navigation', () => {
     renderShell(OPERATIONS_CONFIG);
     const nav = within(screen.getByRole('navigation', { name: 'Console sections' }));
 
-    // Overview is the default section: the tenant name renders, the header
-    // title matches, and only the Overview nav item is marked current.
     expect(screen.getByRole('heading', { level: 1, name: 'Overview' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 2, name: 'Acme' })).toBeInTheDocument();
     expect(nav.getByRole('button', { name: /Overview/ })).toHaveAttribute('aria-current', 'page');
 
     fireEvent.click(nav.getByRole('button', { name: /Environments/ }));
 
-    // The main pane switched wholesale: the overview content is gone, the
-    // environments panel is showing, and selection moved to exactly one item.
     expect(screen.queryByRole('heading', { level: 2, name: 'Acme' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1, name: 'Environments' })).toBeInTheDocument();
     expect(screen.getByText('Register and deploy environments')).toBeInTheDocument();
@@ -186,10 +168,7 @@ describe('AppShell section URL sync', () => {
     fireEvent.click(nav.getByRole('button', { name: /Environments/ }));
     expect(screen.getByRole('heading', { level: 1, name: 'Environments' })).toBeInTheDocument();
 
-    // The URL moves without going through onSelect, so only a real popstate
-    // event -- not a click -- exercises the listener. jsdom's own
-    // history.back()/forward() resolve asynchronously, so the URL is moved
-    // directly and the event dispatched by hand to keep this deterministic.
+    // jsdom's history.back() is async, so the URL is moved directly and popstate dispatched by hand.
     act(() => {
       window.history.pushState(null, '', '/');
       window.dispatchEvent(new PopStateEvent('popstate'));
@@ -205,9 +184,6 @@ describe('AppShell section URL sync', () => {
 });
 
 describe('AppShell nav badge', () => {
-  // The pending count must be visible without opening the Requests panel --
-  // this asserts the count renders on the nav item itself, never requiring
-  // a click into the panel.
   it('shows the pending-request count on the Requests nav item', async () => {
     vi.stubGlobal(
       'fetch',
@@ -234,9 +210,7 @@ describe('AppShell nav badge', () => {
     );
     renderShell(COMPANY_CONFIG);
     const nav = within(screen.getByRole('navigation', { name: 'Console sections' }));
-    // The badge only appears once the list query resolves — the button
-    // itself renders immediately with just the "Requests" label, so this
-    // must wait for the count rather than asserting on the first match.
+    // The badge appears only once the list query resolves.
     await waitFor(() => {
       const requestsButton = nav.getByRole('button', { name: /Requests/ });
       expect(requestsButton).toHaveTextContent('1');
@@ -303,8 +277,7 @@ describe('AppShell identity chrome', () => {
   it("falls back to the token's email while whoami has not resolved yet", () => {
     stubFetch({ username: 'erun' });
     renderShell(OPERATIONS_CONFIG, fakeToken({ sub: '123', email: 'someone@example.com' }));
-    // Asserted synchronously, before the mocked fetch's promise settles: this
-    // is the header's very first paint, with only the token claim available.
+    // Asserted before fetch settles: the first paint has only the token claim.
     expect(screen.getByText('someone@example.com')).toBeInTheDocument();
   });
 
@@ -313,8 +286,6 @@ describe('AppShell identity chrome', () => {
     const subject = '386994597031248060';
     renderShell(OPERATIONS_CONFIG, fakeToken({ sub: subject }));
 
-    // No email claim and whoami not yet resolved -- must show that the label
-    // is unresolved, never the numeric subject id.
     expect(screen.getByText('Loading…')).toBeInTheDocument();
     expect(screen.queryByText(subject)).not.toBeInTheDocument();
 
@@ -326,10 +297,6 @@ describe('AppShell identity chrome', () => {
   });
 });
 
-// The scope selector is a second, distinct tenant control next to
-// the (label-only, since oidc is undefined here too) tenant switcher above
-// the nav -- picking a target must swap which tenant's environments render
-// without ever reaching the switcher's re-auth path.
 describe('AppShell scope selector', () => {
   const SCOPE_CONFIG: TenantConfigView = {
     tenant: { tenantId: 'tn-1', name: 'Acme', type: 'OPERATIONS' },
@@ -378,8 +345,7 @@ describe('AppShell scope selector', () => {
 
     const nav = within(screen.getByRole('navigation', { name: 'Console sections' }));
     fireEvent.click(nav.getByRole('button', { name: /Environments/ }));
-    // Both the deploy list and the AI-sessions panel render the environment
-    // name, so this asserts presence rather than a single match.
+    // The AI-sessions panel also renders the name.
     expect(screen.getAllByText('acme-env').length).toBeGreaterThan(0);
 
     const scopeSelect = await screen.findByRole('combobox', { name: 'Administering' });
@@ -387,8 +353,7 @@ describe('AppShell scope selector', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'Beta' }));
 
     const betaRows = await screen.findAllByText('beta-env');
-    // Only the deploy list's row carries the owning-tenant badge; the
-    // AI-sessions panel's row does not, so this picks that one out.
+    // Only the deploy list's row carries the tenant badge.
     const betaRow = betaRows
       .map((el) => el.closest('li'))
       .find((li) => li !== null && within(li).queryByText('Beta') !== null);

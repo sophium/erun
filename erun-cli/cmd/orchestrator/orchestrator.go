@@ -12,10 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewOrchestratorCmd groups the CLI's writers for host-side orchestrator
-// definitions -- the config-file counterpart to the desktop's Edit
-// orchestrator dialog, so config.yaml is not the only way to set a field the
-// desktop already lets an operator set.
+// NewOrchestratorCmd groups the CLI writers for orchestrator definitions, mirroring the desktop's Edit dialog.
 func NewOrchestratorCmd(store orchestrator.OrchestratorRoleStore) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "orchestrator",
@@ -29,8 +26,6 @@ func NewOrchestratorCmd(store orchestrator.OrchestratorRoleStore) *cobra.Command
 	return cmd
 }
 
-// orchestratorLaunchSettingStorage is the tail every launch-setting writer's
-// help shares: where the value lives, where it is read back, and when it applies.
 const orchestratorLaunchSettingStorage = "Stored on the orchestrator's entry in config.yaml and read " +
 	"back by `erun list`. A running orchestrator keeps the launch it started with until it is restarted."
 
@@ -180,8 +175,7 @@ func runOrchestratorSetEffortCommand(ctx core.Context, store orchestrator.Orches
 	return err
 }
 
-// orchestratorLaunchSettingLabel names a cleared model or effort by the token
-// that cleared it, so the confirmation reads back what the operator typed.
+// orchestratorLaunchSettingLabel names a cleared value by the token that cleared it.
 func orchestratorLaunchSettingLabel(value string) string {
 	if value == "" {
 		return orchestrator.OrchestratorLaunchSettingDefault

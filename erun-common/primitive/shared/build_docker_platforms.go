@@ -9,14 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// ResolveDockerBuildPlatforms picks the docker --platform targets a build
-// mints. An explicit override wins outright — either an operator's --platform
-// flag, or the full multi-arch pair a release build forces regardless of
-// config (see ResolveDockerBuildTarget). Absent one, the project's
-// .erun/config.yaml lets a machine permanently pinned to one architecture stop
-// paying for the other on every build: environments.<env>.docker.platforms for
-// one environment, or the project-wide docker.platforms every environment
-// inherits. Absent all of them, every platform erun supports.
+// ResolveDockerBuildPlatforms: an override wins, then the env's and the
+// project's docker.platforms, then every supported platform.
 func ResolveDockerBuildPlatforms(ctx core.Context, projectRoot, environment string, override []string) ([]string, error) {
 	if platforms := normalizeDockerPlatforms(override); len(platforms) > 0 {
 		return platforms, nil

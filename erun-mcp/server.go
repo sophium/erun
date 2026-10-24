@@ -37,11 +37,8 @@ type HTTPConfig struct {
 	Path string
 }
 
-// RunHTTP serves the MCP edge and the Prometheus metrics listener
-// concurrently until ctx is cancelled. Either one failing (a bind error, most
-// often) cancels the other and its error wins, rather than the metrics
-// listener silently dying while the MCP edge keeps the process alive for the
-// rest of the pod's lifetime.
+// RunHTTP serves the MCP edge and the metrics listener until ctx is cancelled;
+// either one failing cancels the other.
 func RunHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, metricsCfg MetricsConfig, runtime shared.RuntimeConfig) error {
 	cfg, err := normalizeHTTPConfig(cfg)
 	if err != nil {
@@ -97,9 +94,7 @@ func runMCPHTTP(ctx context.Context, info model.BuildInfo, cfg HTTPConfig, runti
 func newHTTPHandler(info model.BuildInfo, cfg HTTPConfig, runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder) http.Handler {
 	cfg, _ = normalizeHTTPConfig(cfg)
 
-	// One server per distinct capability set, resolved per request: a caller
-	// sees exactly the tools it may call, and `tools/list` is the same answer as
-	// what it is allowed to do rather than a menu with locked entries.
+	// One server per capability set, so tools/list shows exactly what the caller may call.
 	servers := newCapabilityServerCache(func(identity shared.AuthIdentity) *mcp.Server {
 		return newServer(info, runtime, identity, recorder)
 	})
@@ -112,59 +107,27 @@ func newHTTPHandler(info model.BuildInfo, cfg HTTPConfig, runtime shared.Runtime
 
 	authCfg := shared.McpAuthConfigFromEnv()
 	mux := http.NewServeMux()
-	// CORS sits outside auth: a browser preflight carries no Authorization
-	// header at all, so gating it on auth would fail every cross-origin caller
-	// before the real request is even sent. The bearer token, checked just
-	// inside it, is the real gate here -- same stance as the attach
-	// handler's permissive CheckOrigin. Auth is the outermost *authorization*
-	// layer, so even idle probes must carry a valid token before any tool
-	// runs. Traffic metering sits just inside it so a rejected call's tiny
-	// response still counts, but wraps the real MCP traffic that
-	// erun_traffic_window_bytes exists to measure.
+	// CORS sits outside auth because a preflight carries no Authorization header;
+	// traffic metering sits inside auth so rejected calls still count.
 	mux.Handle(cfg.Path, corsMiddleware(shared.AuthHTTPMiddleware(authCfg, trafficMeteringMiddleware(recorder, activityHTTPMiddleware(runtime, handler)))))
-	// The WebSocket attach edge is not wrapped in trafficMeteringMiddleware:
-	// that wrapper's byteCountingResponseWriter does not implement
-	// http.Hijacker, and the WebSocket upgrade needs to hijack the
-	// connection. It shares the same auth middleware, so a caller still needs
-	// a valid token before the handler ever inspects capabilities or upgrades.
+	// Not metered: byteCountingResponseWriter does not implement http.Hijacker,
+	// which the WebSocket upgrade needs.
 	attach.RegisterAttachHandler(mux, cfg.Path+"/attach/{session}", authCfg, runtime)
 	return mux
 }
 
-// crossOriginProtectionForAuthenticatedEdge exempts this edge's one served
-// path from the MCP SDK's default same-origin CSRF guard
-// (net/http.CrossOriginProtection, on by default since go-sdk v1.4.1 --
-// NewStreamableHTTPHandler installs a zero-value one whenever the caller
-// leaves this option nil). That guard exists to stop a forged cross-site
-// request from riding a browser's *ambient* credentials -- a cookie the
-// browser attaches automatically. This edge has none: authHTTPMiddleware
-// already requires a bearer token in the Authorization header on every
-// request before it ever reaches this handler, and a cross-site page cannot
-// forge that header without already knowing the secret it protects -- at
-// which point origin is not doing any protective work left to do. Left at
-// its default, the guard 403s every legitimate cross-origin call this edge
-// exists to serve (the hosted console calling an environment's exposed MCP
-// hostname from a different origin) with "cross-origin request detected
-// from Sec-Fetch-Site header", regardless of corsMiddleware's own
-// reflected-Origin CORS headers below -- that middleware controls whether
-// the browser lets the caller's script *read* the response; this guard runs
-// deeper inside the SDK's own handler and rejects the request outright
-// before corsMiddleware's headers are even relevant.
+// crossOriginProtectionForAuthenticatedEdge exempts path from the SDK's
+// same-origin CSRF guard: every request already needs a bearer token, which a
+// cross-site page cannot forge, and the guard would 403 the hosted console.
 func crossOriginProtectionForAuthenticatedEdge(path string) *http.CrossOriginProtection {
 	protection := http.NewCrossOriginProtection()
 	protection.AddInsecureBypassPattern(path)
 	return protection
 }
 
-// corsMiddleware unblocks a browser calling this edge directly from a
-// different origin (the hosted console calling an env's exposed MCP
-// hostname), which is otherwise refused by the browser itself before any
-// request reaches this server. It reflects the caller's Origin rather than a
-// fixed allowlist because a PaaS instance's console hostname is runtime
-// config, not something this binary can bake in; the bearer token
-// authHTTPMiddleware requires next is what actually gates the request.
-// Mcp-Session-Id must be exposed explicitly -- fetch() hides response
-// headers from the caller's script by default unless the server lists them.
+// corsMiddleware reflects the caller's Origin, since the console hostname is
+// runtime config; the bearer token is the real gate. Mcp-Session-Id must be
+// exposed explicitly because fetch() hides unlisted response headers.
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if origin := req.Header.Get("Origin"); origin != "" {
@@ -237,24 +200,11 @@ func endpointURL(cfg HTTPConfig) string {
 	return "http://" + listenAddress(cfg) + cfg.Path
 }
 
-// mcpSessionTimeout is how long the SDK keeps a session it has heard no POST
-// from. It is the edge's own idle-reap budget, and it has to stay in step with
-// the keepalive that renews a session a caller is still attached to
-// (session_keepalive.go), so the two read from one value rather than two.
+// mcpSessionTimeout is the SDK's idle-reap budget, shared with the session keepalive.
 var mcpSessionTimeout = 5 * time.Minute
 
-// mcpServerLogger receives the MCP SDK's own server-side diagnostics. It is a
-// variable rather than a literal so a test can read what would otherwise go
-// straight to the pod's stderr.
-//
-// Leaving it nil is not "no logging configured"; it is
-// slog.New(slog.DiscardHandler) (mcp/ensureLogger), which silently drops every
-// diagnostic the SDK raises — including the "method %q is invalid during
-// session initialization" guard a client hits when it calls a tool on a
-// session the edge no longer knows. That is how a pod log containing zero
-// occurrences of the guard error was read as "those calls never arrived", when
-// the calls had arrived and been refused: the silence was this logger, not the
-// absence of the request.
+// mcpServerLogger receives the MCP SDK's diagnostics; nil would silently
+// discard them.
 var mcpServerLogger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 func newServer(info model.BuildInfo, runtime shared.RuntimeConfig, identity shared.AuthIdentity, metrics *shared.MetricsRecorder) *mcp.Server {
@@ -282,14 +232,9 @@ func newServer(info model.BuildInfo, runtime shared.RuntimeConfig, identity shar
 	return server
 }
 
-// registerRemovedTools gives every retired tool name in erun-common's
-// removed-tool table a stub, instead of leaving the name unregistered. An
-// unregistered name fails at the SDK's own routing layer with a bare "unknown
-// tool", which names a problem and no action the caller can take; the stub
-// registered here instead fails with the guidance naming the tool that took
-// over its capability. The input type accepts any arguments so a caller still
-// shaped for the retired tool's own schema reaches this handler rather than
-// failing schema validation first.
+// registerRemovedTools stubs each retired tool name so callers get guidance
+// naming its replacement instead of a bare "unknown tool". The stub accepts any
+// arguments so an old-shaped call reaches it instead of failing validation.
 func registerRemovedTools(reg shared.ToolRegistrar) {
 	for name, guidance := range mcptools.MCPRemovedTools() {
 		shared.AddTool(reg, &mcp.Tool{

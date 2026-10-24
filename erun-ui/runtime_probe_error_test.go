@@ -10,10 +10,6 @@ import (
 	"time"
 )
 
-// TestRuntimeProbeFailureMessageNamesOwnDeadlineAsTimeout is the reported
-// defect itself: when the ctx that bounded the probe is the one that expired,
-// the message must name that timeout and its bound rather than repeating
-// whatever kill-signal text os/exec used to enforce it.
 func TestRuntimeProbeFailureMessageNamesOwnDeadlineAsTimeout(t *testing.T) {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
 	defer cancel()
@@ -28,11 +24,6 @@ func TestRuntimeProbeFailureMessageNamesOwnDeadlineAsTimeout(t *testing.T) {
 	}
 }
 
-// TestRuntimeProbeFailureMessageNamesExternalKillDistinctFromTimeout covers a
-// kill this probe did not cause: ctx has not expired, but the process still
-// terminated by signal. That is a different situation (an OOM kill, an
-// evicted pod) with a different next action, so it must read differently from
-// the timeout branch above, and must not name a bare signal either.
 func TestRuntimeProbeFailureMessageNamesExternalKillDistinctFromTimeout(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("signal-terminated exec is a POSIX concept")
@@ -56,10 +47,6 @@ func TestRuntimeProbeFailureMessageNamesExternalKillDistinctFromTimeout(t *testi
 	}
 }
 
-// TestRuntimeProbeFailureMessageKeepsRawCauseForUnclassifiedFailure covers
-// everything that is neither this probe's own deadline nor a signal-terminated
-// process: the raw cause is kept (via the caller's own fallback), never dressed
-// up as either specific case.
 func TestRuntimeProbeFailureMessageKeepsRawCauseForUnclassifiedFailure(t *testing.T) {
 	err := errors.New("kubectl: unable to connect to the server")
 

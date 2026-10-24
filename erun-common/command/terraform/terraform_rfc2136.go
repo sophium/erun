@@ -12,18 +12,12 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// terraformDNS01ProviderRFC2136 is the cluster-edge module's dns01_provider
-// value that switches cert-manager's DNS-01 solver to RFC2136 (DNS UPDATE +
-// TSIG) against the platform's own PowerDNS, instead of the Cloudflare API.
+// terraformDNS01ProviderRFC2136 switches the cluster-edge DNS-01 solver to
+// RFC2136 against the platform's PowerDNS.
 const terraformDNS01ProviderRFC2136 = "powerdns-rfc2136"
 
-// terraformRFC2136DefaultIssuerName, terraformRFC2136SecretSuffix, and
-// terraformRFC2136SecretKey mirror terraform-erun-cluster-edge's own locals
-// (variables.tf's issuer_name default, and
-// `tsig_secret_name = "${var.issuer_name}-rfc2136-tsig"` / key "tsig-secret"
-// in main.tf) — the module's own materialized Secret that the rendered Issuer
-// references, not the erun-powerdns chart's source secret. Reading it back is
-// what lets a repeat plan/apply resupply the same value the module last wrote.
+// These mirror terraform-erun-cluster-edge's tsig_secret_name locals: the
+// module's own materialized Secret, read back so a repeat apply resupplies it.
 const (
 	terraformRFC2136DefaultIssuerName      = "erun-cloudflare"
 	terraformRFC2136SecretSuffix           = "-rfc2136-tsig"
@@ -31,13 +25,8 @@ const (
 	terraformRFC2136DefaultIssuerNamespace = "cert-manager"
 )
 
-// terraformRFC2136Requirement is what a resolved <env>.tfvars says about the
-// cluster-edge module's RFC2136 TSIG secret: whether this env's dns01_provider
-// needs it, and where erun should read it from. KubernetesContext is not part
-// of the tfvars — it is the env's own resolved kubectl context, filled in by
-// the caller so the read targets the same cluster every other kubectl call
-// against this env uses, instead of silently falling back to whatever
-// kubectl's ambient current-context happens to be on the operator's machine.
+// KubernetesContext comes from the env, not the tfvars, so the read never falls
+// back to kubectl's ambient context.
 type terraformRFC2136Requirement struct {
 	Needed            bool
 	Namespace         string
@@ -46,19 +35,10 @@ type terraformRFC2136Requirement struct {
 	KubernetesContext string
 }
 
-// resolveTerraformRFC2136Requirement reads the resolved var file — the same
-// file erun already locates for -var-file — to learn whether this env's
-// dns01_provider is "powerdns-rfc2136". PlatformConfig carries no such field:
-// dns01_provider is purely a terraform-module input, so the tfvars file is the
-// only place erun can learn it. It is parsed with a small literal-string
-// scanner (parseTerraformTFVarsStrings) that walks tokens and skips comments
-// properly, rather than a regex matched against the raw text, so a value
-// sitting in a comment or a differently-quoted line can't produce a false
-// negative on what is otherwise a security-relevant decision. A var file that
-// can't be parsed as simple attributes is a real error; one that parses but
-// carries no dns01_provider (or a non-literal expression for it) resolves to
-// the module's own default ("cloudflare" — not needed), matching current
-// behavior for every env that isn't using powerdns-rfc2136.
+// resolveTerraformRFC2136Requirement learns dns01_provider from the var file,
+// its only source. A token scanner, not a regex, keeps commented values from
+// deciding this security-relevant choice; an absent value means the module
+// default (cloudflare).
 func resolveTerraformRFC2136Requirement(dir, varFile string) (terraformRFC2136Requirement, error) {
 	if strings.TrimSpace(varFile) == "" {
 		return terraformRFC2136Requirement{}, nil
@@ -76,9 +56,7 @@ func resolveTerraformRFC2136Requirement(dir, varFile string) (terraformRFC2136Re
 		issuerName = terraformRFC2136DefaultIssuerName
 	}
 
-	// Mirrors the module's own locals: env_namespace falls back to env_label,
-	// and the issuer namespace falls back to the cert-manager namespace var
-	// (default "cert-manager") when neither is set.
+	// Mirrors the module's namespace fallbacks.
 	namespace := strings.TrimSpace(attrs["env_namespace"])
 	if namespace == "" {
 		namespace = strings.TrimSpace(attrs["env_label"])
@@ -98,17 +76,8 @@ func resolveTerraformRFC2136Requirement(dir, varFile string) (terraformRFC2136Re
 	}, nil
 }
 
-// readTerraformRFC2136Secret reads the RFC2136 TSIG key material back from
-// its Kubernetes Secret so the operator never has to export it by hand. The
-// read is pinned to the env's own resolved kubernetes context (the same one
-// every other kubectl call against this env uses) rather than left to
-// kubectl's ambient current-context, and it is traced so the exact command —
-// including which context it targeted — is visible even in --dry-run, since
-// this read always runs up front regardless of DryRun. On failure it
-// distinguishes the Secret genuinely being absent (create it) from the read
-// itself failing for some other reason such as an RBAC denial or the wrong
-// context (fix credentials/context) — two different remedies that a bare
-// "could not be read: exit status 1" collapsed into one.
+// readTerraformRFC2136Secret runs even under --dry-run and is traced with its
+// context.
 func readTerraformRFC2136Secret(ctx core.Context, requirement terraformRFC2136Requirement) (string, error) {
 	jsonPath := "jsonpath={.data." + strings.ReplaceAll(requirement.SecretKey, ".", `\.`) + "}"
 	args := make([]string, 0, 8)
@@ -136,13 +105,8 @@ func readTerraformRFC2136Secret(ctx core.Context, requirement terraformRFC2136Re
 	return string(decoded), nil
 }
 
-// terraformRFC2136ReadError distinguishes the Secret being absent (kubectl's
-// own NotFound) from every other read failure (RBAC denial, wrong/unknown
-// context, unreachable cluster, ...), since those two situations have
-// different remedies. The non-absent branch carries kubectl's own stderr
-// verbatim — a Forbidden response already names the exact denied principal
-// (e.g. `User "system:serviceaccount:...": cannot get resource "secrets"`),
-// which is more precise than erun guessing at who attempted the read.
+// terraformRFC2136ReadError separates NotFound from other failures, which need
+// a different remedy; kubectl's stderr names the denied principal.
 func terraformRFC2136ReadError(requirement terraformRFC2136Requirement, stderr string, err error) error {
 	contextLabel := terraformKubernetesContextLabel(requirement.KubernetesContext)
 	if clusterread.IsKubectlNotFound(stderr) {
@@ -157,11 +121,7 @@ func terraformRFC2136ReadError(requirement terraformRFC2136Requirement, stderr s
 		terraformDNS01ProviderRFC2136, requirement.Namespace, requirement.SecretName, requirement.SecretKey, contextLabel, detail)
 }
 
-// terraformKubernetesContextLabel renders the context a kubectl read targeted
-// for an error/trace message. An empty context means erun had none resolved
-// for this env and let kubectl fall back to its own ambient current-context —
-// naming that explicitly, rather than silently omitting it, is what makes
-// that fallback visible to an operator debugging a wrong-cluster read.
+// An empty context means kubectl's ambient one; say so explicitly.
 func terraformKubernetesContextLabel(context string) string {
 	if strings.TrimSpace(context) == "" {
 		return "kubectl's ambient current-context (no kubernetes context is configured for this environment)"
@@ -169,14 +129,8 @@ func terraformKubernetesContextLabel(context string) string {
 	return fmt.Sprintf("kubernetes context %q", context)
 }
 
-// parseTerraformTFVarsStrings scans a resolved .tfvars file for top-level
-// `identifier = "value"` assignments — the whole grammar the cluster-edge
-// module's string variables need. It correctly skips "#"/"//" line comments
-// and "/* */" block comments, and honors backslash escapes inside quoted
-// strings, so it can't be fooled by a value that only appears in a comment or
-// on a differently-formatted line. An attribute whose value isn't a plain
-// quoted string (a list, a heredoc, an expression) is simply absent from the
-// result; callers treat that as "could not determine" rather than guess.
+// parseTerraformTFVarsStrings returns top-level `name = "string"` attributes,
+// skipping comments; non-string values are absent rather than guessed.
 func parseTerraformTFVarsStrings(path string) (map[string]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -196,8 +150,7 @@ func scanTerraformTFVarsStrings(src string) map[string]string {
 		}
 		name, i2 := scanTerraformTFVarsIdentifier(src, i)
 		if name == "" {
-			// Not the start of an identifier (e.g. a stray `[`/`{`); skip one
-			// byte so the scanner always makes progress.
+			// Skip one byte so the scanner always makes progress.
 			i++
 			continue
 		}
@@ -212,14 +165,12 @@ func scanTerraformTFVarsStrings(src string) map[string]string {
 			i = next
 			continue
 		}
-		// Not a plain string literal: skip to end of line rather than guess.
 		i = skipTerraformTFVarsLine(src, i)
 	}
 	return result
 }
 
-// scanTerraformTFVarsIdentifier reads the identifier starting at src[i].
-// name=="" means src[i] isn't an identifier character at all.
+// name=="" means src[i] isn't an identifier character.
 func scanTerraformTFVarsIdentifier(src string, i int) (name string, next int) {
 	n := len(src)
 	start := i
@@ -229,8 +180,6 @@ func scanTerraformTFVarsIdentifier(src string, i int) (name string, next int) {
 	return src[start:i], i
 }
 
-// scanTerraformTFVarsStringValue reads a quoted-string value at src[i], the
-// only value shape this scanner resolves.
 func scanTerraformTFVarsStringValue(src string, i int) (value string, next int, ok bool) {
 	if i >= len(src) || src[i] != '"' {
 		return "", i, false
@@ -250,10 +199,6 @@ func isTerraformTFVarsIdentChar(b byte) bool {
 		(b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
-// skipTerraformTFVarsTrivia advances past whitespace and comments —
-// everything HCL treats as insignificant between tokens — repeating until a
-// pass makes no further progress (a comment can be followed by more
-// whitespace, another comment, and so on).
 func skipTerraformTFVarsTrivia(src string, i int) int {
 	for {
 		start := i
@@ -285,8 +230,7 @@ func skipTerraformTFVarsLineComment(src string, i int) int {
 	return skipTerraformTFVarsLine(src, i)
 }
 
-// skipTerraformTFVarsBlockComment skips a "/* ... */" comment. An
-// unterminated comment runs to the end of the file, matching HCL.
+// An unterminated block comment runs to EOF, matching HCL.
 func skipTerraformTFVarsBlockComment(src string, i int) int {
 	if !strings.HasPrefix(src[i:], "/*") {
 		return i
@@ -297,8 +241,6 @@ func skipTerraformTFVarsBlockComment(src string, i int) int {
 	return len(src)
 }
 
-// readTerraformTFVarsQuotedString reads a double-quoted string literal
-// starting at src[i] (which must be '"'), honoring backslash escapes.
 // ok=false on an unterminated or multi-line string.
 func readTerraformTFVarsQuotedString(src string, i int) (value string, next int, ok bool) {
 	n := len(src)

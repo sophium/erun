@@ -16,14 +16,8 @@ export interface RuntimeResourceBounds {
   loading: boolean;
   available: boolean;
   message: string;
-  // notice explains what the maximum alone cannot: that the scheduler has
-  // nothing left to admit a pod with, and what returns it.
   notice: string;
-  // worstCase is the other capacity question's answer, carried separately so
-  // the panel can label it and keep it apart from the scheduling figure. It is
-  // never the source of the maximum: a limit reserves nothing, so capping the
-  // configuration at the node's bursting headroom makes a node that schedules
-  // fine look full.
+  // worstCase never sets the maximum: a limit reserves nothing.
   worstCase: { message: string; notice: string };
 }
 
@@ -31,15 +25,10 @@ function emptyMetric(unit: string): UIRuntimeResourceMetric {
   return { total: 0, used: 0, free: 0, unit, formatted: '', floored: false };
 }
 
-// unavailableReading is the shape a reading takes when the capacity read itself
-// failed, so the two readings a status always carries are always present.
 function unavailableReading(): UIRuntimeResourceReading {
   return { cpu: emptyMetric('cores'), memory: emptyMetric('GiB') };
 }
 
-// unavailableRuntimeResourceStatus is the shape a dialog shows when the
-// capacity read itself failed. One helper so the three dialogs that build it
-// cannot drift from the contract as fields are added to the reading.
 export function unavailableRuntimeResourceStatus(
   kubernetesContext: string,
   message: string,
@@ -70,12 +59,8 @@ export function runtimePodConfigToKubernetes(config: UIRuntimePodConfig): UIRunt
   };
 }
 
-// runtimeResourceBounds derives the control's range from the *scheduling*
-// reading, because the scheduler is what decides whether a request places. The
-// worst-case reading travels beside it, labelled, and never caps the control:
-// capping the configuration at the node's bursting headroom is what made a
-// node with ample room to place a pod read as full, and led an operator to
-// shrink a limit that is sized for the work an agent runs in the container.
+// runtimeResourceBounds bounds the control by the scheduling reading; the
+// worst-case reading is shown but never caps it.
 export function runtimeResourceBounds(
   status: UIRuntimeResourceStatus | null,
   loading: boolean,
@@ -145,24 +130,15 @@ function parsedRuntimeErrorMessage(error: string, status: UIRuntimeResourceStatu
   return error;
 }
 
-// RuntimeResourceValidation splits a runtime-pod request into a blockingError
-// (invalid config that must not be persisted) and a capacityWarning (valid
-// config that still saves, leaving a deploy pending until capacity frees up).
-// The split exists so a scheduling shortfall never blocks saving an otherwise
-// valid config.
+// RuntimeResourceValidation separates blocking config errors from capacity
+// warnings, so a scheduling shortfall never blocks saving.
 export interface RuntimeResourceValidation {
   blockingError: string;
   capacityWarning: string;
 }
 
-// schedulerExhaustedWarning is the one scheduling statement this panel can make
-// honestly. It is about the node, never about the entered values: the values
-// size the container's *limits*, which reserve nothing, so no entered figure can
-// be compared against what the scheduler admits a pod on. The warning this
-// replaced ("No node currently has 4 CPU and 8.7 GiB free ... or you lower the
-// request") said the opposite and offered the one remedy that is harmful --
-// shrinking a limit sized for the cold full build an agent runs in that
-// container re-creates the OOM kills that destroy its run and its unpushed work.
+// SCHEDULER_EXHAUSTED_WARNING is about the node, never the entered values: those
+// size limits, and shrinking a limit re-creates OOM kills.
 export const SCHEDULER_EXHAUSTED_WARNING =
   'No node has request capacity left to admit another runtime pod — a new pod stays Pending until a node frees it. Stopping an environment nobody is using on one of these nodes is what returns it.';
 
@@ -177,9 +153,7 @@ export function runtimeResourceValidation(
   if (!status?.available) {
     return { blockingError: '', capacityWarning: '' };
   }
-  // A node whose declared requests could not be read cannot be said to admit or
-  // refuse anything: its free figure is an upper bound, and an unreadable
-  // reading is not a shortfall.
+  // Nodes with unreadable requests make no claim either way.
   const nodes = (status.nodes ?? []).filter((node) => node.schedulableComplete);
   if (nodes.length === 0) {
     return { blockingError: '', capacityWarning: '' };
@@ -193,8 +167,7 @@ export function runtimeResourceValidation(
   return { blockingError: '', capacityWarning: '' };
 }
 
-// runtimeResourceLimitMessage collapses both outcomes into one message for
-// callers (the create/init dialog) that treat any resource problem as blocking.
+// runtimeResourceLimitMessage merges both outcomes for callers that treat any problem as blocking.
 export function runtimeResourceLimitMessage(
   config: UIRuntimePodConfig,
   status: UIRuntimeResourceStatus | null,

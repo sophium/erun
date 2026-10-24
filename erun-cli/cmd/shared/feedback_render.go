@@ -31,8 +31,7 @@ func AddOutputFlag(cmd *cobra.Command) {
 	cmd.PersistentFlags().String("output", "text", outputFlagUsage)
 }
 
-// commandOutputMode falls back to text on an unset or unparsable value so output
-// rendering never blocks; strict --output validation lives elsewhere.
+// commandOutputMode falls back to text on an unset or unparsable value.
 func commandOutputMode(cmd *cobra.Command) core.OutputMode {
 	raw, err := cmd.Flags().GetString("output")
 	if err != nil {
@@ -45,10 +44,7 @@ func commandOutputMode(cmd *cobra.Command) core.OutputMode {
 	return mode
 }
 
-// CommandWantsJSON unifies the global --output json with the per-command --json
-// some commands grew first. Both spellings mean the same thing, so a caller that
-// follows only the documented global flag gets the structured result rather than
-// prose; --json stays a supported alias rather than a second, rival contract.
+// CommandWantsJSON treats --json as an alias of --output json.
 func CommandWantsJSON(commandCtx core.Context, jsonFlag bool) bool {
 	return jsonFlag || commandCtx.Output == core.OutputJSON
 }
@@ -84,9 +80,7 @@ func commandVerbosity(cmd *cobra.Command) int {
 	return verbosity
 }
 
-// shouldSilenceNoShellOutput keeps an `eval "$(erun open ... --no-shell)"` alias
-// silent on stderr as the docs promise; its audit/trace lines would otherwise
-// surface in the wrapping terminal on every alias invocation.
+// shouldSilenceNoShellOutput keeps `eval "$(erun open ... --no-shell)"` silent on stderr.
 func shouldSilenceNoShellOutput(cmd *cobra.Command, userAskedForVerbose bool) bool {
 	return !userAskedForVerbose && !isDryRunCommand(cmd) && isNoShellCommand(cmd)
 }
@@ -96,10 +90,7 @@ func isNoShellCommand(cmd *cobra.Command) bool {
 	return err == nil && noShell
 }
 
-// commandScopesTenantByFlag reports whether cmd's --tenant scopes resolution.
-// Commands whose --tenant means something else (list's selects version-drift
-// reporting) return false, so their failures never offer it as the tenant fix;
-// resolution failures name the flag only when it is the real next step.
+// commandScopesTenantByFlag reports whether cmd's --tenant scopes resolution, so it is offered as a fix only then.
 func commandScopesTenantByFlag(cmd *cobra.Command) bool {
 	if cmd.Flags().Lookup("tenant") == nil {
 		return false
@@ -107,8 +98,6 @@ func commandScopesTenantByFlag(cmd *cobra.Command) bool {
 	return !commandTenantFlagIsNotScoping(cmd)
 }
 
-// commandTenantFlagIsNotScoping names the commands whose --tenant flag is not a
-// tenant-scoping flag, so it must never be offered as the tenant remedy.
 func commandTenantFlagIsNotScoping(cmd *cobra.Command) bool {
 	return cmd.Name() == "list"
 }
@@ -180,9 +169,7 @@ func redactAuditArgs(args []string) []string {
 	return redacted
 }
 
-// Only a flag can carry a secret, so a bare word is never treated as one: a
-// command named `token` would otherwise redact the argument after it, and the
-// audit line would claim a secret was passed where none was.
+// Only flags can carry secrets; a bare word like a `token` command name is never redacted.
 func isSensitiveFlag(value string) bool {
 	if !strings.HasPrefix(value, "-") {
 		return false

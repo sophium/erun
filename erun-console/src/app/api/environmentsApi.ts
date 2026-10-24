@@ -3,8 +3,7 @@ import { type Environment, isRecord, parseEnvironment, parseList } from 'erun-ki
 import { httpBaseQuery } from './httpBaseQuery';
 import { platformApi } from './platformApi';
 
-// The operator-authored fields to register an environment. The tenant is
-// resolved from the caller's token server-side and is never sent from here.
+// The tenant is resolved from the token server-side and never sent.
 export interface CreateEnvironmentInput {
   name: string;
   type: string;
@@ -13,12 +12,7 @@ export interface CreateEnvironmentInput {
   runtimeVersion?: string;
 }
 
-// DeployOutcome distinguishes the two states a caller must render specially
-// from a genuine error: `conflict` (409 — a deploy is already in flight for
-// this environment, a real expected state, not a failure) and `unavailable`
-// (501 — the control plane has no deploy executor configured). Both resolve
-// as data rather than as a query error, so the controller can render them
-// without an error path.
+// 409 (deploy already in flight) and 501 (no deploy executor) resolve as data, not errors.
 export type DeployOutcome =
   | { kind: 'accepted'; environment: Environment }
   | { kind: 'conflict' }
@@ -33,12 +27,7 @@ function parseEnvironmentResponse(raw: unknown): Environment {
 
 export const environmentsApi = platformApi.injectEndpoints({
   endpoints: (builder) => ({
-    // listEnvironments backs the scope selector: the caller's own
-    // tenant by default, or -- operations-only, honored server-side -- a
-    // named target tenant's environments via `?tenantId=`. A non-OPERATIONS
-    // caller naming another tenant gets the same 403 the API always returns;
-    // this console never offers that param to a caller who cannot use it
-    // (see shell/ScopeSelector.tsx).
+    // `tenantId` is operations-only and enforced server-side.
     listEnvironments: builder.query<Environment[], { token: string; tenantId?: string }>({
       query: ({ token, tenantId }) => ({
         url:
@@ -67,8 +56,6 @@ export const environmentsApi = platformApi.injectEndpoints({
       invalidatesTags: ['Config', 'Environments'],
     }),
 
-    // getEnvironment polls one environment by id; the deploy controller drives
-    // this with `pollingInterval` until status reaches running/failed.
     getEnvironment: builder.query<Environment, { token: string; environmentId: string }>({
       query: ({ token, environmentId }) => ({
         url: `/v1/environments/${encodeURIComponent(environmentId)}`,
@@ -79,8 +66,6 @@ export const environmentsApi = platformApi.injectEndpoints({
       providesTags: (_result, _error, arg) => [{ type: 'Environment', id: arg.environmentId }],
     }),
 
-    // deployEnvironment bypasses the shared error channel for 409/501: both
-    // are expected outcomes the render layer shows inline, not query errors.
     deployEnvironment: builder.mutation<
       DeployOutcome,
       { token: string; environmentId: string; version?: string }

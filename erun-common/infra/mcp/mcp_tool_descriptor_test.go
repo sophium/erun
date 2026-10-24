@@ -6,9 +6,7 @@ import (
 	"testing"
 )
 
-// toolsListPayload holds real descriptors as a live edge returns them, including
-// one tool the edge marks destructive and one it marks read-only, each carrying
-// every field the protocol's tools/list provides.
+// toolsListPayload holds real descriptors, one destructive and one read-only.
 const toolsListPayload = `{
   "tools": [
     {
@@ -32,11 +30,7 @@ const toolsListPayload = `{
   ]
 }`
 
-// TestMCPToolListResultRoundTripsEveryProtocolField pins that a structured
-// caller sees exactly what the protocol sent. It compares whole descriptors
-// rather than naming the fields that were once dropped, so a field the protocol
-// gains later fails here instead of vanishing from `erun mcp tools --output
-// json` unnoticed.
+// Compare whole descriptors so a field the protocol adds later cannot vanish unnoticed.
 func TestMCPToolListResultRoundTripsEveryProtocolField(t *testing.T) {
 	encoded := encodeToolList(t, toolsListPayload)
 	got, want := decodeToolsByName(t, encoded), decodeToolsByName(t, []byte(toolsListPayload))
@@ -45,9 +39,6 @@ func TestMCPToolListResultRoundTripsEveryProtocolField(t *testing.T) {
 	}
 }
 
-// TestMCPToolListResultExposesAnnotationsToStructuredCallers reads the payload
-// the way an orchestrator deciding whether a call is safe does: through the
-// annotations, not the description.
 func TestMCPToolListResultExposesAnnotationsToStructuredCallers(t *testing.T) {
 	encoded := encodeToolList(t, toolsListPayload)
 	destructive := annotationsForTool(t, encoded, "cloud_clear_aws_credentials")
@@ -68,8 +59,6 @@ type toolHints struct {
 	readOnly    *bool
 }
 
-// encodeToolList decodes a tools/list payload and re-encodes it the way the
-// structured surface does.
 func encodeToolList(t *testing.T, payload string) []byte {
 	t.Helper()
 	var decoded MCPToolListResult

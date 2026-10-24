@@ -42,12 +42,7 @@ func TestEnvironmentJobThatExitsCleanlyStillSucceeds(t *testing.T) {
 	}
 }
 
-// shrinkGateIncompleteWait overrides the wait cap/poll a job's own finish
-// check uses when waiting for a job it started (see
-// awaitEnvironmentJobRunningChildren), so a test whose seeded child never
-// actually finishes hits the cap in milliseconds rather than genuinely
-// waiting out the production value. Restored on cleanup so tests do not leak
-// state into each other.
+// shrinkGateIncompleteWait shrinks the gate wait cap and poll for one test.
 func shrinkGateIncompleteWait(t *testing.T, waitCap, poll time.Duration) {
 	t.Helper()
 	originalCap, originalPoll := environmentJobGateIncompleteWaitCap, environmentJobGateIncompletePoll
@@ -57,23 +52,8 @@ func shrinkGateIncompleteWait(t *testing.T, waitCap, poll time.Duration) {
 	})
 }
 
-// An agent job that runs a gate through its own `job start` (detach and
-// await) and then
-// ends -- however that end comes about: the agent backgrounding the run
-// itself, exhausting its turns, or an outer `timeout` killing the foreground
-// wait -- must not read as a clean success while the gate it started has not
-// reached a verdict. That gate runs as its own job, detached into its own
-// session on purpose so it survives the caller; it is never a member of the
-// caller's process group, so the process-group survivor check above cannot
-// see it. The record relationship (StartedByJobID) is what makes it visible
-// instead. The gate job is seeded directly rather than started for real,
-// because the property under test is what the *parent's* finish check does
-// when a sibling record says still running, not how the sibling got there.
-//
-// The parent's finish check actually waits out the gate up to a cap before
-// declaring it incomplete (see resolveEnvironmentJobOutcome); the seeded
-// child here never finishes, so the wait is shrunk to milliseconds rather
-// than genuinely waiting out the production cap.
+// A started gate job runs in its own session, outside the parent's process
+// group, so only the StartedByJobID record makes it visible to the parent's finish check.
 func TestEnvironmentJobThatEndsWhileAJobItStartedIsStillRunningIsNotReportedAsSuccess(t *testing.T) {
 	isolateActivityCache(t)
 	shrinkGateIncompleteWait(t, 50*time.Millisecond, 5*time.Millisecond)
@@ -90,9 +70,7 @@ func TestEnvironmentJobThatEndsWhileAJobItStartedIsStillRunningIsNotReportedAsSu
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
-	// A pid of this test process itself reads as alive for as long as the test
-	// runs, which is what keeps the seeded child's state at "running" through
-	// the parent's own finish check below without needing a real process.
+	// This test's own pid stays alive, keeping the seeded child "running".
 	child := shared.EnvironmentJob{
 		ID:             childID,
 		Name:           childID,
@@ -131,15 +109,8 @@ func TestEnvironmentJobThatEndsWhileAJobItStartedIsStillRunningIsNotReportedAsSu
 	}
 }
 
-// A handed-off job is work its parent deliberately does not wait for, so the
-// parent's finish check must not count it however it is found. The record-based
-// reads already honor that (environmentJobRunningChildren), but the descendant
-// scan reads a process table and cannot: a handed-off job's supervisor detaches
-// into its own session, so once the work that started it exits the kernel
-// reparents it onto the parent -- exactly the shape the widest scan reports as
-// abandoned work. The exclusion set is what carries the handoff relationship
-// across to that scan, and this locks its two sides: a child this job handed
-// off is excluded, and a job it did not start is not.
+// A handed-off supervisor is reparented onto its parent once its starter exits,
+// so the descendant scan needs the exclusion set to skip it.
 func TestAHandedOffJobIsExcludedFromItsParentsLeftoverScan(t *testing.T) {
 	isolateActivityCache(t)
 

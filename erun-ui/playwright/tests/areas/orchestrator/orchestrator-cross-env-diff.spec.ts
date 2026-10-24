@@ -3,13 +3,8 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ENV_BETA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// The orchestrator cross-env diff panel is the orchestrator's primary
-// code-review instrument: with a cross-env session focused, the panel shows
-// one section per LINKED environment instead of one merged diff, and each
-// section owns its own loading/error/scope state so one stopped environment
-// cannot blank another's. None of the existing diff specs (review-diff-tree,
-// diff-error-copy, erun-section) exercise a running multi-env orchestrator
-// session, so this spec fills that gap.
+// With a cross-env session focused, the diff panel shows one section per linked
+// env, each with its own loading/error/scope state.
 
 const ORCHESTRATOR_ID = 'pw-orch-diff';
 const RUNNING_SESSION_ID = 9001;
@@ -59,11 +54,8 @@ function diffFile(path: string): DiffFileStub {
   };
 }
 
-// One success stub per environment: a single distinct file, plus optional
-// review-range state (base + commits) for the scope-isolation case. The
-// `scope`/`selectedCommit` echoed back mirror the real backend contract
-// (applyReviewDiffSuccess re-derives the slot's scope/commit from the
-// response), so a spec that selects a scope must see it round-trip.
+// `scope`/`selectedCommit` are echoed back because the frontend re-derives the
+// slot's scope from the response.
 interface EnvDiffSuccessStub {
   kind: 'success';
   file: string;
@@ -85,14 +77,7 @@ function orchestratorSnapshot(): unknown {
       { tenant: SEED_TENANT, environment: SEED_ENV_BETA, directory: '/tmp/orch-beta' },
     ],
     tenants: [SEED_TENANT],
-    // Empty, not absent: this orchestrator has only its linked environments, and
-    // the diff panel renders one section per directory an orchestrator works in
-    // itself, so naming fictional paths here would add a failing section -- and
-    // its error alert -- to every test in this file, which are all about the
-    // per-environment sections. A directory an orchestrator really has is covered
-    // by review-directory-target.spec.ts, against a real one. Empty is also what
-    // the desktop itself sends: directoryPaths builds with make, so the field is
-    // an array even when there is nothing in it.
+    // Empty: a fictional directory would add a failing section to every test here.
     directories: [],
     sessionId: RUNNING_SESSION_ID,
     status: 'running',
@@ -104,13 +89,8 @@ function orchestratorSnapshot(): unknown {
   };
 }
 
-// stubOrchestratorAndDiffs combines both fakes behind one route registration:
-// ListOrchestrators reports the running, multi-env orchestrator above, and
-// LoadDiff resolves per environment according to `byEnv`, keyed by
-// environment name. Everything else (and any environment missing from
-// `byEnv`) falls through to the real headless backend. `calls` records every
-// LoadDiff request's target environment, in order, so a spec can assert one
-// fetch happened per linked environment rather than one merged fetch.
+// LoadDiff resolves per env from `byEnv`; anything else falls through to the
+// real backend. `calls` records each LoadDiff target env in order.
 async function stubOrchestratorAndDiffs(
   page: Page,
   byEnv: Record<string, EnvDiffStub>,
@@ -169,11 +149,8 @@ async function stubOrchestratorAndDiffs(
 }
 
 test.describe('orchestrator cross-env diff panel (#1178)', () => {
-  // These cases drive the same two seeded environments (alpha and beta) and the
-  // app state each leaves behind, so they are order-dependent within a worker.
-  // Under fullyParallel a different subset lands in each worker and that
-  // dependence surfaces as an empty diff. Keep them together, in order, in one
-  // worker; the rest of the suite still parallelises around them.
+  // These cases share app state across the same seeded envs, so they must run
+  // in order in one worker.
   test.describe.configure({ mode: 'serial' });
 
   test('renders one section per linked environment, not a single merged diff', async ({
@@ -188,8 +165,6 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
 
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
     await app.titlebar.toggleReviewPanel();
-    // Converge on the panel having opened before asserting on anything inside
-    // it: the toggle and the panel's render are separate steps.
     await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
 
@@ -220,17 +195,13 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
 
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
     await app.titlebar.toggleReviewPanel();
-    // Converge on the panel having opened before asserting on anything inside
-    // it: the toggle and the panel's render are separate steps.
     await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
     await expect
       .poll(() => review.diffSectionPaths())
       .toEqual(expect.arrayContaining(['alpha-only.ts', 'beta-only.ts']));
 
-    // Three surfaces render "pw / alpha" (review layers, changed-files tree,
-    // diff panel section header) — the raw "pw/alpha" envKey never reaches
-    // the DOM, and every occurrence uses the same spaced, app-native format.
+    // The raw "pw/alpha" envKey never reaches the DOM.
     await expect(review.envLabels(ALPHA_ENV_KEY)).toHaveCount(3);
     await expect(review.envLabels(BETA_ENV_KEY)).toHaveCount(3);
     await expect(review.changedFilesEnvLabel(ALPHA_ENV_KEY)).toBeVisible();
@@ -241,12 +212,9 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
   test('a single linked environment renders no redundant env label', async ({ app }) => {
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
     await app.titlebar.toggleReviewPanel();
-    // The assertion below counts rendered labels, which is zero either way if
-    // the panel never opened -- so converge on it having opened first.
+    // Otherwise a zero count passes when the panel never opened.
     await app.reviewPanel.waitForOpen();
 
-    // Single-env sessions must not gain the multi-env label — the
-    // review panel here has exactly one target, so no surface names it.
     await expect(app.reviewPanel.envLabels(ALPHA_ENV_KEY)).toHaveCount(0);
   });
 
@@ -285,19 +253,12 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
 
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
     await app.titlebar.toggleReviewPanel();
-    // Converge on the panel having opened before asserting on anything inside
-    // it: the toggle and the panel's render are separate steps.
     await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
-    // The changed-files tree renders its own copy of the same per-env alert;
-    // collapse it so the alert count below reflects the diff list alone.
+    // The changed-files tree renders its own copy of the alert.
     await review.collapseChangedFilesSection();
     await expect(review.changedFilesTree()).toBeHidden();
 
-    // Both sections still render (the failing environment does not disappear
-    // or blank the panel), beta's file survives alpha's failure, and exactly
-    // one alert shows -- proving alpha's error stayed in its own section
-    // instead of clearing beta's diff too.
     await expect(review.envSectionHeader(ALPHA_ENV_KEY)).toBeVisible();
     await expect(review.envSectionHeader(BETA_ENV_KEY)).toBeVisible();
     await expect(review.errorAlerts()).toHaveCount(1);
@@ -316,8 +277,6 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
 
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
     await app.titlebar.toggleReviewPanel();
-    // Converge on the panel having opened before asserting on anything inside
-    // it: the toggle and the panel's render are separate steps.
     await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
     await review.collapseChangedFilesSection();
@@ -334,12 +293,8 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
     app,
     page,
   }) => {
-    // alpha never resolves (falls through to the real backend for an
-    // undeployed env, which reports unreachable/no-diff); beta resolves with
-    // a distinct file. diffByEnv is a sparse map -- useEnvDiffSlot substitutes
-    // the empty slot for a key that hasn't been fetched instead of throwing or
-    // aliasing another environment's slot -- so alpha's section must render
-    // its own empty/error state, never beta's file.
+    // alpha falls through to the real backend and never resolves; its section must
+    // render its own empty/error state, never beta's file.
     await stubOrchestratorAndDiffs(page, {
       [SEED_ENV_BETA]: { kind: 'success', file: 'beta-only.ts' },
     });
@@ -347,8 +302,6 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
 
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
     await app.titlebar.toggleReviewPanel();
-    // Converge on the panel having opened before asserting on anything inside
-    // it: the toggle and the panel's render are separate steps.
     await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
 
@@ -384,41 +337,27 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
 
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
     await app.titlebar.toggleReviewPanel();
-    // Converge on the panel having opened before asserting on anything inside
-    // it: the toggle and the panel's render are separate steps.
     await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
     await expect
       .poll(() => review.diffSectionPaths())
       .toEqual(expect.arrayContaining(['alpha.ts', 'beta.ts']));
 
-    // Index 0 is alpha, index 1 is beta: ReviewRangeControls renders one
-    // control per target in selectReviewEnvTargets' order, which mirrors the
-    // orchestrator's configured environments order set up above.
+    // Controls render in the orchestrator's configured env order.
     const alphaAll = review.reviewBoundaryButton('All branch changes', 0);
     const alphaCurrent = review.reviewBoundaryButton('Current local changes', 0);
     const betaAll = review.reviewBoundaryButton('All branch changes', 1);
     const betaCurrent = review.reviewBoundaryButton('Current local changes', 1);
 
-    // diffSectionPaths() above only proves the diff panel's file list
-    // (DiffList) has rendered both environments' files. The review-layers
-    // controls read the same per-env slot but live in a separate subtree
-    // (ReviewRangeControls, inside the changed-files aside), so nth(1) has
-    // nothing to resolve to until beta's own controls have mounted -- wait
-    // for that directly instead of assuming it happens in the same commit.
+    // The range controls live in a separate subtree from DiffList and may mount later.
     await expect(betaCurrent).toBeVisible();
     await expect(betaAll).toBeVisible();
 
     await expect(alphaCurrent).toHaveAttribute('aria-pressed', 'true');
     await expect(betaCurrent).toHaveAttribute('aria-pressed', 'true');
 
-    // A scope change on ANY linked environment reloads every linked
-    // environment's diff (loadReviewDiff fetches the whole target set, not
-    // just the one whose scope changed), so alpha's click also sends beta a
-    // fresh (same-scope) LoadDiff round trip. Wait on that concrete round
-    // trip for both environments -- and re-confirm both files are still in
-    // the diff panel -- before reading any button state, rather than racing
-    // straight into the attribute check.
+    // A scope change reloads every linked env's diff, so wait for both round trips
+    // before reading button state.
     const reloadedBoth = Promise.all(
       [SEED_ENV_ALPHA, SEED_ENV_BETA].map((environment) =>
         page.waitForResponse(
@@ -437,7 +376,6 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
 
     await expect(alphaAll).toHaveAttribute('aria-pressed', 'true');
     await expect(alphaCurrent).toHaveAttribute('aria-pressed', 'false');
-    // beta's own scope selection is untouched by alpha's.
     await expect(betaCurrent).toHaveAttribute('aria-pressed', 'true');
     await expect(betaAll).toHaveAttribute('aria-pressed', 'false');
   });
@@ -461,14 +399,9 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
     await expect(app.titlebar.changedFilesToggle()).toHaveCount(0);
 
     await app.titlebar.toggleReviewPanel();
-    // Converge on the panel's own open/closed witness rather than racing the
-    // toggle's render against expect's fixed budget -- the line above this
-    // block already established it starts closed, so each toggle's direction
-    // is known.
     await app.titlebar.changedFilesToggle().waitFor({ state: 'visible' });
     await expect(app.titlebar.changedFilesToggle()).toBeVisible();
-    // The env-scoped controls stay hidden even with the panel open -- the
-    // orchestrator session, not the diff panel, gates them.
+    // The orchestrator session, not the diff panel, gates these controls.
     await expect(app.titlebar.vscodeButton()).toHaveCount(0);
     await expect(app.titlebar.intellijButton()).toHaveCount(0);
     await expect(app.titlebar.contributeToggleButton()).toHaveCount(0);

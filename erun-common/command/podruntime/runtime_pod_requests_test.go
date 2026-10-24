@@ -12,13 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/build"
 )
 
-// runtimePodRequestsList is `kubectl get pods -o json` for a local-agent
-// environment as the chart actually shapes it: the runtime container and the
-// erun-dind sidecar each declaring the chart's fixed 0.25 CPU / 1024Mi request
-// while their limits are the tens of GiB the operator chose, plus the three
-// small init containers. This is the state the whole reading exists for -- the
-// pod's limits say 27Gi/20Gi and its reservation is 0.5 CPU / 2GiB -- so the
-// numbers below are the ones the report has to state.
+// runtimePodRequestsList mirrors the chart: limits in tens of GiB, requests of 0.25 CPU /
+// 1024Mi per container.
 const runtimePodRequestsList = `{
   "items": [
     {
@@ -44,12 +39,6 @@ const runtimePodRequestsList = `{
   ]
 }`
 
-// TestUsageRequestsReportThePodsOwnDeclaredRequests is the reading's own
-// subject: the request the scheduler admits the runtime pod on, taken from the
-// pod spec where it actually lives. Before this reading existed nothing
-// anywhere in erun carried a request at all, so `erun usage` and the desktop
-// card could only ever report the cgroup limit -- a ceiling that reserves
-// nothing -- as if it were provisioned.
 func TestUsageRequestsReportThePodsOwnDeclaredRequests(t *testing.T) {
 	requests, err := parseRuntimePodRequests([]byte(runtimePodRequestsList))
 	if err != nil {
@@ -62,10 +51,7 @@ func TestUsageRequestsReportThePodsOwnDeclaredRequests(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected the runtime container's own request, got %+v", requests.Containers)
 	}
-	// 0.25 declared in cores and 250m declared in millicores must land on the
-	// same number: the chart's runtime container and the sidecar declare the
-	// same reservation in different spellings, and a renderer that showed them
-	// differently would invent a difference that is not there.
+	// 0.25 cores and 250m must land on the same number.
 	if runtime.CPUMilli != 250 {
 		t.Errorf("runtime container CPU request = %d millicores, want 250", runtime.CPUMilli)
 	}
@@ -78,12 +64,7 @@ func TestUsageRequestsReportThePodsOwnDeclaredRequests(t *testing.T) {
 	}
 }
 
-// TestUsageRequestsTakeTheLargerOfInitPeakAndContainerSum covers the half of
-// the scheduler's rule a naive sum gets wrong. Kubernetes admits a pod on
-// max(max over init containers, sum over containers), so a pod whose init
-// container asks for more than its containers do reserves the init container's
-// figure -- reporting the sum would state a reservation the scheduler never
-// made, which is the one direction of error this reading cannot afford.
+// Kubernetes admits a pod on max(max over init containers, sum over containers).
 func TestUsageRequestsTakeTheLargerOfInitPeakAndContainerSum(t *testing.T) {
 	pod := `{"items": [{
       "metadata": {"name": "erun-devops-1"},
@@ -102,11 +83,6 @@ func TestUsageRequestsTakeTheLargerOfInitPeakAndContainerSum(t *testing.T) {
 	}
 }
 
-// TestUsageRequestsPreferTheRunningPodDuringARollout covers the window a
-// Recreate-strategy rollout spends with two pods under the same label. The
-// reading has to report the pod the scheduler admitted -- the Running one --
-// rather than whichever the API server happened to list first, which on a
-// terminating predecessor would report the size this environment just left.
 func TestUsageRequestsPreferTheRunningPodDuringARollout(t *testing.T) {
 	pods := `{"items": [
       {
@@ -129,11 +105,6 @@ func TestUsageRequestsPreferTheRunningPodDuringARollout(t *testing.T) {
 	}
 }
 
-// TestUsageRequestsStateAnUnreadableQuantityRatherThanDroppingIt covers the one
-// wrong answer that matters here: a declared request this parser cannot read
-// must not silently become zero. A smaller-than-declared reservation is
-// indistinguishable from a real one on every surface, and it understates the
-// exact figure an operator is sizing a node against.
 func TestUsageRequestsStateAnUnreadableQuantityRatherThanDroppingIt(t *testing.T) {
 	pod := `{"items": [{
       "metadata": {"name": "erun-devops-1"},
@@ -149,10 +120,6 @@ func TestUsageRequestsStateAnUnreadableQuantityRatherThanDroppingIt(t *testing.T
 	}
 }
 
-// TestRuntimeUsageCarriesThePodsRequestsAndSurvivesAnUnreadablePodSpec is the
-// wiring half: the reading reaches RuntimeUsage.Requests, and a pod spec that
-// cannot be read costs the reservation figures alone -- the cgroup reading
-// beside them is the one thing this call must never lose.
 func TestRuntimeUsageCarriesThePodsRequestsAndSurvivesAnUnreadablePodSpec(t *testing.T) {
 	reading := strings.Join([]string{
 		"cgroup_type=cgroup2fs",
@@ -188,13 +155,6 @@ func TestRuntimeUsageCarriesThePodsRequestsAndSurvivesAnUnreadablePodSpec(t *tes
 	})
 }
 
-// TestEffectiveKubernetesPodRequestsIsTheOneAdmissionRule covers the exported
-// entry point the desktop's node-capacity reading consumes. That reading sums
-// the rule over every pod on a node to answer what the scheduler can still
-// admit there, so it must get the same answer the per-environment usage
-// reading does -- a second spelling of "max over the init containers, sum over
-// the containers" would report free capacity the scheduler does not have, and
-// would do it silently, since both spellings return a plausible number.
 func TestEffectiveKubernetesPodRequestsIsTheOneAdmissionRule(t *testing.T) {
 	requests, err := EffectiveKubernetesPodRequests(
 		[]KubernetesContainerResources{
@@ -210,8 +170,6 @@ func TestEffectiveKubernetesPodRequestsIsTheOneAdmissionRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EffectiveKubernetesPodRequests: %v", err)
 	}
-	// The containers sum to 500m/2GiB and the init phase peaks at 100m/64Mi, so
-	// the containers are what the scheduler admits the pod on.
 	if requests.CPUMilli != 500 || requests.MemoryBytes != 2048*(1<<20) {
 		t.Fatalf("pod request = %d millicores / %d bytes, want the containers' 500m / 2GiB", requests.CPUMilli, requests.MemoryBytes)
 	}
@@ -227,8 +185,6 @@ func TestEffectiveKubernetesPodRequestsIsTheOneAdmissionRule(t *testing.T) {
 		t.Fatalf("pod request = %d millicores, want the init phase's 2 CPU", raised.CPUMilli)
 	}
 
-	// A declared quantity this parser cannot read is an error, never a dropped
-	// zero: an understated reservation reports free capacity that is not there.
 	if _, err := EffectiveKubernetesPodRequests(
 		[]KubernetesContainerResources{{Name: "erun-devops", Requests: map[string]string{"cpu": "plenty"}}},
 		nil,

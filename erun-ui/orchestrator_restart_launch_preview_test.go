@@ -10,8 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// requireLoneRestartPreviewNotice fails unless the preview names only id, with
-// a notice carrying every one of wants.
 func requireLoneRestartPreviewNotice(t *testing.T, preview []core.DesktopRestartReopen, id string, wants ...string) {
 	t.Helper()
 	if len(preview) != 1 || preview[0].OrchestratorID != id {
@@ -24,10 +22,6 @@ func requireLoneRestartPreviewNotice(t *testing.T, preview []core.DesktopRestart
 	}
 }
 
-// TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused: the agent keeps
-// running through a restart, but a desktop that refuses to reopen it leaves the
-// operator without a terminal on it, so the preview says so while it can still
-// be fixed.
 func TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused(t *testing.T) {
 	app, restoreDir := restartTestApp(t)
 	var credentialErr error

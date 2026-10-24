@@ -11,11 +11,6 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// TestCreateEnvironmentAdoptRegistersWithoutDeploy: adopting a runtime
-// environment that already runs somewhere the operator manages
-// records the row and dispatches no deploy, even though the type is
-// runtime — the case the ordinary create path would otherwise refuse
-// (errCrossClusterPlacementUnsupported) or deploy into (a pinned version).
 func TestCreateEnvironmentAdoptRegistersWithoutDeploy(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{
 		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, KubernetesContext: "primary",
@@ -37,8 +32,6 @@ func TestCreateEnvironmentAdoptRegistersWithoutDeploy(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentAdoptRequiresKubernetesContext: an adopt request
-// names nothing to record without a kubernetesContext.
 func TestCreateEnvironmentAdoptRequiresKubernetesContext(t *testing.T) {
 	environments := &stubEnvironmentRepository{}
 	rec := postCreateEnvironment(t, environments, underCapQuota, `{"name":"prod","type":"runtime","adopt":true}`)
@@ -50,8 +43,6 @@ func TestCreateEnvironmentAdoptRequiresKubernetesContext(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentAdoptForbidsRuntimeVersion: a runtimeVersion would
-// start a deploy on the ordinary path, exactly what adopt must never do.
 func TestCreateEnvironmentAdoptForbidsRuntimeVersion(t *testing.T) {
 	environments := &stubEnvironmentRepository{}
 	rec := postCreateEnvironment(t, environments, underCapQuota,
@@ -64,8 +55,6 @@ func TestCreateEnvironmentAdoptForbidsRuntimeVersion(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentAdoptForbidsContextID: adopt records a raw
-// kubernetesContext, not a platform-managed placement reference.
 func TestCreateEnvironmentAdoptForbidsContextID(t *testing.T) {
 	environments := &stubEnvironmentRepository{}
 	rec := postCreateEnvironment(t, environments, underCapQuota,
@@ -78,10 +67,6 @@ func TestCreateEnvironmentAdoptForbidsContextID(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentAdoptSkipsRuntimeResourceQuotaFloor: adopting
-// consumes no platform-managed cluster capacity, so a quota below the
-// runtime namespace floor — which the ordinary create path refuses (see
-// TestCreateEnvironmentRejectsQuotaBelowRuntimeFloor) — must not block it.
 func TestCreateEnvironmentAdoptSkipsRuntimeResourceQuotaFloor(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{
 		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRuntime, KubernetesContext: "primary",
@@ -105,10 +90,6 @@ func TestCreateEnvironmentAdoptSkipsRuntimeResourceQuotaFloor(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentAdoptWithoutIntentStillBehavesAsCreate: a name that
-// happens to match an existing local environment, submitted without adopt
-// set, still creates a fresh row exactly as before adopt existed — adopting
-// is never inferred from a name collision.
 func TestCreateEnvironmentAdoptWithoutIntentStillBehavesAsCreate(t *testing.T) {
 	environments := &stubEnvironmentRepository{created: model.Environment{
 		EnvironmentID: "env-1", Name: "prod", Type: model.EnvironmentTypeRemoteAgent, KubernetesContext: "primary",
@@ -124,9 +105,6 @@ func TestCreateEnvironmentAdoptWithoutIntentStillBehavesAsCreate(t *testing.T) {
 	}
 }
 
-// TestCreateEnvironmentPreviewAdoptRendersAdoptPlanWithoutDeployLine: the
-// preview an operator sees before adopting must never claim a deploy will
-// happen — the "preview that cannot model what submit does" defect class.
 func TestCreateEnvironmentPreviewAdoptRendersAdoptPlanWithoutDeployLine(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 2}
 	rec := postCreateEnvironmentPreview(t, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{

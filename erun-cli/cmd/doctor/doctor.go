@@ -94,8 +94,7 @@ func NewDoctorCmd(resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, err
 }
 
 func runDoctorCommand(ctx core.Context, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloud.CloudContextDependencies, promptRunner shared.PromptRunner, options doctorOptions, args []string) error {
-	// In-pod invocations target remote-init recovery instead; the host root
-	// config the checks below would inspect does not exist in the pod.
+	// The host root config does not exist in the pod.
 	if config.IsInRuntimeEnvironment(os.Getenv) {
 		return runDoctorInRuntime(ctx, promptRunner, options)
 	}
@@ -119,11 +118,7 @@ func runDoctorCommand(ctx core.Context, resolveOpen func(sharedpkg.OpenParams) (
 	ctx, closeEnvTrace := e2e.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
 
-	// The desktop pipes `erun doctor` into its shared Local shell, which never
-	// produces a PTY exit (see erun-ui/AGENTS.md § "Command Completion And
-	// State-Refresh Wiring"), so these are the only completion signal the
-	// desktop has: an activity-queue entry to show doctor running, and a
-	// recorded outcome the Manage dialog can display as the last run's result.
+	// The desktop's Local shell never sees a PTY exit, so these lines are its only completion signal.
 	ctx.Info(fmt.Sprintf("==> Doctor %s/%s", result.Tenant, result.Environment))
 	if err := runDoctorForTarget(ctx, configStore, promptRunner, result, options); err != nil {
 		ctx.Info(fmt.Sprintf("==> Doctor failed %s/%s: %s", result.Tenant, result.Environment, err.Error()))
@@ -133,16 +128,8 @@ func runDoctorCommand(ctx core.Context, resolveOpen func(sharedpkg.OpenParams) (
 	return nil
 }
 
-// runDoctorForTarget reports in the order a broken environment needs: the
-// helm release and pod state first, because nothing about reading them
-// requires the runtime pod to be up, and that is exactly the state most worth
-// diagnosing when it is not. Every check after it that does need the pod
-// (host credentials, the resource-pressure reading, the docker-storage
-// inspection) degrades to a "could not read" report instead of aborting, so a
-// down pod stops none of the checks that do not need it. The
-// resource-pressure section sits with those read-only pod checks rather than
-// with the cleanup tail, because it is a diagnosis: nothing about it mutates
-// the environment, and the resize it recommends is left for the operator.
+// runDoctorForTarget reports helm and pod state first since they need no running
+// pod; later pod-dependent checks degrade to "could not read" instead of aborting.
 func runDoctorForTarget(ctx core.Context, configStore config.ConfigStore, promptRunner shared.PromptRunner, result config.OpenResult, options doctorOptions) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Target: %s/%s\n", result.Tenant, result.Environment); err != nil {
 		return err
@@ -150,8 +137,6 @@ func runDoctorForTarget(ctx core.Context, configStore config.ConfigStore, prompt
 	if err := reportProjectConfigAndExecutionModes(ctx, result); err != nil {
 		return err
 	}
-	// The erun-level gateway catalog arrives on the resolved target, so the
-	// diagnosis judges the same routing the AI launch uses.
 	req := cloud.ShellLaunchParamsFromResult(result)
 	diagnosis, err := runDeployDiagnosis(ctx, req)
 	if err != nil {
@@ -172,13 +157,7 @@ func runDoctorForTarget(ctx core.Context, configStore config.ConfigStore, prompt
 	return runDoctorPostSyncActions(ctx, promptRunner, result, req, diagnosis, options)
 }
 
-// reportDeployDiagnosisSections writes the read-only sections that report what
-// the deploy diagnosis found: the environment's image and registry
-// configuration, the credentials injected into its runtime pod, and whether
-// that pod carries the model-provider wiring it was deployed with. They read as
-// one sequence because they share a shape -- each states one fact about the
-// environment as deployed, and none of them mutates anything -- and they are
-// grouped here rather than inlined so the section list stays a list.
+// reportDeployDiagnosisSections writes the read-only deploy diagnosis sections.
 func reportDeployDiagnosisSections(ctx core.Context, configStore config.ConfigStore, result config.OpenResult, diagnosis deploy.DeployDiagnosisResult) error {
 	sections := []func() error{
 		func() error { return reportRuntimeImageRegistryMismatch(ctx, result) },
@@ -195,8 +174,6 @@ func reportDeployDiagnosisSections(ctx core.Context, configStore config.ConfigSt
 	return nil
 }
 
-// reportProjectConfigAndExecutionModes runs the two checks that need neither
-// req nor a deploy diagnosis, ahead of everything that does.
 func reportProjectConfigAndExecutionModes(ctx core.Context, result config.OpenResult) error {
 	if err := reportProjectConfigTracked(ctx, result); err != nil {
 		return err
@@ -204,13 +181,8 @@ func reportProjectConfigAndExecutionModes(ctx core.Context, result config.OpenRe
 	return reportExecutionModes(ctx)
 }
 
-// reportProjectConfigTracked reports when this environment's project config
-// (.erun/config.yaml) exists but is excluded by .gitignore -- a silent
-// onboarding failure: it resolves fine on this machine and nowhere else,
-// because git never sees it, so the same build/deploy elsewhere falls back to
-// unconfigured defaults with no clue why. A detection failure (no git
-// repository, no config file at all) is not reported; only a config that
-// resolves yet is untracked is worth flagging here.
+// reportProjectConfigTracked flags a .erun/config.yaml that resolves here but is
+// gitignored, so it silently falls back to defaults elsewhere.
 func reportProjectConfigTracked(ctx core.Context, result config.OpenResult) error {
 	if !projectConfigGitIgnored(ctx, result.RepoPath) {
 		return nil
@@ -224,9 +196,6 @@ func projectConfigGitIgnored(ctx core.Context, repoPath string) bool {
 	return err == nil && present && ignored
 }
 
-// runDoctorPostSyncActions runs the JetBrains Gateway repair and then the
-// remaining cleanup actions, unless the JetBrains repair was the only action
-// requested. It is the tail of runDoctorCommand's diagnosis sequence.
 func runDoctorPostSyncActions(ctx core.Context, promptRunner shared.PromptRunner, result config.OpenResult, req config.ShellLaunchParams, diagnosis deploy.DeployDiagnosisResult, options doctorOptions) error {
 	repairedJetBrains, err := runSelectedJetBrainsGatewayRepair(ctx, promptRunner, result, options)
 	if err != nil {
@@ -238,10 +207,7 @@ func runDoctorPostSyncActions(ctx core.Context, promptRunner shared.PromptRunner
 	return runDoctorCleanupActions(ctx, promptRunner, result, req, diagnosis, options)
 }
 
-// runDoctorConfigRepairs runs the host-side config recoveries before
-// resolveOpen: a broken root config (the motivating failure mode — missing
-// CloudProviders that block resolveOpen) or a corrupted per-env config would
-// otherwise block the resolve the rest of doctor relies on.
+// runDoctorConfigRepairs runs before resolveOpen, which a broken config would block.
 func runDoctorConfigRepairs(ctx core.Context, configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloud.CloudContextDependencies, promptRunner shared.PromptRunner, options doctorOptions, args []string) (bool, error) {
 	if _, err := runRootConfigDoctor(ctx, configStore, cloudDeps, cloudContextDeps, promptRunner, options); err != nil {
 		return false, err
@@ -283,9 +249,8 @@ func doctorOnlyRestoreEnvConfig(options doctorOptions) bool {
 		!options.finishRemoteInit
 }
 
-// validateDoctorRecoveryFlags rejects asking for both helm-level recoveries at
-// once: clearing a pending lock and rolling back are alternative fixes, and
-// running both in one invocation steps the release back a revision too far.
+// validateDoctorRecoveryFlags rejects both helm recoveries at once: running both
+// steps the release back a revision too far.
 func validateDoctorRecoveryFlags(options doctorOptions) error {
 	if options.clearPendingHelm && options.rollback {
 		return errors.New("--clear-pending-helm and --rollback are alternative recoveries; pass only one")
@@ -293,14 +258,8 @@ func validateDoctorRecoveryFlags(options doctorOptions) error {
 	return nil
 }
 
-// runDoctorCleanupActions runs the mutating helm-level recovery (if the
-// diagnosis recommends one and the operator confirms it), then the
-// docker-storage inspection and any requested prune actions against the daemon
-// that holds this environment's build images. An unreachable cluster degrades
-// this whole tail to a single "could not read" report rather than one of them
-// aborting with a raw exec error — unless the daemon is this machine's own,
-// which a host environment's is: that one needs neither the pod nor the
-// cluster, so an unreachable cluster says nothing about it.
+// runDoctorCleanupActions degrades to one "could not read" report on an unreachable
+// cluster, except for a host environment's local daemon.
 func runDoctorCleanupActions(ctx core.Context, promptRunner shared.PromptRunner, result config.OpenResult, req config.ShellLaunchParams, diagnosis deploy.DeployDiagnosisResult, options doctorOptions) error {
 	daemon := doctor.ResolveDoctorDockerDaemon(req)
 	if err := runDeployRecoveryActions(ctx, promptRunner, req, options, diagnosis); err != nil {
@@ -316,16 +275,8 @@ func runDoctorCleanupActions(ctx core.Context, promptRunner shared.PromptRunner,
 	return runDoctorSelectedPrunes(ctx, promptRunner, result, req, options)
 }
 
-// reportDoctorDockerStorage reads the environment's docker storage and reports
-// it, opening with the line that names the daemon every figure below it came
-// from — without it a table from an empty daemon reads exactly like one from
-// the daemon the build just measured.
-//
-// It reports whether the run continues to the prune actions. A read that could
-// not happen is already reported in full and stops this tail: the prunes act on
-// the same daemon, so attempting them would fail for the cause just named (see
-// reportDoctorInspectionUnreachable). Only the refusal of a prune that was
-// explicitly requested is an error there.
+// reportDoctorDockerStorage names the daemon before its figures, and reports
+// whether the prune actions should run (they share the same daemon).
 func reportDoctorDockerStorage(ctx core.Context, req config.ShellLaunchParams, options doctorOptions) (bool, error) {
 	inspection, err := doctor.RunDoctorInspection(ctx, nil, req)
 	if err != nil {
@@ -340,8 +291,6 @@ func reportDoctorDockerStorage(ctx core.Context, req config.ShellLaunchParams, o
 	return true, writeDoctorCommandOutput(ctx, inspection.Stdout, inspection.Stderr)
 }
 
-// runDoctorSelectedPrunes runs the prune actions the run selected, and reports
-// plainly when it selected none.
 func runDoctorSelectedPrunes(ctx core.Context, promptRunner shared.PromptRunner, result config.OpenResult, req config.ShellLaunchParams, options doctorOptions) error {
 	actions, err := selectedDoctorActions(ctx, promptRunner, result, options, ctx.DryRun)
 	if err != nil {
@@ -358,16 +307,8 @@ func runDoctorSelectedPrunes(ctx core.Context, promptRunner shared.PromptRunner,
 	return nil
 }
 
-// reportDoctorInspectionUnreachable degrades the docker-storage inspection
-// failure to a report and, when the operator requested a prune action that acts
-// on the same daemon, says plainly that it was skipped rather than attempting
-// it and failing with the same cause again.
-//
-// An environment with no daemon holding build images is the one case that does
-// not degrade: nothing is unreachable and nothing is transient there, so a
-// requested prune cannot be skipped as maintenance left undone — it was asked
-// for and cannot be done, and the run fails naming why instead of printing a
-// success that implies space was reclaimed somewhere.
+// reportDoctorInspectionUnreachable reports requested prunes as skipped; with no
+// build daemon at all a requested prune fails instead of implying success.
 func reportDoctorInspectionUnreachable(ctx core.Context, options doctorOptions, err error) error {
 	var unavailable doctor.DoctorDockerDaemonUnavailableError
 	if errors.As(err, &unavailable) {
@@ -389,12 +330,7 @@ func reportDoctorInspectionUnreachable(ctx core.Context, options doctorOptions, 
 	return ferr
 }
 
-// reportDoctorDockerDaemonUnavailable reports a docker-storage section this
-// environment cannot host at all. It deliberately does not borrow the
-// pod-unreachable wording: nothing here is unreachable or transient, and
-// telling an operator to retry once the pod is running would send them back to
-// a check that fails identically every time. The reason itself carries the next
-// step.
+// reportDoctorDockerDaemonUnavailable avoids the retry-later wording: this fails identically every time.
 func reportDoctorDockerDaemonUnavailable(ctx core.Context, err error) error {
 	detail := strings.TrimSpace(err.Error())
 	var unavailable doctor.DoctorDockerDaemonUnavailableError
@@ -405,11 +341,7 @@ func reportDoctorDockerDaemonUnavailable(ctx core.Context, err error) error {
 	return ferr
 }
 
-// reportDoctorCleanupSkippedUnreachable mirrors reportDoctorInspectionUnreachable
-// for the case where an earlier section already confirmed the cluster is
-// unreachable: it reports the same skip and the same "no prune action ran"
-// outcome without paying a second kubectl exec timeout to rediscover what the
-// helm release status section already proved.
+// reportDoctorCleanupSkippedUnreachable avoids a second kubectl exec timeout once unreachability is known.
 func reportDoctorCleanupSkippedUnreachable(ctx core.Context, options doctorOptions) error {
 	if repErr := reportPodSkippedUnreachable(ctx, "Docker storage"); repErr != nil {
 		return repErr
@@ -426,15 +358,10 @@ func writeNoDoctorActionsSelected(ctx core.Context) error {
 	return err
 }
 
-// deployDiagnosisGuidance points at fixes for the common deploy-failure modes;
-// the desktop Activities panel exposes these same fixes as one-click buttons on
-// a failed deploy card.
+// deployDiagnosisGuidance mirrors the one-click fixes on the desktop's failed deploy card.
 const deployDiagnosisGuidance = "If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release."
 
-// runDeployDiagnosis reports helm release status and pods, read-only, so the
-// reader sees why a deploy failed before deciding on the destructive recovery
-// actions. It runs under --dry-run too: the flag withholds mutations, not
-// reads, and this diagnosis is the whole reason an operator reaches for it.
+// runDeployDiagnosis is read-only, so it runs under --dry-run too.
 func runDeployDiagnosis(ctx core.Context, req config.ShellLaunchParams) (deploy.DeployDiagnosisResult, error) {
 	diagnosis := deploy.RunDeployDiagnosis(ctx, req)
 	if err := writeDeployDiagnosis(ctx, diagnosis); err != nil {
@@ -446,9 +373,7 @@ func runDeployDiagnosis(ctx core.Context, req config.ShellLaunchParams) (deploy.
 	return diagnosis, nil
 }
 
-// runDeployRecoveryActions runs the selected helm-level recovery. The actions
-// mutate the live release, so prompts are gated on an unhealthy diagnosis —
-// `erun doctor` never offers rollback on a healthy env.
+// runDeployRecoveryActions prompts only on an unhealthy diagnosis.
 func runDeployRecoveryActions(ctx core.Context, promptRunner shared.PromptRunner, req config.ShellLaunchParams, options doctorOptions, diagnosis deploy.DeployDiagnosisResult) error {
 	actions, err := selectedDeployRecoveryActions(ctx, promptRunner, req, options, diagnosis, ctx.DryRun)
 	if err != nil {
@@ -474,10 +399,7 @@ func runDeployRecoveryActions(ctx core.Context, promptRunner shared.PromptRunner
 	return nil
 }
 
-// selectedDeployRecoveryActions resolves which recovery to run: explicit flags
-// win, else the interactive path offers a single confirm for the one recovery
-// that fits the diagnosis — clearing a pending lock and rolling back are
-// alternative fixes, and running both is wrong.
+// selectedDeployRecoveryActions lets explicit flags win, else offers the one recovery that fits.
 func selectedDeployRecoveryActions(ctx core.Context, promptRunner shared.PromptRunner, req config.ShellLaunchParams, options doctorOptions, diagnosis deploy.DeployDiagnosisResult, dryRun bool) ([]deploy.DeployRecoveryAction, error) {
 	if options.clearPendingHelm {
 		return []deploy.DeployRecoveryAction{deploy.DeployRecoveryClearPendingHelm}, nil
@@ -520,9 +442,7 @@ func writeDeployDiagnosis(ctx core.Context, diagnosis deploy.DeployDiagnosisResu
 }
 
 func runSelectedDoctorAction(ctx core.Context, req config.ShellLaunchParams, action doctor.DoctorAction) error {
-	// The line names the daemon this action will act on: the same action
-	// against a daemon that does not hold this environment's build images
-	// reclaims nothing, and the reader has to be able to tell which one ran.
+	// Name the daemon: the same action against the wrong daemon reclaims nothing.
 	if _, err := fmt.Fprintf(ctx.Stdout, "Running: %s\n", doctor.DoctorActionDescriptionOn(action, doctor.ResolveDoctorDockerDaemon(req))); err != nil {
 		return err
 	}
@@ -558,13 +478,8 @@ func selectedDoctorActions(ctx core.Context, promptRunner shared.PromptRunner, r
 	if len(selected) > 0 || dryRun || promptRunner == nil {
 		return selected, nil
 	}
-	// doctor is the command reached for when a deploy has already failed, which
-	// is exactly when the caller is an orchestrator, a CI job, or an agent — none
-	// of which have a terminal to answer a prompt on. These prunes are optional
-	// maintenance with explicit flags of their own, so with no terminal they are
-	// skipped and named as skipped, never turned into a failed check: a
-	// diagnostic that reports "environment broken" because nobody answered an
-	// optional prompt is worse than one that says what it did not do.
+	// Callers without a terminal (orchestrators, CI, agents) get optional prunes
+	// reported as skipped, never as a failed check.
 	if !shared.StdinIsTerminal() {
 		return selected, writeOptionalDoctorPromptsSkipped(ctx, result, doctorPromptsNoTerminal)
 	}
@@ -578,22 +493,13 @@ func selectedDoctorActions(ctx core.Context, promptRunner shared.PromptRunner, r
 	return append(selected, prompted...), nil
 }
 
-// The two reasons the optional prompts went unasked differ in cause and so in
-// what the reader should do about them, and the report says which one happened
-// rather than prescribing a fix for the wrong one.
 const (
 	doctorPromptsNoTerminal  = "stdin is not a terminal, so there was nobody to answer the prompt"
 	doctorPromptsStdinClosed = "stdin closed before the prompt could be answered"
 )
 
-// doctorConfirm answers a confirm doctor offers for a step it cannot simply
-// skip, such as a recovery that mutates the live release. A reader that went
-// away is a declined answer -- the default these prompts already document --
-// and not a diagnosis: letting EOF surface as an error turns it into "Doctor
-// failed <tenant>/<env>", which reads as a verdict on an environment nothing
-// was wrong with, to the caller that never got the report it asked for. The
-// line names the step that was not run and how to run it without a prompt, so
-// the caller still has a next action. A real prompt failure still propagates.
+// doctorConfirm treats EOF as a declined answer, naming the skipped step and its
+// flag, so a missing reader does not read as an environment failure.
 func doctorConfirm(ctx core.Context, promptRunner shared.PromptRunner, label, withoutPrompt string) (bool, error) {
 	confirmed, err := shared.ConfirmPrompt(promptRunner, label)
 	if !errors.Is(err, promptui.ErrEOF) {
@@ -604,10 +510,7 @@ func doctorConfirm(ctx core.Context, promptRunner shared.PromptRunner, label, wi
 	return false, writeErr
 }
 
-// promptForDoctorActions asks about each optional prune action. unasked reports
-// that the reader hit EOF instead of answering: a terminal that closed mid-run
-// is still nobody declining optional maintenance, so the caller reports those
-// actions as skipped rather than failing the diagnosis over them.
+// promptForDoctorActions reports unasked when the reader hit EOF.
 func promptForDoctorActions(promptRunner shared.PromptRunner, result config.OpenResult) ([]doctor.DoctorAction, bool, error) {
 	selected := make([]doctor.DoctorAction, 0, len(doctor.DoctorActions()))
 	for _, action := range doctor.DoctorActions() {
@@ -625,11 +528,7 @@ func promptForDoctorActions(promptRunner shared.PromptRunner, result config.Open
 	return selected, false, nil
 }
 
-// writeOptionalDoctorPromptsSkipped names each optional prune action that went
-// unasked and says plainly that it was skipped rather than run or failed. It
-// returns only write errors: a caller that could not be asked anything is not a
-// failed check, and doctor's exit code must reflect the environment's health,
-// not the absence of somebody to answer a prompt.
+// writeOptionalDoctorPromptsSkipped returns only write errors; no answerer is not a failed check.
 func writeOptionalDoctorPromptsSkipped(ctx core.Context, result config.OpenResult, reason string) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Optional cleanup steps in %s/%s not checked: %s. These are optional maintenance, not failed checks.\n", result.Tenant, result.Environment, reason); err != nil {
 		return err

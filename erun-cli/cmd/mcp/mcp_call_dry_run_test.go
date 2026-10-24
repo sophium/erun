@@ -18,13 +18,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
-// TestCallMCPToolWithReattachDryRunNeverReattaches locks the preview contract on
-// the shared reattach choke point every host-side edge call goes through: a
-// --dry-run reports an unreachable channel instead of spawning the
-// `erun open --reconnect` that re-establishes it. That spawn is real work which
-// outlives the preview, so the assertion is that it was never invoked -- a
-// process table read from inside the suite would race the child's own exit and
-// cannot establish that the preview left nothing behind.
+// The reattach spawn outlives the preview, so assert it was never invoked rather than reading the process table.
 func TestCallMCPToolWithReattachDryRunNeverReattaches(t *testing.T) {
 	seedDesktopIdentityForTest(t)
 
@@ -51,8 +45,6 @@ func TestCallMCPToolWithReattachDryRunNeverReattaches(t *testing.T) {
 		t.Fatalf("--dry-run reattached %v, want no reattach at all", spawned)
 	}
 
-	// The guard must stop the preview only: a real run still recovers the
-	// channel, which is the whole reason this choke point exists.
 	_, _ = shared.CallMCPToolWithReattach(context.Background(), testCommandContext(t, false), target, "whip", map[string]any{}, false)
 	if len(spawned) != 1 || spawned[0] != "team/dev" {
 		t.Fatalf("a real run reattached %v, want exactly team/dev", spawned)
@@ -71,8 +63,6 @@ func swapReattachMCPChannel(replacement func(core.Context, string, string) error
 	return func() { shared.ReattachMCPChannel = original }
 }
 
-// closedLoopbackPort returns a loopback port with nothing listening on it, so
-// the call fails as unreachable without depending on any external service.
 func closedLoopbackPort(t *testing.T) int {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -90,9 +80,7 @@ func closedLoopbackPort(t *testing.T) int {
 	return port
 }
 
-// seedDesktopIdentityForTest writes an ed25519 identity where the CLI resolves
-// it, so minting the call's bearer succeeds and the call reaches the dial
-// rather than failing before the branch under test.
+// seedDesktopIdentityForTest lets bearer minting succeed so the call reaches the dial.
 func seedDesktopIdentityForTest(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())

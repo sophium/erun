@@ -1,8 +1,3 @@
-// tenantInviteRequestApi wraps the invite-requests Wails methods
-// (tenant_platform_invite_requests.go): submitting a request, checking the
-// caller's own status, the operator/admin queue's approve/decline, and the
-// sidebar's per-tenant enrollment status poll.
-
 import type {
   UIDecideInviteRequestInput,
   UIDeclineInviteRequestInput,

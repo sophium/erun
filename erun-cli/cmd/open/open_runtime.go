@@ -31,9 +31,7 @@ func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq config.ShellLaunchParam
 }
 
 func (r *resolvedOpenRunner) resolveRuntimeExecution() (deploy.DeploySpec, error) {
-	// Heal envs created by older binaries: their tenant Chart.yaml is pinned to
-	// the literal "1.0.0" placeholder, so helm keeps pulling an erun-devops:1.0.0
-	// image that was never published and every rollout fails at pod startup.
+	// Older envs pin Chart.yaml to the unpublished "1.0.0" placeholder.
 	appVersion := strings.TrimSpace(r.result.EnvConfig.RuntimeVersion)
 	if appVersion == "" {
 		appVersion = shared.CurrentBuildInfo().Version
@@ -94,15 +92,7 @@ func (r *resolvedOpenRunner) deployRuntime(execution deploy.DeploySpec) error {
 	if err := deploy.RunDeploySpec(r.ctx, execution, r.openHelmDeployer(execution)); err != nil {
 		return err
 	}
-	// Persist through the same shared writer `erun deploy`/`erun upgrade` use
-	// (common.PersistRuntimeVersionFromDeploySpecs) instead of a hand-rolled
-	// subset: the hand-rolled version only ever wrote RuntimeVersion and
-	// RuntimeRegistry, so an operator's own --runtime-image on `open --deploy`
-	// installed correctly this one time and then was silently forgotten on the
-	// next plain open/deploy. The shared writer also heals RuntimeRunningImage, a
-	// stated RuntimeChart, and the MCP-auth key, and already knows to heal to
-	// the running version instead of a never-pushed snapshot when every image
-	// came from the fingerprint cache (SkipHelm).
+	// The shared writer also persists RuntimeImage and heals to the running version on a cached no-op.
 	return deploy.PersistRuntimeVersionFromDeploySpecs(r.ctx, []deploy.DeploySpec{execution}, r.options.SaveEnvConfig, r.resolveDeployedVersion)
 }
 
@@ -114,18 +104,13 @@ func (r *resolvedOpenRunner) openHelmDeployer(execution deploy.DeploySpec) deplo
 	)
 }
 
-// ensureRuntimeDeployed fails a pure `open` when the env's runtime is not
-// deployed. Because a port-forward that cannot bind is no longer fatal, a
-// genuinely undeployed runtime is detected here by deployment presence rather
-// than inferred from a downstream forward timeout — this is the accurate signal
-// the desktop surfaces as "deploy this environment".
+// ensureRuntimeDeployed detects an undeployed runtime by deployment presence, the
+// signal the desktop surfaces as "deploy this environment".
 func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
 	release := config.RuntimeReleaseName(r.result.Tenant)
 	namespace := config.KubernetesNamespaceName(r.result.Tenant, r.result.Environment)
 	if r.ctx.DryRun {
-		// Show the check in the dry-run plan, then assume present so the rest of
-		// the plan still renders. CheckKubernetesDeployment emits this same line
-		// itself in real mode.
+		// Dry-run shows the check and assumes present.
 		r.ctx.TraceCommand("", "kubectl", runtimeDeploymentPresenceArgs(r.result.EnvConfig.KubernetesContext, namespace, release)...)
 		return nil
 	}
@@ -141,26 +126,17 @@ func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
 		return err
 	}
 	if !present {
-		// Builds on common.KubernetesDeploymentAbsentMessageMarker so the
-		// desktop, reading only this text across a CLI subprocess boundary, can
-		// tell a genuine absence apart from a check that could not resolve an
-		// answer without re-deriving kubectl's own error grammar.
+		// The marker lets the desktop tell absence from an unresolved check across the CLI boundary.
 		return fmt.Errorf("runtime for %s/%s "+deploy.KubernetesDeploymentAbsentMessageMarker+" %q not found in namespace %q); run `erun deploy %s %s` first",
 			r.result.Tenant, r.result.Environment, release, namespace, r.result.Tenant, r.result.Environment)
 	}
 	return nil
 }
 
-// prepareRuntime brings the environment to a state the rest of open can use:
-// deploy when the operator asked for it, otherwise verify the runtime is there,
-// and either way start it if it was stopped. The wake comes last because it is
-// the step that must hold immediately before the port-forwards.
+// prepareRuntime deploys or verifies the runtime, then wakes it right before the port-forwards.
 func (r *resolvedOpenRunner) prepareRuntime(shellReq config.ShellLaunchParams) error {
 	if r.options.Deploy {
-		// --deploy is operator-convenience only (root AGENTS.md § "Command
-		// primitives vs orchestration"): programmatic callers like the desktop
-		// must NOT use it — they compose build→push→deploy themselves and open
-		// the pure shell.
+		// --deploy is operator convenience; programmatic callers compose build→push→deploy themselves.
 		if err := r.maybeDeployRuntime(shellReq); err != nil {
 			return err
 		}
@@ -170,17 +146,12 @@ func (r *resolvedOpenRunner) prepareRuntime(shellReq config.ShellLaunchParams) e
 			return err
 		}
 	}
-	// Wake before the forwards: kubectl port-forward cannot attach to a
-	// Deployment with zero replicas, so a stopped environment would otherwise
-	// surface as a forward timeout instead of starting.
+	// kubectl port-forward cannot attach to a zero-replica Deployment.
 	return r.ensureRuntimeAwake()
 }
 
-// clearStopIntent records that this environment is wanted running again. It
-// touches only the config, so it is safe to run before the runtime is known to
-// exist (a first `open --deploy` has no Deployment yet). A reconnect declares
-// itself as machine-initiated and is therefore not that statement: the operator
-// stopped the environment, which is what dropped the session being reattached.
+// clearStopIntent touches only config, so it is safe before the runtime exists. A
+// reconnect is not a request to run, so it keeps the stop.
 func (r *resolvedOpenRunner) clearStopIntent() error {
 	if r.options.Reconnect {
 		r.ctx.Trace("open: --reconnect, so any recorded stop stays recorded and a stopped runtime is not started")
@@ -194,11 +165,7 @@ func (r *resolvedOpenRunner) clearStopIntent() error {
 	return nil
 }
 
-// ensureRuntimeAwake scales a stopped environment back to one replica and waits
-// for the rollout. It is quiet for an environment that is already running: the
-// single read below decides, and no scale call is made. A reconnect never
-// scales — a stopped environment fails the reattach instead of being restarted
-// behind the operator.
+// ensureRuntimeAwake scales a stopped env to one replica; a reconnect never scales.
 func (r *resolvedOpenRunner) ensureRuntimeAwake() error {
 	wake, err := lifecycle.EnsureEnvironmentAwake(r.ctx, lifecycle.WakeEnvironmentParams{
 		Result:        r.result,
@@ -247,9 +214,7 @@ func wrapOpenHelmDeployWithSpinner(ctx core.Context, releaseName string, deployH
 	}
 }
 
-// applyRuntimeDeployImageOverride applies a runtime-image override only for
-// published-chart envs; envs on a repo-local chart ignore it because the local
-// chart's templates own their image references.
+// applyRuntimeDeployImageOverride is ignored for repo-local charts, which own their image refs.
 func applyRuntimeDeployImageOverride(ctx core.Context, result config.OpenResult, execution deploy.DeploySpec, runtimeImage string) (deploy.DeploySpec, error) {
 	runtimeImage = strings.TrimSpace(runtimeImage)
 	if runtimeImage == "" {

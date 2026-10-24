@@ -12,10 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// TimingRecordSummary is one entry in a recent-builds listing -- lightweight
-// enough to build without parsing every retained record's full step tree, so
-// `erun build profile` can list history cheaply before a caller picks one
-// record to see in full.
+// TimingRecordSummary is one entry in a recent-builds listing.
 type TimingRecordSummary struct {
 	ID              string  `json:"id"`
 	StartedAt       string  `json:"startedAt"`
@@ -23,11 +20,8 @@ type TimingRecordSummary struct {
 	Failed          bool    `json:"failed"`
 }
 
-// ListTimingRecords returns command's retained records, newest first. limit
-// <= 0 returns every retained record (bounded by maxTimingRecordsRetained,
-// since that is all writeTimingRecord ever keeps on disk). A record file that
-// fails to parse is skipped rather than failing the whole listing -- a
-// half-written or corrupted record must not hide every other one.
+// ListTimingRecords returns command's retained records, newest first; limit <= 0 returns all.
+// Unparseable records are skipped so one corrupt file can't hide the rest.
 func ListTimingRecords(command string, limit int) ([]TimingRecordSummary, error) {
 	dir, err := core.TimingRecordDir()
 	if err != nil {
@@ -61,9 +55,7 @@ func ListTimingRecords(command string, limit int) ([]TimingRecordSummary, error)
 	return summaries, nil
 }
 
-// LoadTimingRecord resolves id -- a record's ID as printed by
-// ListTimingRecords, with or without its .json suffix, or "" / "latest" for
-// command's most recent retained record -- and returns the parsed record.
+// LoadTimingRecord loads a record by ID (with or without .json), or the latest for "" / "latest".
 func LoadTimingRecord(command, id string) (core.TimingRecord, error) {
 	dir, err := core.TimingRecordDir()
 	if err != nil {
@@ -103,10 +95,7 @@ func LoadTimingRecordFile(path string) (core.TimingRecord, error) {
 	return record, nil
 }
 
-// RenderTimingRecordRows renders a loaded TimingRecord as the same
-// duration-ordered, cgroup-annotated table reportStepTiming prints live
-// during a run, so `erun build profile <id>` reads identically to the
-// original run's own "step timing" output.
+// RenderTimingRecordRows renders a record identically to the live step timing table.
 func RenderTimingRecordRows(record core.TimingRecord) []string {
 	label := record.Command
 	if record.Failed {
@@ -123,9 +112,6 @@ func RenderTimingRecordRows(record core.TimingRecord) []string {
 	return rows
 }
 
-// orderedTimingStepJSONRows sorts a record's stably-ordered (insertion-order)
-// JSON children by duration descending, mirroring orderedTimingRows' live
-// equivalent -- the dominant cost is always the first line a reader sees.
 func orderedTimingStepJSONRows(steps []core.TimingStepJSON) []core.TimingStepJSON {
 	sorted := make([]core.TimingStepJSON, len(steps))
 	copy(sorted, steps)

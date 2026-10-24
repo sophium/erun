@@ -37,9 +37,7 @@ func DetectHost() HostInfo {
 	}
 }
 
-// ResolveDetectedHostOS honors ERUN_HOST_OS_OVERRIDE as a test seam so the
-// integration suite can pin platform-dependent goldens on any host; production
-// must never set it.
+// ResolveDetectedHostOS honors ERUN_HOST_OS_OVERRIDE as a test seam; production never sets it.
 func ResolveDetectedHostOS() HostOS {
 	if override := strings.ToLower(strings.TrimSpace(HostOSOverEnv())); override != "" {
 		if classified := classifyHostOS(override); classified != HostOSUnknown {

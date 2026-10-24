@@ -141,9 +141,6 @@ func TestListUsersReturnsAdminResult(t *testing.T) {
 	}
 }
 
-// TestListUsersDefaultsToNoOrgOverride locks today's unchanged behaviour for
-// the common case: omitting ?orgId= must not send an override, so an
-// existing caller keeps seeing the credential's own org.
 func TestListUsersDefaultsToNoOrgOverride(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
 	routes := IdentityRoutes{admin: admin, erunUsers: &stubEnrolledUserLister{}}
@@ -157,9 +154,7 @@ func TestListUsersDefaultsToNoOrgOverride(t *testing.T) {
 	}
 }
 
-// TestListUsersThreadsOrgIDQueryParam is the fix itself: an identity created
-// in another org via orgId is invisible to ListUsers unless that same org is
-// named again on the read.
+// An identity in another org is invisible unless that org is named on the read.
 func TestListUsersThreadsOrgIDQueryParam(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
 	routes := IdentityRoutes{admin: admin, erunUsers: &stubEnrolledUserLister{}}
@@ -173,10 +168,6 @@ func TestListUsersThreadsOrgIDQueryParam(t *testing.T) {
 	}
 }
 
-// TestListUsersDefaultsMembershipJoinToCallersOwnTenant locks today's
-// unchanged behaviour: omitting ?tenantId= must keep cross-referencing
-// against the caller's own resolved tenant, so an existing caller sees no
-// change.
 func TestListUsersDefaultsMembershipJoinToCallersOwnTenant(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
 	erunUsers := &stubEnrolledUserLister{}
@@ -191,12 +182,7 @@ func TestListUsersDefaultsMembershipJoinToCallersOwnTenant(t *testing.T) {
 	}
 }
 
-// TestListUsersThreadsTenantIDQueryParamForMembershipJoin is the fix itself:
-// the membership join must target the tenant being administered, not the
-// caller's own resolved tenant -- otherwise every row
-// from another org misses the join against its genuine members and renders
-// "IdP only, not enrolled" for people who really are enrolled, just in a
-// different tenant.
+// The join must target the administered tenant, or members of other orgs render as IdP-only.
 func TestListUsersThreadsTenantIDQueryParamForMembershipJoin(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
 	erunUsers := &stubEnrolledUserLister{}
@@ -211,9 +197,7 @@ func TestListUsersThreadsTenantIDQueryParamForMembershipJoin(t *testing.T) {
 	}
 }
 
-// TestListUsersDistinguishesEnrolledFromIdPOnly: a self-registered IdP account with no erun mapping must
-// not render identically to an actual tenant member. It also proves the
-// machine-account signal survives the merge unchanged.
+// Also proves the machine-account signal survives the merge.
 func TestListUsersDistinguishesEnrolledFromIdPOnly(t *testing.T) {
 	admin := &stubIdentityAdminClient{users: []zitadel.User{
 		{ID: "sub-alice", Username: "alice", Email: "alice@example.com"},
@@ -247,14 +231,7 @@ func TestListUsersDistinguishesEnrolledFromIdPOnly(t *testing.T) {
 	}
 }
 
-// TestListUsersReportsErunUsernameAlongsideIdPUsername locks the backend
-// half: an enrolled row's own erun username travels alongside the
-// IdP's own username field rather than being merged away, so a client can
-// render both when they diverge, since the erun username is what a caller
-// sees everywhere else (whoami's `username`, reviews, audit entries). The row's own `id` is
-// asserted too: it is the OIDC subject, the one stable value that actually
-// joins the two directories, and it must keep flowing through unrenamed for
-// a client to recognize "this is the same person" against whoami's subject.
+// `id` is the OIDC subject, the one value joining both directories.
 func TestListUsersReportsErunUsernameAlongsideIdPUsername(t *testing.T) {
 	admin := &stubIdentityAdminClient{users: []zitadel.User{
 		{ID: "sub-1", Username: "zadmin@frs.auth.example.com", Email: "admin@example.com"},
@@ -328,12 +305,7 @@ func TestCreateUserReports201WithErrorOnMappingFailure(t *testing.T) {
 	}
 }
 
-// TestCreateUserReportsATakenLoginNameAsUsernameTaken is the route-level half
-// of the reported failure: the instance rejects the create with its bare
-// AlreadyExists conflict, so the caller must get a code and the name they
-// chose rather than the IdP's own account-naming text. It is wrapped the way
-// the service wraps it, so the check proves the error is still recognized
-// through that wrap.
+// The error is wrapped as the service wraps it.
 func TestCreateUserReportsATakenLoginNameAsUsernameTaken(t *testing.T) {
 	enroller := &stubIdentityEnroller{err: fmt.Errorf("create identity provider user: %w",
 		&zitadel.UsernameTakenError{Username: "login-client"})}
@@ -352,10 +324,6 @@ func TestCreateUserReportsATakenLoginNameAsUsernameTaken(t *testing.T) {
 	}
 }
 
-// TestCreateUserForwardsAnUnrelatedConflictFromTheIdP is the crossed state of
-// the test above: a conflict that is not the user-already-exists collision
-// keeps the instance's own status and body, so the caller is not sent to
-// change a login name that was never the problem.
 func TestCreateUserForwardsAnUnrelatedConflictFromTheIdP(t *testing.T) {
 	enroller := &stubIdentityEnroller{err: &zitadel.APIError{
 		StatusCode: http.StatusConflict,
@@ -396,10 +364,6 @@ func TestDeactivateAndReactivateUsePathValue(t *testing.T) {
 	}
 }
 
-// TestDeactivateAndReactivateThreadOrgIDQueryParam is the other half of the
-// fix: an identity created in another org 404s deactivating with no org
-// context, so the route must forward ?orgId= to the client the same way it
-// forwards the path's external_id.
 func TestDeactivateAndReactivateThreadOrgIDQueryParam(t *testing.T) {
 	admin := &stubIdentityAdminClient{}
 	routes := IdentityRoutes{admin: admin}

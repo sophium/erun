@@ -12,10 +12,7 @@ import (
 
 const runtimeMCPRestartDelay = 2 * time.Second
 
-// runtimeMCPEnabled reports whether this container serves the environment's MCP
-// edge. The chart sets ERUN_MCP_ENABLED so an operator can turn the edge off; a
-// chart that predates it leaves it unset, and a configured port then keeps an
-// existing environment serving.
+// A chart that predates ERUN_MCP_ENABLED leaves it unset; a configured port then keeps serving.
 func (b runtimeBoot) runtimeMCPEnabled() bool {
 	value := b.get("ERUN_MCP_ENABLED")
 	if runtimeEnvFlagEnabled(value) {
@@ -38,9 +35,8 @@ func (b runtimeBoot) namespace() string {
 	return strings.TrimSpace(string(data))
 }
 
-// runtimeMCPArgs is the emcp invocation. The bool flag is written
-// --metrics-enabled=<value>: a space-separated value would end Go's flag parsing
-// at the bare "true" and silently drop every flag after it.
+// The bool flag is written --metrics-enabled=<value>: a separate "true" would end Go's
+// flag parsing and drop every later flag.
 func (b runtimeBoot) runtimeMCPArgs() []string {
 	args := []string{
 		"--host", b.getOr("ERUN_MCP_HOST", "0.0.0.0"),
@@ -73,10 +69,6 @@ func describeRuntimeMCP(boot runtimeBoot) string {
 	return "serve the MCP edge, restarting it whenever it exits: " + core.FormatShellCommand("", "emcp", boot.runtimeMCPArgs()...)
 }
 
-// startRuntimeMCP serves the environment's MCP edge from the runtime container
-// itself, so every MCP-driven command runs with the environment's own toolchain.
-// A crashed server is restarted and each restart is logged, so a crash loop stays
-// visible in the container log.
 func startRuntimeMCP(ctx core.Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
 	attempt := 1
 	supervisor.goLoop(func() bool {

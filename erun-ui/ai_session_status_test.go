@@ -12,13 +12,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// aiSessionProbeOutput builds the pod exec's combined output the way
-// aiSessionStatusScript does: the CLI's JSON array between the begin and end
-// markers.
+// aiSessionProbeOutput frames statuses the way aiSessionStatusScript output does.
 func aiSessionProbeOutput(statuses ...model.AISessionStatus) string {
 	if statuses == nil {
-		// The CLI prints an empty list for an environment with nothing
-		// recorded, never null.
+		// The CLI prints an empty list, never null.
 		statuses = []model.AISessionStatus{}
 	}
 	data, err := json.Marshal(statuses)
@@ -28,8 +25,6 @@ func aiSessionProbeOutput(statuses ...model.AISessionStatus) string {
 	return fmt.Sprintf("%s\tbegin\n%s\n%s\tend\n", aiSessionStatusMarker, data, aiSessionStatusMarker)
 }
 
-// reportedAISessionStatus is one resolved status the tool reported at a given
-// time, as erun-common's own resolver would produce it.
 func reportedAISessionStatus(sessionID string, state model.AISessionState, at time.Time) model.AISessionStatus {
 	return model.AISessionStatus{
 		SessionID:    sessionID,
@@ -40,9 +35,7 @@ func reportedAISessionStatus(sessionID string, state model.AISessionState, at ti
 	}
 }
 
-// newAISessionStatusTestApp is an App holding the three maps the badge's
-// decision path touches, with a pod exec that answers with one environment's
-// reading and records the script it was asked to run.
+// newAISessionStatusTestApp's pod exec answers with output and records each script.
 func newAISessionStatusTestApp(output string, execErr error) (*App, *capturedEmits, *[]string) {
 	emits := newCapturedEmits()
 	scripts := &[]string{}
@@ -64,9 +57,7 @@ func newAISessionStatusTestApp(output string, execErr error) (*App, *capturedEmi
 	return app, emits, scripts
 }
 
-// aiStatusTestTab is a latched-busy AI tab whose pod session is still running:
-// the state the reported defect described. The latch was raised by output
-// volume, the stream has since gone quiet, and the claude process is alive.
+// aiStatusTestTab is latched busy by volume, now silent, with a live process.
 func aiStatusTestTab(selection uiSelection) *managedTerminal {
 	return &managedTerminal{
 		kind:          sessionKindAI,
@@ -80,13 +71,8 @@ func aiStatusTestTab(selection uiSelection) *managedTerminal {
 	}
 }
 
-// TestAwaitingInputReleasesTheBadgeOnALiveSession is the reproduction of the
-// defect: an AI tool that reported a turn boundary — its turn ended, and it is
-// waiting on the operator — was still shown as working, because the only two
-// inputs the badge had were output volume (silent, so no opinion) and the pod
-// heartbeat (the claude process is alive, so "still running"). Neither can tell
-// a blocked session from a working one; the tool's own report can, and the
-// badge must take it.
+// A reported awaiting-input boundary must release the badge even though the
+// process is alive and output is silent.
 func TestAwaitingInputReleasesTheBadgeOnALiveSession(t *testing.T) {
 	selection := uiSelection{Tenant: "petios", Environment: "local"}
 	tests := []struct {
@@ -110,8 +96,6 @@ func TestAwaitingInputReleasesTheBadgeOnALiveSession(t *testing.T) {
 			app, emits, _ := newAISessionStatusTestApp("", nil)
 			managed := aiStatusTestTab(selection)
 			app.sessions[managed.key] = managed
-			// The pod reports the session still running, which is what held the
-			// latch open through every silence the tab produced.
 			app.sessionHeartbeats[selectionKey(selection)] = heartbeatFor(true)
 			app.recordAISessionReading(selection, []model.AISessionStatus{
 				reportedAISessionStatus("conv-1", tc.state, time.Now()),
@@ -131,10 +115,7 @@ func TestAwaitingInputReleasesTheBadgeOnALiveSession(t *testing.T) {
 	}
 }
 
-// TestModelReportedWorkLightsTheBadgeWithoutOutput pins the other direction:
-// the badge is the tool's answer, not a threshold crossing. An agent inside a
-// long silent tool call has produced nothing to measure, and the report is the
-// only thing that can say it is working.
+// A reported working state lights the badge without any output.
 func TestModelReportedWorkLightsTheBadgeWithoutOutput(t *testing.T) {
 	selection := uiSelection{Tenant: "petios", Environment: "local"}
 	app, emits, scripts := newAISessionStatusTestApp(
@@ -160,8 +141,7 @@ func TestModelReportedWorkLightsTheBadgeWithoutOutput(t *testing.T) {
 	if !managed.aiModelLatch {
 		t.Fatalf("a latch the tool raised must be marked as such, so pod liveness does not hold it open")
 	}
-	// The read names its target explicitly rather than relying on the pod's own
-	// environment context.
+	// The read names its target explicitly.
 	if len(*scripts) != 1 {
 		t.Fatalf("expected exactly one pod read, got %d", len(*scripts))
 	}
@@ -172,12 +152,7 @@ func TestModelReportedWorkLightsTheBadgeWithoutOutput(t *testing.T) {
 	}
 }
 
-// TestReportedStateOutranksVolumeWhenTheToolRepaints pins that the two sources
-// do not both get a say. A tool blocked on the human can still repaint its
-// prompt, and those redraws would keep raising a badge the report keeps
-// clearing — a badge flickering between two inputs is worse than either answer.
-// So where the tool reports its own state, volume stands down completely: the
-// poller owns the latch, and the repaints leave it alone.
+// Where the tool reports state, repaint volume must not raise the badge.
 func TestReportedStateOutranksVolumeWhenTheToolRepaints(t *testing.T) {
 	selection := uiSelection{Tenant: "petios", Environment: "local"}
 	tests := []struct {
@@ -207,8 +182,6 @@ func TestReportedStateOutranksVolumeWhenTheToolRepaints(t *testing.T) {
 			app, emits, _ := newAISessionStatusTestApp("", nil)
 			managed := aiStatusTestTab(selection)
 			managed.aiBusyEmitted = false
-			// Sustained output: five seconds of it, unbroken up to now, which
-			// is what the volume rule needs to raise the badge on its own.
 			managed.aiActiveSince = time.Now().Add(-(aiActivitySustainedThreshold + time.Second))
 			managed.aiLastOutput = time.Now()
 			app.sessions[managed.key] = managed
@@ -234,11 +207,7 @@ func TestReportedStateOutranksVolumeWhenTheToolRepaints(t *testing.T) {
 	}
 }
 
-// TestAISessionStatusLeavesTheVolumeLatchAloneWhenItSaysNothing pins that the
-// new input only ever decides when it has something to say about this tab. A
-// record left by an earlier session, an environment with nothing recorded, a
-// read that failed, and a read that did not parse are all "no evidence", and
-// the badge keeps the volume behaviour it has always had.
+// Stale, empty, failed, and unparseable reads all leave the volume latch alone.
 func TestAISessionStatusLeavesTheVolumeLatchAloneWhenItSaysNothing(t *testing.T) {
 	selection := uiSelection{Tenant: "petios", Environment: "local"}
 	tests := []struct {
@@ -287,12 +256,7 @@ func TestAISessionStatusLeavesTheVolumeLatchAloneWhenItSaysNothing(t *testing.T)
 	}
 }
 
-// TestModelLatchIsReleasedWhenItsReportStopsArriving guards the pinning hazard
-// the pod heartbeat cannot reach: a latch the tool raised is re-asserted by its
-// own report, never by pod liveness, so when the reports stop the latch has to
-// go even though the program is still running. Otherwise a report that quietly
-// stops arriving would leave the row spinning forever — the failure this
-// desktop has already paid for once on the orchestrator path.
+// A tool-raised latch must clear when reports stop, even with the process alive.
 func TestModelLatchIsReleasedWhenItsReportStopsArriving(t *testing.T) {
 	selection := uiSelection{Tenant: "petios", Environment: "local"}
 	app, emits, _ := newAISessionStatusTestApp("", nil)
@@ -310,7 +274,6 @@ func TestModelLatchIsReleasedWhenItsReportStopsArriving(t *testing.T) {
 		t.Fatalf("expected the report to raise the latch, got %+v", emits.events(aiActivityEvent))
 	}
 
-	// The report stops arriving while the pod keeps saying the program is up.
 	reading := app.aiSessionReadings[selectionKey(selection)]
 	reading.observedAt = time.Now().Add(-2 * aiSessionStatusTTL)
 	app.aiSessionReadings[selectionKey(selection)] = reading
@@ -329,9 +292,6 @@ func TestModelLatchIsReleasedWhenItsReportStopsArriving(t *testing.T) {
 	}
 }
 
-// TestParseAISessionStatuses pins the reader against the shape the pod actually
-// returns: the CLI's array between the markers, with whatever else the combined
-// pod-exec stream carries around it.
 func TestParseAISessionStatuses(t *testing.T) {
 	tests := []struct {
 		name       string

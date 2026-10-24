@@ -9,12 +9,8 @@ import (
 	"strings"
 )
 
-// ResolveErunExecutable finds the erun binary for a transport that is not itself
-// that binary — the in-environment MCP server supervising a job, the desktop app
-// wiring a per-env MCP proxy — so those callers get a clear failure rather than a
-// launch that silently never happens. A sibling of the running program is
-// preferred over PATH so a source build resolves the binary it was built beside
-// instead of an unrelated installed one.
+// ResolveErunExecutable finds the erun binary, preferring a sibling of the running
+// program over PATH so a source build uses the binary built beside it.
 func ResolveErunExecutable() (string, error) {
 	if override := strings.TrimSpace(os.Getenv("ERUN_ERUN_BIN")); override != "" {
 		return override, nil
@@ -30,7 +26,7 @@ func ResolveErunExecutable() (string, error) {
 	return path, nil
 }
 
-// ErunExecutableName is the on-disk file name of the erun binary for this host.
+// ErunExecutableName is the erun binary's file name on this host.
 func ErunExecutableName() string {
 	if runtime.GOOS == "windows" {
 		return "erun.exe"
@@ -38,11 +34,8 @@ func ErunExecutableName() string {
 	return "erun"
 }
 
-// erunExecutableNearRunningProgram searches beside the running program: the
-// install layout puts every erun executable in one directory, and a source build
-// puts them in each module's own bin/. It is not the mirror of how the CLI finds
-// erun-app — that direction stops at the .app bundle, while a program running
-// from inside one sits three levels below the directory its siblings share.
+// erunExecutableNearRunningProgram searches beside the running program, which
+// inside a macOS .app sits three levels below its siblings' directory.
 func erunExecutableNearRunningProgram(name string) string {
 	executable, err := os.Executable()
 	if err != nil {
@@ -68,9 +61,6 @@ func erunExecutableNear(executable, name string) string {
 	return ""
 }
 
-// executableSiblingRoots lists the directories an erun executable may sit in
-// relative to the running program: its own directory, plus the directory holding
-// the macOS .app bundle it runs inside, if any.
 func executableSiblingRoots(dir string) []string {
 	roots := []string{dir}
 	if container := macOSBundleContainer(dir); container != "" {
@@ -79,9 +69,7 @@ func executableSiblingRoots(dir string) []string {
 	return roots
 }
 
-// macOSBundleContainer returns the directory holding the <Name>.app bundle whose
-// Contents/MacOS is dir, and "" for every other layout — so no other host's
-// directory names can accidentally match the bundle shape.
+// macOSBundleContainer returns "" for anything but an exact <Name>.app/Contents/MacOS dir.
 func macOSBundleContainer(dir string) string {
 	if filepath.Base(dir) != "MacOS" {
 		return ""

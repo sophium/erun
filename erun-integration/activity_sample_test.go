@@ -15,26 +15,18 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// writeSampleProcess lays down one /proc/<pid>/stat entry so the sampler's
-// verdict is driven by the fixture rather than by whatever the host happens to
-// be running.
 func writeSampleProcess(t *testing.T, root string, pid int, comm string, cpuTicks, startTime int64) {
 	t.Helper()
 	writeSampleProcessWithTTY(t, root, pid, comm, cpuTicks, startTime, 0)
 }
 
-// writeSampleProcessWithTTY is writeSampleProcess with an explicit tty_nr
-// (column 7) and no parent, for a lone process with - or without - an
-// allocated pseudo-terminal.
 func writeSampleProcessWithTTY(t *testing.T, root string, pid int, comm string, cpuTicks, startTime, ttyNr int64) {
 	t.Helper()
 	writeSampleProcessFull(t, root, pid, 0, comm, cpuTicks, startTime, ttyNr)
 }
 
-// writeSampleProcessFull is writeSampleProcessWithTTY with an explicit ppid
-// (column 4), so a scenario can model the real shape of an SSH session: the
-// per-session "sshd: user@ptsN" process stays tty-less itself while the
-// command it forks becomes the pty's session leader.
+// writeSampleProcessFull adds ppid, to model sshd's tty-less session process
+// forking a pty session leader.
 func writeSampleProcessFull(t *testing.T, root string, pid int, ppid int64, comm string, cpuTicks, startTime, ttyNr int64) {
 	t.Helper()
 	dir := filepath.Join(root, fmt.Sprintf("%d", pid))
@@ -42,13 +34,10 @@ func writeSampleProcessFull(t *testing.T, root string, pid int, ppid int64, comm
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
 	fields := []string{fmt.Sprintf("%d (%s) S", pid, comm)}
-	// Column 4 (ppid).
 	fields = append(fields, fmt.Sprintf("%d", ppid))
-	// Columns 5..6 (pgrp, session) are unused padding.
 	fields = append(fields, "0", "0")
-	// Column 7 (tty_nr): 0 means no controlling terminal.
+	// tty_nr 0 means no controlling terminal.
 	fields = append(fields, fmt.Sprintf("%d", ttyNr))
-	// Columns 8..13 (tpgid through cmajflt) are unused padding.
 	for i := 0; i < 6; i++ {
 		fields = append(fields, "0")
 	}
@@ -63,9 +52,6 @@ func writeSampleProcessFull(t *testing.T, root string, pid int, ppid int64, comm
 	}
 }
 
-// writeCgroupFixture lays down a cgroup v2 tree so the usage reader's verdict
-// comes from the fixture. The real /sys/fs/cgroup says something different on
-// every machine, and on a cgroup v1 host it says nothing at all.
 func writeCgroupFixture(t *testing.T, root string, files map[string]string) {
 	t.Helper()
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -78,8 +64,7 @@ func writeCgroupFixture(t *testing.T, root string, files map[string]string) {
 	}
 }
 
-// cgroupV2Fixture is the shape measured in a live runtime container: a 12-core
-// quota, a 23552Mi limit, and a high-water mark at roughly half of it.
+// cgroupV2Fixture is the shape measured in a live runtime container.
 func cgroupV2Fixture(usageUsec, periods, throttled, peakBytes, oomKills int64) map[string]string {
 	return map[string]string{
 		"cpu.max":        "1200000 100000\n",
@@ -91,8 +76,6 @@ func cgroupV2Fixture(usageUsec, periods, throttled, peakBytes, oomKills int64) m
 	}
 }
 
-// readUsageHistory reads the retained usage store. It is a side effect outside
-// the captured streams, so a golden cannot assert it.
 func readUsageHistory(t *testing.T, cacheHome, tenant, environment string) map[string]any {
 	t.Helper()
 	path := filepath.Join(cacheHome, "erun", "activity", tenant, environment, "usage-history.json")
@@ -108,16 +91,12 @@ func readUsageHistory(t *testing.T, cacheHome, tenant, environment string) map[s
 }
 
 func testActivitySampleRecordsActivityOnlyWhenWorkAdvances(t *testing.T) {
-	// The uninstrumented-work fallback. Driven against a fixture process tree
-	// because a real /proc says something different on every machine, and the
-	// point of the CPU-delta rule is that residency alone is not work.
+	// Residency alone is not work; the CPU delta is.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	procRoot := filepath.Join(setup.Cwd, "proc")
 	writeSampleProcess(t, procRoot, 101, "java", 500, 900)
-	// The same tick also retains a usage reading. Point it at an absent
-	// cgroup root so this scenario stays about the process sampler and reads
-	// nothing ambient from the host that ran it.
+	// An absent cgroup root keeps host usage out of this scenario.
 	sampleArgs := []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot, "--cgroup-root", filepath.Join(setup.Cwd, "no-cgroup")}
 
 	first := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -127,18 +106,13 @@ func testActivitySampleRecordsActivityOnlyWhenWorkAdvances(t *testing.T) {
 	golden.Equal(t, "activity/sample_records_activity_only_when_work_advances", normalize.Apply(
 		first.Combined+working.Combined+quiet.Combined))
 
-	// The recorded activity is the side effect the idle decision reads, and it
-	// lives outside the captured streams.
 	if _, err := os.Stat(filepath.Join(setup.CacheHome, "erun", "activity", "team", "dev", "process.json")); err != nil {
 		t.Errorf("expected the working sample to record process activity: %v", err)
 	}
 }
 
 func testActivitySampleRecordsSSHActivityForAPtyHoldingSession(t *testing.T) {
-	// A real interactive session is an sshd child ("sshd:
-	// user@ptsN", itself tty-less) that forks a shell holding the allocated
-	// pseudo-terminal. That must read as SSH activity even though nothing
-	// crossed the host-side forward that this fixture cannot simulate.
+	// A tty-less sshd child forking a pty-holding shell is SSH activity.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	procRoot := filepath.Join(setup.Cwd, "proc")
@@ -158,10 +132,7 @@ func testActivitySampleRecordsSSHActivityForAPtyHoldingSession(t *testing.T) {
 }
 
 func testActivitySampleIgnoresANottySSHChild(t *testing.T) {
-	// An sshd child whose forked command never allocated a pty -
-	// the shape a port-forward re-establishment or a background sync
-	// channel takes - must never read as SSH activity, or the phantom-session
-	// bug this fixes comes back.
+	// Without a pty (port-forward, sync channel) it must not be.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	procRoot := filepath.Join(setup.Cwd, "proc")
@@ -177,9 +148,6 @@ func testActivitySampleIgnoresANottySSHChild(t *testing.T) {
 }
 
 func testActivitySampleRetainsRuntimeUsageFromCgroupCounters(t *testing.T) {
-	// The collection half of the sizing recommendation. The monitor's tick
-	// already runs this command, so the history accumulates with no second
-	// scheduled job.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	procRoot := filepath.Join(setup.Cwd, "proc")
@@ -205,10 +173,7 @@ func testActivitySampleRetainsRuntimeUsageFromCgroupCounters(t *testing.T) {
 }
 
 func testActivitySampleRetainsThePeakAcrossAContainerRestart(t *testing.T) {
-	// memory.peak resets when the container restarts, which is exactly why
-	// this is a store and not a live read: without retention the pre-restart
-	// high-water is simply gone, and an environment gets sized from whatever
-	// it happens to have done since.
+	// memory.peak resets on restart, so the pre-restart high-water must be retained.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	procRoot := filepath.Join(setup.Cwd, "proc")
@@ -217,8 +182,6 @@ func testActivitySampleRetainsThePeakAcrossAContainerRestart(t *testing.T) {
 
 	writeCgroupFixture(t, cgroupRoot, cgroupV2Fixture(27551234478, 376556, 12, 22000000000, 1))
 	erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
-	// Every cumulative counter starts over, and the fresh peak is far below
-	// the one already observed.
 	writeCgroupFixture(t, cgroupRoot, cgroupV2Fixture(4000, 40, 0, 900000000, 0))
 	erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 
@@ -238,8 +201,7 @@ func testActivitySampleRetainsThePeakAcrossAContainerRestart(t *testing.T) {
 }
 
 func testActivitySampleRecordsNoUsageWhenTheHostSuppliesNoCounters(t *testing.T) {
-	// cgroup v1, or a laptop. A history of empty samples could only ever
-	// support "no evidence", so nothing is written at all.
+	// No cgroup v2: nothing is written.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	procRoot := filepath.Join(setup.Cwd, "proc")

@@ -14,20 +14,9 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// A job's supervisor is the one process a cancel must never reach: it is what
-// has to survive the signal to record what happened to the work. A started
-// job's record names that work in ChildPID, but the supervisor publishes its
-// running record before it spawns the work, so a reader can observe a running
-// job whose ChildPID is not there yet. Cancelling in that window must not fall
-// back to the one pid the record does hold, because that pid is the
-// supervisor's — and the report this reproduces is exactly that: the
-// supervisor gone without recording an exit status, so the cancelled job read
-// back as unknown instead of as an exited job carrying the signal.
-//
-// The stand-in below is detached with the same helper the real supervisor is
-// (detachEnvironmentJobSupervisor), so it sits in its own process group the way
-// a real one does and the "this is this call's own group" guard in
-// signalEnvironmentJobProcessGroup cannot quietly make the test pass.
+// The supervisor publishes its running record before spawning the work, so a
+// cancel in that window must refuse rather than fall back to the supervisor's
+// pid. The stand-in is detached like the real one, so the own-group guard cannot mask it.
 func TestCancelRefusesToSignalTheSupervisorWhenTheWorkIsNotYetNamed(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("process-group signalling is POSIX-only")
@@ -72,9 +61,6 @@ func TestCancelRefusesToSignalTheSupervisorWhenTheWorkIsNotYetNamed(t *testing.T
 	}
 }
 
-// startCancelTestStandInSupervisor launches a long-lived process detached
-// exactly as a job supervisor is, so it is in its own process group and can be
-// observed for having been signalled.
 func startCancelTestStandInSupervisor(t *testing.T) *exec.Cmd {
 	t.Helper()
 	cmd := core.Command("sleep", "30")

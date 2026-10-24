@@ -14,9 +14,7 @@ const (
 	linuxPackageBuildStage = "build"
 )
 
-// linuxPackageCheckTarget is the stage a plain build runs: `test` when the
-// package declares one, otherwise `build`, so a package without tests is still
-// compiled on every build. A package with neither has nothing a build can run.
+// linuxPackageCheckTarget is `test` when declared, otherwise `build`, so untested packages still compile.
 func linuxPackageCheckTarget(pkg shared.LinuxPackageSpec) (string, error) {
 	for _, stage := range []string{linuxPackageTestStage, linuxPackageBuildStage} {
 		if shared.DockerfileDeclaresStage(pkg.DockerfilePath, stage) {
@@ -35,8 +33,6 @@ func CheckLinuxPackagesBuildable(packages []shared.LinuxPackageSpec) error {
 	return nil
 }
 
-// linuxPackageCheckArgs builds the package's tests (or, without any, its
-// build) and exports nothing: no image, no tag, nothing to push.
 func linuxPackageCheckArgs(pkg shared.LinuxPackageSpec, target, cgroupParent string) []string {
 	args := []string{"build", "--progress=plain", "--target", target, "--output", "type=cacheonly"}
 	return append(AppendCgroupParentArg(args, cgroupParent), "-f", pkg.DockerfilePath, ".")
@@ -47,10 +43,8 @@ func linuxPackageDistArgs(pkg shared.LinuxPackageSpec, version, platform, dest, 
 	return append(AppendCgroupParentArg(args, cgroupParent), "-f", pkg.DockerfilePath, ".")
 }
 
-// AppendCgroupParentArg nests a build's RUN containers under the environment's
-// CPU cap (buildContainerCPUCapCgroupParent), as every image build does. A
-// package's test stage is as heavy as any image's, and without it the build
-// escapes the sidecar's limit and can take the whole node.
+// AppendCgroupParentArg nests a build's RUN containers under the environment's CPU cap;
+// without it a heavy test stage escapes the sidecar's limit.
 func AppendCgroupParentArg(args []string, cgroupParent string) []string {
 	if cgroupParent == "" {
 		return args
@@ -58,9 +52,7 @@ func AppendCgroupParentArg(args []string, cgroupParent string) []string {
 	return append(args, "--cgroup-parent", cgroupParent)
 }
 
-// runLinuxPackageDockerBuild runs one package build on the run's heartbeat:
-// below debug verbosity its BuildKit output is captured, so the heartbeat is
-// the only sign a long test stage is still working.
+// Below debug verbosity output is captured, so the heartbeat is the only liveness signal.
 func runLinuxPackageDockerBuild(ctx core.Context, pkg shared.LinuxPackageSpec, label string, args []string) error {
 	done := ctx.Progress.Begin(label)
 	defer done()
@@ -70,11 +62,8 @@ func runLinuxPackageDockerBuild(ctx core.Context, pkg shared.LinuxPackageSpec, l
 	return nil
 }
 
-// RunLinuxPackageChecks runs every package's tests on a plain build and reports
-// each outcome the way an image build does. A package whose fingerprint has a
-// recorded pass reports `reused` (`none declared` without a `test` stage) and
-// runs nothing; one that passes records its fingerprint, and one that fails
-// records nothing.
+// RunLinuxPackageChecks runs every package's tests on a plain build. A recorded pass for the
+// fingerprint is reused; only a pass is recorded.
 func RunLinuxPackageChecks(ctx core.Context, packages []shared.LinuxPackageSpec) error {
 	ctx, stopProgress := withBuildProgress(ctx)
 	defer stopProgress()
@@ -112,9 +101,6 @@ func RunLinuxPackageChecks(ctx core.Context, packages []shared.LinuxPackageSpec)
 	return nil
 }
 
-// linuxPackageTestOutcome is the outcome line for a package's check target: a
-// package without a `test` stage has no tests to have passed or to reuse, on
-// the build that ran its `build` stage and on every build that reuses it.
 func linuxPackageTestOutcome(target, tested string) string {
 	if target != linuxPackageTestStage {
 		return "none declared"
@@ -138,10 +124,8 @@ func traceLinuxPackageRunReason(ctx core.Context, pkg shared.LinuxPackageSpec, t
 	}
 }
 
-// ExportReleaseLinuxPackages builds every package's `dist` stage for every
-// release platform into the release's package directory. It runs inside the
-// publish, so a package that fails to build stops the release before anything
-// is public.
+// ExportReleaseLinuxPackages builds every package's `dist` stage for every release platform,
+// inside the publish so a failure stops the release before anything is public.
 func ExportReleaseLinuxPackages(ctx core.Context, spec shared.ReleaseSpec) error {
 	ctx, stopProgress := withBuildProgress(ctx)
 	defer stopProgress()

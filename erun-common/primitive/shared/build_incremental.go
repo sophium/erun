@@ -13,9 +13,7 @@ type ignorePattern struct {
 	anchored bool
 	dirOnly  bool
 	negate   bool
-	// base scopes the pattern to the subtree of the nested .gitignore it came
-	// from (empty for the root files), mirroring git, where a nested .gitignore
-	// only governs files beneath it.
+	// base scopes the pattern to its nested .gitignore's subtree.
 	base string
 }
 
@@ -23,9 +21,7 @@ type IgnoreSet struct {
 	Patterns []ignorePattern
 }
 
-// LoadNestedGitignores honours nested .gitignore files but intentionally not
-// nested .dockerignore files: Docker reads only the root .dockerignore, so
-// honouring nested ones would diverge from the real build context.
+// LoadNestedGitignores skips nested .dockerignore files, which Docker ignores.
 func LoadNestedGitignores(contextDir string, sources []string, combined *IgnoreSet) error {
 	visited := make(map[string]struct{}, len(sources))
 	for _, src := range sources {
@@ -127,10 +123,7 @@ func parseIgnoreLine(raw, base string) (ignorePattern, bool) {
 		dirOnly = true
 		line = strings.TrimSuffix(line, "/")
 	}
-	// gitignore: a pattern that contains a slash anywhere except the
-	// trailing position is anchored to the file's directory. For our
-	// purposes the file's directory is contextDir, the same as
-	// leading-slash anchoring.
+	// gitignore anchors a pattern with a non-trailing slash.
 	if !anchored && strings.Contains(line, "/") {
 		anchored = true
 	}
@@ -167,8 +160,6 @@ func patternMatchesPath(p ignorePattern, rel string) bool {
 	if p.raw == "" || p.raw == "." {
 		return false
 	}
-	// Strip the nested .gitignore's base prefix so anchoring and globbing run
-	// on a path relative to where the pattern was declared.
 	if p.base != "" {
 		if rel == p.base || !strings.HasPrefix(rel, p.base+"/") {
 			return false
@@ -187,8 +178,7 @@ func patternMatchesPath(p ignorePattern, rel string) bool {
 	return false
 }
 
-// anchoredPatternMatches also matches rel's ancestor prefixes so the walker can
-// prune an ignored directory before descending into it.
+// anchoredPatternMatches also matches ancestors so ignored dirs are pruned early.
 func anchoredPatternMatches(raw, rel string) bool {
 	if globMatch(raw, rel) {
 		return true
@@ -203,8 +193,7 @@ func anchoredPatternMatches(raw, rel string) bool {
 	return false
 }
 
-// globMatch extends filepath.Match with `**`, which (unlike `*`) matches across
-// path separators (e.g. `a/**/b` matches both `a/b` and `a/x/y/b`).
+// globMatch adds `**`, which matches across path separators.
 func globMatch(pattern, name string) bool {
 	if !strings.Contains(pattern, "**") {
 		ok, err := filepath.Match(pattern, name)

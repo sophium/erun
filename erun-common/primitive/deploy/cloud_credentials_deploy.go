@@ -14,9 +14,7 @@ func cloudflareSecretName(releaseName string) string {
 	return strings.TrimSpace(releaseName) + "-cloudflare"
 }
 
-// Only the token belongs in the Secret; the account id rides as a plain helm
-// value. %q renders it as valid YAML (a JSON superset) so punctuation can't
-// break the manifest.
+// Only the token belongs in the Secret; %q renders valid YAML whatever the punctuation.
 func renderCloudflareCredentialsSecret(name, namespace, apiToken string) string {
 	return fmt.Sprintf(`apiVersion: v1
 kind: Secret
@@ -31,9 +29,7 @@ stringData:
 `, name, namespace, apiToken)
 }
 
-// applyCloudflareCredentialsSecret delivers the delegated Cloudflare token into
-// the env's runtime pod, keeping it out of argv, the trace, and helm release
-// values.
+// applyCloudflareCredentialsSecret keeps the token out of argv, the trace, and helm values.
 func applyCloudflareCredentialsSecret(ctx core.Context, deployInput HelmDeploySpec) error {
 	if !deployInput.CloudflareEnabled || strings.TrimSpace(deployInput.CloudflareSecretName) == "" {
 		return nil
@@ -63,9 +59,7 @@ func applyCloudflareCredentialsSecret(ctx core.Context, deployInput HelmDeploySp
 	return kube.ApplySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "cloudflare credentials secret", manifest, args)
 }
 
-// applyCloudflareDeployMetadata populates the Cloudflare deploy fields from the
-// env's attached alias; the Secret itself is applied later at execution time,
-// not here.
+// applyCloudflareDeployMetadata fills Cloudflare deploy fields; the Secret is applied at execution.
 func applyCloudflareDeployMetadata(store config.CloudReadStore, env config.EnvConfig, deployInput *HelmDeploySpec) {
 	if deployInput == nil {
 		return

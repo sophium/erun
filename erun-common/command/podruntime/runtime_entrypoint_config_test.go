@@ -11,10 +11,6 @@ import (
 	"github.com/sophium/erun/erun-common/command/doctor"
 )
 
-// The cloud-context defaults were once implemented twice, in the shell
-// entrypoint and in ResolveInjectedRuntimeConfig, and disagreed silently:
-// `doctor --sync-config` then reported drift on every run. The boot now writes
-// the Go projection itself; these are the cases the shared table pinned.
 func TestRuntimeBootConfigCloudContextDefaults(t *testing.T) {
 	for _, tc := range []struct {
 		label, contextName, kubeContext, wantName, wantKube string
@@ -38,8 +34,6 @@ func TestRuntimeBootConfigCloudContextDefaults(t *testing.T) {
 			if len(root.CloudContexts) != 1 || root.CloudContexts[0].Name != tc.wantName || root.CloudContexts[0].KubernetesContext != tc.wantKube {
 				t.Fatalf("got %+v, want name %q kubernetescontext %q", root.CloudContexts, tc.wantName, tc.wantKube)
 			}
-			// A freshly booted pod is in sync with the projection doctor
-			// reconciles against, by construction.
 			inspection, err := doctor.InspectRuntimeConfigSync(boot.configHome(), boot.env)
 			if err != nil || !inspection.InSync() {
 				t.Fatalf("a booted pod should be in sync: %+v %v", inspection.Drift, err)

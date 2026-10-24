@@ -14,26 +14,10 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// The desktop writes into the job store — Investigate starts a job there — and
-// until now could not display the job it had just created. These bindings give
-// the Jobs surface the same three reads the CLI and MCP already have, plus the
-// one write that matters while a job is running.
-//
-// Output is paged rather than streamed: a page is what the operator's scroll
-// position can absorb, and an offset the caller passes back is what makes a
-// second read continue rather than repeat.
-//
-// A remote-agent/runtime environment's jobs run in its pod, not on the host,
-// so these reads go through the env's own MCP edge whenever it is reachable —
-// the same branch LoadIdleStatus already uses to tell a pod-backed answer from
-// a locally-guessed one. The local store is still consulted when the edge is
-// not reachable: it is where the desktop's own Investigate job is recorded
-// (that job runs on the host regardless of the environment's type), and for an
-// environment nobody has opened yet it is the only truthful answer there is —
-// no pod is running to have missed any jobs. A stale forward (the port is
-// held but the edge never answers) is different: a pod may well be running
-// jobs behind it, so that case is reported as unreachable rather than
-// silently read as empty.
+// A remote-agent/runtime env's jobs run in its pod, so reads go through its MCP
+// edge when reachable. The local store answers when the env is not open (it also
+// holds the desktop's own Investigate job); a stale forward is reported as
+// unreachable, never as empty.
 
 // LoadEnvironmentJobs lists an environment's retained jobs, newest first.
 func (a *App) LoadEnvironmentJobs(tenant, environment string) ([]uiEnvironmentJob, error) {
@@ -97,9 +81,8 @@ func (a *App) ReadEnvironmentJobOutput(input uiJobOutputInput) (uiEnvironmentJob
 	return jobOutputToUI(page), nil
 }
 
-// CancelEnvironmentJob signals a running job's work. The supervisor is left
-// alone so it survives to record the outcome, which is why a cancelled job
-// still reads back as a normal exited job rather than vanishing.
+// CancelEnvironmentJob signals the job's work but leaves the supervisor alive to
+// record the outcome.
 func (a *App) CancelEnvironmentJob(input uiCancelJobInput) (uiEnvironmentJob, error) {
 	tenant := strings.TrimSpace(input.Tenant)
 	environment := strings.TrimSpace(input.Environment)
@@ -131,15 +114,7 @@ func (a *App) CancelEnvironmentJob(input uiCancelJobInput) (uiEnvironmentJob, er
 	return environmentJobToUI(cancel.Job), nil
 }
 
-// jobsReachability decides how a job read or write should reach its answer:
-// through the environment's own MCP edge when it is reachable, or through the
-// local store when the environment is legitimately not running -- no pod is
-// there to have missed anything, and the local store is also where the
-// desktop's own Investigate job is recorded regardless of the environment's
-// type. A stale forward (the port is held but the edge never answers) is
-// neither: a pod may well be running jobs behind it that the local store
-// cannot see, so that case is reported as unreachable rather than read as
-// empty.
+// jobsReachability picks the MCP edge, the local store, or an unreachable error.
 func (a *App) jobsReachability(tenant, environment string) (config.OpenResult, bool, error) {
 	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      tenant,
@@ -158,10 +133,7 @@ func (a *App) jobsReachability(tenant, environment string) (config.OpenResult, b
 	return result, false, nil
 }
 
-// wrapJobMCPErr classifies a failure from a pod-backed job call: a dial
-// failure means the edge dropped mid-call, reported the same way an
-// upfront-unreachable read is; any other failure (including "this runtime
-// image predates the job_* tools") passes through unchanged.
+// wrapJobMCPErr reports a dial failure as unreachable; other errors pass through.
 func (a *App) wrapJobMCPErr(result config.OpenResult, err error) error {
 	if err == nil || !isMCPDialFailure(err) {
 		return err
@@ -170,8 +142,6 @@ func (a *App) wrapJobMCPErr(result config.OpenResult, err error) error {
 	return wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
 }
 
-// defaultJobOutputPageBytes is one screenful and then some, so the first read
-// of a finished job is usually its whole output.
 const defaultJobOutputPageBytes = 65536
 
 func environmentJobsToUI(jobs []shared.EnvironmentJob) []uiEnvironmentJob {

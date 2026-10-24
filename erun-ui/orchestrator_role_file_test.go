@@ -7,10 +7,7 @@ import (
 	"testing"
 )
 
-// TestOrchestratorRoleFileIsSeededOnceAndNeverRewritten is the inverse of the
-// shared CLAUDE.md's contract. erun overwrites the
-// shared file on every launch, which is why an edit there is silently discarded;
-// the role file must survive every launch instead, or it is the same dead end.
+// erun rewrites the shared CLAUDE.md every launch; the role file must survive.
 func TestOrchestratorRoleFileIsSeededOnceAndNeverRewritten(t *testing.T) {
 	dir := t.TempDir()
 
@@ -26,7 +23,6 @@ func TestOrchestratorRoleFileIsSeededOnceAndNeverRewritten(t *testing.T) {
 		t.Fatal("role file seeded empty")
 	}
 
-	// What the operator writes must survive every subsequent launch.
 	operator := []byte("# my standing role\nOnly ever open issues; never write code.\n")
 	if err := os.WriteFile(path, operator, 0o644); err != nil {
 		t.Fatalf("simulate an operator edit: %v", err)
@@ -45,10 +41,7 @@ func TestOrchestratorRoleFileIsSeededOnceAndNeverRewritten(t *testing.T) {
 	}
 }
 
-// TestOrchestratorRoleFileSeedDoesNotBakeInScope: the shared contract requires
-// knowing scope from erun's config and never from disk, so a seed that invited an
-// environment list would contradict it and go stale the moment the orchestrator's
-// links changed.
+// Scope comes from erun's config, never from disk.
 func TestOrchestratorRoleFileSeedDoesNotBakeInScope(t *testing.T) {
 	if !strings.Contains(orchestratorRoleFileSeed, "Do NOT list this orchestrator's environments") {
 		t.Error("the seed must tell the operator not to bake an environment list into it")
@@ -58,9 +51,7 @@ func TestOrchestratorRoleFileSeedDoesNotBakeInScope(t *testing.T) {
 	}
 }
 
-// TestOrchestratorRoleFileSkipsATransientSession: a transient (Investigate)
-// session has an empty id by design and gets the shared contract only. Seeding
-// "CLAUDE..md" for it would litter the shared root.
+// A transient session's empty id would seed "CLAUDE..md" in the shared root.
 func TestOrchestratorRoleFileSkipsATransientSession(t *testing.T) {
 	dir := t.TempDir()
 	for _, id := range []string{"", "   "} {
@@ -81,10 +72,7 @@ func TestOrchestratorRoleFileSkipsATransientSession(t *testing.T) {
 	}
 }
 
-// TestOrchestratorSkillHookInjectsTheRoleFileAfterTheSharedContract: the
-// ordering IS the precedence rule, so it is worth asserting rather than assuming.
-// The guard matters too -- without it a transient session's empty id would make
-// the hook cat a path ending in "CLAUDE..md".
+// The ordering is the precedence rule.
 func TestOrchestratorSkillHookInjectsTheRoleFileAfterTheSharedContract(t *testing.T) {
 	command := orchestratorSkillHookCommand("/tmp/orchestrators")
 
@@ -102,8 +90,7 @@ func TestOrchestratorSkillHookInjectsTheRoleFileAfterTheSharedContract(t *testin
 	if !strings.Contains(command, "if(id)") {
 		t.Errorf("no guard on the id, so a transient session would read CLAUDE..md:\n%s", command)
 	}
-	// A missing role file is the common case and must not fail the hook or write
-	// to stderr.
+	// A missing role file is common and must not fail the hook or write to stderr.
 	if !strings.Contains(command, `id+".md","utf8"));}catch(e){}`) {
 		t.Errorf("a missing role file must be a silent no-op:\n%s", command)
 	}

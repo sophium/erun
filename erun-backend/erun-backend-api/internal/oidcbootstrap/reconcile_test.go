@@ -32,10 +32,7 @@ const (
 	testPATsSecret     = "test-zitadel-pats"
 )
 
-// fakeManagementAPI is an in-memory Zitadel Management API serving the call
-// shapes internal/zitadel issues for the OIDC applications. It refuses any
-// call that does not carry the external domain as Host and the org-owner PAT
-// as bearer, because Zitadel itself 404s a call with the wrong Host.
+// fakeManagementAPI requires the external domain as Host, as Zitadel itself does.
 type fakeManagementAPI struct {
 	mu       sync.Mutex
 	nextID   int
@@ -69,8 +66,6 @@ func (f *fakeManagementAPI) serve(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	path := strings.TrimPrefix(r.URL.Path, "/management/v1/projects")
 	segments := strings.Split(strings.Trim(path, "/"), "/")
-	// The route key is the method plus the path with the project and app ids
-	// blanked out, which is all that distinguishes the endpoints.
 	key := r.Method + " " + path
 	if len(segments) >= 3 {
 		key = r.Method + " " + strings.Join(append([]string{"*", segments[1], "*"}, segments[3:]...), "/")
@@ -130,8 +125,7 @@ func (f *fakeManagementAPI) updateApp(w http.ResponseWriter, id string, body map
 		http.Error(w, "no app", http.StatusNotFound)
 		return
 	}
-	// The real endpoint replaces the whole config; only the client id, which
-	// is not part of the update, survives on its own.
+	// The real endpoint replaces the whole config; only clientId survives.
 	body["clientId"] = app.Config["clientId"]
 	app.Config = body
 	f.puts = append(f.puts, id)
@@ -174,8 +168,6 @@ func writeJSON(w http.ResponseWriter, value any) {
 	}
 }
 
-// seedApp registers a pre-existing project and app, the shape a real platform
-// carries after first init.
 func (f *fakeManagementAPI) seedApp(name string, appType string, redirects []string, logout []string) {
 	f.projects = append(f.projects, fakeProject{ID: "p1", Name: testProject})
 	config := map[string]any{
@@ -399,7 +391,6 @@ func TestAFailedUpdateIsLoudAndLeavesTheAppAsItWas(t *testing.T) {
 		t.Fatalf("a failed update must leave the app unchanged, got %v", got)
 	}
 	assertLog(t, h, "FAILED to converge erun-console")
-	// The app itself resolved, so its client id is still published.
 	if h.configMap(t)[ConsoleClientIDKey] != "cid-existing" {
 		t.Fatalf("client ids = %v", h.configMap(t))
 	}
@@ -447,8 +438,6 @@ func TestMobileAppConvergesAChangedRedirect(t *testing.T) {
 	assertLog(t, h, `converged erun-mobile redirect URIs from ["erun://old-callback"] to ["erun://new-callback"]`)
 }
 
-// A resolution failure must leave the previously published client ids alone
-// rather than overwrite them with empty strings.
 func TestAnUnresolvedAppLeavesThePublishedConfigMapUntouched(t *testing.T) {
 	h := newHarness(t)
 	h.api.seedApp(ConsoleAppName, "OIDC_APP_TYPE_USER_AGENT", []string{"https://console.example.test/"}, []string{"https://console.example.test/"})

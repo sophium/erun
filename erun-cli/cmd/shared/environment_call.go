@@ -10,29 +10,16 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// The idle, job, and activity-lease verbs each have two homes. Inside the
-// environment they read and write its own activity store directly, which is
-// what the in-pod monitor and the MCP server invoke. Run from the operator's
-// machine the same code would answer from the laptop's store — an answer about
-// the wrong machine, and work started on the wrong machine — so off-environment
-// they go to the environment's own edge instead.
+// Off-environment, idle/job/activity-lease verbs must go to the environment's edge;
+// the local store would answer about the wrong machine.
 
-// EnvironmentTargetsItself reports whether this process is the environment the
-// verb is about, and may therefore serve it from the local store.
+// EnvironmentTargetsItself reports whether this process is the target environment.
 func EnvironmentTargetsItself() bool {
 	return config.IsInRuntimeEnvironment(nil)
 }
 
-// CallEnvironmentTool runs one tool on the environment's MCP edge and decodes
-// its structured result. The second return reports whether a call was actually
-// made: a dry run resolves and traces the plan without reaching the edge, so the
-// plan stays readable for an environment that is not currently open.
-//
-// idleProbe must be true only for a tool the caller knows is read-only (idle,
-// job_status, job_output, job_await, activity_lease_list): the probe header it
-// sets exempts the whole request from the environment's activity accounting, so
-// setting it for a tool that can mutate the environment (job_start, job_cancel,
-// activity_lease_take, ...) would let driving the environment read as idle.
+// CallEnvironmentTool runs one tool on the environment's MCP edge; the bool reports whether a call was made.
+// idleProbe exempts the request from activity accounting, so set it only for read-only tools.
 func CallEnvironmentTool[T any](ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment, tool string, arguments map[string]any, idleProbe bool) (T, bool, error) {
 	var decoded T
 	if arguments == nil {
@@ -42,11 +29,7 @@ func CallEnvironmentTool[T any](ctx context.Context, commandCtx core.Context, re
 	if err != nil {
 		return decoded, false, err
 	}
-	// This host already resolved the target to pick target.endpoint above --
-	// restating it in the call itself, rather than leaving the tool to infer it
-	// from the server's own bound context, is what turns a stale edge pointed at
-	// the wrong environment into a named refusal instead of a silent act on the
-	// wrong one (resolveLocalTarget, erun-mcp/runtime.go).
+	// Naming the target explicitly makes a stale edge refuse instead of acting on the wrong environment.
 	arguments["tenant"] = target.Tenant
 	arguments["environment"] = target.Environment
 	commandCtx.TraceCommand("", "mcp", "tools/call", target.Endpoint, tool, CompactMCPArguments(arguments))
@@ -57,8 +40,7 @@ func CallEnvironmentTool[T any](ctx context.Context, commandCtx core.Context, re
 	if err != nil {
 		return decoded, false, McpEdgeErrorWithExitCode(target, err)
 	}
-	// An edge that answered without a payload is not an empty answer about the
-	// environment; treating it as one is the failure these verbs exist to close.
+	// An empty payload is not an empty answer.
 	if len(result.Structured) == 0 {
 		return decoded, false, fmt.Errorf("%s/%s returned no result for %s", target.Tenant, target.Environment, tool)
 	}
@@ -68,9 +50,7 @@ func CallEnvironmentTool[T any](ctx context.Context, commandCtx core.Context, re
 	return decoded, true, nil
 }
 
-// PutEnvironmentToolArgument keeps an unset flag out of the call so the
-// environment applies its own default rather than receiving a zero that means
-// something else.
+// PutEnvironmentToolArgument omits unset values so the environment applies its own default.
 func PutEnvironmentToolArgument(arguments map[string]any, name string, value any) {
 	if isZeroToolArgument(value) {
 		return
@@ -78,9 +58,6 @@ func PutEnvironmentToolArgument(arguments map[string]any, name string, value any
 	arguments[name] = value
 }
 
-// isZeroToolArgument reports whether value is the zero form of one of the
-// tool-argument types put on the wire — the form that means "unset" rather
-// than a value the environment should receive.
 func isZeroToolArgument(value any) bool {
 	switch typed := value.(type) {
 	case string:
@@ -99,8 +76,7 @@ func isZeroToolArgument(value any) bool {
 	return false
 }
 
-// LeaseTTLSeconds converts a flag's duration to the seconds the environment's
-// tools take. Zero stays zero so the environment applies its own default.
+// LeaseTTLSeconds converts a TTL to seconds; zero lets the environment apply its default.
 func LeaseTTLSeconds(ttl time.Duration) int64 {
 	if ttl <= 0 {
 		return 0

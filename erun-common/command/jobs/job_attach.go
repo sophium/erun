@@ -11,23 +11,19 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// AttachEnvironmentJobParams registers work erun did not start.
 type AttachEnvironmentJobParams struct {
 	Tenant      string
 	Environment string
 	ID          string
 	Name        string
-	// PID is the process to track. It is the only thing the attached job's state
-	// is decided by, and erun never learns its exit status — nothing erun ran was
-	// waiting on it — so it resolves to unknown rather than to a made-up outcome.
+	// PID decides the job's state; erun never sees its exit status, so it
+	// resolves to unknown, not a made-up outcome.
 	PID int
-	// LogPath is where the caller is already writing the work's output, so job
-	// output can serve it without erun having captured it.
+	// LogPath is where the caller already writes the work's output.
 	LogPath  string
 	LeaseTTL time.Duration
 }
 
-// AttachEnvironmentJob gives work started another way a handle and a lease.
 func AttachEnvironmentJob(ctx core.Context, params AttachEnvironmentJobParams) (shared.EnvironmentJob, error) {
 	dir, job, ttl, err := resolveAttachedEnvironmentJob(params)
 	if err != nil {
@@ -82,8 +78,7 @@ func resolveAttachedEnvironmentJob(params AttachEnvironmentJobParams) (string, s
 		LogPath:   strings.TrimSpace(params.LogPath),
 		LeaseID:   environmentJobLeaseID(id),
 	}
-	// Re-attaching the same id renews rather than restarts, matching the lease
-	// store, so a caller can refresh on a timer without tracking what it holds.
+	// Re-attaching renews rather than restarts, so callers can refresh on a timer.
 	if existing, err := shared.ReadEnvironmentJob(filepath.Join(dir, id+".json")); err == nil && existing.Attached && existing.PID == params.PID {
 		job.StartedAt = existing.StartedAt
 	}

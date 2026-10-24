@@ -11,9 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// reviewDetailFixedResponses serves every path reviewDetailAPI answers with a
-// fixed body regardless of method; the one path with method-dependent
-// behavior (creating a comment) is handled separately in reviewDetailAPI.
+// reviewDetailFixedResponses are method-independent; comment creation is
+// handled in reviewDetailAPI.
 var reviewDetailFixedResponses = map[string]string{
 	"/v1/whoami":                  `{"tenantId":"tenant-1","userId":"user-1","username":"reader","capabilities":null}`,
 	"/v1/reviews/review-1":        `{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}`,
@@ -30,8 +29,7 @@ const reviewDetailThreadJSON = `[
 
 const reviewDetailNewReplyJSON = `{"commentId":"comment-3","reviewId":"review-1","creatorUserId":"user-1","status":"OPEN","parentCommentId":"comment-1","commitId":"abc123","filePath":"main.go","line":42,"body":"fixed, thanks","createdAt":"2026-01-01T00:10:00Z"}`
 
-// reviewDetailAPI serves one review's detail reads plus a comment-create
-// write, refusing every path in forbidden.
+// reviewDetailAPI refuses every path in forbidden.
 func reviewDetailAPI(t *testing.T, forbidden map[string]bool) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -104,7 +102,7 @@ func TestLoadReviewDetailPopulatesCommentsBuildsAndQueuePosition(t *testing.T) {
 	if len(detail.Builds) != 1 || !detail.Builds[0].Successful {
 		t.Fatalf("expected the review's recorded build, got %+v", detail.Builds)
 	}
-	// review-1 is the second entry the merge-queue stub returns.
+	// review-1 is the merge-queue stub's second entry.
 	if detail.QueuePosition != 2 {
 		t.Fatalf("expected queue position 2, got %d", detail.QueuePosition)
 	}
@@ -168,11 +166,7 @@ func TestCreateReviewReplyRequiresABody(t *testing.T) {
 	}
 }
 
-// usernameResolutionFixedResponses backs
-// TestLoadReviewDetailResolvesAuthorAndCommenterUsernames: user-2 (the
-// review's author and comment-1's creator) resolves to "pat"; user-1 (the
-// signed-in caller, comment-2's creator) is deliberately absent, so it stays
-// unresolved.
+// user-1 is deliberately absent so it stays unresolved.
 var usernameResolutionFixedResponses = map[string]string{
 	"/v1/whoami":                  `{"tenantId":"tenant-1","userId":"user-1","username":"reader","capabilities":null}`,
 	"/v1/users":                   `[{"userId":"user-2","tenantId":"tenant-1","username":"pat"}]`,
@@ -195,9 +189,6 @@ func usernameResolutionAPI(t *testing.T) *httptest.Server {
 	}))
 }
 
-// TestLoadReviewDetailResolvesAuthorAndCommenterUsernames: the review's author
-// and each comment's creator resolve to the tenant user directory's display
-// name when the caller can read /v1/users.
 func TestLoadReviewDetailResolvesAuthorAndCommenterUsernames(t *testing.T) {
 	server := usernameResolutionAPI(t)
 	defer server.Close()
@@ -215,10 +206,7 @@ func TestLoadReviewDetailResolvesAuthorAndCommenterUsernames(t *testing.T) {
 	}
 }
 
-// TestFetchReviewBuildsConcurrentlyReturnsPartialResultsOnFailure locks the
-// concurrency fix's behavior: a failing review's builds read must not lose
-// the builds already fetched for the reviews that succeeded, matching the
-// old serial loop's break-with-partial-results contract.
+// A failing builds read must keep the builds already fetched.
 func TestFetchReviewBuildsConcurrentlyReturnsPartialResultsOnFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path == "/v1/reviews/review-bad/builds" {

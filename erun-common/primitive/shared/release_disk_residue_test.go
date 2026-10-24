@@ -12,26 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
-// The reproduction this closes: `erun build --release` ran its
-// disk-headroom preflight immediately before the publish, which is *after* the
-// "release" stage has written the version files, committed the stamp and
-// created the annotated tag. A run refused for space therefore exited having
-// left all three behind, unpushed — and the next attempt reported
-//
-//	release tag "vX" already exists at <sha>, expected current HEAD <sha>
-//
-// instead of the disk that was still too short. The remedy that message names
-// ("delete it with `git tag -d vX` to retry") then reapplied to a symptom, one
-// fresh tag per attempt, for as long as the node stayed full.
-//
-// These tests drive the real release entrypoint against a real git repository
-// and a docker/df stand-in that makes the headroom read refuse, so the claim
-// under test is the one that matters: after the refusal the repository is
-// exactly as it was found.
+// A refused disk preflight must leave the repository exactly as found: no stamp commit, no tag.
 
-// releaseDiskResidueStubDocker is a docker stand-in whose every headroom read
-// answers. The `buildx` branch covers both the prune and the post-prune cache
-// reading that follows it.
 func releaseDiskResidueStubDocker(t *testing.T, root string) string {
 	t.Helper()
 	return writeExecutableScript(t, `case "$1" in
@@ -41,30 +23,22 @@ func releaseDiskResidueStubDocker(t *testing.T, root string) string {
 esac`)
 }
 
-// refuseReleaseDiskHeadroom points the headroom reads at a filesystem with 1 GiB
-// free under a 20 GiB floor, which is the measured shortage the preflight
-// refuses on. The df stand-in answers every `df -Pk <path>` the check makes,
-// including the mount-point comparisons it uses to name co-located space.
+// refuseReleaseDiskHeadroom reports 1 GiB free under a 20 GiB floor.
 func refuseReleaseDiskHeadroom(t *testing.T, root string) {
 	t.Helper()
 	t.Setenv("ERUN_DOCKER_BIN", releaseDiskResidueStubDocker(t, root))
 	t.Setenv("ERUN_DF_BIN", writeExecutableScript(t, `echo "Filesystem     1024-blocks     Used Available Capacity Mounted on"
 echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
 	t.Setenv(ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
-	// The cache ceiling above the floor is a separate reading. Leaving the
-	// volume unset keeps it out of the way so the floor is what refuses.
+	// Keep the cache ceiling out of the way so the floor is what refuses.
 	t.Setenv(DockerVolumeBytesEnv, "")
 }
 
-// gitTagsForTest lists the repository's tags, one per line, or "" when it has
-// none — the before/after comparison for "no new tag".
 func gitTagsForTest(t *testing.T, dir string) string {
 	t.Helper()
 	return gitOutputForTest(t, dir, "tag", "--list")
 }
 
-// releaseVersionPathForTest seeds a committed, clean VERSION file the release
-// stage has something to rewrite, and returns its path.
 func releaseVersionPathForTest(t *testing.T, repo, content string) string {
 	t.Helper()
 	path := filepath.Join(repo, "VERSION")
@@ -76,16 +50,9 @@ func releaseVersionPathForTest(t *testing.T, repo, content string) string {
 	return path
 }
 
-// TestRefusedReleaseDiskPreflightLeavesNoStampCommitAndNoTag is the
-// reproduction. It asserts the repository is exactly as it was found after the
-// refusal — same HEAD, same tags, and the version file the release stage would
-// have rewritten still holding what it held — because the preflight now runs
-// before the release stage rather than after it.
 func TestRefusedReleaseDiskPreflightLeavesNoStampCommitAndNoTag(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		// Not a tool-availability skip: dockerRootDiskBytes is a structural
-		// no-op on Windows, so there is no refusal there to order against the
-		// release stage. The ordering property is real but unobservable.
+		// dockerRootDiskBytes is a no-op on Windows, so there is no refusal to order against.
 		t.Skip("the disk-headroom preflight cannot refuse on Windows, so no refusal exists to order against the stages")
 	}
 
@@ -102,10 +69,7 @@ func TestRefusedReleaseDiskPreflightLeavesNoStampCommitAndNoTag(t *testing.T) {
 	logs := &strings.Builder{}
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
 
-	// A publisher is what makes this a build-and-publish release rather than
-	// `erun release` marking source control: it is the only caller that runs
-	// the headroom preflight at all. Publish must never be reached — a refusal
-	// that got as far as the build is a different defect from this one.
+	// Only a publisher runs the headroom preflight; Publish must never be reached.
 	published := false
 	publisher := ReleasePublisher{
 		Publish: func(core.Context) error { published = true; return nil },
@@ -133,11 +97,8 @@ func TestRefusedReleaseDiskPreflightLeavesNoStampCommitAndNoTag(t *testing.T) {
 		t.Fatal("the publish ran despite the refusal")
 	}
 
-	// The whole point: the refusal left nothing of the release's own behind.
 	assertReleaseLeftNoResidue(t, repo, versionPath, before, headBefore, tagsBefore)
 
-	// The refusal is still the disk's, which is what the operator has to act on
-	// rather than a tag collision they would otherwise delete and re-earn.
 	message := logs.String()
 	if !strings.Contains(message, "free of") || !strings.Contains(message, "below the") {
 		t.Errorf("expected the trace to name the measured free space against the floor, got %q", message)
@@ -147,9 +108,6 @@ func TestRefusedReleaseDiskPreflightLeavesNoStampCommitAndNoTag(t *testing.T) {
 	}
 }
 
-// assertReleaseLeftNoResidue checks the three things the release stage writes —
-// the commit, the tag and the version file — against what they held before the
-// refused run.
 func assertReleaseLeftNoResidue(t *testing.T, repo, versionPath, content, headBefore, tagsBefore string) {
 	t.Helper()
 	if headAfter := gitOutputForTest(t, repo, "rev-parse", "HEAD"); headAfter != headBefore {

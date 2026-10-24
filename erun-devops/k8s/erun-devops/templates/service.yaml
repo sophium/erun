@@ -413,17 +413,8 @@ roleRef:
   kind: ClusterRole
   name: {{ .Release.Name }}-namespace-manager
 ---
-# local-only: in contribute mode an operator runs `erun deploy` from inside the
-# runtime pod, where helm authenticates as this release's ServiceAccount. That
-# SA is bound to the built-in admin ClusterRole, which covers namespaced
-# resources but deliberately withholds cluster-scoped RBAC — so an in-pod
-# self-deploy could not even helm-diff the namespace-manager ClusterRole/
-# bindings above (helm fails with "cannot get clusterroles at the cluster
-# scope"). Grant the SA management of exactly this release's own cluster-scoped
-# RBAC, by name, so an in-pod redeploy works without granting broad clusterrole
-# escalation. The first install still comes from an admin context (which can
-# create these); the SA only upgrades them in place, and it already holds every
-# permission it re-applies, so the apiserver's escalation check passes.
+# Lets an in-pod self-deploy upgrade this release's own cluster-scoped RBAC, by
+# name only; the first install must still come from an admin context.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -474,15 +465,8 @@ roleRef:
 ---
 {{- end }}
 {{- if .Values.platformAccount }}
-# Opt-in platform account: this env's runtime ServiceAccount is the cluster's
-# erun platform admin, so in-pod `erun terraform apply` of the cluster edge and
-# platform component installs (cert-manager, Traefik, PowerDNS) can create the
-# cluster-scoped resources they require — namespaces, CRDs, cluster RBAC,
-# webhooks. Bound to the built-in cluster-admin because the platform charts'
-# cluster-scoped surface evolves and a curated role would need endless upkeep.
-# The first bind is created by the admin-capable context that runs the initial
-# deploy: the apiserver's escalation check requires the creator already hold
-# everything it grants, so an in-pod self-deploy cannot bootstrap this itself.
+# Opt-in: makes the runtime SA cluster-admin so in-pod platform installs can
+# create cluster-scoped resources. The first bind needs an admin context.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -500,10 +484,7 @@ roleRef:
 ---
 {{- end }}
 {{- with .Values.extraRules }}
-# Extra cluster-scoped RBAC for the runtime ServiceAccount, supplied by a wrapper
-# (e.g. a build env that adds a sidecar needing permissions the built-in admin
-# binding does not grant). No-op unless set; namespaced access already comes from
-# the admin binding above.
+# Extra cluster-scoped RBAC a wrapper chart can grant the runtime SA.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -627,14 +608,8 @@ spec:
               mountPath: {{ $erunBinStagePath | quote }}
             {{- end }}
         {{- if eq $worktreeStorage "pvc" }}
-        # Adopt before mounting: a deploy that introduces the worktree claim to
-        # an environment whose checkout still lives on the home volume would
-        # otherwise mount an empty volume straight over that checkout, leaving it
-        # unreachable through erun and letting the one-way workspace sync
-        # propagate the empty tree over the operator's only other copy. Runs the
-        # runtime image's own erun so no new image dependency is introduced. An
-        # image whose erun has no adopt-worktree fails this container, which
-        # refuses the rollout: starting is exactly what loses the tree.
+        # Moves an existing checkout onto the worktree volume before it is mounted
+        # over; failing here must block the rollout, or the checkout is lost.
         - image: {{ $devopsImage }}
           name: adopt-worktree
           imagePullPolicy: IfNotPresent
@@ -1064,12 +1039,8 @@ spec:
                   - sh
                   - -lc
                   - 'i=0; until docker -H unix:///var/run/docker.sock info >/dev/null 2>&1 || [ "$i" -ge 300 ]; do i=$((i+1)); sleep 1; done; chmod 0666 /var/run/docker.sock 2>/dev/null || true'
-          # The dind sidecar is the docker daemon that resolves a tenant's
-          # docker-compose bind-mount sources on its own filesystem, so it must
-          # see the same home + repo tree as the erun-devops container: without
-          # the repo mount a "./relative" compose bind mount resolves to a path
-          # the daemon lacks and Docker silently creates an empty dir there
-          # (localstack init hooks, DB seed SQL, service configs all vanish).
+          # dind resolves compose bind-mount sources on its own filesystem, so it
+          # needs the same mounts or relative binds silently become empty dirs.
           volumeMounts:
             - name: erun-home
               mountPath: /home/erun
@@ -1146,12 +1117,8 @@ spec:
       restartPolicy: Always
 {{- if eq $mcpEnabled "true" }}
 ---
-# Fronts the runtime container's MCP port so `erun expose <tenant> <env> mcp`
-# has a real Service to route to (TenantResourcePrefix(tenant)+"-mcp", the
-# BackendService name the expose primitive derives from tenant + service name
-# alone, independent of this chart's own release naming). Port 80 keeps the
-# public hostname's default port (no --port needed) mapped onto the named
-# "mcp" containerPort declared above.
+# `erun expose <tenant> <env> mcp` derives this name from the tenant alone,
+# independent of the release name.
 apiVersion: v1
 kind: Service
 metadata:
@@ -1168,22 +1135,9 @@ spec:
 {{- end }}
 {{- if eq $metricsEnabled "true" }}
 ---
-# Restricts the Prometheus exposition listener (metrics-spec.md) added for
-# erun_idle_eligibility/erun_terminal_input_seconds_since_last/
-# erun_traffic_window_bytes/erun_mcp_calls_total/erun_audit_events_total: the
-# listener carries no authentication of its own (matching Prometheus scrape
-# convention), and every series it exposes is labelled by tenant+environment,
-# so leaving it reachable from every namespace would let any other tenant's
-# pod on the cluster read this one's idle/audit/MCP-call activity. Selecting
-# this pod with an Ingress NetworkPolicy makes it default-deny for every port
-# no rule names, so this policy is what isolates the pod's ingress: the ssh and
-# mcp rules below re-permit those two ports by number from any source, keeping
-# the reachability they had before any policy governed them, and every other
-# listener on the pod is closed to other pods. Adding a listener here means
-# adding its port to this policy. A cluster Prometheus living outside this
-# namespace needs its own
-# namespace labelled network-policy/erun-metrics-scraper=true to reach it;
-# same-namespace traffic (e.g. `erun open` + a manual curl) is always allowed.
+# The metrics listener is unauthenticated, so only same-namespace pods and
+# namespaces labelled network-policy/erun-metrics-scraper=true may scrape it.
+# This policy default-denies every other port: a new listener must be added here.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

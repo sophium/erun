@@ -13,12 +13,8 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// A tenant's own runtimeimage tag rides the tenant's own release
-// line, not erun's. Rewriting it to the erun target version would name a
-// tag that line never publishes, guaranteeing an ImagePullBackOff on the
-// very next deploy — produced by the command whose whole purpose is
-// keeping version references consistent. pin must leave it alone and say
-// so in the plan, so the operator is not left assuming it was covered.
+// A tenant runtimeimage tag rides the tenant's release line; rewriting it to the erun
+// target would ImagePullBackOff, so pin skips it and says so.
 func testPinSkipsATenantRuntimeimageTagAndSaysSo(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -39,11 +35,6 @@ func testPinSkipsATenantRuntimeimageTagAndSaysSo(t *testing.T) {
 	golden.Equal(t, "pin/skips_a_tenant_runtimeimage_tag_and_says_so", normalize.Apply(result.Combined))
 }
 
-// The reported bug, for real: applying a re-pin for a tenant-imaged
-// env must not overwrite its persisted runtimeversion — that would name a
-// tag the tenant's own image line never publishes, guaranteeing an
-// ImagePullBackOff on the next deploy — while the rest of the repo's
-// erun-owned references still move.
 func testPinRealRunLeavesATenantImagedRuntimeversionAlone(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -77,11 +68,7 @@ func testPinRealRunLeavesATenantImagedRuntimeversionAlone(t *testing.T) {
 	}
 }
 
-// The reported bug, for real: a runtimechart naming erun's own stock
-// chart is versioned on erun's own release line, just like runtimeversion
-// and a stated runtimeimage — a re-pin's dry-run plan must name it as a
-// site to move rather than reporting a plan that looks complete while
-// leaving it behind.
+// A stock-erun runtimechart is on erun's release line, so the plan must move it.
 func testPinDryRunReportsAStaleRuntimechartReference(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -102,12 +89,7 @@ func testPinDryRunReportsAStaleRuntimechartReference(t *testing.T) {
 	golden.Equal(t, "pin/dry_run_reports_a_stale_runtimechart_reference", normalize.Apply(result.Combined))
 }
 
-// The whole coordinate, applied for real: a stated-stock runtimeimage and
-// runtimechart move to the target alongside runtimeversion, in the one
-// write that realigns the environment's own config. Before this fix, only
-// runtimeversion moved — runtimechart (this report) and a stated
-// runtimeimage (a latent instance of the same gap, found while fixing
-// this) were both left behind.
+// A stated-stock runtimeimage and runtimechart move together with runtimeversion.
 func testPinRealRunPinsRuntimeversionRuntimeimageAndRuntimechartTogether(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -143,13 +125,7 @@ func testPinRealRunPinsRuntimeversionRuntimeimageAndRuntimechartTogether(t *test
 	}
 }
 
-// A tenant's own runtimechart line is a real, deliberate configuration —
-// --runtime-chart exists precisely so the chart can be versioned
-// separately from the image and the erun release. A re-pin must leave the
-// whole coordinate exactly as stated: the env running that umbrella runs
-// the image the umbrella publishes, so its runtimeversion is that line's
-// number too, and writing the erun target into it hands the environment a
-// version its own release line never publishes.
+// A tenant-own runtimechart line pins the whole coordinate, including runtimeversion.
 func testPinRealRunLeavesATenantOwnRuntimechartLineUnchanged(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -179,11 +155,8 @@ func testPinRealRunLeavesATenantOwnRuntimechartLineUnchanged(t *testing.T) {
 	}
 }
 
-// The reported case, binary-reachable: the environment states no
-// runtimeimage, so only its own umbrella names the line its runtime pod
-// runs. The plan must skip runtimeversion with a note saying what it read,
-// rather than adding the erun target to an environment whose own release
-// line never publishes it.
+// With no stated runtimeimage the env's own umbrella names its line, so runtimeversion
+// is skipped with a note.
 func testPinSkipsAnOwnUmbrellaEnvsRuntimeversionAndSaysSo(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "frs", "build")

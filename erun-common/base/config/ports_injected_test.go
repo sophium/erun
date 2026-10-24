@@ -4,10 +4,6 @@ import (
 	"testing"
 )
 
-// TestLocalPortsForResultPrefersInjectedRuntimePorts covers the open path: the
-// pod's own CLI resolves its environment's edge from the same derivation, so a
-// process that carries the chart-injected ports must resolve that environment
-// to them rather than to the defaulted block.
 func TestLocalPortsForResultPrefersInjectedRuntimePorts(t *testing.T) {
 	t.Setenv("ERUN_TENANT", "tenant-a")
 	t.Setenv("ERUN_ENVIRONMENT", "dev")
@@ -30,10 +26,6 @@ func TestLocalPortsForResultPrefersInjectedRuntimePorts(t *testing.T) {
 	}
 }
 
-// TestOverlayInjectedRuntimeLocalPorts covers the in-pod port overlay: an
-// environment's own runtime pod is the only process whose injected ERUN_*_PORT
-// values are authoritative for it, and the on-disk projection that pod reads
-// carries no localportrangestart to derive the same block from.
 func TestOverlayInjectedRuntimeLocalPorts(t *testing.T) {
 	injectedEnv := map[string]string{
 		"ERUN_TENANT":      "tenant-a",

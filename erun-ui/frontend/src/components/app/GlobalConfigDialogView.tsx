@@ -43,10 +43,7 @@ export function GlobalConfigDialogView(): React.ReactElement {
       }}
     >
       <DialogContent
-        // Bound the panel to the viewport and let the body scroll, same shape as
-        // EnvironmentDialogView — cloud aliases and cloud contexts grow this
-        // dialog's content without limit, so a plain centered grid overflows off
-        // both edges with nothing scrollable.
+        // Bound to the viewport with a scrolling body; content grows without limit.
         className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
         onCloseAutoFocus={(event) => {
           event.preventDefault();

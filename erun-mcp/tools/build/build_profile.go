@@ -13,16 +13,9 @@ type BuildProfileInput struct {
 	Limit int    `json:"limit,omitempty" jsonschema:"maximum number of recent builds to list when id is omitted, newest-first (default 20); ignored when id is set"`
 }
 
-// BuildProfileResult is one of two shapes depending on whether Input.ID was
-// set: a recent-builds listing (Records, Record left empty), or one build's
-// full step tree (Record, Records left empty). Folding both into one result
-// type keeps this a single tool rather than a list/show pair, matching how
-// few fields either shape has. Record is a raw core.TimingRecord
-// captured verbatim rather than the typed struct: TimingStepJSON nests itself
-// (a step's own Steps field), and the SDK's schema reflector cannot compute
-// an output schema for a directly self-referential type -- capabilities.go's
-// rawJSONSchemaOverrides already widens json.RawMessage to accept any JSON
-// for exactly this reason (see EnvironmentJob.Result).
+// BuildProfileResult holds either a listing (Records) or one build (Record).
+// Record is raw JSON because the SDK cannot derive a schema for the
+// self-referential step type.
 type BuildProfileResult struct {
 	Records []build.TimingRecordSummary `json:"records,omitempty"`
 	Record  json.RawMessage             `json:"record,omitempty"`

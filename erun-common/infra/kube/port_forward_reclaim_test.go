@@ -10,10 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// seedPortForwardLogForTest writes the log a forward appends to, and the
-// rotated generation its size cap leaves beside it, so a test can tell a
-// removal that clears the whole record from one that clears only the state
-// file.
+// seedPortForwardLogForTest writes a log and its rotated generation.
 func seedPortForwardLogForTest(t *testing.T, kind, tenant, environment string) string {
 	t.Helper()
 	logPath, err := PortForwardLogPath(kind, tenant, environment)
@@ -45,14 +42,8 @@ func requirePresent(t *testing.T, path string) {
 	}
 }
 
-// TestRemovePortForwardRecordKeepsTheLogOfAForwardThatIsStillRunning is the
-// other half of the same decision: a forward holds the file it opened at start
-// as its own stdout/stderr, so a log a still-running forward is writing to is
-// the one thing a reclaim must leave alone. Unlinking it would take away the
-// forward an operator is still reading while its writer kept consuming disk
-// invisibly. The state file still goes: the local port it names is freed and
-// reissued, so a record outliving its environment resolves to somebody else's
-// forward.
+// A running forward still writes to its log, so the log stays; the state file goes
+// because its port gets reissued.
 func TestRemovePortForwardRecordKeepsTheLogOfAForwardThatIsStillRunning(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	tenant, environment := "team", "dev"
@@ -73,18 +64,10 @@ func TestRemovePortForwardRecordKeepsTheLogOfAForwardThatIsStillRunning(t *testi
 	requireMissing(t, statePath)
 }
 
-// TestRemovePortForwardRecordKeepsALogSomeProcessStillHolds covers the case no
-// record can answer: a forward whose environment was deleted keeps its log
-// while it is still running, and the state file it would have been found
-// through goes with the environment, so a later reclaim looking at the tree
-// has nothing left to ask. Without the open-file check the delete path would
-// keep a log the sweep then removed -- taking away what an operator is reading
-// while the writer kept consuming disk through the unlinked file.
+// The state file is gone, so only the open-file check can protect a running forward's log.
 func TestRemovePortForwardRecordKeepsALogSomeProcessStillHolds(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	tenant, environment := "team", "dev"
-	// No processId: the record cannot answer the question on its own, which is
-	// the whole point.
 	seedPortForwardStateFileForTest(t, tenant, environment, 26100)
 	logPath := seedPortForwardLogForTest(t, "mcp", tenant, environment)
 
@@ -100,8 +83,6 @@ func TestRemovePortForwardRecordKeepsALogSomeProcessStillHolds(t *testing.T) {
 	requirePresent(t, logPath+".1")
 }
 
-// writePortForwardStateProcessID rewrites a seeded record with the process id
-// a live forward would have recorded.
 func writePortForwardStateProcessID(t *testing.T, statePath string, processID int) {
 	t.Helper()
 	data, err := os.ReadFile(statePath)
@@ -122,10 +103,6 @@ func writePortForwardStateProcessID(t *testing.T, statePath string, processID in
 	}
 }
 
-// TestReclaimOrphanedPortForwardRecordsRemovesEnvironmentsThatNoLongerExist
-// covers the residue a delete can no longer reach: logs belonging to tenants
-// and environments the config store does not know, including files whose state
-// file was already reclaimed and only the log is left.
 func TestReclaimOrphanedPortForwardRecordsRemovesEnvironmentsThatNoLongerExist(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	if err := config.SaveERunConfig(config.ERunConfig{}); err != nil {
@@ -145,11 +122,8 @@ func TestReclaimOrphanedPortForwardRecordsRemovesEnvironmentsThatNoLongerExist(t
 	seedPortForwardStateFileForTest(t, "acme", "dev", 26100)
 	liveLog := seedPortForwardLogForTest(t, "mcp", "acme", "dev")
 
-	// A configured tenant's deleted environment: the state file was reclaimed,
-	// only the log is left.
 	orphanLog := seedPortForwardLogForTest(t, "mcp", "acme", "gone")
 
-	// A tenant that is not configured at all, in another kind.
 	retiredLog := seedPortForwardLogForTest(t, "sshd", "sapiens", "poc")
 
 	if err := ReclaimOrphanedPortForwardRecords(core.Context{}); err != nil {
@@ -166,14 +140,9 @@ func TestReclaimOrphanedPortForwardRecordsRemovesEnvironmentsThatNoLongerExist(t
 	}
 }
 
-// TestReclaimOrphanedPortForwardRecordsLeavesTheTreeAloneWhenTheConfigIsUnreadable
-// pins the answer that must never be guessed: a config tree that is not there
-// is not the same answer as a config tree with no tenants in it, and treating
-// the two alike would remove every forward log on the host.
+// A missing config tree is not an empty one; treating them alike would remove every forward log.
 func TestReclaimOrphanedPortForwardRecordsLeavesTheTreeAloneWhenTheConfigIsUnreadable(t *testing.T) {
 	redirectConfigHomeForTest(t)
-	// A forward tree with no config tree beside it, which is what a process
-	// resolving a different config home sees.
 	retiredLog := seedPortForwardLogForTest(t, "mcp", "sapiens", "poc")
 
 	if err := ReclaimOrphanedPortForwardRecords(core.Context{}); err != nil {

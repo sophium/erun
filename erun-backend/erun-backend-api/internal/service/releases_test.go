@@ -9,11 +9,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
 
-// fakeReleaseQueue models the queue table's contracts in memory: one row per
-// commit, keyed by commit for the idempotency contract. The invariants it
-// holds are the ones PostgreSQL enforces, so a service behaviour that depends
-// on them is exercised here and the SQL that enforces them is exercised
-// against a real database in internal/repository's own release e2e tests.
+// fakeReleaseQueue holds one row per commit, mirroring the PostgreSQL uniqueness contract.
 type fakeReleaseQueue struct {
 	rows   []*model.Release
 	nextID int
@@ -116,9 +112,6 @@ func TestEnqueueRejectsARequestWithNothingToRelease(t *testing.T) {
 	}
 }
 
-// TestEnqueueMintsNothingForAnAlreadyReleasedCommit is the worst failure this
-// queue could have: two versions for one merge commit. The already-released row
-// is the answer, and no second row appears.
 func TestEnqueueMintsNothingForAnAlreadyReleasedCommit(t *testing.T) {
 	queue := &fakeReleaseQueue{}
 	service := NewReleaseService(queue)
@@ -143,9 +136,7 @@ func TestEnqueueMintsNothingForAnAlreadyReleasedCommit(t *testing.T) {
 	}
 }
 
-// TestEnqueueRequeuesAFailedCommit: a transient failure must not lock a commit
-// out of ever being released, and the retry has to be a new attempt so its
-// workflow runs rather than replay.
+// The retry must be a new attempt so its workflow runs rather than replays.
 func TestEnqueueRequeuesAFailedCommit(t *testing.T) {
 	queue := &fakeReleaseQueue{}
 	service := NewReleaseService(queue)

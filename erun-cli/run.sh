@@ -1,13 +1,11 @@
 #!/usr/bin/env sh
-# Development wrapper: builds erun (and, for `erun app`, the desktop) from this
-# checkout, then runs it. The contribute shim forwards every `erun` call here.
+# Builds erun (and, for `erun app`, the desktop) from this checkout, then runs it.
 
 set -eu
 
 ORIGINAL_DIR=$(pwd)
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
-# ERUN_DEV_BIN_DIR moves the binaries out of the checkout, for callers that must
-# not write into it (a host orchestrator's read-only review directory).
+# ERUN_DEV_BIN_DIR is for callers that must not write into the checkout.
 BIN_DIR=${ERUN_DEV_BIN_DIR:-$SCRIPT_DIR/bin}
 TARGET="$BIN_DIR/erun"
 APP_TARGET="$BIN_DIR/erun-app"

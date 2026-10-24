@@ -12,8 +12,6 @@ import (
 	"github.com/sophium/erun/erun-common/command/workspace"
 )
 
-// hostWorkspaceStore builds a remote-agent env whose workspace-sync mirror lives
-// at localPath, so the host-workspace methods resolve to a real host directory.
 func hostWorkspaceStore(localPath string) stubUIStore {
 	return stubUIStore{
 		tenants: map[string]config.TenantConfig{
@@ -94,10 +92,6 @@ func TestRunHostArtifactRejectsMissingAndTraversal(t *testing.T) {
 	}
 }
 
-// hostTypeEnvironmentStore builds a host env (no pod, no cluster) whose
-// worktree is localPath directly — unlike a remote-agent env, it needs no
-// SSHD/workspace-sync mirror, since the worktree IS the operator's own
-// directory and was never anywhere else.
 func hostTypeEnvironmentStore(localPath string) stubUIStore {
 	return stubUIStore{
 		tenants: map[string]config.TenantConfig{
@@ -113,12 +107,6 @@ func hostTypeEnvironmentStore(localPath string) stubUIStore {
 	}
 }
 
-// TestHostWorkspacePathIsTheRepoPathDirectlyForAHostEnvironment locks in the
-// same "reading the diff works" contract TestLoadHostDiffReadsHostWorktreeWithoutMCP
-// proves for a remote-agent's synced mirror, but for a host env: no SSHD, no
-// workspace sync, no pod at all — just the local directory itself, resolved
-// entirely through config.EnvConfig.RemoteWorktree() correctly answering
-// false for host.
 func TestHostWorkspacePathIsTheRepoPathDirectlyForAHostEnvironment(t *testing.T) {
 	local := t.TempDir()
 	store := hostTypeEnvironmentStore(local)
@@ -166,12 +154,6 @@ func TestLoadHostDiffReadsHostWorktreeWithoutMCP(t *testing.T) {
 	}
 }
 
-// TestLoadDirectoryDiffReadsADirectoryWithoutMCP is the path-addressed sibling of
-// the host-diff test above: a directory the orchestrator works in belongs to no
-// environment, so there is no tenant to resolve and no MCP edge to dial. The diff
-// is read with host git from the path itself -- which is what lets the review
-// panel show a directory's changes at all, instead of the panel reading "No
-// environment selected" for a scope the orchestrator actually has.
 func TestLoadDirectoryDiffReadsADirectoryWithoutMCP(t *testing.T) {
 	local := t.TempDir()
 	runGit := func(args ...string) {
@@ -186,7 +168,6 @@ func TestLoadDirectoryDiffReadsADirectoryWithoutMCP(t *testing.T) {
 	runGit("commit", "-m", "init")
 	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(local, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644), "modify")
 
-	// No store and no loadDiff dep at all: a directory diff must not need either.
 	app := NewApp(erunUIDeps{})
 	defer app.shutdown(context.Background())
 
@@ -206,9 +187,6 @@ func TestLoadDirectoryDiffReadsADirectoryWithoutMCP(t *testing.T) {
 	}
 }
 
-// A path that names nothing, or names a file, is refused at this edge with the
-// path in the message -- the operator typed it, and git's own error from a layer
-// down would name neither the path nor what was wrong with it.
 func TestLoadDirectoryDiffRefusesAnUnusablePath(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "a-file")

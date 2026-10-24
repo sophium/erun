@@ -8,20 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-// TestDrainPortForwardOutputKeepsDrainingAfterReportingThePort reproduces a
-// parent-stops-draining bug one hop down the stack from the docker
-// build/push deadlock this same shape was found in: a kubectl port-forward
-// the build/push path keeps open for as long as a registry is reachable
-// through it. The old readForwardingPort returned from its scan loop the
-// moment it found the "Forwarding from ..." line, so nothing ever read
-// kubectl's stdout again for the rest of the forward's life -- once kubectl
-// wrote more than one pipe buffer's worth of later "Handling connection for
-// ..." lines, it would block on write forever and the tunnel it was providing
-// would stall silently.
-//
-// The stub here writes the forwarding line and then well over 64KB more, so a
-// parent that stops draining after the first line leaves the child blocked
-// and cmd.Wait() never returns.
+// The stub writes well over 64KB after the forwarding line; a parent that stops draining hangs Wait.
 func TestDrainPortForwardOutputKeepsDrainingAfterReportingThePort(t *testing.T) {
 	script := `echo "Forwarding from 127.0.0.1:38471 -> 80"
 for i in $(seq 1 20000); do
@@ -53,9 +40,6 @@ done`
 		t.Fatal("timed out waiting for the forwarding port to be reported")
 	}
 
-	// The real regression: with the port already reported, does the rest of
-	// the child's output still get drained, or does the child block on write
-	// and cmd.Wait() hang forever?
 	waitErr := make(chan error, 1)
 	go func() { waitErr <- cmd.Wait() }()
 	select {

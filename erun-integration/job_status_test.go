@@ -17,11 +17,8 @@ import (
 )
 
 func testJobAwaitReportsATimeoutDistinctlyFromAFailure(t *testing.T) {
-	// The defect this whole surface closes: an orchestrator that cannot tell
-	// "not finished yet" from "failed". The bounded wait exits 124 with the job
-	// still running, where a failed job exits 1 (see the non-zero scenario
-	// below) — two different events, two different codes, neither inferred from
-	// the other.
+	// A bounded await exits 124 on timeout with the job still running, distinct
+	// from a failure's exit 1.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	release := filepath.Join(setup.Cwd, "release")
@@ -37,9 +34,7 @@ func testJobAwaitReportsATimeoutDistinctlyFromAFailure(t *testing.T) {
 	}
 	golden.Equal(t, "job/await_reports_a_timeout_distinctly_from_a_failure", normalize.Apply(await.Combined))
 
-	// timedOut is carried in the result too, so a caller reading the payload
-	// does not have to infer it from an exit code either. It is masked by
-	// normalization, so it is asserted from the parsed JSON.
+	// timedOut is masked by normalization, so assert it from JSON.
 	awaitJSON := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "slow", "--timeout", "1s", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	var payload struct {
 		TimedOut bool `json:"timedOut"`
@@ -58,8 +53,7 @@ func testJobAwaitReportsATimeoutDistinctlyFromAFailure(t *testing.T) {
 		t.Errorf("a running job must carry no exit code, got %d", *payload.Job.ExitCode)
 	}
 
-	// Let the work finish so the scenario leaves nothing running, and confirm
-	// the same await now reports the outcome rather than a timeout.
+	// Release the work; the same await now reports the outcome.
 	if err := os.WriteFile(release, []byte("go\n"), 0o644); err != nil {
 		t.Fatalf("release the stub: %v", err)
 	}
@@ -70,10 +64,8 @@ func testJobAwaitReportsATimeoutDistinctlyFromAFailure(t *testing.T) {
 }
 
 func testJobStatusReportsANonZeroExitCapturedInTheEnvironment(t *testing.T) {
-	// The exit status is observed by the supervisor waiting on the work, so it
-	// survives with no sentinel token in the log and no shell between the work
-	// and its result. The stub prints on both streams to lock that they are
-	// captured together.
+	// The supervisor captures exit 42 directly; stdout and stderr are captured
+	// together.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := jobStubEnv(t, setup, "printf 'compiling\\n'\nprintf 'boom\\n' >&2\nexit 42")
@@ -91,9 +83,6 @@ func testJobStatusReportsANonZeroExitCapturedInTheEnvironment(t *testing.T) {
 	golden.Equal(t, "job/status_reports_a_non_zero_exit_captured_in_the_environment", normalize.Apply(
 		await.Combined+status.Combined+output.Combined))
 
-	// The captured code is the contract; normalization leaves it alone, but the
-	// persisted record is a side effect outside the streams, so it is asserted
-	// on disk.
 	body, err := os.ReadFile(jobRecordPath(setup, "team", "dev", "suite"))
 	if err != nil {
 		t.Fatalf("read job record: %v", err)
@@ -111,11 +100,8 @@ func testJobStatusReportsANonZeroExitCapturedInTheEnvironment(t *testing.T) {
 }
 
 func testJobStatusNamesWhyAFailedJobFailedInsteadOfOnlyItsExitCode(t *testing.T) {
-	// Every other terminal status line already rendered the recorded reason;
-	// exited did not, so a job that never even started reported a bare
-	// "exited -1" and left the one field that says what went wrong readable
-	// only in JSON. The work here is an absolute path that does not exist, so
-	// the supervisor's own start fails and the reason is the whole answer.
+	// A job whose command does not exist names the reason in its status line, not
+	// just "exited -1".
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := inEnvironment(setup.Env())
@@ -130,10 +116,7 @@ func testJobStatusNamesWhyAFailedJobFailedInsteadOfOnlyItsExitCode(t *testing.T)
 }
 
 func testJobOutputIsReadableWhileTheJobRuns(t *testing.T) {
-	// Progress must be visible before the work exits, not buffered to the end,
-	// and the next offset must let a poll continue rather than repeat. The stub
-	// signals when its first line is flushed and waits to be released, so the
-	// scenario reads mid-run on an observable condition rather than a sleep.
+	// Output is readable mid-run, and the next offset resumes without repeats.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	flushed := filepath.Join(setup.Cwd, "flushed")
@@ -166,17 +149,13 @@ func testJobOutputIsReadableWhileTheJobRuns(t *testing.T) {
 	if await.ExitCode != 0 {
 		t.Fatalf("await: exit %d: %s", await.ExitCode, await.Combined)
 	}
-	// Resuming from the mid-run read's next offset returns only what was
-	// written after it.
 	rest := erun.Run(t, []string{"job", "output", "--tenant", "team", "--environment", "dev", "--id", "chatty", "--offset", "6"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	golden.Equal(t, "job/output_is_readable_while_the_job_runs", normalize.Apply(
 		midRun.Combined+rest.Combined))
 }
 
 func testJobARunningJobHoldsAnActivityLease(t *testing.T) {
-	// The payoff of building jobs on the lease store: starting work makes the
-	// environment read as busy, and finishing it releases the claim, without
-	// the caller arranging either.
+	// A running job holds an activity lease, released when it finishes.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	release := filepath.Join(setup.Cwd, "release")
@@ -200,10 +179,8 @@ func testJobARunningJobHoldsAnActivityLease(t *testing.T) {
 }
 
 func testJobCancelSignalsTheRecordedProcessAndRecordsTheOutcome(t *testing.T) {
-	// The cancel targets a pid the record holds, so it can never match the
-	// shell issuing it. The supervisor is left alone, which is why the
-	// cancelled job reads back as a normal exited job carrying the signal
-	// rather than as a job whose outcome nobody recorded.
+	// Cancel signals the recorded work pid, not the supervisor, so the outcome is
+	// still recorded.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	started := filepath.Join(setup.Cwd, "started")
@@ -227,9 +204,7 @@ func testJobCancelSignalsTheRecordedProcessAndRecordsTheOutcome(t *testing.T) {
 }
 
 func testJobAttachTracksAPidWithoutClaimingAnOutcome(t *testing.T) {
-	// Work erun did not start still gets a handle and a lease. The pid seeded
-	// here cannot exist, so the job resolves to unknown immediately — which is
-	// the honest answer for work nothing erun ran was waiting on.
+	// An attached pid that cannot exist resolves to unknown immediately.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	attach := erun.Run(t, []string{"job", "attach", "--tenant", "team", "--environment", "dev", "--name", "overnight index", "--id", "overnight", "--pid", "2147483646"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -261,17 +236,8 @@ func testJobStatusWithoutJobsSaysSo(t *testing.T) {
 }
 
 func testJobStatusSkipsACorruptedRecordAndOrdersTiesById(t *testing.T) {
-	// Listing every job tolerates an unreadable record instead of failing
-	// the whole list: a record this process cannot even parse cannot
-	// answer anything, and leaving it on disk would keep an unreadable job
-	// in every listing forever, so it is removed as the list is built.
-	// Two records sharing the same startedAt (two jobs started in the same
-	// wall-clock second, a real possibility) also proves the list's
-	// tie-break falls back to ID rather than whatever order the directory
-	// happened to return. Both are seeded running (this test binary's own,
-	// real, alive pid, the same technique the task-job scenarios above
-	// use) rather than exited, so retention never prunes them regardless of
-	// how old the fixed startedAt is.
+	// A corrupted record is skipped and removed, and startedAt ties order by ID.
+	// Records use this test's live pid so retention never prunes them.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	dir := filepath.Dir(jobRecordPath(setup, "team", "dev", "a"))
@@ -327,8 +293,7 @@ func assertJobsListedAThenB(t *testing.T, stdout string) {
 }
 
 func testJobAwaitRefusesAnUnboundedTimeout(t *testing.T) {
-	// The ceiling is what makes "bounded" real: a caller that wants to wait
-	// longer polls again rather than parking on one call.
+	// Await refuses a timeout past its ceiling.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "suite", "--timeout", "2h"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -356,8 +321,7 @@ func testJobCancelDryRunNamesTheTargetWithoutSignalling(t *testing.T) {
 	}
 	golden.Equal(t, "job/cancel_dry_run_names_the_target_without_signalling", normalize.Apply(cancel.Combined))
 
-	// The dry run must not have stopped anything: the job is still running and
-	// finishes on its own.
+	// The dry run stopped nothing.
 	if err := os.WriteFile(release, []byte("go\n"), 0o644); err != nil {
 		t.Fatalf("release the stub: %v", err)
 	}
@@ -368,9 +332,7 @@ func testJobCancelDryRunNamesTheTargetWithoutSignalling(t *testing.T) {
 }
 
 func testJobOutputPastTheCapIsReportedAsTruncated(t *testing.T) {
-	// A bounded log must never read as a complete answer, and the outcome must
-	// survive the bound — which it does, because the exit status never comes
-	// from the log.
+	// A capped log reports truncation, and the exit status survives it.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := jobStubEnv(t, setup, "i=0\nwhile [ $i -lt 200 ]; do printf 'chatter %s\\n' $i; i=$((i+1)); done\nexit 3")

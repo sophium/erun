@@ -16,11 +16,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// hostnameAPIStubServer runs a minimal erun-backend-api double covering the
-// two calls the platform-route DNS write path makes (GET /v1/environments to
-// resolve the environment id by name, then PUT/DELETE .../hostname), so a
-// real-run scenario exercises erun-common/command/expose/expose_platform_dns.go's actual
-// network calls, not only their --dry-run trace.
+// hostnameAPIStubServer is an erun-backend-api double for the platform-route DNS write.
 func hostnameAPIStubServer(t testing.TB) (*httptest.Server, *[]string) {
 	t.Helper()
 	var mu sync.Mutex
@@ -97,11 +93,7 @@ func testExposeHelp(t *testing.T) {
 }
 
 func testExposeDryRun(t *testing.T) {
-	// Happy path: a platform block plus an env yields a complete expose plan
-	// with no side effects. TLS is requested by default (no --no-tls) but no
-	// DNS-01 broker flags are set, so the plan resolves to http-only and says
-	// why, rather than the Ingress claiming https with nothing to ever
-	// populate the certificate Secret.
+	// TLS without DNS-01 broker flags resolves to http-only and says why.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -110,12 +102,7 @@ func testExposeDryRun(t *testing.T) {
 	golden.Equal(t, "expose/dry_run", normalize.Apply(result.Combined))
 }
 
-// dry_run_backend_service_overrides_the_derived_name is the CLI half of the
-// reported gap: without --backend-service the Ingress targets the derived
-// <tenant>-<service>, and a repo whose own chart names its Service
-// something else gets a hostname that resolves and an Ingress that 503s.
-// The scenario pins both halves -- the public host stays the logical label
-// the caller passed, and only the Ingress backend moves.
+// The public host stays the logical label; only the Ingress backend moves to --backend-service.
 func testExposeDryRunBackendServiceOverridesTheDerivedName(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -129,8 +116,6 @@ func testExposeDryRunBackendServiceOverridesTheDerivedName(t *testing.T) {
 }
 
 func testExposeDryRunNoTLS(t *testing.T) {
-	// --no-tls takes the http branch: the plan traces "http-only" and the
-	// rendered Ingress carries no tls block, only ingressClassName.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -140,11 +125,7 @@ func testExposeDryRunNoTLS(t *testing.T) {
 }
 
 func testExposeDryRunWithTLSProvisioning(t *testing.T) {
-	// --dns01-token-file + --dns01-broker-url + --acme-email together
-	// provision a per-env cert-manager Issuer + Certificate through the
-	// DNS-01 broker, so the wildcard TLS Secret the Ingress references
-	// actually gets populated. The token file's content never
-	// appears in the trace -- only its path.
+	// The token file's content must never appear in the trace, only its path.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -162,10 +143,7 @@ func testExposeDryRunWithTLSProvisioning(t *testing.T) {
 }
 
 func testExposeDryRunCrossCluster(t *testing.T) {
-	// The platform env that owns PowerDNS sits on a different cluster than the
-	// target env: the wildcard DNS write must exec against the platform env's
-	// kube context while the Ingress applies against the target env's, and the
-	// two must never collapse into one cross-cluster misroute.
+	// The DNS write runs against the platform env's context, the Ingress against the target env's.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedTenantEnvWithContext(t, setup, "frs", "prod", "platform-context")
@@ -176,9 +154,6 @@ func testExposeDryRunCrossCluster(t *testing.T) {
 }
 
 func testExposeRequiresPlatformConfig(t *testing.T) {
-	// expose only makes sense for a platform deployment; without a platform
-	// block it fails with an actionable error rather than resolving a hostname
-	// under an unknown zone.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -190,8 +165,7 @@ func testExposeRequiresPlatformConfig(t *testing.T) {
 }
 
 func testExposeRequiresPlatformEnv(t *testing.T) {
-	// Without platform.env the per-env wildcard DNS write would exec as
-	// `kubectl -n "" exec` and silently misroute, so expose fails fast.
+	// Without platform.env the DNS write would run `kubectl -n "" exec` and misroute.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -204,10 +178,6 @@ func testExposeRequiresPlatformEnv(t *testing.T) {
 }
 
 func testExposeRealRunViaStubs(t *testing.T) {
-	// Drive the live expose path (the block RunExposeService reaches only after
-	// the dry-run short-circuit: RequireKubernetesContext, the pdnsutil
-	// replace-rrset exec, and the Host-routing Ingress apply) via a kubectl stub
-	// so the real-run execution branch gets covered, not just the dry-run trace.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -223,11 +193,7 @@ func testExposeRealRunViaStubs(t *testing.T) {
 }
 
 func testExposeSkipIfUnconfiguredNoPlatform(t *testing.T) {
-	// --skip-if-unconfigured turns the missing-platform-block hard failure
-	// (see requires_platform_config above) into a traced no-op success, the
-	// behavior a caller composing expose after another command needs when it
-	// cannot know in advance whether the target project is a platform
-	// deployment.
+	// A caller composing expose may not know whether the project is a platform deployment.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -239,9 +205,6 @@ func testExposeSkipIfUnconfiguredNoPlatform(t *testing.T) {
 }
 
 func testExposeSkipIfUnconfiguredWithPlatform(t *testing.T) {
-	// --skip-if-unconfigured must not change behavior for an actual platform
-	// deployment: with a platform block present, it resolves and traces the
-	// full plan exactly like the plain dry_run scenario above.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -254,10 +217,7 @@ func testExposeSkipIfUnconfiguredWithPlatform(t *testing.T) {
 }
 
 func testExposeDryRunPlatformOverrideNoProject(t *testing.T) {
-	// --services-zone/--platform-namespace supply what a project checkout
-	// would otherwise resolve, so expose runs from a directory with no git
-	// repo at all -- the shape a hosted deploy Job runs in, which has no
-	// checkout to read .erun/config.yaml from.
+	// A hosted deploy Job has no checkout to read .erun/config.yaml from.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{
@@ -272,8 +232,6 @@ func testExposeDryRunPlatformOverrideNoProject(t *testing.T) {
 }
 
 func testExposePlatformOverrideRequiresBoth(t *testing.T) {
-	// Half the override configured is the same as neither: expose refuses
-	// rather than resolving a plan from an incomplete pair.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{
@@ -288,9 +246,7 @@ func testExposePlatformOverrideRequiresBoth(t *testing.T) {
 }
 
 func testExposeSkipIfUnconfiguredNoProject(t *testing.T) {
-	// --skip-if-unconfigured must cover "no project at all", not just "a
-	// project with no platform block" -- project resolution failing with
-	// "cannot find git project" must not pre-empt the skip decision.
+	// A "cannot find git project" failure must not pre-empt the skip decision.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "127.0.0.1", "--skip-if-unconfigured", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -301,9 +257,6 @@ func testExposeSkipIfUnconfiguredNoProject(t *testing.T) {
 }
 
 func testExposeRequiresProjectWithoutOverrideOrSkip(t *testing.T) {
-	// Interactive `erun expose` from a plain, non-git directory still fails
-	// fast -- the override flags and --skip-if-unconfigured are opt-in, not
-	// a silent relaxation of the default project requirement.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"expose", "team", "dev", "api", "--ip", "127.0.0.1", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -314,17 +267,7 @@ func testExposeRequiresProjectWithoutOverrideOrSkip(t *testing.T) {
 }
 
 func testExposeRealRunViaPlatformAlias(t *testing.T) {
-	// Drives the platform-route DNS write for real against a stub
-	// erun-backend-api: resolvePlatformEnvironmentID's GET
-	// /v1/environments lookup and the PUT .../hostname call itself, not
-	// only their --dry-run trace. kubectl is still stubbed for the
-	// Ingress apply, which is unaffected by the DNS path choice.
-	// Substring assertions, not golden.Equal: the stub server's own
-	// ephemeral port makes the trace lines that name its URL
-	// intrinsically variable (erun-integration/AGENTS.md's third
-	// exception to the whole-output-snapshot default), the same reason
-	// review_test.go's own real-run scenarios against a stub server use
-	// this shape instead of a golden.
+	// Substring assertions: the stub server's ephemeral port makes its URL vary.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -348,11 +291,7 @@ func testExposeRealRunViaPlatformAlias(t *testing.T) {
 }
 
 func testExposeDryRunViaPlatformAlias(t *testing.T) {
-	// An erun platform alias configured (and no --services-zone/
-	// --platform-namespace override -- the hosted deploy Job's own
-	// signal for direct pdnsutil access) switches the DNS write from the
-	// direct kubectl exec to the platform's own API,
-	// automatically, with no extra flag needed.
+	// A configured erun alias, with no zone/namespace override, routes the DNS write through the platform API.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -366,8 +305,6 @@ func testExposeDryRunViaPlatformAlias(t *testing.T) {
 }
 
 func testExposeDryRunViaPlatformAliasExplicit(t *testing.T) {
-	// --erun-alias names which configured alias to use; here it is the
-	// sole one configured, so behavior matches the automatic case above.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -381,11 +318,6 @@ func testExposeDryRunViaPlatformAliasExplicit(t *testing.T) {
 }
 
 func testExposeDryRunPlatformOverrideBeatsConfiguredAlias(t *testing.T) {
-	// --services-zone/--platform-namespace (the hosted deploy Job's own
-	// signal that it has direct PowerDNS access) always wins over an
-	// erun platform alias, even when one happens to be configured --
-	// this caller never actually configures one in practice, but the
-	// override must still take priority if it did.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
@@ -401,9 +333,6 @@ func testExposeDryRunPlatformOverrideBeatsConfiguredAlias(t *testing.T) {
 }
 
 func testExposeAmbiguousErunAliasWithoutDisambiguation(t *testing.T) {
-	// Two erun-type aliases configured and neither named refuses rather
-	// than silently guessing which credential should perform the DNS
-	// write, matching `erun review`'s own ambiguity refusal.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -417,8 +346,6 @@ func testExposeAmbiguousErunAliasWithoutDisambiguation(t *testing.T) {
 }
 
 func testExposeRequiresIP(t *testing.T) {
-	// The per-env wildcard record needs a target IP (the env's ingress IP);
-	// omitting --ip fails clearly instead of writing an empty record.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)

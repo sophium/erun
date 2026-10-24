@@ -1,32 +1,9 @@
 package integration
 
-// exec_bound_test.go is a structural gate for the harness's own subprocess
-// handling, in the same shape as issue_reference_test.go and
-// bare_required_input_test.go: an AST walk that fails the build the next time
-// the defect reappears, rather than another instruction to follow.
-//
-// The defect it prevents is a moved hang, not a missing feature. os/exec
-// drains a child's stdout and stderr from goroutines of its own and Cmd.Wait
-// waits for those goroutines rather than for the child, so any process the
-// child started still holds the write end after the child is gone: the drain
-// never reaches EOF and Wait blocks on a child that has already exited.
-// Cmd.WaitDelay is the exact bound for that, but it has to be armed on the Cmd
-// that is actually waited on. A single patched call site left every other one
-// bare, so the hang simply reappeared on the next test the gate ran -- twice,
-// on a different pair of tests each time.
-//
-// internal/harnessexec is now the only constructor, and this gate is what
-// keeps it that way: a bare exec.Command or exec.CommandContext anywhere else
-// in the module fails, naming the call to use instead. It is deliberately a
-// zero-tolerance check with no baseline, in the shape of the role-
-// classification gate: the module was fully converted in the change that added
-// this, so there is no pre-existing debt to carry, and a baseline over a
-// two-word call form would only invite entries to be added to it.
-//
-// This test reads .go files under the module rather than only what is
-// compiled into it, so it must run uncached: the erun-devops image's cli-test stage
-// already runs this module with -count=1. The whole module is COPYed into that
-// stage, so the scanned input is present wherever the gate runs.
+// Cmd.Wait waits for the stdout/stderr drain, which a grandchild holding the pipe
+// keeps open after the child exits; WaitDelay bounds that. internal/harnessexec is
+// the only constructor that arms it, and this gate refuses any other, with no baseline.
+// It reads source files, so it must run uncached (-count=1).
 
 import (
 	"fmt"
@@ -42,25 +19,14 @@ import (
 )
 
 // blessedExecPackage is the one directory allowed to construct an *exec.Cmd.
-// It is a directory rather than a file list so the package can grow helpers
-// around its constructor without this gate having to be taught each one; the
-// guarantee that matters is that the constructor is reachable in exactly one
-// place, and exec-bound_test.go's own unit tests pin what it arms.
 var blessedExecPackage = filepath.Join("internal", "harnessexec")
 
-// bareExecConstructor is the call this gate refuses. CommandContext is listed
-// beside Command because it is the shape a call site reaches for once it
-// believes it has bounded something: it arms a context, but a context alone
-// does not arm WaitDelay, so the Cmd it builds still waits on a descendant's
-// held pipe for as long as that descendant lives.
+// bareExecConstructors are refused; a context alone does not arm WaitDelay.
 var bareExecConstructors = map[string]bool{
 	"Command":        true,
 	"CommandContext": true,
 }
 
-// skipDirForExecScan mirrors skipDirForIssueReferenceScan's exclusions: no
-// hand-written Go source lives in version control, installed JS dependencies,
-// generated trees, or captured golden fixtures.
 func skipDirForExecScan(name string) bool {
 	switch name {
 	case ".git", "node_modules", "vendor", "dist", "wailsjs", ".claude", ".claude-plugin", ".vscode", "testdata", "coverage":
@@ -70,10 +36,8 @@ func skipDirForExecScan(name string) bool {
 	}
 }
 
-// bareExecHit is one direct construction of an *exec.Cmd found in harness Go
-// source. The location is carried as a path relative to the scan root rather
-// than as token.Position, so the same hit reads identically from a local
-// checkout and from the image test stage's own /src tree.
+// bareExecHit is one direct *exec.Cmd construction, located relative to the scan
+// root so hits read the same locally and in the image's /src tree.
 type bareExecHit struct {
 	file string // path relative to the scan root, forward-slash separated
 	line int
@@ -89,10 +53,8 @@ func (h bareExecHit) Message() string {
 	return fmt.Sprintf("%s: %s builds a child process directly -- build every harness child with harnessexec.Command or harnessexec.CommandContext instead, the one constructor that arms the bound keeping a descendant's held pipe from blocking Wait forever (erun-integration/AGENTS.md § \"Subprocess bounds\")", h.position(), h.call)
 }
 
-// execImportNames returns the local names a file binds "os/exec" to, and
-// whether it dot-imports the package. Keying on the import path rather than
-// the identifier means an unrelated package that happens to be named exec is
-// not a hit, and an alias the file chose for itself still is.
+// execImportNames returns the names a file binds "os/exec" to, keyed on the import
+// path so aliases count and unrelated exec packages do not.
 func execImportNames(file *ast.File) (names map[string]bool, dotImported bool) {
 	names = map[string]bool{}
 	for _, imp := range file.Imports {
@@ -104,7 +66,6 @@ func execImportNames(file *ast.File) (names map[string]bool, dotImported bool) {
 		case imp.Name == nil:
 			names["exec"] = true
 		case imp.Name.Name == "_":
-			// A blank import cannot name a constructor.
 		case imp.Name.Name == ".":
 			dotImported = true
 		default:
@@ -114,10 +75,8 @@ func execImportNames(file *ast.File) (names map[string]bool, dotImported bool) {
 	return names, dotImported
 }
 
-// findBareExecConstructors parses every .go file under root -- production,
-// test, and the stub binaries alike, since all of them run inside the same
-// test binary or are spawned by it -- and returns one hit per direct call to
-// an os/exec constructor outside blessedExecPackage.
+// findBareExecConstructors returns one hit per os/exec constructor call under root
+// outside blessedExecPackage, stub binaries included.
 func findBareExecConstructors(t testing.TB, root string) []bareExecHit {
 	t.Helper()
 	var hits []bareExecHit
@@ -152,8 +111,6 @@ func findBareExecConstructors(t testing.TB, root string) []bareExecHit {
 	return hits
 }
 
-// execScanDirVerdict skips the directories the scan leaves out, the blessed
-// package among them, while always descending into root itself.
 func execScanDirVerdict(root, blessed, path string, d os.DirEntry) error {
 	if path != root && (skipDirForExecScan(d.Name()) || path == blessed) {
 		return filepath.SkipDir
@@ -161,8 +118,6 @@ func execScanDirVerdict(root, blessed, path string, d os.DirEntry) error {
 	return nil
 }
 
-// bareExecHitsInFile returns one hit per direct os/exec constructor call in
-// file, whether reached through the package name, an alias, or a dot import.
 func bareExecHitsInFile(fset *token.FileSet, file *ast.File, rel string) []bareExecHit {
 	var hits []bareExecHit
 	names, dotImported := execImportNames(file)
@@ -195,23 +150,16 @@ func bareExecHitsInFile(fset *token.FileSet, file *ast.File, rel string) []bareE
 	return hits
 }
 
-// harnessModuleRoot resolves this module's directory from this file's own
-// location rather than the working directory `go test` happens to run from,
-// so the gate scans the same tree however it was invoked.
+// harnessModuleRoot resolves the module directory from this file's location.
 func harnessModuleRoot(t testing.TB) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller could not resolve this test file's path")
 	}
-	// This file lives at <moduleRoot>/exec_bound_test.go.
 	return filepath.Dir(file)
 }
 
-// TestNoBareExecConstructorInHarness fails when any file in the module builds
-// an *exec.Cmd itself instead of going through internal/harnessexec, so the
-// unbounded wait cannot come back through a call site that was never
-// converted -- the shape that made this defect recur twice.
 func TestNoBareExecConstructorInHarness(t *testing.T) {
 	t.Parallel()
 	for _, hit := range findBareExecConstructors(t, harnessModuleRoot(t)) {
@@ -219,18 +167,12 @@ func TestNoBareExecConstructorInHarness(t *testing.T) {
 	}
 }
 
-// TestFindBareExecConstructorsExclusions locks the scope this scanner must
-// respect. The legitimate cases matter as much as the caught ones: os/exec is
-// imported throughout the harness for LookPath, ErrWaitDelay and ExitError,
-// and a gate that flagged those would be turned off rather than satisfied.
-// Every fixture below is written into a temp directory rather than committed
-// source.
+// TestFindBareExecConstructorsExclusions: os/exec is used throughout for LookPath,
+// ErrWaitDelay and ExitError, which must not be flagged.
 func TestFindBareExecConstructorsExclusions(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	files := map[string]string{
-		// Caught: the default import name, the alias a file may choose, and a
-		// dot import, for both constructors.
 		"default_name.go": `package fixture
 
 import "os/exec"
@@ -249,7 +191,6 @@ import . "os/exec"
 
 func c() { _ = Command("git", "status") }
 `,
-		// Not caught: os/exec used for anything other than a constructor.
 		"lookpath_only.go": `package fixture
 
 import "os/exec"
@@ -259,17 +200,12 @@ func d() (string, error) { return exec.LookPath("atlas") }
 var _ = exec.ErrWaitDelay
 var _ = exec.ExitError{}
 `,
-		// Not caught: a different package that happens to be named exec. Keying
-		// on the import path rather than the identifier is what separates it
-		// from the aliased.go hit above.
 		"other_package.go": `package fixture
 
 import "example.com/exec"
 
 func e() { _ = exec.Command("git", "status") }
 `,
-		// Not caught: calling through the blessed constructor, whichever
-		// package the caller imported it from.
 		"wired.go": `package fixture
 
 import "github.com/sophium/erun/erun-integration/internal/harnessexec"
@@ -311,10 +247,6 @@ func f() { _ = harnessexec.Command("git", "status") }
 	}
 }
 
-// TestBareExecConstructorMessageNamesTheReplacement keeps the failure
-// actionable rather than merely prohibitive: a gate that says only "do not
-// call exec.Command" leaves the next author to find the constructor, which is
-// how a one-off exception gets argued for instead of a conversion.
 func TestBareExecConstructorMessageNamesTheReplacement(t *testing.T) {
 	t.Parallel()
 	msg := bareExecHit{file: "some/file.go", line: 12, col: 3, call: "exec.Command"}.Message()

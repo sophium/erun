@@ -17,14 +17,9 @@ var (
 	ErrTenantNotFound                  = errors.New("no such tenant exists")
 	ErrKubernetesContextNotConfigured  = errors.New("kubernetes context is not configured")
 	ErrRepoPathNotConfigured           = errors.New("repo path is not configured")
-	// ErrOpenTenantNotProvided is open's tenant-resolution failure for a call
-	// path that is not allowed to infer one (UseDefaultTenant is false) —
-	// distinct from ErrDefaultTenantNotConfigured, where inference was
-	// permitted but resolved to nothing, because the two have different
-	// recoveries (root AGENTS.md "Distinguish causes before writing copy").
+	// ErrOpenTenantNotProvided: inference was not permitted, unlike ErrDefaultTenantNotConfigured.
 	ErrOpenTenantNotProvided = errors.New("no tenant given for open")
-	// ErrOpenEnvironmentNotProvided mirrors ErrOpenTenantNotProvided for the
-	// environment half of open's target resolution.
+	// ErrOpenEnvironmentNotProvided is the environment counterpart of ErrOpenTenantNotProvided.
 	ErrOpenEnvironmentNotProvided = errors.New("no environment given for open")
 )
 
@@ -37,15 +32,10 @@ type OpenParams struct {
 	Environment           string
 	UseDefaultTenant      bool
 	UseDefaultEnvironment bool
-	// Command is the operator-facing invocation of the command resolving this
-	// target (for example "erun usage", "erun outputs list"), used only to name
-	// that command's own recovery in a resolution failure. Empty means the
-	// caller did not name itself: the failure then falls back to the
-	// command-free wording rather than borrowing another command's name, so a
-	// new command can adopt this path without inheriting a misleading one.
+	// Command is the operator-facing invocation named in a resolution failure's recovery;
+	// empty falls back to command-free wording.
 	Command string
-	// CommandScopesTenantByFlag gates whether the recovery may name Command's
-	// --tenant flag as the fix — see Context.CommandScopesTenantByFlag.
+	// CommandScopesTenantByFlag gates whether the recovery may name Command's --tenant flag.
 	CommandScopesTenantByFlag bool
 }
 
@@ -108,10 +98,7 @@ func ResolveOpenWithFinder(store configpkg.OpenStore, findProjectRoot ProjectFin
 	}, nil
 }
 
-// ResolveOpenGateway reads the erun-level gateway catalog for a resolved
-// target. A root config that cannot be read leaves it unset rather than failing
-// the open: the catalog only changes how an AI session is routed, and the
-// unreadable config itself is reported by whatever inspects the root config.
+// ResolveOpenGateway reads the erun-level gateway catalog; an unreadable root config leaves it unset.
 func ResolveOpenGateway(store configpkg.OpenStore) *configpkg.OpenRouterConfig {
 	gateway, err := configpkg.ResolveOpenRouterConfig(store)
 	if err != nil {
@@ -120,22 +107,8 @@ func ResolveOpenGateway(store configpkg.OpenStore) *configpkg.OpenRouterConfig {
 	return gateway
 }
 
-// tenantResolutionRemedy renders the second half of resolveOpenTenant's
-// inference-permitted-but-unresolved error: that working-directory inference
-// also came up empty, and what the operator can do about it.
-//
-// The recovery is stated for the command that actually failed, with that
-// command's own flag, because it is the next thing the operator runs. A fixed
-// command name here sends the reader to an operation they never invoked and
-// did not need — `erun usage` failing must not report that `open` could not
-// infer a tenant, since the reasonable readings of that are all wrong (a typo,
-// a hidden delegation to open, or open being the fault).
-//
-// command is empty for a caller that did not name itself; the wording then
-// keeps the disclosure and both remedies but names no operation, which stays
-// correct rather than guessing. That is also what keeps this correct as new
-// commands adopt the resolution path: naming yourself is what buys the
-// command-specific recovery, and not naming yourself is never wrong.
+// tenantResolutionRemedy names the command that actually failed and its own flag, or no
+// command when the caller did not name itself.
 func tenantResolutionRemedy(command string, scopesTenantByFlag bool) string {
 	const (
 		cause    = "one could not be inferred from the working directory either"
@@ -225,21 +198,13 @@ func loadOpenEnvConfig(store configpkg.OpenStore, tenant, environment string) (c
 func resolveOpenRepoPath(envConfig configpkg.EnvConfig) (string, error) {
 	repoPath := envConfig.EffectiveLocalRepoPath()
 	if repoPath == "" {
-		// A runtime env with no mounted source worktree genuinely has no repo path
-		// (RemoteWorktree's doc: "none for runtime") — a control-plane-provisioned
-		// tenant with no project never has one to configure. Every other type has a
-		// real worktree (hostPath for local-agent, a PVC for remote-agent, or a
-		// runtime env's own opted-in mutable-source clone), so those still require it.
+		// A runtime env with no mounted source has no repo path; every other type has a worktree.
 		if envConfig.Type == configpkg.EnvironmentTypeRuntime && !envConfig.MountsRuntimeSource() {
 			return "", nil
 		}
 		return "", ErrRepoPathNotConfigured
 	}
-	// A remote/PVC-worktree env's repo path is a POSIX path inside the pod, not a
-	// host path. filepath.Clean would rewrite "/home/erun/..." to "\home\erun\..."
-	// on Windows, which then breaks the emitted `cd`/Set-Location (and any in-pod
-	// use). Normalize with forward-slash `path` for remote envs; only local-agent
-	// envs get the OS-native filepath.Clean.
+	// A remote worktree path is a POSIX path in the pod; filepath.Clean would break it on Windows.
 	if envConfig.RemoteWorktree() {
 		return path.Clean(repoPath), nil
 	}
@@ -256,11 +221,7 @@ func validateOpenTarget(tenant, environment, repoPath string, envConfig configpk
 			return fmt.Errorf("%q is not a directory", repoPath)
 		}
 	}
-	// A host env has no pod and no cluster at all, so it has no kubernetes
-	// context to require — every other type deploys into one. Checked against
-	// ResolvedType rather than the broader !HasPod() so a legacy env with an
-	// unresolved type keeps requiring a context exactly as it did before host
-	// existed.
+	// A host env has no cluster. ResolvedType, not !HasPod(), keeps legacy untyped envs requiring a context.
 	if envConfig.ResolvedType() == configpkg.EnvironmentTypeHost {
 		return nil
 	}
@@ -308,12 +269,8 @@ func loadCurrentDirectoryTenant(store configpkg.OpenStore, findProjectRoot Proje
 	return "", false, nil
 }
 
-// TenantResourcePrefix is the prefix a tenant's component-chart Kubernetes
-// resources carry (<prefix>-postgres, <prefix>-api, <prefix>-powerdns, ...),
-// matching the charts' `{{ .Values.tenant | default "erun" }}` scoping: the
-// tenant name, or "erun" for the canonical product (empty tenant). Code that
-// addresses those resources by name (API port-forward, PowerDNS exec) derives
-// the name through this so it stays in lockstep with the charts.
+// TenantResourcePrefix is a tenant's component-chart resource prefix: the tenant, or "erun"
+// when empty, matching the charts' `{{ .Values.tenant | default "erun" }}`.
 func TenantResourcePrefix(tenant string) string {
 	return strings.TrimSuffix(configpkg.RuntimeReleaseName(tenant), "-devops")
 }

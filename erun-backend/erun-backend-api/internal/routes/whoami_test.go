@@ -32,16 +32,6 @@ func (r stubWhoamiTenantRepository) Current(context.Context) (model.Tenant, erro
 	return r.tenant, nil
 }
 
-// TestWhoamiTenantNameMatchesTenantRecordNotUsername locks the agreement: an
-// operator read whoami's leading username field as if it were the tenant's
-// name, because whoami carried no tenant name field at all and its
-// plain-text rendering put the username exactly where a tenant name would
-// visually be expected -- the two fields happened to read "erun" and "frs"
-// for the same tenant id, which looked like a naming disagreement between
-// whoami and tenant list. There is only one tenants.name column (tenant.go's
-// model.Tenant.Name); whoami must report that same value, off the same
-// TenantRepository.Current call tenant list uses, never the caller's
-// username.
 func TestWhoamiTenantNameMatchesTenantRecordNotUsername(t *testing.T) {
 	userRepo := stubWhoamiUserRepository{user: model.User{Username: "erun"}}
 	tenantRepo := stubWhoamiTenantRepository{tenant: model.Tenant{TenantID: "tenant-1", Name: "frs"}}

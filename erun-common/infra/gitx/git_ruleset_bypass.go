@@ -7,35 +7,17 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// rulesetBypassNotice is GitHub's own report, written to `git push`'s stderr,
-// that a push was admitted by a ruleset bypass rather than by satisfying the
-// rules. Ref is the ref the notice names (empty when GitHub did not name one),
-// and Rules are the violated rules GitHub lists beneath it.
-//
-// The notice is the only place a non-bypassing operator learns that a
-// protected branch was written through rather than around: GitHub attributes
-// the bypass to a credential's grant, not to a person, so the message names
-// the rules that were stepped over and nothing about who stepped over them.
-// Who can be resolved afterwards, from the repository's rule-suites ledger
-// (`erun exec reconcile-bypass`); that a push bypassed at all is knowable
-// here, at the moment it happened, and nowhere else in erun's own output.
+// rulesetBypassNotice is GitHub's stderr report that a push was admitted by a ruleset
+// bypass; it is the only moment erun can see that a bypass happened.
 type rulesetBypassNotice struct {
 	Ref   string
 	Rules []string
 }
 
-// bypassNoticeMarker is the phrase GitHub opens the notice with. The rest of
-// that line is "for <ref>:" or ":", depending on the ruleset's scope.
+// bypassNoticeMarker opens the notice; the line continues "for <ref>:" or ":".
 const bypassNoticeMarker = "Bypassed rule violations"
 
-// parseRulesetBypassNotice reads GitHub's bypass notice out of a `git push`'s
-// stderr. It reports false when stderr carries no notice, so a caller can ask
-// unconditionally and a push that satisfied every rule costs nothing.
-//
-// Git relays the remote's own lines with a "remote: " prefix, and an
-// unindented continuation of the notice carries no prefix of its own; both
-// forms are accepted rather than requiring the prefix, because the prefix is
-// git's formatting of someone else's message and not part of the contract.
+// parseRulesetBypassNotice accepts lines with or without git's "remote: " prefix.
 func parseRulesetBypassNotice(stderr string) (rulesetBypassNotice, bool) {
 	lines := strings.Split(stderr, "\n")
 	for i, raw := range lines {
@@ -46,9 +28,7 @@ func parseRulesetBypassNotice(stderr string) (rulesetBypassNotice, bool) {
 		notice := rulesetBypassNotice{Ref: bypassNoticeRef(line)}
 		for _, follow := range lines[i+1:] {
 			next := remoteLineText(follow)
-			// GitHub separates the listed rules with blank remote lines; a
-			// blank line is not the end of the notice, but anything that is
-			// neither blank nor a rule is.
+			// Blank lines separate rules; any other non-rule line ends the notice.
 			if next == "" {
 				continue
 			}
@@ -65,15 +45,11 @@ func parseRulesetBypassNotice(stderr string) (rulesetBypassNotice, bool) {
 	return rulesetBypassNotice{}, false
 }
 
-// remoteLineText strips git's "remote: " relay prefix and surrounding
-// whitespace, leaving the message the remote actually wrote.
 func remoteLineText(line string) string {
 	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "remote:"))
 }
 
-// bypassNoticeRef reads the ref out of a notice's opening line, which reads
-// "Bypassed rule violations for refs/heads/main:". A ruleset that scopes no
-// ref leaves it empty rather than inventing one.
+// bypassNoticeRef returns "" when the ruleset scopes no ref.
 func bypassNoticeRef(line string) string {
 	rest := strings.TrimSpace(strings.TrimPrefix(line, bypassNoticeMarker))
 	rest = strings.TrimSpace(strings.TrimSuffix(rest, ":"))
@@ -81,12 +57,7 @@ func bypassNoticeRef(line string) string {
 	return rest
 }
 
-// reportRulesetBypass reports a bypass a push was admitted by. It is not a
-// failure and never makes the push one: the push landed, and the operator's
-// business is knowing that it landed through a grant rather than through the
-// rules. Saying so where the push itself is reported is the point -- the only
-// other trace is GitHub's own remote line, which erun captures and used to
-// discard on success.
+// reportRulesetBypass reports a bypass without failing the push.
 func reportRulesetBypass(ctx core.Context, remote string, notice rulesetBypassNotice) {
 	target := "this repository's ruleset"
 	if notice.Ref != "" {
@@ -100,11 +71,7 @@ func reportRulesetBypass(ctx core.Context, remote string, notice rulesetBypassNo
 	ctx.Info("push: run `erun exec reconcile-bypass` to check a bypassed push against the successful build that accounts for it.")
 }
 
-// ReportRulesetBypassFromPushArgs reports a bypass GitHub wrote on a `git push`
-// invocation's own stderr, naming the remote those arguments pushed to. It is
-// the entry point for callers that hold a push's arguments rather than the
-// resolved remote, so every push erun makes can report a bypass from the one
-// parse instead of each site growing its own.
+// ReportRulesetBypassFromPushArgs reports a bypass for callers holding push args rather than the remote.
 func ReportRulesetBypassFromPushArgs(ctx core.Context, args []string, stderr string) {
 	notice, ok := parseRulesetBypassNotice(stderr)
 	if !ok {
@@ -113,11 +80,8 @@ func ReportRulesetBypassFromPushArgs(ctx core.Context, args []string, stderr str
 	reportRulesetBypass(ctx, pushRemoteFromArgs(args), notice)
 }
 
-// pushRemoteFromArgs reads the repository a push targets out of its arguments.
-// git's grammar is `push [options] <repository> [<refspec>...]`, so it is the
-// first argument after `push` that is not an option; an option that takes a
-// separate value would be read as the remote, which is why every push erun
-// makes passes options in `--flag=value` form.
+// pushRemoteFromArgs takes the first non-option after `push`; erun passes options as
+// --flag=value so a separate value is never mistaken for the remote.
 func pushRemoteFromArgs(args []string) string {
 	for _, arg := range args[min(1, len(args)):] {
 		if !strings.HasPrefix(arg, "-") {

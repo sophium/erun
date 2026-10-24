@@ -1,17 +1,5 @@
--- Records the outcome of one retention policy file's sweep of one table,
--- across every tenant -- not tenant-owned itself, since a sweep runs once
--- for the whole platform rather than per tenant (same reasoning as
--- platform_rate_limits: this is platform-operational state, not tenant
--- data). This is what lets an operator see that a scheduled retention run
--- deleted rows and how many, without relying on the CronJob's own
--- transient pod logs (capped at successfulJobsHistoryLimit/
--- failedJobsHistoryLimit and only reachable with cluster access).
---
--- Deliberately not audit_events: that table requires an authenticated,
--- single-tenant caller (erun_user_id/external_user_id/external_issuer_id
--- all NOT NULL), which a cross-tenant scheduled sweep has none of. This
--- table is also not itself swept by any retention policy today, so the
--- record of a deletion can never be the first thing a later sweep deletes.
+-- Platform-wide record of one retention policy's sweep of one table, so deletions outlive the CronJob's pod logs.
+-- Not audit_events, which needs an authenticated single-tenant caller. No retention policy sweeps this table.
 CREATE TABLE retention_runs (
   retention_run_id UUID PRIMARY KEY DEFAULT uuidv7(),
   policy_name TEXT NOT NULL,
@@ -23,9 +11,7 @@ CREATE TABLE retention_runs (
   CONSTRAINT retention_runs_policy_name_check CHECK (length(trim(policy_name)) > 0),
   CONSTRAINT retention_runs_table_name_check CHECK (length(trim(table_name)) > 0),
   CONSTRAINT retention_runs_eligible_count_check CHECK (eligible_count >= 0),
-  -- A dry run never deletes, so deleted_count must be 0; a real run deletes
-  -- exactly the rows it reported eligible under the same predicate, so
-  -- deleted_count can never exceed eligible_count.
+  -- A dry run deletes nothing; a real run deletes at most what it reported eligible.
   CONSTRAINT retention_runs_deleted_count_check CHECK (
     deleted_count >= 0 AND deleted_count <= eligible_count
   ),

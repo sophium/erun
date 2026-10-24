@@ -6,10 +6,8 @@ import (
 	"go/token"
 )
 
-// declTargets lists a file's top-level declarations with the directory each
-// goes to. A method goes where its receiver's type goes, which objectDir
-// resolves; here it is placed by its receiver's name, which is the same
-// answer for a receiver declared in the module root.
+// declTargets lists a file's top-level declarations and their directories;
+// methods are placed by receiver name.
 func declTargets(sf *sourceFile, m packageMap) []declTarget {
 	var out []declTarget
 	for _, decl := range sf.ast.Decls {
@@ -31,12 +29,8 @@ func declTargets(sf *sourceFile, m packageMap) []declTarget {
 	return out
 }
 
-// specTargets places each spec of a grouped declaration on its own, so one
-// `type ( ... )` block can be split between packages. A spec's range starts
-// where the previous one ended, carrying the comments between them, and runs
-// to the end of its last line. A const group that repeats an expression
-// implicitly or counts with iota stays whole: splitting it would change the
-// values the later specs get.
+// specTargets places each spec of a group separately. A const group with
+// implicit repetition or iota stays whole, since splitting would change values.
 func specTargets(sf *sourceFile, m packageMap, g *ast.GenDecl, group int) []declTarget {
 	keepWhole := g.Tok == token.CONST && constGroupIsPositional(g)
 	firstDir := m.declDir(sf.rel, specName(g.Specs[0]))
@@ -93,8 +87,6 @@ func mentionsIota(expr ast.Expr) bool {
 	return found
 }
 
-// lineEnd is the offset of the newline ending the line offset is on, or the
-// end of src.
 func lineEnd(src []byte, offset int) int {
 	for i := offset; i < len(src); i++ {
 		if src[i] == '\n' {

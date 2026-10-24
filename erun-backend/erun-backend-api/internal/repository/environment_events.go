@@ -18,16 +18,9 @@ const (
 	maxEnvironmentEventLimit     = 1000
 )
 
-// EnvironmentEventCursor names a position in the log rather than a row in it:
-// the reader resumes *after* the event it last saw, so a cursor never has to
-// agree about which row existed, only about where the stream stood. The zero
-// value means "from the beginning of the log".
-//
-// It is the database-assigned sequence, not the event's uuidv7 id: a cursor
-// has to be totally ordered and stable across replays, and neither a
-// timestamp (which collides within a millisecond) nor a uuidv7 (whose tail is
-// random inside one) gives that on its own. A sequence does, and it is a
-// plain integer to compare rather than a composite pair to break ties on.
+// EnvironmentEventCursor is the database sequence of the last event seen; the
+// reader resumes after it. A sequence, unlike a timestamp or uuidv7, is totally
+// ordered. The zero value means the beginning of the log.
 type EnvironmentEventCursor struct {
 	Seq int64
 }
@@ -36,9 +29,7 @@ func (c EnvironmentEventCursor) isZero() bool {
 	return c.Seq <= 0
 }
 
-// String encodes the cursor as an opaque token for a caller to hand back to
-// resume the stream. The zero cursor encodes to the empty string, which is
-// also what parses back to it.
+// String encodes the cursor as an opaque token; the zero cursor encodes to "".
 func (c EnvironmentEventCursor) String() string {
 	if c.isZero() {
 		return ""
@@ -46,11 +37,8 @@ func (c EnvironmentEventCursor) String() string {
 	return strconv.FormatInt(c.Seq, 10)
 }
 
-// ParseEnvironmentEventCursor decodes a token previously returned by Read. An
-// empty token decodes to the zero cursor. A token that is not a positive
-// integer is refused rather than treated as zero: silently restarting the
-// stream from the beginning would replay the whole log to a client that asked
-// to resume, which is the one thing a resume cursor must never do.
+// ParseEnvironmentEventCursor decodes a cursor token; empty decodes to zero. A
+// malformed token is refused, since treating it as zero would replay the log.
 func ParseEnvironmentEventCursor(token string) (EnvironmentEventCursor, error) {
 	if token == "" {
 		return EnvironmentEventCursor{}, nil
@@ -62,21 +50,14 @@ func ParseEnvironmentEventCursor(token string) (EnvironmentEventCursor, error) {
 	return EnvironmentEventCursor{Seq: seq}, nil
 }
 
-// EnvironmentEventFilter narrows one forward page of the log. EnvironmentID
-// is optional and narrows the stream to one environment; Cursor is where the
-// reader last reached.
+// EnvironmentEventFilter narrows one forward page of the log.
 type EnvironmentEventFilter struct {
 	EnvironmentID string
 	Cursor        EnvironmentEventCursor
-	// Limit caps the page size; non-positive defaults to
-	// defaultEnvironmentEventLimit and any value above
-	// maxEnvironmentEventLimit is capped there.
-	Limit int
+	Limit         int
 }
 
-// EnvironmentEventPage is one forward page of the log, oldest first.
-// NextCursor is empty when the page reached the end of the log as it stood
-// when this read ran.
+// EnvironmentEventPage is one forward page, oldest first; NextCursor is empty at the end.
 type EnvironmentEventPage struct {
 	Events     []model.EnvironmentEvent
 	NextCursor string
@@ -90,14 +71,9 @@ func NewEnvironmentEventRepository(txs *TxManager) *EnvironmentEventRepository {
 	return &EnvironmentEventRepository{txs: txs}
 }
 
-// Append records one event, taking the next position in the log. The tenant
-// is the database default from the transaction's security context, the same
-// as every other tenant-owned insert; the sequence is the identity column's
-// to assign, so it is neither accepted nor generated here.
+// Append records one event; tenant and sequence are assigned by the database.
 func (r *EnvironmentEventRepository) Append(ctx context.Context, event model.EnvironmentEvent) (model.EnvironmentEvent, error) {
-	// A reporter that knows when the event actually happened supplies it; one
-	// that only knows it now gets receipt time. NULL is what the column's own
-	// DEFAULT would have supplied, made explicit so both paths are one INSERT.
+	// NULL falls back to the column's DEFAULT (receipt time).
 	var occurredAt *time.Time
 	if !event.OccurredAt.IsZero() {
 		occurredAt = &event.OccurredAt
@@ -114,11 +90,8 @@ func (r *EnvironmentEventRepository) Append(ctx context.Context, event model.Env
 	return appended, err
 }
 
-// classifyEnvironmentEventError maps environment_events' foreign key and
-// CHECK constraints onto the repository's sentinel errors, mirroring
-// classifyJobError: an environmentId the caller's tenant cannot see fails
-// the same foreign key check whether it genuinely doesn't exist or just isn't
-// this tenant's.
+// classifyEnvironmentEventError maps constraint violations to sentinel errors;
+// an invisible environmentId fails the FK like a missing one.
 func classifyEnvironmentEventError(err error) error {
 	code, ok := pgErrorCode(err)
 	if !ok {
@@ -134,23 +107,9 @@ func classifyEnvironmentEventError(err error) error {
 	}
 }
 
-// Read returns one forward page of the caller's tenant's log: everything
-// after the cursor, oldest first. Scoped explicitly by tenant_id from the
-// security context rather than left to RLS, because erun_operations' policy
-// is unconditional and an OPERATIONS caller's empty filter would otherwise
-// read every tenant's log.
-//
-// Oldest-first is the opposite direction from the newest-first pagination
-// audit_events and builds use, and deliberately so: a reader that just
-// reconnected wants the backlog it has not seen in the order it happened.
-// Handing it the newest events first would make it buffer and reverse a page
-// to find its own position, which is the cursor's whole job.
-//
-// A cursor older than anything the log still holds is not an error: it reads
-// from the oldest surviving event forward. Nothing prunes this log today, so
-// that case cannot arise yet -- if retention is ever added, a cursor pointing
-// into a pruned range becomes a silent skip and will need an explicit answer
-// here.
+// Read returns one oldest-first page after the cursor, so a reconnecting reader
+// gets its backlog in order. tenant_id is filtered explicitly because
+// erun_operations' RLS policy is unconditional.
 func (r *EnvironmentEventRepository) Read(ctx context.Context, filter EnvironmentEventFilter) (EnvironmentEventPage, error) {
 	limit := filter.Limit
 	switch {
@@ -173,9 +132,7 @@ func (r *EnvironmentEventRepository) Read(ctx context.Context, filter Environmen
 			args = append(args, filter.EnvironmentID)
 		}
 		if !filter.Cursor.isZero() {
-			// Strictly greater: the cursor names the position already
-			// delivered, so a reader that hands back the last event it saw
-			// must not be sent that same event again.
+			// Strictly greater: the cursor names an event already delivered.
 			query += ` AND environment_event_seq > ?`
 			args = append(args, filter.Cursor.Seq)
 		}

@@ -12,10 +12,7 @@ import (
 func initRemoteFlagScenarios(t *testing.T) {
 	t.Run("remote_dry_run", testInitRemoteDryRun)
 	t.Run("remote_with_runtime_image_override", testInitRemoteWithRuntimeImageOverride)
-	// A tagged --runtime-image is persisted tagless, so the deploy this
-	// same init performs (and every later redeploy) pins the image to the env's
-	// own runtime version instead of sticking to the tag the operator happened
-	// to type at init time.
+	// A tagged --runtime-image persists tagless so deploys pin to the env's runtime version.
 	t.Run("remote_with_tagged_runtime_image_persists_tagless", testInitRemoteWithTaggedRuntimeImagePersistsTagless)
 	t.Run("remote_with_runtime_resources", testInitRemoteWithRuntimeResources)
 	t.Run("remote_with_dind_resources", testInitRemoteWithDindResources)
@@ -98,9 +95,6 @@ func testInitRemoteWithRuntimeResources(t *testing.T) {
 }
 
 func testInitRemoteWithDindResources(t *testing.T) {
-	// --dind-cpu/--dind-memory size the erun-dind sidecar independent of
-	// --runtime-cpu/--runtime-memory; the deployed helm command must carry
-	// both containers' resolved limits on separate --set-string flags.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "dev",
@@ -153,7 +147,6 @@ func testInitYesFlagReplacesConfirms(t *testing.T) {
 }
 
 func testInitRemoteRequiresEnvironment(t *testing.T) {
-	// --remote without an environment must fail before any side effect runs.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"init", "--remote", "--tenant", "frs", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode == 0 {

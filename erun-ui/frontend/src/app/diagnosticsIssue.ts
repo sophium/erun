@@ -2,20 +2,15 @@ import type { UIBuildDetails } from '@/types';
 
 import type { DiagnosticsReportContext } from './diagnosticsReport';
 
-// diagnosticsIssue turns the Diagnostics console's report into a prefilled
-// GitHub issue the operator reviews and edits before submitting — filing
-// itself stays a Submit-button action on github.com, never a silent `gh`
-// call from the desktop (no credentials, no confirmation step).
+// Prefills a GitHub issue the operator submits themselves; the desktop never
+// files one silently.
 const ERUN_ISSUE_URL = 'https://github.com/sophium/erun/issues/new';
 
-// GitHub and browsers cap a request URL in the single-digit-KB range; this
-// stays comfortably under that so the prefilled link always opens.
+// Stays under the URL length GitHub and browsers accept.
 export const DIAGNOSTICS_ISSUE_URL_MAX_LENGTH = 8000;
 
 const TRUNCATION_NOTICE = '\n\n… truncated — the full report is on your clipboard.';
 
-// diagnosticsIssueTitle prefills from the context's own identity rather than
-// leaving the title blank: an untitled issue is worse than no button.
 export function diagnosticsIssueTitle(context: DiagnosticsReportContext): string {
   switch (context.kind) {
     case 'environment': {
@@ -41,11 +36,7 @@ function buildLine(build: UIBuildDetails | null): string {
   return `- erun version: ${build.version}${extras ? ` (${extras})` : ''}`;
 }
 
-// diagnosticsIssueBody mirrors the erun-file-issue skill's own template (What
-// happened / What you expected / Reproduction / Environment) so a
-// desktop-filed issue reads like one a human filed by hand, with the
-// evidence the operator would otherwise have had to copy in themselves
-// attached as its own section rather than dumped in place of the narrative.
+// diagnosticsIssueBody follows the erun-file-issue skill's template.
 export function diagnosticsIssueBody(report: string, build: UIBuildDetails | null): string {
   return [
     '## What happened',
@@ -82,9 +73,8 @@ export interface DiagnosticsIssuePrefill {
   truncated: boolean;
 }
 
-// buildDiagnosticsIssueURL trims the body — never the title — down to the
-// longest prefix whose encoded URL still fits the cap, appending a notice
-// that the untrimmed report is on the clipboard so nothing is silently lost.
+// buildDiagnosticsIssueURL trims only the body to fit, noting that the full
+// report is on the clipboard.
 export function buildDiagnosticsIssueURL(
   title: string,
   body: string,

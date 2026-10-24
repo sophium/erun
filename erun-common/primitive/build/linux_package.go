@@ -11,15 +11,10 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// A linux package component is <tenant>-devops/linux/<name>/Dockerfile. It is
-// never an image: a plain build runs it through its `test` stage to a
-// cache-only output, and only `erun build --release` exports its `dist` stage
-// and uploads the .deb files it holds (linux_package_build.go).
+// A linux package component is never an image: a plain build runs its `test` stage to a cache-only
+// output, and only `erun build --release` exports and uploads its `dist` .deb files.
 
-// ResolveCurrentLinuxPackageContexts resolves the linux package components the
-// current directory scopes a build to: the package directory itself, every
-// package under a linux/ directory, or every package of the project's
-// <tenant>-devops/linux module from the devops directory or the project root.
+// ResolveCurrentLinuxPackageContexts resolves the linux package components the current directory scopes a build to.
 func ResolveCurrentLinuxPackageContexts(findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, target shared.DockerCommandTarget) ([]shared.LinuxPackageContext, error) {
 	if resolveBuildContext == nil {
 		resolveBuildContext = shared.ResolveDockerBuildContext

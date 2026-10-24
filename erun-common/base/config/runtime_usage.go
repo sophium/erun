@@ -10,161 +10,86 @@ import (
 
 const (
 
-	// CgroupV2FSType is the sentinel the reading script prints when
-	// $cg/cgroup.controllers exists -- the portable systemd-style cgroup v2
-	// test (a cgroup2 mount always has this file at its root, delegated subtree
-	// or not; a v1 hierarchy never does). It avoids `stat -fc %T`, because
-	// BusyBox stat (the erun-dind sidecar's shell) reports every filesystem
-	// type as "UNKNOWN".
+	// CgroupV2FSType is printed when $cg/cgroup.controllers exists; `stat -fc %T`
+	// is avoided because BusyBox stat reports every type as "UNKNOWN".
 	CgroupV2FSType = "cgroup2fs"
 
-	// DefaultCgroupRoot is the container's own cgroup v2 directory, read
-	// directly by ReadLocalRuntimeUsage. Overridable so a test can point the
-	// reader at a fixture tree.
+	// DefaultCgroupRoot is the container's own cgroup v2 directory.
 	DefaultCgroupRoot = "/sys/fs/cgroup"
 )
 
-// RuntimeUsage is one environment's live resource reading, scoped to the
-// runtime container -- not the job that happens to be running in it, since
-// two concurrent jobs in the same container would otherwise let one
-// misattribute the other's consumption to itself.
+// RuntimeUsage is a live reading scoped to the runtime container, not a job,
+// so concurrent jobs cannot misattribute each other's consumption.
 type RuntimeUsage struct {
 	Tenant      string             `json:"tenant"`
 	Environment string             `json:"environment"`
 	CPU         RuntimeCPUUsage    `json:"cpu"`
 	Memory      RuntimeMemoryUsage `json:"memory"`
 	Disk        []RuntimeDiskUsage `json:"disk"`
-	// Warnings are named threshold crossings a caller can branch on without
-	// parsing prose -- see the RuntimeUsage*WarnPercent constants.
-	Warnings []string `json:"warnings,omitempty"`
-	// ExcludesBuilds is true when this environment carries the erun-dind
-	// sidecar (EnvironmentType.UsesDindSidecar) -- i.e. CPU and Memory above
-	// are scoped to the runtime container alone and cannot see a build
-	// actually running in the sidecar's own cgroup. Mirrors the desktop
-	// hover card's usageExcludesBuilds/excludesBuilds caveat so both
-	// transports disclose the same limitation instead of one silently
-	// under-reporting relative to the other. Stays true even when Dind below
-	// was read successfully -- it describes CPU/Memory above, which never
-	// change meaning regardless of what else this reading also carries.
+	Warnings    []string           `json:"warnings,omitempty"`
+	// ExcludesBuilds marks that CPU/Memory cannot see builds in the erun-dind sidecar.
 	ExcludesBuilds bool `json:"excludesBuilds,omitempty"`
-	// Requests is what the scheduler admits this environment's pod on -- the
-	// runtime container's and the erun-dind sidecar's declared
-	// resources.requests, and the pod's effective total (runtime_pod_requests.go)
-	// -- so a sizing judgement can tell a *reservation* from the cgroup ceiling
-	// CPU and Memory above divide against. A limit costs nothing while unused,
-	// so `Mem 0% of 27.0GiB` measured against a 1GiB reservation reads as an
-	// environment holding 27GiB when it holds none of it.
-	//
-	// Nil in dry-run (nothing was read, and a zero request would be a
-	// reservation of nothing) and never fabricated: a pod spec that could not
-	// be read arrives as a reading carrying Unavailable, so "could not read the
-	// reservation" stays distinguishable from "reserves nothing".
+	// Requests is the scheduler reservation, as opposed to the cgroup ceiling. Nil
+	// in dry-run; an unreadable pod spec arrives with Unavailable set.
 	Requests *RuntimeUsageRequests `json:"requests,omitempty"`
-	// Dind is the erun-dind sidecar's own CPU/memory reading, populated only
-	// on an environment that carries the sidecar (ExcludesBuilds true) and
-	// only when its cgroup could actually be read -- nil on any other
-	// environment, and nil (not a zero value) when the exec into the sidecar
-	// failed, so a caller cannot mistake "could not read it" for "read as
-	// zero usage". See the file-level comment for why this exists instead of
-	// treating the sidecar as permanently unreadable.
+	// Dind is nil when the environment has no sidecar or the sidecar read failed.
 	Dind *RuntimeDindUsage `json:"dind,omitempty"`
 }
 
-// RuntimeDindUsage is the erun-dind sidecar's own CPU/memory reading, sampled
-// by exec'ing the exact same script RunRuntimeUsage runs against the runtime
-// container into the sidecar container instead. It deliberately carries no
-// Disk field: the sidecar mounts the same workspace volume the runtime
-// container's RuntimeUsage.Disk already reports on, so a second disk reading
-// here would just repeat that figure under a name that invites reading it as
-// a second, independent filesystem.
+// RuntimeDindUsage is the erun-dind sidecar's reading. It has no Disk field: the
+// sidecar shares the workspace volume RuntimeUsage.Disk already reports.
 type RuntimeDindUsage struct {
 	CPU    RuntimeCPUUsage    `json:"cpu"`
 	Memory RuntimeMemoryUsage `json:"memory"`
 }
 
-// HasCounters reports whether the read found anything worth retaining. A host
-// without cgroup v2 yields a reading of nothing, and recording that would
-// build a history that can only ever answer "no evidence".
+// HasCounters reports whether the read found anything worth retaining.
 func (u RuntimeUsage) HasCounters() bool {
 	return u.Memory.LimitBytes > 0 || u.Memory.PeakBytes > 0 || u.CPU.QuotaCores > 0 || u.CPU.Periods > 0
 }
 
-// RuntimeCPUUsage reports quota-relative utilisation. Unavailable is set,
-// and every other field left zero, when cgroup v2 is absent or cpu.max
-// reports no quota to divide by (an unlimited container has no ceiling to be
-// "close to").
+// RuntimeCPUUsage reports quota-relative utilisation; Unavailable when cgroup v2
+// is absent or cpu.max sets no quota.
 type RuntimeCPUUsage struct {
 	QuotaCores         float64 `json:"quotaCores,omitempty"`
 	UtilizationPercent float64 `json:"utilizationPercent,omitempty"`
 	IntervalSeconds    float64 `json:"intervalSeconds,omitempty"`
-	// UsageUsec, Periods and ThrottledPeriods are cpu.stat's cumulative
-	// counters for the current container lifetime (usage_usec, nr_periods,
-	// nr_throttled), carried alongside the interval-based UtilizationPercent
-	// above so a consumer that retains readings over time -- RuntimeUsageHistory
-	// -- can derive its own rates and throttle ratio from the deltas between
-	// two readings, without a second reader.
+	// Cumulative cpu.stat counters, so RuntimeUsageHistory can derive rates from deltas.
 	UsageUsec        int64  `json:"usageUsec,omitempty"`
 	Periods          int64  `json:"periods,omitempty"`
 	ThrottledPeriods int64  `json:"throttledPeriods,omitempty"`
 	Unavailable      string `json:"unavailable,omitempty"`
 }
 
-// RuntimeMemoryUsage mirrors what the AI launch's post-mortem OOM message would
-// like to have had beforehand: current usage, the high-water mark, and a real
-// OOM-kill counter instead of "likely out of memory".
 type RuntimeMemoryUsage struct {
 	CurrentBytes int64 `json:"currentBytes,omitempty"`
 	PeakBytes    int64 `json:"peakBytes,omitempty"`
-	// PeakObserved is true only when memory.peak was actually read. memory.peak
-	// is cgroup v2 and reasonably recent -- cgroup v1 exposes
-	// memory.max_usage_in_bytes instead, and older v2 kernels lack it entirely
-	// -- so a missing or unparseable memory.peak must not collapse into a
-	// reported zero indistinguishable from a genuine idle peak, and must not
-	// let a percent-of-limit warning compute against a reading that was never
-	// taken.
+	// PeakObserved distinguishes an unreadable memory.peak (cgroup v1, older
+	// kernels) from a genuine zero.
 	PeakObserved   bool    `json:"peakObserved,omitempty"`
 	LimitBytes     int64   `json:"limitBytes,omitempty"`
 	Unlimited      bool    `json:"unlimited,omitempty"`
 	PercentOfLimit float64 `json:"percentOfLimit,omitempty"`
 	OOMKills       int64   `json:"oomKills,omitempty"`
-	// OOMKillsObserved mirrors PeakObserved: memory.events' oom_kill counter
-	// can be as unreadable as memory.peak, and a caller must not read a silent
-	// zero as "no kills" when it actually means "could not tell".
+	// OOMKillsObserved distinguishes an unreadable oom_kill counter from zero kills.
 	OOMKillsObserved bool `json:"oomKillsObserved,omitempty"`
-	// CeilingHits is memory.events' "max" counter: how many times this
-	// cgroup's usage hit its memory.max ceiling and the kernel reclaimed hard
-	// rather than killing outright. Distinct from OOMKills -- a container can
-	// spend a long time pinned against its ceiling under reclaim pressure
-	// while never once being OOM-killed, and that state is invisible to
-	// OOMKills alone.
-	CeilingHits int64 `json:"ceilingHits,omitempty"`
-	// CeilingHitsObserved mirrors OOMKillsObserved: a missing or unparseable
-	// counter must not collapse into a reported zero indistinguishable from
-	// a genuine "never hit the ceiling" reading.
+	// CeilingHits is memory.events' "max" counter: hard reclaims at memory.max,
+	// which happen without any OOM kill.
+	CeilingHits         int64  `json:"ceilingHits,omitempty"`
 	CeilingHitsObserved bool   `json:"ceilingHitsObserved,omitempty"`
 	Unavailable         string `json:"unavailable,omitempty"`
 }
 
-// RuntimeDiskUsage reports usage for one watched mount (the workspace path,
-// at minimum). TotalBytes/UsedBytes/PercentUsed come from a statfs of the
-// whole mount, so they describe the node's filesystem, not this environment's
-// own footprint -- see the file-level comment's point 4. NodeShared names
-// that explicitly; OwnUsedBytes is the one figure scoped to this environment
-// alone.
+// RuntimeDiskUsage totals come from statfs of the whole node filesystem;
+// OwnUsedBytes is the only figure scoped to this environment.
 type RuntimeDiskUsage struct {
-	Mount      string `json:"mount"`
-	NodeShared bool   `json:"nodeShared,omitempty"`
-	TotalBytes int64  `json:"totalBytes,omitempty"`
-	UsedBytes  int64  `json:"usedBytes,omitempty"`
-	// PercentUsed is the node's own fill level, not this environment's share
-	// of it -- see NodeShared.
+	Mount       string  `json:"mount"`
+	NodeShared  bool    `json:"nodeShared,omitempty"`
+	TotalBytes  int64   `json:"totalBytes,omitempty"`
+	UsedBytes   int64   `json:"usedBytes,omitempty"`
 	PercentUsed float64 `json:"percentUsed,omitempty"`
-	// OwnUsedBytes is a `du` of the watched mount, scoped to this
-	// environment's own filesystem tree rather than the whole node -- the
-	// figure an operator can actually reduce by cleaning up this one
-	// environment. OwnUsageObserved mirrors PeakObserved/OOMKillsObserved:
-	// `du` timing out or being unreadable must render as unavailable, not a
-	// fabricated zero.
+	// OwnUsedBytes is a `du` of this environment's tree; OwnUsageObserved is false
+	// when du fails or times out.
 	OwnUsedBytes     int64  `json:"ownUsedBytes,omitempty"`
 	OwnUsageObserved bool   `json:"ownUsageObserved,omitempty"`
 	Unavailable      string `json:"unavailable,omitempty"`
@@ -215,11 +140,6 @@ func RuntimeMemoryUsageFromValues(v map[string]string) RuntimeMemoryUsage {
 	return m
 }
 
-// runtimeCPUCounters is cpu.max/cpu.stat's cumulative counters, shared by the
-// interval-based reading below and ReadLocalRuntimeUsage's point-in-time
-// local reading -- both need the same quota and the same raw cpu.stat fields,
-// and reading them once keeps a remote read and a local read of the same
-// container agreeing on what the numbers mean.
 type runtimeCPUCounters struct {
 	QuotaCores       float64
 	UsageUsec        int64
@@ -246,16 +166,8 @@ func RuntimeCPUCountersFromValues(v map[string]string) (runtimeCPUCounters, bool
 	return counters, true
 }
 
-// ReadLocalRuntimeUsage reads the container's own cgroup v2 files directly,
-// for the in-pod monitor tick that already runs inside the container being
-// measured -- see the file-level comment for why that tick does not kubectl-exec
-// into itself. It shares runtimeMemoryUsageFromValues and the cumulative CPU
-// counters with RunRuntimeUsage's script-based parser, so this is a second
-// acquisition path for the same reader, not a second reader: a local read and
-// a kubectl-exec'd read of the same container agree on what the numbers mean.
-// It never fails -- an absent or unparseable file reports its field as
-// unavailable, because cgroup v1 and a missing mount are ordinary states and a
-// caller on the monitor's tick must not be broken by either.
+// ReadLocalRuntimeUsage reads the container's own cgroup files through the same
+// parser as RunRuntimeUsage. It never fails: unreadable files report unavailable.
 func ReadLocalRuntimeUsage(cgroupRoot string) RuntimeUsage {
 	root := strings.TrimSpace(cgroupRoot)
 	if root == "" {
@@ -268,10 +180,8 @@ func ReadLocalRuntimeUsage(cgroupRoot string) RuntimeUsage {
 	}
 }
 
-// readLocalCgroupValues builds a values map matching the shape the
-// kubectl-exec'd script prints, so both acquisition paths run through the
-// exact same parser. A file that cannot be read yields an empty value, which
-// the parser already treats as unavailable.
+// readLocalCgroupValues produces the same map the exec'd script prints, so both
+// paths share one parser.
 func readLocalCgroupValues(root string) map[string]string {
 	return map[string]string{
 		"cgroup_type":           CgroupV2FSType,
@@ -295,9 +205,6 @@ func readLocalCgroupFile(path string) string {
 	return strings.TrimSpace(string(data))
 }
 
-// localCgroupStatValue reads one "<key> <value>" line out of a cgroup keyed
-// file (cpu.stat, memory.events), mirroring the awk lookups the exec'd script
-// runs against the same files.
 func localCgroupStatValue(path, key string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -312,11 +219,8 @@ func localCgroupStatValue(path, key string) string {
 	return ""
 }
 
-// localRuntimeCPUUsage is runtimeCPUUsageFromValues without the interval-rate
-// half: a local read is a single point in time, so there is no before/after
-// pair to diff into a utilisation rate. It still reports the same cumulative
-// counters (quota, usage_usec, periods, throttled periods) that
-// RuntimeUsageHistory needs to derive its own rates from consecutive ticks.
+// localRuntimeCPUUsage reports only cumulative counters: a single local read has
+// no interval to compute a rate from.
 func localRuntimeCPUUsage(v map[string]string) RuntimeCPUUsage {
 	c := RuntimeCPUUsage{}
 	if !RuntimeCgroupV2Available(v) {

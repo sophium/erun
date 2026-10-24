@@ -7,10 +7,7 @@ import (
 	"time"
 )
 
-// A reader that cannot parse a lease reclaims it. An exclusive claim used to be
-// created as an empty file and written afterwards, so a reader landing between
-// the two deleted the brand-new claim and a second claimant took the
-// environment. The reader here runs at the exact moment the claim first exists.
+// The concurrent reader runs the moment the exclusive claim first exists.
 func TestAConcurrentReaderNeverSeesAHalfWrittenExclusiveClaim(t *testing.T) {
 	isolateActivityCache(t)
 	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)

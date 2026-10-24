@@ -11,9 +11,7 @@ import (
 
 var awsConfigUserHomeDir = os.UserHomeDir
 
-// AWSSSOProfile is the subset of an AWS shared config profile the doctor needs
-// to pre-fill an InitAWSCloudProviderParams; fields are trimmed and empty only
-// when the source omitted the entry.
+// AWSSSOProfile is the subset of an AWS shared-config profile used to pre-fill AWS init params.
 type AWSSSOProfile struct {
 	Profile     string
 	SSOStartURL string
@@ -23,9 +21,7 @@ type AWSSSOProfile struct {
 	Region      string
 }
 
-// LookupAWSSSOProfileByAccountID returns the AWS shared-config profile matching
-// the given account id, resolving both inline SSO settings and the sso_session
-// indirection. ok is false when no profile matches or the config file is absent.
+// LookupAWSSSOProfileByAccountID returns the profile for accountID, resolving sso_session indirection.
 func LookupAWSSSOProfileByAccountID(accountID string) (AWSSSOProfile, bool, error) {
 	accountID = strings.TrimSpace(accountID)
 	if accountID == "" {
@@ -104,8 +100,7 @@ type awsConfigSection struct {
 	values map[string]string
 }
 
-// parseAWSSharedConfig deliberately parses only flat top-level keys; the nested
-// "s3 ="-style blocks some configs use carry no SSO settings, so it skips them.
+// parseAWSSharedConfig reads only flat top-level keys; nested blocks carry no SSO settings.
 func parseAWSSharedConfig(r io.Reader) ([]awsConfigSection, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)

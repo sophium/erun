@@ -18,11 +18,8 @@ export function LoadingScreen({ brand }: { brand: string | undefined }): React.R
   );
 }
 
-// useCanEndIdpSession reports whether sign-out can also end the IdP session
-// for `oidc`, defaulting to false (the safe direction: a claim this screen
-// cannot yet back up must never render as if it could) until discovery
-// confirms an end_session_endpoint. It only ever upgrades false -> true, so
-// the card's wording never flashes a promise it then has to retract.
+// useCanEndIdpSession defaults to false and only upgrades once discovery
+// confirms an end_session_endpoint, so the copy never retracts a promise.
 function useCanEndIdpSession(oidc: OidcConfig | undefined): boolean {
   const [supported, setSupported] = React.useState(false);
   React.useEffect(() => {
@@ -41,10 +38,6 @@ function useCanEndIdpSession(oidc: OidcConfig | undefined): boolean {
   return supported;
 }
 
-// enrollCommand fills in `erun platform user enroll` with what the token
-// tells us — the same hand-off shape the desktop's NotEnrolledState offers,
-// so an administrator gets a command to run and verify rather than raw
-// values to reassemble into one by hand.
 function enrollCommand(identity: ReturnType<typeof readTokenIdentity>): string {
   const username = identity.email ?? '<username>';
   const issuer = identity.issuer ?? '<issuer>';
@@ -71,16 +64,8 @@ function CopyCommandButton({ command }: { command: string }): React.ReactElement
   );
 }
 
-// NotEnrolledScreen is the dead end a self-signed-up user hits: OIDC
-// succeeded, so a token is held, but the API rejects the identity because it
-// is enrolled in no tenant. This says what actually has to happen (an
-// operator must enrol them), names the identity an operator needs in order to
-// do it, and offers a sign-out — signing in again as the *same* identity just
-// returns here, but signing in as a different one is the actual escape, so
-// this screen must not be a true dead end for that case. Whether sign-out
-// can actually reach a different account depends on whether this platform's
-// IdP supports RP-initiated logout (useCanEndIdpSession), and the wording
-// below only ever claims what that check confirms.
+// NotEnrolledScreen: the token is valid but the identity is enrolled in no
+// tenant. Signing in as a different identity is the escape.
 export function NotEnrolledScreen({
   brand,
   token,
@@ -151,14 +136,8 @@ export function NotEnrolledScreen({
   );
 }
 
-// TenantUnresolvedScreen is shown when the API could authenticate the token
-// but could not determine which tenant it resolves to at all -- most
-// commonly a shared, org-scoped issuer whose token carries no matching org
-// claim. Unlike NotEnrolledScreen, this deliberately does not tell the
-// caller to ask an operator to enrol them: they may already be enrolled
-// somewhere, and that advice would not help. `message` carries
-// the API's own diagnosis (issuer, org claim seen or its absence) so an
-// operator debugging this does not have to query the database for it.
+// TenantUnresolvedScreen: the issuer could not be mapped to a tenant. It must
+// not tell the caller to get enrolled; they may already be.
 export function TenantUnresolvedScreen({
   brand,
   token,
@@ -203,14 +182,8 @@ export function TenantUnresolvedScreen({
   );
 }
 
-// ResolutionErrorScreen is shown when the API authenticated the token but
-// failed to resolve the identity because of an internal error (e.g. an
-// unexpected database failure) rather than a real answer about enrolment --
-// distinct from both NotEnrolledScreen and TenantUnresolvedScreen, since
-// neither "an operator has to enrol you" nor "you may already be enrolled
-// somewhere else" is the right advice here. This screen never
-// offers an enrolment command: whatever the API's record of this identity
-// is, it was not what failed, so no command derived from it would help.
+// ResolutionErrorScreen: resolution failed internally, so it offers no
+// enrolment command.
 export function ResolutionErrorScreen({
   brand,
   token,

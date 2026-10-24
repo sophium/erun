@@ -20,9 +20,7 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// scrapeMetrics serves recorder's registry the same way runMetricsHTTP does
-// and parses the response as real Prometheus text exposition format — proving
-// the exposition parses, not just that the handler wrote some bytes.
+// scrapeMetrics parses the response as real Prometheus text exposition.
 func scrapeMetrics(t *testing.T, recorder *shared.MetricsRecorder) map[string]*dto.MetricFamily {
 	t.Helper()
 	server := httptest.NewServer(promhttp.HandlerFor(recorder.Registry, promhttp.HandlerOpts{}))
@@ -101,9 +99,6 @@ func counterValue(t *testing.T, families map[string]*dto.MetricFamily, name stri
 	return 0
 }
 
-// TestMetricsEndpointServesAllFiveDocumentedSeries proves the endpoint serves
-// exactly the five series metrics-spec.md documents, each carrying the
-// tenant+environment labels the spec requires on every series.
 func TestMetricsEndpointServesAllFiveDocumentedSeries(t *testing.T) {
 	recorder := newMetricsRecorder("acme", "dev")
 	recorder.SetIdleEligibility(true)
@@ -135,11 +130,6 @@ func TestMetricsEndpointServesAllFiveDocumentedSeries(t *testing.T) {
 	}
 }
 
-// TestIdleEligibilityGaugeTracksUnderlyingActivityState proves the gauge
-// moves with the real activity snapshot on disk rather than reporting a fixed
-// value that merely looks healthy — root AGENTS.md calls a metric wired to a
-// constant worse than no metric at all, because it hides the very failure it
-// claims to report.
 func TestIdleEligibilityGaugeTracksUnderlyingActivityState(t *testing.T) {
 	cacheDir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
@@ -149,18 +139,13 @@ func TestIdleEligibilityGaugeTracksUnderlyingActivityState(t *testing.T) {
 	runtime := normalizeRuntimeConfig(shared.RuntimeConfig{
 		Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"},
 	})
-	// WorkingHours spans virtually the whole day so the test's outcome does not
-	// depend on the wall-clock hour it happens to run at: outside working hours,
-	// environmentStopEligibility ignores every marker except a lease, which
-	// would make the SSH-activity assertion below flaky.
+	// Near-all-day working hours so the result does not depend on the wall clock.
 	envConfig := config.EnvConfig{Name: "dev", ManagedCloud: true, Idle: config.EnvironmentIdleConfig{WorkingHours: "00:00-23:59"}}
 	if err := runtime.Store.SaveEnvConfig("acme", envConfig); err != nil {
 		t.Fatalf("SaveEnvConfig failed: %v", err)
 	}
 	recorder := newMetricsRecorder("acme", "dev")
 
-	// No activity recorded yet: every marker reads idle, so the environment is
-	// eligible for idle-stop and no terminal input has ever been observed.
 	sampleIdleMetrics(runtime, recorder)
 	families := scrapeMetrics(t, recorder)
 	if got := gaugeValue(t, families, "erun_idle_eligibility"); got != 1 {
@@ -170,8 +155,6 @@ func TestIdleEligibilityGaugeTracksUnderlyingActivityState(t *testing.T) {
 		t.Fatalf("erun_terminal_input_seconds_since_last = %v before any activity, want 0", got)
 	}
 
-	// An SSH session started five seconds ago: eligibility must flip to
-	// ineligible and terminal-input must report a real elapsed time.
 	if err := activitypkg.RecordEnvironmentActivity(activitypkg.EnvironmentActivityParams{
 		Tenant: "acme", Environment: "dev", Kind: config.ActivityKindSSH,
 		Now: time.Now().Add(-5 * time.Second),
@@ -188,10 +171,6 @@ func TestIdleEligibilityGaugeTracksUnderlyingActivityState(t *testing.T) {
 	}
 }
 
-// TestTerminalInputUnionsSSHCLIAndMCPActivity proves the gauge follows
-// idle-policy.md's already-published `last_terminal_input` definition (a
-// union of ssh, cli, and non-idle-probe mcp activity), not just SSH: a more
-// recent CLI invocation must win over an older SSH keystroke.
 func TestTerminalInputUnionsSSHCLIAndMCPActivity(t *testing.T) {
 	cacheDir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
@@ -221,10 +200,6 @@ func TestTerminalInputUnionsSSHCLIAndMCPActivity(t *testing.T) {
 	}
 }
 
-// TestTrafficWindowTracksByteDeltasNotARunningTotal proves
-// erun_traffic_window_bytes reports the bytes seen since the previous sample
-// — a tumbling window — rather than a cumulative total or a constant: a quiet
-// tick between two active ones must read back to 0.
 func TestTrafficWindowTracksByteDeltasNotARunningTotal(t *testing.T) {
 	cacheDir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
@@ -240,8 +215,6 @@ func TestTrafficWindowTracksByteDeltasNotARunningTotal(t *testing.T) {
 		t.Fatalf("first window = %v, want 100", got)
 	}
 
-	// A quiet window: no new bytes since the last sample, so this window is 0
-	// even though the process-lifetime total is unchanged and non-zero.
 	lastSSH, lastMCP = sampleTrafficWindow(runtime, recorder, lastSSH, lastMCP)
 	if got := gaugeValue(t, scrapeMetrics(t, recorder), "erun_traffic_window_bytes"); got != 0 {
 		t.Fatalf("quiet window = %v, want 0", got)
@@ -254,17 +227,11 @@ func TestTrafficWindowTracksByteDeltasNotARunningTotal(t *testing.T) {
 	}
 }
 
-// guardToolTestOutput mimics the CommandOutput shape guardTool inspects via
-// reflection to detect a preview/dry-run call.
+// guardToolTestOutput mimics the CommandOutput shape guardTool reflects on.
 type guardToolTestOutput struct {
 	Executed bool
 }
 
-// TestGuardToolRecordsMCPCallsAndAuditEvents proves guardTool — the one place
-// every MCP tool call passes through regardless of which register* function
-// added it — increments both erun_mcp_calls_total and erun_audit_events_total
-// with the labels metrics-spec.md documents, for a successful call, a
-// dry-run call, an error, and a capability refusal.
 func TestGuardToolRecordsMCPCallsAndAuditEvents(t *testing.T) {
 	recorder := newMetricsRecorder("acme", "dev")
 	admin := shared.AuthIdentity{Tenant: "acme", Capabilities: mcptools.AdminMCPCapabilitySet()}
@@ -289,8 +256,6 @@ func TestGuardToolRecordsMCPCallsAndAuditEvents(t *testing.T) {
 	if _, _, err := shared.GuardTool(admin, "deploy", recorder, errorHandler)(context.Background(), nil, struct{}{}); err == nil {
 		t.Fatal("expected the error handler's error to propagate")
 	}
-	// A read-only caller reaching a mutating tool directly (bypassing
-	// registration filtering) is refused by the guard itself.
 	if _, _, err := shared.GuardTool(readOnly, "deploy", recorder, successHandler)(context.Background(), nil, struct{}{}); err == nil {
 		t.Fatal("expected the capability refusal to propagate")
 	}
@@ -305,8 +270,7 @@ func TestGuardToolRecordsMCPCallsAndAuditEvents(t *testing.T) {
 	if got := counterValue(t, families, "erun_mcp_calls_total", map[string]string{"tool": "deploy", "result": "error"}); got != 1 {
 		t.Fatalf("erun_mcp_calls_total{tool=deploy,result=error} = %v, want 1", got)
 	}
-	// The refused call never reaches the handler, so it must not be counted as
-	// an MCP call — only as an audited (denied) action.
+	// A refused call is audited but not counted as an MCP call.
 	if got := counterValue(t, families, "erun_audit_events_total", map[string]string{"action": "mcp.deploy", "actor_kind": "agent", "result": "error"}); got < 2 {
 		t.Fatalf("erun_audit_events_total{action=mcp.deploy,actor_kind=agent,result=error} = %v, want at least 2 (the error call + the capability refusal)", got)
 	}
@@ -315,10 +279,6 @@ func TestGuardToolRecordsMCPCallsAndAuditEvents(t *testing.T) {
 	}
 }
 
-// TestNilMetricsRecorderIsSafe proves every recording path tolerates a nil
-// recorder (the state when metrics are disabled), so disabling the HTTP
-// listener never has to be threaded through every call site as a separate
-// "is metrics enabled" branch.
 func TestNilMetricsRecorderIsSafe(t *testing.T) {
 	var recorder *shared.MetricsRecorder
 	recorder.RecordMCPCall("idle", "success")
@@ -337,9 +297,6 @@ func TestNilMetricsRecorderIsSafe(t *testing.T) {
 	}
 }
 
-// TestMetricsHTTPHonorsEnabledFlag proves scope item 3's access decision has a
-// real effect: an operator (or the chart) that sets metricsEnabled=false gets
-// no listener at all, rather than one that silently ignores the setting.
 func TestMetricsHTTPHonorsEnabledFlag(t *testing.T) {
 	recorder := newMetricsRecorder("acme", "dev")
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)

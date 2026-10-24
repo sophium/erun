@@ -12,26 +12,18 @@ import (
 )
 
 func testListSSHDEnabledButHostAliasMissing(t *testing.T) {
-	// The env config says sshd is enabled, but nothing ever wrote a matching
-	// Host block to ~/.ssh/config (e.g. workspace sync flipped the flag
-	// without running `sshd init`). list must not report the derived alias
-	// as usable — every consumer of it (ssh, VS Code Remote-SSH) would fail
-	// to resolve the hostname.
+	// sshd is enabled but no Host block exists in ~/.ssh/config, so the alias
+	// must not be reported as usable.
 	setup := env.New(t)
 	seedListSSHDTenant(t, setup)
 	result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// The golden below is the negative assertion: both `ssh host:` lines
-	// must carry the "not in ~/.ssh/config" repair note, not a bare alias.
 	golden.Equal(t, "list/sshd_enabled_but_host_alias_missing", normalize.Apply(result.Combined))
 }
 
 func testListSSHDEnabledAndHostAliasConfigured(t *testing.T) {
-	// The counterpart to the scenario above: once ~/.ssh/config actually
-	// carries the Host block (what `sshd init` writes), list reports the
-	// alias plainly again, with no repair note.
 	setup := env.New(t)
 	seedListSSHDTenant(t, setup)
 	sshDir := filepath.Join(setup.Home, ".ssh")
@@ -52,20 +44,8 @@ func testListSSHDEnabledAndHostAliasConfigured(t *testing.T) {
 }
 
 func testListOrphanedHostAliasBlocksAreReported(t *testing.T) {
-	// The reverse direction of the annotation above. `erun sshd init`
-	// writes a Host block and only env deletion removes one, so a block
-	// left by a rename, a deleted environment or a turned-off sshd stays in
-	// ~/.ssh/config indefinitely -- and because local ports are reissued,
-	// the stale alias starts resolving into whichever live environment
-	// inherited its port. Nothing warned about that: an alias that fails is
-	// legible, an alias that succeeds against the wrong environment is not.
-	//
-	// Four blocks, so the report is pinned to be both complete and precise:
-	// the live env's own block (claimed, not reported), a stale alias whose
-	// port the live env now holds (reported, and named as the environment
-	// `ssh` would actually reach), a stale alias on a port nobody holds
-	// (reported, unqualified), and the operator's own hand-maintained host
-	// (never reported -- erun reports on the aliases it writes).
+	// Stale Host blocks persist, and reissued local ports can make them resolve
+	// into the wrong live environment. Only erun-written aliases are reported.
 	setup := env.New(t)
 	seedListSSHDTenant(t, setup)
 	sshDir := filepath.Join(setup.Home, ".ssh")

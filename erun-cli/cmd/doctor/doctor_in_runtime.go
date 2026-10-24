@@ -18,9 +18,7 @@ func runDoctorInRuntime(ctx core.Context, promptRunner shared.PromptRunner, opti
 	if err != nil {
 		return err
 	}
-	// --sync-config short-circuits before remote-init: config drift is more
-	// fundamental (a wrong type mis-drives everything downstream), and gating it
-	// here leaves plain in-pod `erun doctor` output byte-for-byte unchanged.
+	// Config drift is more fundamental than remote-init, so it short-circuits.
 	if options.syncConfig {
 		return runRuntimeConfigSync(ctx, promptRunner, options, doctor.ResolveRuntimeConfigHome(homeDir))
 	}

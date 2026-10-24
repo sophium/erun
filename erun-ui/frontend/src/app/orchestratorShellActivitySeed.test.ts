@@ -34,10 +34,6 @@ function orchestrator(
   };
 }
 
-// The point of the snapshot half of the fix (the same treatment the busy
-// signal already gets): a fetch that lands after the shell started (boot, a
-// reload) must render the running shell without ever having witnessed the
-// orchestrator-shell-activity event that announced it.
 test('a running orchestrator seeds its shell activity from the snapshot alone', () => {
   const seed = planOrchestratorShellSeed([orchestrator(7, true, 'sleep 300', 1_700_000_000)]);
   assert.deepEqual(seed, [
@@ -50,8 +46,6 @@ test('an orchestrator with no running shell seeds not-running, clearing a stale 
   assert.deepEqual(seed, [{ sessionId: 7, running: false, command: '', startedAtUnix: 0 }]);
 });
 
-// A stopped orchestrator has no session id to key the shell-activity map by,
-// so it must not contribute a seed entry at all.
 test('a stopped orchestrator contributes no seed', () => {
   assert.deepEqual(planOrchestratorShellSeed([orchestrator(0, false)]), []);
 });

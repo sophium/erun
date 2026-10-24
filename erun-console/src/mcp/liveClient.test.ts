@@ -182,14 +182,7 @@ describe('callMcpTool', () => {
     });
   });
 
-  // An erun:operate-scoped token's server never registers an admin-only tool
-  // at all (erun-mcp/capabilities.go's addTool filters at registration, per
-  // erun-common/mcp_capabilities.go's MCPCapabilityOperate doc comment), so a
-  // caller reaching for one -- whether through this console's own UI or
-  // hand-rolled against the same edge -- gets refused, surfaced by this
-  // generic client exactly like any other JSON-RPC error rather than a crash
-  // or a silently-ignored call. This is erun-mcp/guardTool's own error
-  // shape (`tool %q requires the %s capability`) verbatim.
+  // The error text is erun-mcp guardTool's own shape, verbatim.
   it('surfaces an admin-only tool refusal for an operate-scoped caller like any other JSON-RPC error', async () => {
     mockSequence([
       () => jsonResponse({ jsonrpc: '2.0', id: 1, result: {} }, { sessionId: 'session-1' }),

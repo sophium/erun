@@ -22,12 +22,8 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
 
-// The merge queue runs nothing itself: the environment that promotes a review to MERGE does the fetch/merge/build/push locally,
-// with its own already-warm checkout and daemon, then reports the outcome.
-// This gate proves the platform's half of that contract — accepting a
-// verified MERGED report and refusing an unverified one — against a real
-// migrated Postgres and a real (local, file://) git remote. No cluster, DBOS
-// workflow, or Kubernetes Job is involved.
+// The environment does the merge itself; this gates the platform's half (verifying
+// MERGED reports) against real Postgres and a file:// git remote.
 type mergeQueueE2E struct {
 	databaseURL string
 }
@@ -38,9 +34,6 @@ func mergeQueueE2EFromEnv(t *testing.T) mergeQueueE2E {
 	return mergeQueueE2E{databaseURL: databaseURL}
 }
 
-// startMergeQueueAPI wires the API the way the control plane runs it for
-// reviews/builds: real Postgres, real git verification. No KubeClient and no
-// DBOSContext — neither is needed once nothing here dispatches a Job.
 func startMergeQueueAPI(t *testing.T, config mergeQueueE2E) *httptest.Server {
 	t.Helper()
 
@@ -66,8 +59,6 @@ func startMergeQueueAPI(t *testing.T, config mergeQueueE2E) *httptest.Server {
 	return srv
 }
 
-// runGit runs a git command and fails the test on error — these are real
-// local git repositories with no network or cluster involved.
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -81,18 +72,10 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// mergeQueueRemote is a bare local git repository standing in for the
-// tenant's real remote, reachable only over file:// — exactly what the
-// gitverify.RemoteVerifier fetches from, just without a real host.
 type mergeQueueRemote struct {
 	url string
-	// main is a unique branch name per remote, not the literal "main": the
-	// platform's "target tip it was gated against" bookkeeping is keyed by
-	// (tenant, targetBranch) alone, so two tests both targeting a branch
-	// literally named "main" — even in two different physical remotes —
-	// would otherwise be compared against each other, which is a testing
-	// artifact, not something that happens in reality (one tenant has one
-	// remote per target branch name).
+	// main is unique per remote because gated-tip bookkeeping is keyed by
+	// (tenant, targetBranch) alone.
 	main string
 }
 
@@ -109,8 +92,6 @@ func newMergeQueueRemote(t *testing.T) mergeQueueRemote {
 	return mergeQueueRemote{url: "file://" + bare, main: main}
 }
 
-// branch forks a new branch from main with one commit, pushes it, and
-// returns its commit hash.
 func (r mergeQueueRemote) branch(t *testing.T, name, filename string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -123,7 +104,6 @@ func (r mergeQueueRemote) branch(t *testing.T, name, filename string) string {
 	return runGit(t, dir, "rev-parse", "HEAD")
 }
 
-// mainTip reads the remote's current main tip.
 func (r mergeQueueRemote) mainTip(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -131,8 +111,7 @@ func (r mergeQueueRemote) mainTip(t *testing.T) string {
 	return runGit(t, dir, "rev-parse", r.main)
 }
 
-// pushDirect pushes a commit straight to branch with no review or gate
-// involved — exactly what the release flow's own "[skip ci]" commits do.
+// pushDirect bypasses review, like the release flow's "[skip ci]" commits.
 func (r mergeQueueRemote) pushDirect(t *testing.T, branch, filename, message string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -146,9 +125,6 @@ func (r mergeQueueRemote) pushDirect(t *testing.T, branch, filename, message str
 	return commit
 }
 
-// merge is exactly what an environment does on promotion to MERGE: fetch
-// target and source, squash-merge the source onto the current target, commit,
-// and push. Real git, against the real (local) remote.
 func (r mergeQueueRemote) merge(t *testing.T, targetBranch, sourceBranch, message string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -162,10 +138,7 @@ func (r mergeQueueRemote) merge(t *testing.T, targetBranch, sourceBranch, messag
 	return commit
 }
 
-// uniqueBranchName keeps a re-run against a persistent database from
-// colliding on the one-live-review-per-branch-pair uniqueness constraint, and
-// keeps two tests' target branches from being compared against each other by
-// the platform's own (tenant, targetBranch) gated-tip bookkeeping.
+// uniqueBranchName avoids the one-live-review-per-branch-pair constraint on reruns.
 func uniqueBranchName(t *testing.T, prefix string) string {
 	t.Helper()
 	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
@@ -195,9 +168,6 @@ func e2eOpenReview(t *testing.T, baseURL, name, targetBranch, sourceBranch strin
 	return review.ReviewID
 }
 
-// e2eReportGreenBuild is the CLIENT-reported build a real CI would post for
-// the source branch. A successful one moves the review OPEN -> READY and, if
-// nothing else is merging on that target, promotes it straight to MERGE.
 func e2eReportGreenBuild(t *testing.T, baseURL, reviewID string) {
 	t.Helper()
 	code, body := e2eRequest(t, baseURL, http.MethodPost, "/v1/reviews/"+reviewID+"/builds", map[string]any{
@@ -210,11 +180,6 @@ func e2eReportGreenBuild(t *testing.T, baseURL, reviewID string) {
 	}
 }
 
-// e2ePostMergeBuild is the environment promoted to MERGE recording its
-// successful build of the prepared merge commit as an ordinary RECORDED build
-// with the version it minted — the build a MERGED report then names. It is
-// the same route and shape as any other build of a commit, which is why the
-// refusal tests below use it for the source tip and the gated tip too.
 func e2ePostMergeBuild(t *testing.T, baseURL, reviewID, commit string) string {
 	t.Helper()
 	code, respBody := e2eRequest(t, baseURL, http.MethodPost, "/v1/reviews/"+reviewID+"/builds", map[string]any{
@@ -232,8 +197,6 @@ func e2ePostMergeBuild(t *testing.T, baseURL, reviewID, commit string) string {
 	return build.BuildID
 }
 
-// e2eReportMerged is the environment's own claim that the merge landed —
-// accepted only once the platform can verify it against the real repository.
 func e2eReportMerged(t *testing.T, baseURL, reviewID, buildID, remoteURL string) (int, mergeReviewResponse) {
 	t.Helper()
 	code, body := e2eRequest(t, baseURL, http.MethodPatch, "/v1/reviews/"+reviewID+"/status", map[string]any{
@@ -259,10 +222,6 @@ func readMergeReview(t *testing.T, baseURL, reviewID string) mergeReviewResponse
 	return review
 }
 
-// TestMergeQueueAcceptsAVerifiedMergeEndToEnd is the environment-driven
-// happy path: promote to MERGE, do the real merge/push exactly as an
-// environment would, record the merge commit's build, and have MERGED accepted because
-// it checks out against the real repository — not because of who reported it.
 func TestMergeQueueAcceptsAVerifiedMergeEndToEnd(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -292,12 +251,8 @@ func TestMergeQueueAcceptsAVerifiedMergeEndToEnd(t *testing.T) {
 	}
 }
 
-// TestMergeQueueRefusesTheReadyBuildOfAnUnlandedSourceTip: the build that
-// took the review to READY is a real, successful build recorded on the review
-// — of the source branch's tip. Once the branch is squash-merged, naming that
-// build for MERGED names a commit that never landed on the target, so it is
-// refused and the review stays at MERGE; the build of the merge commit that
-// did land is then accepted.
+// TestMergeQueueRefusesTheReadyBuildOfAnUnlandedSourceTip: the READY build is of the source tip,
+// which never landed after a squash merge.
 func TestMergeQueueRefusesTheReadyBuildOfAnUnlandedSourceTip(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -328,10 +283,8 @@ func TestMergeQueueRefusesTheReadyBuildOfAnUnlandedSourceTip(t *testing.T) {
 	}
 }
 
-// TestMergeQueueRefusesABuildOfTheGatedTip: the previous merge's commit is on
-// the target branch and, being its own ancestor, "descends" from the gated
-// tip — so a review at MERGE naming a build of that commit would pass both
-// repository checks while nothing of its own landed. It is refused.
+// TestMergeQueueRefusesABuildOfTheGatedTip: the previous merge's commit trivially descends from the
+// gated tip, yet nothing of this review landed.
 func TestMergeQueueRefusesABuildOfTheGatedTip(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -364,14 +317,8 @@ func TestMergeQueueRefusesABuildOfTheGatedTip(t *testing.T) {
 	}
 }
 
-// TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget is the property the
-// merge queue exists for: a merge built
-// against a target tip that is no longer current must never become MERGED,
-// even though the reported commit really is (now) on the branch. Producing
-// this without a second, well-behaved environment racing the first means
-// force-pushing a merge computed against a stale local fetch — standing in
-// for a buggy or malicious reporter, which is exactly who this check has to
-// hold up against once any caller may report MERGED.
+// TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget: a force-pushed merge built against a
+// stale target must never become MERGED, even though the commit is on the branch.
 func TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -381,8 +328,6 @@ func TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget(t *testing.T) {
 	remote.branch(t, branchA, "a.txt")
 	remote.branch(t, branchC, "c.txt")
 
-	// feature-c's "environment" fetches main while it is still at the root
-	// commit — before feature-a lands.
 	staleClone := t.TempDir()
 	runGit(t, staleClone, "clone", remote.url, ".")
 	runGit(t, staleClone, "fetch", "origin", remote.main, branchC)
@@ -391,8 +336,6 @@ func TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget(t *testing.T) {
 	runGit(t, staleClone, "commit", "-m", "merge "+branchC)
 	staleMergeCommit := runGit(t, staleClone, "rev-parse", "HEAD")
 
-	// Meanwhile feature-a's review lands for real, moving the platform's own
-	// record of main's tip forward.
 	reviewA := e2eOpenReview(t, srv.URL, "merge-queue-e2e-a", remote.main, branchA)
 	e2eReportGreenBuild(t, srv.URL, reviewA)
 	mergeCommitA := remote.merge(t, remote.main, branchA, "merge "+branchA)
@@ -401,9 +344,7 @@ func TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget(t *testing.T) {
 		t.Fatalf("review A did not merge: HTTP %d status=%s", code, merged.Status)
 	}
 
-	// feature-c's stale merge still pushes — a fast-forward check alone does
-	// not catch this, since force-pushing (a buggy or malicious reporter,
-	// not a well-behaved one) can still land it on the branch.
+	// Force-push bypasses fast-forward checks.
 	runGit(t, staleClone, "push", "--force", "origin", "HEAD:"+remote.main)
 	if got := remote.mainTip(t); got != staleMergeCommit {
 		t.Fatalf("main tip = %s, want the force-pushed stale merge %s to have landed", got, staleMergeCommit)
@@ -422,13 +363,8 @@ func TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget(t *testing.T) {
 	}
 }
 
-// TestMergeQueueAcceptsAMergeReportedAfterUnrelatedCommitsLandInBetween: the
-// release flow enqueued by review A's own MERGED
-// transition pushes its "[skip ci]" commits straight to main — no review, no
-// gate — before review B's merge is reported. Review B's own merge commit is
-// therefore no longer an immediate child of review A's merge commit, but
-// review A's merge commit is still really its ancestor, so the report is
-// accepted rather than refused forever by strict parent equality.
+// TestMergeQueueAcceptsAMergeReportedAfterUnrelatedCommitsLandInBetween: release "[skip ci]"
+// commits land between merges, so the gated tip is an ancestor, not the direct parent.
 func TestMergeQueueAcceptsAMergeReportedAfterUnrelatedCommitsLandInBetween(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -462,9 +398,6 @@ func TestMergeQueueAcceptsAMergeReportedAfterUnrelatedCommitsLandInBetween(t *te
 	}
 }
 
-// isAncestorCommit reports whether ancestor is reachable from descendant in
-// the repository at dir, without failing the test on a "no" answer — the
-// question here is expected to come back false.
 func isAncestorCommit(t *testing.T, dir, ancestor, descendant string) bool {
 	t.Helper()
 	cmd := exec.Command("git", "merge-base", "--is-ancestor", ancestor, descendant)
@@ -473,22 +406,13 @@ func isAncestorCommit(t *testing.T, dir, ancestor, descendant string) bool {
 	return cmd.Run() == nil
 }
 
-// reconcileMerged reports MERGED for a review with no merge build to name —
-// the shape a squash-landed review is in. Everything else about the request
-// is the ordinary PATCH .../status call.
 func reconcileMerged(t *testing.T, baseURL, reviewID, remoteURL string) (int, mergeReviewResponse) {
 	t.Helper()
 	return e2eReportMerged(t, baseURL, reviewID, "", remoteURL)
 }
 
-// TestReconcileMergedAcceptsASquashLandedBranchEndToEnd is driven through the real HTTP route against a real migrated
-// Postgres and a real (local, file://) git remote: a review whose branch
-// landed by squash merge reaches MERGED even though it never entered the
-// merge queue, never had a build recorded, and has none of its commits as
-// ancestors of the target.
-//
-// The test asserts that last part itself — the branch tip really is not an
-// ancestor of main, so an ancestry check could never have held — rather than assuming the setup produced a squash.
+// TestReconcileMergedAcceptsASquashLandedBranchEndToEnd: a squash-landed review has no ancestor
+// commits on the target and no build, yet reaches MERGED.
 func TestReconcileMergedAcceptsASquashLandedBranchEndToEnd(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -496,9 +420,6 @@ func TestReconcileMergedAcceptsASquashLandedBranchEndToEnd(t *testing.T) {
 	sourceBranch := uniqueBranchName(t, "squashed")
 	branchTip := remote.branch(t, sourceBranch, "squashed.txt")
 
-	// The review is opened and never promoted: no build is reported, so it
-	// sits at OPEN with nothing in the merge queue — exactly what a branch
-	// that landed through GitHub rather than the platform looks like.
 	reviewID := e2eOpenReview(t, srv.URL, "reconcile-e2e", remote.main, sourceBranch)
 	if got := readMergeReview(t, srv.URL, reviewID).Status; got != model.ReviewStatusOpen {
 		t.Fatalf("review status = %s, want OPEN before anything lands", got)
@@ -506,9 +427,6 @@ func TestReconcileMergedAcceptsASquashLandedBranchEndToEnd(t *testing.T) {
 
 	squashCommit := remote.merge(t, remote.main, sourceBranch, "squashed work (#1)")
 
-	// The half of the reproduction that matters: a squash merge leaves the
-	// branch's own commits out of the target's history, which is why the
-	// merge-build path had nothing to point at.
 	checkout := t.TempDir()
 	runGit(t, checkout, "clone", remote.url, ".")
 	if isAncestorCommit(t, checkout, branchTip, squashCommit) {
@@ -530,11 +448,6 @@ func TestReconcileMergedAcceptsASquashLandedBranchEndToEnd(t *testing.T) {
 	}
 }
 
-// TestReconcileMergedRefusesABranchThatNeverLanded is the other side of the
-// same check, through the same route: a review whose branch really is not in
-// the target is refused and left exactly where it was. Reconciliation is a
-// verified fact about the repository, not a privileged way to clear the open
-// count.
 func TestReconcileMergedRefusesABranchThatNeverLanded(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -553,13 +466,8 @@ func TestReconcileMergedRefusesABranchThatNeverLanded(t *testing.T) {
 	}
 }
 
-// TestReconcileMergedLeavesTheNextQueueMergeVerifiable is why
-// FindLastMergedReview skips a build-less merge. That lookup is what
-// gatedTargetTip anchors the next queue-driven merge on, so a reconciled
-// review being returned there would resolve an empty build id and refuse
-// every subsequent report-merged on the branch. Reconcile a squash-landed
-// review first, then drive a completely ordinary queue merge to completion —
-// it has to be accepted, not merely not crash.
+// TestReconcileMergedLeavesTheNextQueueMergeVerifiable: FindLastMergedReview must skip build-less
+// merges, or gatedTargetTip resolves an empty build id and refuses every later report-merged.
 func TestReconcileMergedLeavesTheNextQueueMergeVerifiable(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -573,8 +481,6 @@ func TestReconcileMergedLeavesTheNextQueueMergeVerifiable(t *testing.T) {
 		t.Fatalf("reconcile MERGED: HTTP %d status=%s", code, merged.Status)
 	}
 
-	// Now an ordinary queue-driven merge on the same target branch — the
-	// path gatedTargetTip feeds.
 	queuedBranch := uniqueBranchName(t, "queued")
 	remote.branch(t, queuedBranch, "queued.txt")
 	queuedReview := e2eOpenReview(t, srv.URL, "reconcile-e2e-queued", remote.main, queuedBranch)

@@ -14,9 +14,6 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// captureLog redirects the standard logger for the duration of fn and
-// returns what it wrote, so a test can assert on the one place an operator
-// would see why a request 500'd.
 func captureLog(t *testing.T, fn func()) string {
 	t.Helper()
 	var buf bytes.Buffer
@@ -27,9 +24,6 @@ func captureLog(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
-// TestWriteErrorAlwaysCarriesACode is the property the whole envelope exists
-// for: a client branching on `code` must never see it absent, even when the
-// call site supplies only a status and a message.
 func TestWriteErrorAlwaysCarriesACode(t *testing.T) {
 	rec := httptest.NewRecorder()
 	writeError(rec, http.StatusTeapot, "I am a teapot")
@@ -49,8 +43,6 @@ func TestWriteErrorAlwaysCarriesACode(t *testing.T) {
 	}
 }
 
-// TestWriteRepositoryErrorMapsEverySentinelToACode covers the generic path
-// every route without a business-specific code falls through to.
 func TestWriteRepositoryErrorMapsEverySentinelToACode(t *testing.T) {
 	cases := []struct {
 		err        error
@@ -82,10 +74,6 @@ func TestWriteRepositoryErrorMapsEverySentinelToACode(t *testing.T) {
 	}
 }
 
-// TestWriteRepositoryErrorLogsRouteActorAndErrorOn500 locks the
-// observability requirement: a 500 on an authenticated route must leave a
-// server-side trace naming the route, the actor, and the real underlying
-// error — none of which reaches the client-facing response body.
 func TestWriteRepositoryErrorLogsRouteActorAndErrorOn500(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/invite-requests/req-1/approve", nil)
 	ctx := security.WithContext(req.Context(), security.Context{TenantID: "tenant-ops", ErunUserID: "user-42"})
@@ -104,8 +92,6 @@ func TestWriteRepositoryErrorLogsRouteActorAndErrorOn500(t *testing.T) {
 	}
 }
 
-// TestWriteRepositoryErrorDoesNotLogClientFaults keeps the log free of
-// routine 4xx noise: only a 500 needs an operator's attention.
 func TestWriteRepositoryErrorDoesNotLogClientFaults(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/whatever", nil)
 
@@ -119,8 +105,6 @@ func TestWriteRepositoryErrorDoesNotLogClientFaults(t *testing.T) {
 	}
 }
 
-// TestWriteErrorDetailsOmitsDetailsWhenNil: details is documented as present
-// only "where useful" — a nil details must not render as a literal null.
 func TestWriteErrorDetailsOmitsDetailsWhenNil(t *testing.T) {
 	rec := httptest.NewRecorder()
 	writeErrorCode(rec, http.StatusBadRequest, "SOME_CODE", "message")

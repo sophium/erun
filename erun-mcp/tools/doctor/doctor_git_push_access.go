@@ -9,17 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// writeDoctorGitPushAccess is the MCP counterpart of the CLI's
-// reportGitPushAccess (erun-cli/cmd/doctor/doctor_git_push_access.go): a public
-// GitHub repository fetches anonymously for the entire life of a piece of
-// work, so an environment whose worktree lives in a pod can look completely
-// healthy right up to the moment an agent tries to push a branch or use gh --
-// the worst possible time to discover there is no credential. Runs only for
-// an environment whose worktree actually lives in a pod; a local-agent env
-// pushes from the operator's own machine. When an earlier section already
-// confirmed the cluster is unreachable (diagnosis.ClusterUnreachable), this
-// reports the same skip instead of paying its own kubectl exec timeout to
-// rediscover it.
+// writeDoctorGitPushAccess checks push credentials for a pod-backed worktree,
+// since public repos fetch anonymously and the gap only shows at push time.
 func writeDoctorGitPushAccess(runCtx core.Context, target config.OpenResult, req config.ShellLaunchParams, diagnosis deploy.DeployDiagnosisResult) error {
 	if !target.EnvConfig.RemoteWorktree() {
 		return nil

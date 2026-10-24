@@ -4,7 +4,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// These variables are replaced at build time via -ldflags to embed release metadata.
+// Set at build time via -ldflags.
 var (
 	buildVersion = "dev"
 	buildCommit  = ""

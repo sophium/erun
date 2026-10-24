@@ -10,7 +10,7 @@ import (
 )
 
 // registrationWriteAPI serves the Registration tab's write routes, refusing
-// every path in forbidden the same way reviewWriteAPI/tenantDashboardAPI do.
+// every forbidden path.
 func registrationWriteAPI(routes map[string]func(w http.ResponseWriter, req *http.Request), forbidden map[string]bool) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		key := req.Method + " " + req.URL.Path
@@ -47,10 +47,6 @@ func TestRegisterPlatformEnvironmentRegisters(t *testing.T) {
 	}
 }
 
-// TestRegisterPlatformEnvironmentReportsQuotaCapAsAConflict pins rule (5): a
-// quota-cap refusal is a recoverable Kind, not a raw error — the operator's
-// next action (delete/stop another environment) is visible on the outcome,
-// not buried in an error string.
 func TestRegisterPlatformEnvironmentReportsQuotaCapAsAConflict(t *testing.T) {
 	const quotaMessage = "environment quota reached: this tenant already has 3 of 3 environments"
 	server := registrationWriteAPI(map[string]func(w http.ResponseWriter, req *http.Request){
@@ -93,9 +89,6 @@ func TestRegisterPlatformEnvironmentRequiresNameAndType(t *testing.T) {
 	}
 }
 
-// TestDeployPlatformEnvironmentReportsUnavailable pins the other recoverable
-// outcome: no deploy executor configured on the control plane is not the
-// same failure as a genuine error, and the operator-facing message says so.
 func TestDeployPlatformEnvironmentReportsUnavailable(t *testing.T) {
 	server := registrationWriteAPI(map[string]func(w http.ResponseWriter, req *http.Request){
 		"POST /v1/environments/env-1/deploy": func(w http.ResponseWriter, _ *http.Request) {
@@ -147,9 +140,6 @@ func TestStopPlatformEnvironmentRequiresAnEnvironmentID(t *testing.T) {
 	}
 }
 
-// TestDeletePlatformEnvironmentReportsConflict pins the delete-in-progress
-// case: the same recoverable Kind as a quota cap, distinguishable by its
-// message.
 func TestDeletePlatformEnvironmentReportsConflict(t *testing.T) {
 	server := registrationWriteAPI(map[string]func(w http.ResponseWriter, req *http.Request){
 		"DELETE /v1/environments/env-1": func(w http.ResponseWriter, _ *http.Request) {
@@ -169,9 +159,6 @@ func TestDeletePlatformEnvironmentReportsConflict(t *testing.T) {
 	}
 }
 
-// TestCreatePlatformContextPreviewsWithoutCreating pins rule (3): a preview
-// call resolves the plan without a Context in the response, and the outcome
-// still reports Kind accepted (a preview succeeding is not a refusal).
 func TestCreatePlatformContextPreviewsWithoutCreating(t *testing.T) {
 	server := registrationWriteAPI(map[string]func(w http.ResponseWriter, req *http.Request){
 		"POST /v1/contexts": func(w http.ResponseWriter, req *http.Request) {
@@ -204,10 +191,6 @@ func TestCreatePlatformContextRequiresNameAliasAndRegion(t *testing.T) {
 	}
 }
 
-// TestPreviewPlatformEnvironmentAlwaysReportsAPlan pins that the register
-// preview never surfaces a quota conflict as an error — POST /v1/environments
-// with preview:true always resolves 200, with QuotaOk naming the blocking
-// decision instead.
 func TestPreviewPlatformEnvironmentAlwaysReportsAPlan(t *testing.T) {
 	server := registrationWriteAPI(map[string]func(w http.ResponseWriter, req *http.Request){
 		"POST /v1/environments": func(w http.ResponseWriter, req *http.Request) {
@@ -230,11 +213,6 @@ func TestPreviewPlatformEnvironmentAlwaysReportsAPlan(t *testing.T) {
 	}
 }
 
-// TestPreviewPlatformEnvironmentSendsTheSameFieldsAsRegister pins the
-// property the preview/register split exists for: the same input, sent to
-// PreviewPlatformEnvironment, carries the exact same fields onto the wire as
-// RegisterPlatformEnvironment would — a plan an operator previews can never
-// diverge from what register then submits.
 func TestPreviewPlatformEnvironmentSendsTheSameFieldsAsRegister(t *testing.T) {
 	input := uiRegisterPlatformEnvironmentInput{
 		Tenant: "frs", Name: "prod", Type: "runtime", ContextID: "ctx-1", RuntimeVersion: "1.2.3",
@@ -272,9 +250,6 @@ func TestPreviewPlatformEnvironmentSendsTheSameFieldsAsRegister(t *testing.T) {
 	}
 }
 
-// TestRegisterPlatformEnvironmentSendsAdopt pins that Adopt travels onto
-// the wire, so the platform's own adopt validation (kubernetesContext
-// required, runtimeVersion/contextId forbidden) is what a caller actually hits.
 func TestRegisterPlatformEnvironmentSendsAdopt(t *testing.T) {
 	var body string
 	server := registrationWriteAPI(map[string]func(w http.ResponseWriter, req *http.Request){
@@ -305,9 +280,6 @@ func readBody(t *testing.T, req *http.Request) string {
 	return string(body)
 }
 
-// TestTenantDashboardRegistrationHidesTabWhenNothingReadableOrWritable pins
-// the Registration tab's own hide condition: neither list is readable and
-// neither write is grantable, so there is genuinely nothing to show.
 func TestTenantDashboardRegistrationHidesTabWhenNothingReadableOrWritable(t *testing.T) {
 	var requests []string
 	capabilities := `[{"method":"GET","path":"/v1/whoami"}]`
@@ -322,10 +294,6 @@ func TestTenantDashboardRegistrationHidesTabWhenNothingReadableOrWritable(t *tes
 	}
 }
 
-// TestTenantDashboardRegistrationDegradesPartially pins the "partial access
-// degrades partially" rule: the caller can read environments but not
-// contexts, so the tab stays visible and only the contexts list names what
-// is missing.
 func TestTenantDashboardRegistrationDegradesPartially(t *testing.T) {
 	var requests []string
 	capabilities := `[{"method":"GET","path":"/v1/whoami"},{"method":"GET","path":"/v1/environments"}]`
@@ -346,9 +314,6 @@ func TestTenantDashboardRegistrationDegradesPartially(t *testing.T) {
 	}
 }
 
-// TestTenantDashboardRegistrationLoadsBothLists is the happy path: an
-// unknown capability set (nil) leaves every read attemptable, same as every
-// other panel.
 func TestTenantDashboardRegistrationLoadsBothLists(t *testing.T) {
 	var requests []string
 	server := tenantDashboardAPI(t, "null", nil, &requests)

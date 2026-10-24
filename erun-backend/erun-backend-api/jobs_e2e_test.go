@@ -17,12 +17,8 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
-// The jobs table's own contracts live in SQL — a CHECK that pairs status with
-// ended_at, a tenant-scoped RLS policy, a timestamp trigger that maintains the
-// updated_at the sweep compares against — so they are exercised against a real
-// migrated PostgreSQL rather than a fake that agrees with itself. Needs only
-// the database, no cluster. Mirrors environmentDeleteDatabase's shape
-// (environment_delete_e2e_test.go).
+// The jobs table's contracts (status/ended_at CHECK, RLS, timestamp trigger) live
+// in SQL, so these tests run against a real migrated PostgreSQL.
 func jobsDatabase(t *testing.T) (*repository.JobRepository, *sql.DB, string) {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -54,14 +50,10 @@ func seedJobsTestTenant(t *testing.T, db *sql.DB) string {
 	return tenantID
 }
 
-// jobsTenantContext is the ordinary tenant-scoped session: the erun_tenant
-// role, isolated to one tenant by the jobs RLS policy.
 func jobsTenantContext(tenantID string) context.Context {
 	return security.WithContext(context.Background(), security.Context{TenantID: tenantID, TenantType: "COMPANY"})
 }
 
-// claimJobsTestJob claims one job through the service, so the row under test
-// is the one the API would actually have written.
 func claimJobsTestJob(t *testing.T, svc *service.JobService, ctx context.Context, scope, actorID, summary string) model.Job {
 	t.Helper()
 	job, err := svc.Claim(ctx, model.Job{
@@ -75,13 +67,8 @@ func claimJobsTestJob(t *testing.T, svc *service.JobService, ctx context.Context
 	return job
 }
 
-// sweepPastEveryStamp closes every RUNNING job in the caller's tenant, by
-// asking the sweep for everything older than a threshold an hour from now.
-//
-// The threshold is what moves, never the row. jobs_set_timestamps
-// (erun-backend-db/schema/triggers/timestamps.sql) stamps updated_at = NOW()
-// on every UPDATE, so a job cannot be aged by writing to it — the write that
-// would age it is the same write that refreshes it.
+// sweepPastEveryStamp ages the threshold, not the row: jobs_set_timestamps
+// refreshes updated_at on every UPDATE.
 func sweepPastEveryStamp(t *testing.T, repo *repository.JobRepository, ctx context.Context) []model.Job {
 	t.Helper()
 	abandoned, err := repo.AbandonStale(ctx, time.Now().UTC().Add(time.Hour))
@@ -89,7 +76,6 @@ func sweepPastEveryStamp(t *testing.T, repo *repository.JobRepository, ctx conte
 	return abandoned
 }
 
-// assertAbandoned holds one swept row to what the sweep promises about it.
 func assertAbandoned(t *testing.T, closed map[string]model.Job, jobID string) {
 	t.Helper()
 	job, ok := closed[jobID]
@@ -99,21 +85,11 @@ func assertAbandoned(t *testing.T, closed map[string]model.Job, jobID string) {
 	if job.Status != model.JobStatusAbandoned {
 		t.Errorf("job %s status = %q, want %q", jobID, job.Status, model.JobStatusAbandoned)
 	}
-	// The table's CHECK enforces the pairing, so a row that came back without
-	// an ended_at could not have been written at all.
 	if job.EndedAt == nil {
 		t.Errorf("endedAt = nil on abandoned job %s", jobID)
 	}
 }
 
-// TestJobsSweepAbandonsOnlyStaleRunningJobs is the sweep's SQL contract: it
-// closes a RUNNING job whose last update predates the threshold, pairs it with
-// the ended_at the table's CHECK requires, and touches neither a job inside the
-// threshold nor one that already reached an outcome.
-//
-// Both sides of that boundary are pinned by moving the threshold, because the
-// row cannot be moved: the first sweep runs at the production TTL every claim
-// is inside, and the second runs past every stamp there is.
 func TestJobsSweepAbandonsOnlyStaleRunningJobs(t *testing.T) {
 	repo, _, tenantID := jobsDatabase(t)
 	ctx := jobsTenantContext(tenantID)
@@ -126,17 +102,13 @@ func TestJobsSweepAbandonsOnlyStaleRunningJobs(t *testing.T) {
 		t.Fatalf("Update() error = %v", err)
 	}
 
-	// Every claim is well inside the TTL, so the production sweep closes
-	// nothing: being young enough is what protects a job, not its status.
+	// Being young enough protects a job, not its status.
 	abandoned, err := svc.SweepAbandoned(ctx, service.DefaultJobAbandonTTL)
 	mustNoErr(t, err, "sweep inside the TTL")
 	if len(abandoned) != 0 {
 		t.Fatalf("abandoned = %+v, want nothing: every claim here is inside the TTL", abandoned)
 	}
 
-	// Past every stamp, both RUNNING jobs are stale. The finished one is not
-	// RUNNING, so the same sweep must leave it alone — which is the "only" in
-	// this test's name, observable in one call.
 	closed := map[string]model.Job{}
 	for _, job := range sweepPastEveryStamp(t, repo, ctx) {
 		closed[job.JobID] = job
@@ -158,10 +130,6 @@ func TestJobsSweepAbandonsOnlyStaleRunningJobs(t *testing.T) {
 	}
 }
 
-// TestJobsSweepReleasesTheAbandonedScope is the payoff: the scope a vanished
-// actor held becomes claimable again, so an abandoned job cannot wedge an
-// issue forever. Everything here is real SQL — the partial read the claim
-// makes, the status the sweep writes, and the read that follows it.
 func TestJobsSweepReleasesTheAbandonedScope(t *testing.T) {
 	repo, _, tenantID := jobsDatabase(t)
 	ctx := jobsTenantContext(tenantID)
@@ -180,9 +148,6 @@ func TestJobsSweepReleasesTheAbandonedScope(t *testing.T) {
 	}
 }
 
-// TestJobsAreTenantIsolated pins the RLS policy:
-// an ordinary tenant session cannot read another tenant's jobs, whether it
-// lists or asks for one by id.
 func TestJobsAreTenantIsolated(t *testing.T) {
 	repo, db, tenantID := jobsDatabase(t)
 	otherTenantID := seedJobsTestTenant(t, db)
@@ -193,11 +158,8 @@ func TestJobsAreTenantIsolated(t *testing.T) {
 
 	theirs := claimJobsTestJob(t, svc, otherCtx, "scope:theirs", "erun/code9", "work in the other tenant")
 
-	// By id: another tenant's job resolves to the same not-found a genuinely
-	// missing row does. This holds for a COMPANY caller through RLS and for an
-	// OPERATIONS caller, whose policy is unconditional, through the explicit
-	// tenant predicate Get now carries — so the caller's own tenant is what is
-	// named here, not the row's.
+	// An OPERATIONS caller's policy is unconditional, so Get's explicit tenant
+	// predicate is what isolates it.
 	if _, err := repo.Get(ownCtx, tenantID, theirs.JobID); err == nil {
 		t.Fatal("Get() of another tenant's job succeeded; tenant isolation is not holding")
 	}
@@ -211,11 +173,6 @@ func TestJobsAreTenantIsolated(t *testing.T) {
 	}
 }
 
-// TestJobsSweepIsCrossTenant: the sweep runs under the operations role and
-// closes stale jobs in every tenant at once, so an abandoned job in a tenant
-// that never asks for it is still cleared. Without this the orphaned running
-// record the design exists to prevent would simply outlive its tenant's
-// attention.
 func TestJobsSweepIsCrossTenant(t *testing.T) {
 	repo, _, tenantID := jobsDatabase(t)
 	ownCtx := jobsTenantContext(tenantID)
@@ -223,8 +180,6 @@ func TestJobsSweepIsCrossTenant(t *testing.T) {
 
 	job := claimJobsTestJob(t, svc, ownCtx, "scope:cross-tenant", "erun/code4", "work in a tenant that never sweeps")
 
-	// The sweep itself runs under the operations role, which is the thing
-	// under test: with no tenant of its own it still reaches this one's rows.
 	opsCtx := security.WithContext(context.Background(), security.Context{TenantID: tenantID, TenantType: "OPERATIONS"})
 	abandoned := sweepPastEveryStamp(t, repo, opsCtx)
 
@@ -239,8 +194,6 @@ func TestJobsSweepIsCrossTenant(t *testing.T) {
 	}
 }
 
-// plannedJobsTestJob records work that has not started, through the service,
-// so the row under test is the one the API would actually have written.
 func plannedJobsTestJob(t *testing.T, svc *service.JobService, ctx context.Context, scope, issueRef, actorID, summary string) model.Job {
 	t.Helper()
 	job, err := svc.Claim(ctx, model.Job{
@@ -256,22 +209,8 @@ func plannedJobsTestJob(t *testing.T, svc *service.JobService, ctx context.Conte
 	return job
 }
 
-// TestJobsSweepNeverAbandonsAPlannedJob asserts the sweep's PLANNED exemption
-// against real SQL rather than leaving it to a predicate nobody runs.
-//
-// The sweep closes a RUNNING job whose last update predates its threshold, on
-// a five-minute schedule and a thirty-minute TTL. A parked plan is by
-// definition never updated -- that is what parked means -- so if PLANNED were
-// inside the predicate, every prospective backlog entry would turn into
-// "ABANDONED -- read it as dropped, not as failed" within about thirty-five
-// minutes of being recorded, silently, with nothing an operator did to cause
-// it. The ladder's first rung would self-destruct on a timer.
-//
-// The threshold is moved past every stamp rather than the row being aged,
-// because jobs_set_timestamps refreshes updated_at on every write (see
-// sweepPastEveryStamp). That makes this the strongest form of the question:
-// every RUNNING row in the tenant is stale, and the planned one has been
-// sitting longer than any of them.
+// A parked plan is never updated, so including PLANNED in the sweep would
+// abandon every plan within one TTL.
 func TestJobsSweepNeverAbandonsAPlannedJob(t *testing.T) {
 	repo, _, tenantID := jobsDatabase(t)
 	ctx := jobsTenantContext(tenantID)
@@ -281,8 +220,6 @@ func TestJobsSweepNeverAbandonsAPlannedJob(t *testing.T) {
 	if planned.Status != model.JobStatusPlanned {
 		t.Fatalf("claimed status = %q, want %q", planned.Status, model.JobStatusPlanned)
 	}
-	// The table's own CHECK pairs a non-open status with an ended_at, so a
-	// PLANNED row that came back without one is the migration having worked.
 	if planned.EndedAt != nil {
 		t.Errorf("endedAt = %v on a PLANNED job, want none: a plan has not stopped", planned.EndedAt)
 	}
@@ -308,10 +245,6 @@ func TestJobsSweepNeverAbandonsAPlannedJob(t *testing.T) {
 	}
 }
 
-// TestJobsPlannedJobHoldsItsScopeAndOpensAgainstRealSQL covers the two moves
-// the status exists for, both of which are SQL contracts: a plan claims its
-// scope no less than a running job does, and the move to RUNNING has to clear
-// nothing while still satisfying the ended_at CHECK.
 func TestJobsPlannedJobHoldsItsScopeAndOpensAgainstRealSQL(t *testing.T) {
 	repo, _, tenantID := jobsDatabase(t)
 	ctx := jobsTenantContext(tenantID)
@@ -319,9 +252,6 @@ func TestJobsPlannedJobHoldsItsScopeAndOpensAgainstRealSQL(t *testing.T) {
 
 	planned := plannedJobsTestJob(t, svc, ctx, "scope:planned", "sophium/erun#2683", "erun/ideas", "plan the pipeline view")
 
-	// A second actor asking for the same scope is told who holds it, and the
-	// holder it names is the plan -- already the case through the service
-	// layer's fake, and now through FindOpenByScope's real predicate.
 	_, err := svc.Claim(ctx, model.Job{
 		JobType:   model.JobTypeFix,
 		Summary:   "start coding the pipeline view",

@@ -1,13 +1,7 @@
 import { CheckCircle2 } from 'lucide-react';
 import type * as React from 'react';
 
-// The hero's product visual: a live console signed-out into no
-// tenant has nothing real to screenshot, so this is a considered abstract
-// stand-in — an editor pane and an agent pane sharing one window, the same
-// "side by side" claim the differentiators section states in words. Built
-// from the console's own tokens (not a static image) so it repaints for
-// dark mode for free, the same reason LandingDifferentiators avoided the
-// docs site's hand-drawn diagram.
+// Abstract product visual built from theme tokens so it follows dark mode.
 export function LandingHeroVisual(): React.ReactElement {
   return (
     <div

@@ -9,12 +9,8 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
-// resolveReleaseStages splits the plan at the publish: the local commit and tag
-// come first because they are recoverable, and everything that makes the version
-// public — the tag push, the packaging sync that reads the published archive,
-// the version bump, and the branch push — waits until the artifacts exist.
-// A run with no publish (erun release) still gets the second half; nothing
-// exists for it to wait on and it says so when it finishes.
+// resolveReleaseStages splits the plan at the publish: the recoverable local commit and tag
+// first, everything that makes the version public after the artifacts exist.
 func resolveReleaseStages(inputs releaseInputs, releaseFileUpdates []ReleaseFileUpdate, packagingSync *ReleasePackagingSyncSpec) (string, []ReleaseStage, []ReleaseStage, error) {
 	stages := baseReleaseStages(inputs, releaseFileUpdates)
 	postPublishStages := stablePackagingStages(inputs, packagingSync)
@@ -262,8 +258,6 @@ func releaseGitPath(projectRoot, path string) string {
 	if err != nil {
 		return path
 	}
-	// git pathspecs use forward slashes on every OS, so emit a slash path rather
-	// than the host-native filepath (which is backslashed on Windows). No-op on
-	// Unix.
+	// git pathspecs use forward slashes on every OS.
 	return filepath.ToSlash(filepath.Clean(relative))
 }

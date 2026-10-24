@@ -1,9 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-// TerminalTabStrip is the strip above the terminal pane. Which of its two modes
-// is mounted is the rendered answer to "what owns the pane": an orchestrator
-// session (cross-env, so the strip lists orchestrators) or the selected
-// environment's terminals.
+// Lists orchestrators when an orchestrator session owns the pane, else the env's terminals.
 export class TerminalTabStrip {
   constructor(private readonly page: Page) {}
 
@@ -19,19 +16,12 @@ export class TerminalTabStrip {
     return this.page.getByRole('tab', { name: label, exact: true });
   }
 
-  // waitForTab converges on a tab having reached the strip, the same shape
-  // DebugPanel.waitForOpen and ActivityQueueDrawer.close use: waitFor with no
-  // explicit timeout defers to the enclosing test's own budget, where a fixed
-  // cap below that budget fails a merely slow spawn under contention with
-  // budget still unused. The env's default tabs land asynchronously after the
-  // env open, so every caller that reaches for one of them has to converge on
-  // it first -- callers used to hand-roll that wait with their own 15s/20s cap.
+  // No explicit timeout, so the enclosing test's budget bounds the wait.
   async waitForTab(label: string): Promise<void> {
     await this.tab(label).waitFor({ state: 'visible' });
   }
 
-  // closeTab presses a tab's close control. On an orchestrator tab that stops
-  // the orchestrator.
+  // On an orchestrator tab this stops the orchestrator.
   async closeTab(label: string): Promise<void> {
     await this.page.getByRole('button', { name: `Close ${label}`, exact: true }).click();
   }

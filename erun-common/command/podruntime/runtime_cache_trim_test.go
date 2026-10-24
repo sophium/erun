@@ -24,9 +24,6 @@ func runtimeTestContext(dryRun bool) (core.Context, *bytes.Buffer) {
 	}, &out
 }
 
-// addGoCacheEntry writes one go cache entry the way cmd/go lays it out: a
-// two-hex-digit subdirectory holding a data file and its action file, both named
-// by the entry's hash, aged by age.
 func addGoCacheEntry(t *testing.T, dir string, index, size int, age time.Duration) {
 	t.Helper()
 	sub := filepath.Join(dir, fmt.Sprintf("%02x", index%256))
@@ -70,8 +67,6 @@ func mustGoCacheSize(t *testing.T, dir string) int64 {
 	return size
 }
 
-// The common case, and the one that decides whether this can run on an
-// interval: a cache inside its cap is not touched and nothing is reported.
 func TestTrimGoBuildCacheLeavesACacheUnderItsCapAlone(t *testing.T) {
 	dir := t.TempDir()
 	for i := 0; i < 16; i++ {
@@ -91,8 +86,6 @@ func TestTrimGoBuildCacheLeavesACacheUnderItsCapAlone(t *testing.T) {
 	}
 }
 
-// A cache directory that does not exist holds nothing; creating it would leave
-// a build to find a directory it never made.
 func TestTrimGoBuildCacheDoesNotCreateAMissingCache(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "never-created")
 	ctx, out := runtimeTestContext(false)
@@ -105,9 +98,6 @@ func TestTrimGoBuildCacheDoesNotCreateAMissingCache(t *testing.T) {
 	}
 }
 
-// The cache's bookkeeping sits beside the entries: trim.txt is go's own record
-// of its last age trim, and a file in a subdirectory that is not an entry is
-// nobody's to delete.
 func TestTrimGoBuildCacheOnlyEvictsCacheEntries(t *testing.T) {
 	dir := t.TempDir()
 	for i := 0; i < 8; i++ {
@@ -127,8 +117,6 @@ func TestTrimGoBuildCacheOnlyEvictsCacheEntries(t *testing.T) {
 	}
 }
 
-// An action whose output has to be run is stored as a directory; it is sized by
-// what it holds and goes with its contents.
 func TestTrimGoBuildCacheEvictsAnExecutableEntryWhole(t *testing.T) {
 	dir := t.TempDir()
 	hash := fmt.Sprintf("%064x", 7)
@@ -168,8 +156,6 @@ func TestTrimGoBuildCacheRefusesBadArguments(t *testing.T) {
 	}
 }
 
-// Growth must not accumulate: each round adds as much as the cap holds, so a
-// trim that removed the newest entries, or nothing, would end a round over it.
 func TestTrimGoBuildCacheStaysBoundedUnderGrowth(t *testing.T) {
 	dir := t.TempDir()
 	const limit = 2000000
@@ -191,9 +177,6 @@ func TestTrimGoBuildCacheStaysBoundedUnderGrowth(t *testing.T) {
 	}
 }
 
-// A bounded cache is still a warm one: against the real toolchain, the entries
-// the last build used survive a trim that evicts the aged bulk, so the next
-// build is still answered from the cache.
 func TestTrimGoBuildCacheKeepsTheWorkingSetWarm(t *testing.T) {
 	goBin, err := exec.LookPath("go")
 	if err != nil {

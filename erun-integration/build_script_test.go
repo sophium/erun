@@ -25,12 +25,8 @@ func buildOutputAndScriptScenarios(t *testing.T) {
 }
 
 func testBuildRealRunDefaultVerbosityStaysQuietWhenTheBuildSucceeds(t *testing.T) {
-	// docker build always runs with --progress=plain now (never
-	// --quiet, which suppressed a failing step's own output at the source),
-	// so quiet-on-success below debug verbosity has to come from erun
-	// capturing the output itself rather than replaying it. This is the
-	// success half of that contract: BuildKit's plain-progress chatter must
-	// not leak into a plain `erun build` even though docker produced it.
+	// docker build always uses --progress=plain, so erun itself must keep
+	// BuildKit chatter out of a successful plain build.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"
@@ -54,14 +50,7 @@ func testBuildRealRunDefaultVerbosityStaysQuietWhenTheBuildSucceeds(t *testing.T
 }
 
 func testBuildRealRunDefaultVerbositySurfacesDockerBuildsOwnOutputOnFailure(t *testing.T) {
-	// The release path builds quietly, so when an in-build test stage
-	// failed, all that survived was
-	// `process "/bin/sh -c ..." did not complete successfully:
-	// exit code: 2` — no lint finding, no failing test name. docker build's
-	// own output (what BuildKit's plain progress captured, including a
-	// failing RUN step's stdout/stderr) must now reach the user even at
-	// default verbosity, since a failed build is the one time quiet is the
-	// wrong default.
+	// A failed build must show docker's own output at default verbosity.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"
@@ -85,13 +74,8 @@ func testBuildRealRunDefaultVerbositySurfacesDockerBuildsOwnOutputOnFailure(t *t
 }
 
 func testBuildRealRunStepTimingBreaksAPlatformBuildDownIntoDockerfileStepsAndMakePhases(t *testing.T) {
-	// A gate build renders one image as ~99% of total wall clock, so the
-	// per-platform timing row used to be the finest granularity available --
-	// it could say a build was slow, never which part. BuildKit's own
-	// --progress=plain output (already captured for the two scenarios above)
-	// carries a per-Dockerfile-step DONE line, and a step's own
-	// `>> <phase>` markers ride inside that step's output lines. Both must now surface as their own rows in the step timing table
-	// instead of collapsing into the platform's one duration.
+	// BuildKit step DONE lines and in-step `>> <phase>` markers become their
+	// own timing rows.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"
@@ -120,9 +104,6 @@ func testBuildRealRunStepTimingBreaksAPlatformBuildDownIntoDockerfileStepsAndMak
 }
 
 func testBuildDryRunNoIncrementalSkipsFingerprintShortCircuit(t *testing.T) {
-	// --no-incremental forces `docker build` for every image even when a
-	// fingerprint tag exists — no `docker image inspect` short-circuit, no
-	// `(skipping)` lines.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	result := erun.Run(t, []string{"build", "--dry-run", "--no-incremental"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -133,9 +114,6 @@ func testBuildDryRunNoIncrementalSkipsFingerprintShortCircuit(t *testing.T) {
 }
 
 func testBuildDryRunWithProjectBuildScriptTracesScriptInvocation(t *testing.T) {
-	// When a build.sh exists at the project root, the build flow calls the
-	// script instead of running docker builds. Dry-run traces the resolved
-	// script path with ERUN_BUILD_VERSION and skips the docker build chain.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	if err := os.WriteFile(filepath.Join(setup.Cwd, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
@@ -151,10 +129,6 @@ func testBuildDryRunWithProjectBuildScriptTracesScriptInvocation(t *testing.T) {
 }
 
 func testBuildDryRunDisableBuildScriptIgnoresProjectBuildSh(t *testing.T) {
-	// An env with disablebuildscript: true makes erun build ignore the
-	// project build.sh and resolve docker/release contexts directly. With no
-	// docker context the build ends at the no-buildable-context error rather
-	// than tracing ./build.sh (which dry_run_with_project_build_script does).
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -177,11 +151,7 @@ func testBuildDryRunDisableBuildScriptIgnoresProjectBuildSh(t *testing.T) {
 }
 
 func testBuildDryRunRefusesScriptFallbackWhenTheProjectHasADockerModule(t *testing.T) {
-	// A project whose docker module holds images must never degrade to a
-	// nested project build script: that exits zero having built no image and
-	// run no gate, which the caller reading the exit code cannot tell from a
-	// real pass. Running from a directory that resolves no images is the
-	// shape of that false green, and it must fail loudly instead.
+	// A nested build script would exit zero having built no image: a false green.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	nestedDir := filepath.Join(setup.Cwd, "erun-ui")
@@ -201,9 +171,7 @@ func testBuildDryRunRefusesScriptFallbackWhenTheProjectHasADockerModule(t *testi
 }
 
 func testBuildRealRunWithProjectBuildScriptExecutesScript(t *testing.T) {
-	// Real-run companion to the dry-run script scenario: without --dry-run the
-	// build flow actually invokes ./build.sh. The marker file the script writes
-	// (a side effect outside the captured streams) proves the process ran.
+	// The script's marker file proves it ran.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	marker := filepath.Join(setup.Cwd, "build-script-marker")

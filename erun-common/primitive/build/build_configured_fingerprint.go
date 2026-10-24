@@ -10,10 +10,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// materializeConfiguredFingerprints seeds the local Docker store with the
-// fp-tagged images a project's configured fingerprints point at, so a fresh
-// checkout can promote those builds instead of rebuilding them. Failures fall
-// through silently, leaving the build to rebuild as it would without this step.
+// materializeConfiguredFingerprints pulls the fp-tagged images configured fingerprints
+// name so a fresh checkout can promote them; failures fall through to a rebuild.
 func materializeConfiguredFingerprints(ctx core.Context, builds []shared.DockerBuildSpec) (map[string]struct{}, error) {
 	materialized := make(map[string]struct{})
 	configuredByEnv := make(map[string]map[string]string)
@@ -106,8 +104,7 @@ func pullAndTagConfiguredFingerprint(ctx core.Context, sourceTag, fpTag, platfor
 	return nil
 }
 
-// isValidFingerprintHash mirrors computeBuildFingerprint's output shape, so a
-// mistyped configured hash is rejected rather than promoted as if it were real.
+// isValidFingerprintHash must match computeBuildFingerprint's output shape, so a mistyped hash is rejected.
 func isValidFingerprintHash(value string) bool {
 	value = strings.TrimSpace(value)
 	if len(value) != 16 {

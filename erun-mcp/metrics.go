@@ -18,10 +18,8 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// The runtime pod's Prometheus exposition listener, documented at
-// erun-docs/docs/agent-reference/metrics-spec.md. It is a separate listener
-// from the MCP HTTP edge (DefaultHost/DefaultPort above) so a Prometheus
-// scrape never shares a port, session, or auth requirement with a tool call.
+// The Prometheus listener is separate from the MCP edge so a scrape never
+// shares its port or auth.
 const (
 	DefaultMetricsHost = "0.0.0.0"
 	DefaultMetricsPort = 9100
@@ -31,11 +29,7 @@ const (
 	trafficWindowTickInterval = 60 * time.Second
 )
 
-// MetricsConfig binds the metrics listener. Enabled defaults to false on a
-// zero value deliberately (unlike HTTPConfig's port/path, which always have a
-// usable default): the caller (cmd/emcp) is the one place that decides the
-// env-var-driven default of "on", so a config built without going through it
-// (e.g. a test) starts from the safe, inert state.
+// MetricsConfig binds the metrics listener; the zero value is disabled.
 type MetricsConfig struct {
 	Host    string
 	Port    int
@@ -89,10 +83,8 @@ func newMetricsRecorder(tenant, environment string) *shared.MetricsRecorder {
 	return r
 }
 
-// byteCountingResponseWriter measures the response half of an MCP HTTP call
-// for erun_traffic_window_bytes. It always implements http.Flusher (a no-op
-// when the underlying writer does not support it) so wrapping never breaks a
-// streaming response the way a naive wrapper would.
+// byteCountingResponseWriter always implements http.Flusher so wrapping never
+// breaks a streaming response.
 type byteCountingResponseWriter struct {
 	http.ResponseWriter
 	bytes int64
@@ -110,11 +102,7 @@ func (w *byteCountingResponseWriter) Flush() {
 	}
 }
 
-// trafficMeteringMiddleware feeds metricsRecorder.mcpBytesSeen, the in-process
-// half of the traffic-window gauge (the other half, SSH bytes, is sampled from
-// the activity snapshot the ssh-proxy already maintains). An idle probe is
-// excluded for the same reason activityHTTPMiddleware excludes it: it is
-// synthetic polling, not traffic that should ever read as the env being busy.
+// trafficMeteringMiddleware counts MCP bytes, excluding idle probes.
 func trafficMeteringMiddleware(recorder *shared.MetricsRecorder, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if recorder == nil || req.Header.Get(mcp.MCPIdleProbeHeader) == "true" {
@@ -131,12 +119,8 @@ func trafficMeteringMiddleware(recorder *shared.MetricsRecorder, next http.Handl
 	})
 }
 
-// runMetricsHTTP serves the Prometheus exposition endpoint until ctx is
-// cancelled, mirroring RunHTTP's own listen/shutdown shape. A disabled config
-// (or a nil recorder, which normalizeRuntimeConfig never produces but a
-// direct caller could) just waits for cancellation without binding a port —
-// the tickers that feed the registry still run, so re-enabling later needs no
-// restart of the rest of the process.
+// runMetricsHTTP serves the metrics endpoint until ctx is cancelled; when
+// disabled it only waits.
 func runMetricsHTTP(ctx context.Context, cfg MetricsConfig, recorder *shared.MetricsRecorder) error {
 	cfg, err := normalizeMetricsConfig(cfg)
 	if err != nil {
@@ -171,12 +155,8 @@ func runMetricsHTTP(ctx context.Context, cfg MetricsConfig, recorder *shared.Met
 	return err
 }
 
-// startIdleMetricsTicker feeds erun_idle_eligibility and
-// erun_terminal_input_seconds_since_last from the same read-only idle-status
-// resolution the `idle` MCP tool already exposes
-// (activity.ResolveStoredEnvironmentIdleStatus), so the gauges can never disagree with
-// what an agent calling `idle` sees. It samples once immediately so a scrape
-// right after boot does not read a zero-value gauge as "eligible"/"just typed".
+// startIdleMetricsTicker samples the same idle status the `idle` tool exposes,
+// once immediately so an early scrape is not read as zero.
 func startIdleMetricsTicker(ctx context.Context, runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder) {
 	if recorder == nil {
 		return
@@ -203,22 +183,14 @@ func sampleIdleMetrics(runtime shared.RuntimeConfig, recorder *shared.MetricsRec
 	now := time.Now()
 	status, err := activitypkg.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, now)
 	if err != nil {
-		// Best-effort: leave the gauges at their last known value rather than
-		// erroring the whole metrics loop over a transient resolution failure
-		// (e.g. env config not yet written at pod boot).
+		// Keep the last known gauge values on a transient failure.
 		return
 	}
 	recorder.SetIdleEligibility(status.StopEligible)
 	recorder.SetTerminalInputSecondsSinceLast(secondsSinceLastTerminalInput(status, now))
 }
 
-// terminalInputActivityKinds mirrors idle-policy.md's `last_terminal_input`
-// definition: an SSH keystroke, a successful in-pod erun invocation, or any
-// MCP tools/call that is not an idle probe. The MCP snapshot already excludes
-// idle probes (activityHTTPMiddleware never records one), so taking the max
-// LastActivity across these three kinds is the same value that page already
-// documents, computed from the same on-disk activity snapshots the `idle`
-// tool reads rather than a metrics-only redefinition.
+// terminalInputActivityKinds are the kinds counted as last_terminal_input (idle-policy.md).
 var terminalInputActivityKinds = []string{config.ActivityKindSSH, config.ActivityKindCLI, config.ActivityKindMCP}
 
 func secondsSinceLastTerminalInput(status activitypkg.EnvironmentIdleStatus, now time.Time) float64 {
@@ -242,13 +214,7 @@ func secondsSinceLastTerminalInput(status activitypkg.EnvironmentIdleStatus, now
 	return seconds
 }
 
-// startTrafficWindowTicker feeds erun_traffic_window_bytes by sampling two
-// monotonic counters every tick and reporting the delta since the previous
-// sample: the ssh-proxy's cumulative activity-snapshot byte count (on disk,
-// shared with the idle predicate) and this process's own in-memory MCP byte
-// counter (fed by trafficMeteringMiddleware). Each reported value is the
-// last *completed* window, not a window still accumulating — a gauge sampled
-// mid-window would read low simply because a scrape landed early in it.
+// startTrafficWindowTicker reports SSH plus MCP bytes over the last completed window.
 func startTrafficWindowTicker(ctx context.Context, runtime shared.RuntimeConfig, recorder *shared.MetricsRecorder) {
 	if recorder == nil {
 		return
@@ -282,9 +248,7 @@ func sampleTrafficWindow(runtime shared.RuntimeConfig, recorder *shared.MetricsR
 	return sshBytes, mcpBytes
 }
 
-// deltaSinceLastSample treats a counter that reads lower than the previous
-// sample as having reset (process restart, fresh activity snapshot) rather
-// than as negative traffic, so the whole current value counts as new.
+// deltaSinceLastSample treats a counter that went backwards as reset.
 func deltaSinceLastSample(current, previous int64) int64 {
 	if current < previous {
 		return current

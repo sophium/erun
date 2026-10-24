@@ -22,9 +22,7 @@ export type TenantDashboardTab =
   | 'Requests'
   | 'API log';
 
-// TenantDashboard POM. Unlike the dialogs, this view replaces the main pane
-// content (MainPane.tsx) rather than rendering inside a Radix dialog, so
-// waitForOpen anchors on the tab list rather than a role="dialog".
+// Replaces the main pane rather than opening a dialog, so waitForOpen anchors on the tab list.
 export class TenantDashboard {
   constructor(public readonly page: Page) {}
 
@@ -32,8 +30,7 @@ export class TenantDashboard {
     await this.page.getByRole('tab', { name: 'Audit log' }).waitFor({ state: 'visible' });
   }
 
-  // waitForOpenRestricted anchors on a tab that survives permission gating, for
-  // the cases where the dashboard's other tabs are deliberately absent.
+  // Anchors on a tab that survives permission gating.
   async waitForOpenRestricted(): Promise<void> {
     await this.page.getByRole('tab', { name: 'API log' }).waitFor({ state: 'visible' });
   }
@@ -50,19 +47,14 @@ export class TenantDashboard {
     return this.page.getByRole('tab');
   }
 
-  // tabStrip is the dashboard's own tab list. The terminal tab strip is a
-  // second role="tablist" on the same page, so this scopes by a tab only the
-  // dashboard carries rather than taking the first match.
+  // The terminal strip is a second role="tablist"; scope by a dashboard-only tab.
   tabStrip(): Locator {
     return this.page
       .getByRole('tablist')
       .filter({ has: this.page.getByRole('tab', { name: 'API log' }) });
   }
 
-  // tabStripGeometry samples the strip and every tab it holds in one round
-  // trip, so the boxes it returns describe one layout pass. Reading them tab
-  // by tab would let a resize or re-render land between two reads and produce
-  // a set of rectangles that never co-existed on screen.
+  // One round trip, so all boxes come from the same layout pass.
   async tabStripGeometry(): Promise<TabStripGeometry> {
     return this.tabStrip().evaluate((list) => {
       const box = (el: Element): ElementBox => {
@@ -79,10 +71,7 @@ export class TenantDashboard {
     });
   }
 
-  // coveredTabs hit-tests every tab at its own centre and names the ones
-  // something else is painting over. Geometry alone cannot tell a tab that
-  // covers a button from a tab a button covers, and only the second one is
-  // unclickable.
+  // Hit-tests each tab's centre: geometry can't tell which element is on top.
   async coveredTabs(): Promise<string[]> {
     return this.tabStrip().evaluate((list) =>
       [...list.querySelectorAll('[role="tab"]')].flatMap((tab) => {
@@ -100,9 +89,7 @@ export class TenantDashboard {
     );
   }
 
-  // The note is the whole status region, not just the sentence that opens it:
-  // the grant it carries renders as a sibling of that sentence, so a locator
-  // on the sentence alone sees a note that never names its remedy.
+  // The grant renders as a sibling of the opening sentence, so locate the whole region.
   restrictedAccessNote(): Locator {
     return this.page
       .getByText('Some panels are hidden because you do not have access to')
@@ -117,8 +104,6 @@ export class TenantDashboard {
     return this.page.getByRole('tabpanel');
   }
 
-  // buildProfileButtonFor opens BuildProfileDialog for one build row in the
-  // Builds tab.
   buildProfileButtonFor(buildId: string): Locator {
     return this.activePanel().getByRole('button', { name: `View build profile for ${buildId}` });
   }
@@ -135,10 +120,7 @@ export class TenantDashboard {
     return this.activePanel().getByText('No audit events', { exact: true });
   }
 
-  // API log tab. A failed read renders InlineAlert (role="alert") while a log
-  // with nothing in it renders the panel's empty state, so the two are asserted
-  // separately: this panel deliberately distinguishes "the read failed" from
-  // "nothing logged yet", and a spec has to be able to hold it to that.
+  // A failed read renders an alert; an empty log renders the empty state.
   apiLogAlert(): Locator {
     return this.activePanel().getByRole('alert');
   }
@@ -147,13 +129,10 @@ export class TenantDashboard {
     return this.activePanel().getByText('No API log returned', { exact: true });
   }
 
-  // The log body is a <pre> of raw container output with no role of its own.
   apiLogBody(): Locator {
     return this.activePanel().locator('pre');
   }
 
-  // The Users tab is the tenant's roster, so its rows are the tenant's users —
-  // not the signed-in operator's single row.
   usersTable(): Locator {
     return this.activePanel().getByRole('table');
   }
@@ -166,10 +145,6 @@ export class TenantDashboard {
     return this.activePanel().getByText('No signed-in user', { exact: true });
   }
 
-  // Pipeline tab: the one view that spans planned work and the review
-  // pipeline, unioned on the issue each piece of work belongs to. Its rows are
-  // the union's rows -- a job with no branch and a review with no scope both
-  // appear, each saying which record it came from.
   pipelineTable(): Locator {
     return this.activePanel().getByRole('table');
   }
@@ -194,9 +169,7 @@ export class TenantDashboard {
     return this.activePanel().getByText('No reviews yet', { exact: true });
   }
 
-  // reviewsFilteredEmptyState is the distinct "nothing matches this filter"
-  // empty state (as opposed to reviewsEmptyState's "nothing exists yet") —
-  // the repo's three-empty-states rule requires the two read differently.
+  // Must read differently from reviewsEmptyState ("nothing exists yet").
   reviewsFilteredEmptyState(): Locator {
     return this.activePanel().getByText('No reviews match this filter', { exact: true });
   }
@@ -205,8 +178,7 @@ export class TenantDashboard {
     return this.activePanel().getByRole('button', { name: 'Clear filter' });
   }
 
-  // Mine's accessible name gains a count badge (e.g. "Mine 2"), so this
-  // matches the prefix rather than the exact label.
+  // Prefix match: the name carries a count badge ("Mine 2").
   mineFilterButton(): Locator {
     return this.activePanel().getByRole('button', { name: /^Mine\b/ });
   }
@@ -215,20 +187,15 @@ export class TenantDashboard {
     return this.activePanel().getByRole('button', { name: 'Waiting on me' });
   }
 
-  // reviewStatusFilterButton matches one status chip by label prefix, because
-  // each chip's accessible name carries its count badge (e.g. "OPEN 3") — the
-  // same shape mineFilterButton handles.
+  // Prefix match: the name carries a count badge ("OPEN 3").
   reviewStatusFilterButton(status: string): Locator {
     return this.activePanel().getByRole('button', { name: new RegExp(`^${status}\\b`) });
   }
 
-  // reviewStatusFilterGroup scopes a status-chip query to the filter group, so
-  // a status word appearing elsewhere in the panel is never matched.
   reviewStatusFilterGroup(): Locator {
     return this.activePanel().getByRole('group', { name: 'Filter reviews by status' });
   }
 
-  // reviewCountText is the "N reviews" / "N of M reviews" line above the table.
   reviewCountText(): Locator {
     return this.activePanel().getByText(/^\d+( of \d+)? reviews?$/);
   }
@@ -265,18 +232,13 @@ export class TenantDashboard {
     return this.activePanel().getByText('You do not have access to advance the merge queue.');
   }
 
-  // A queue spanning several target branches has no single head, so the action
-  // is replaced by the reason rather than silently absent.
-  // The note now covers both halves of what names a queue: a panel spanning
-  // branches, or repositories, has no single unambiguous head to advance.
+  // A queue spanning several branches or repositories has no single head to advance.
   advanceMergeQueueMixedBranchNote(): Locator {
     return this.activePanel().getByText(
       'These reviews do not all name one branch and repository, so there is no single queue head to advance.',
     );
   }
 
-  // mergeQueueBlockedAlert is AdvanceMergeQueue's unresolved-thread refusal,
-  // rendered as role="alert" (InlineAlert) rather than a bare error string.
   mergeQueueBlockedAlert(): Locator {
     return this.activePanel().getByRole('alert');
   }
@@ -301,16 +263,12 @@ export class TenantDashboard {
     return this.activePanel().getByRole('button', { name: 'Confirm override' });
   }
 
-  // Platform-readiness states. None of these render a tab strip, so
-  // waitForOpen/waitForOpenRestricted do not apply — assert on the heading
-  // text directly (EmptyState renders it as a plain div, no heading role).
+  // None of these render a tab strip; EmptyState's heading is a plain div.
   notConnectedHeading(): Locator {
     return this.page.getByText('Connect this tenant to erunpaas.com', { exact: true });
   }
 
-  // The card replaces the dashboard before its tab strip renders, so its body
-  // must not name a subset of the tabs — a list of some of them reads as an
-  // account of what is unavailable and leaves the rest looking usable.
+  // The body must not name a subset of tabs, which would imply the rest are usable.
   notConnectedBody(): Locator {
     return this.page.getByText(/This tenant isn't connected to a hosted erun platform yet/);
   }
@@ -323,9 +281,7 @@ export class TenantDashboard {
     return this.page.getByRole('button', { name: 'Connect', exact: true });
   }
 
-  // Addressed by id, not by role: the alert this names is one of several that
-  // can be on screen at once (the sidebar carries its own), so a page-wide
-  // getByRole('alert') is ambiguous exactly when something else has failed.
+  // By id: the sidebar may show its own alert at the same time.
   connectErrorAlert(): Locator {
     return this.page.locator('#platform-connect-error');
   }
@@ -350,8 +306,7 @@ export class TenantDashboard {
     return this.page.getByText("This identity isn't enrolled in this tenant yet", { exact: true });
   }
 
-  // FieldLabel appends a visually-hidden "(required)" to the accessible
-  // name, so this intentionally does not use exact matching.
+  // Not exact: FieldLabel appends a visually-hidden "(required)".
   enrollUsernameInput(): Locator {
     return this.page.getByLabel('Username');
   }
@@ -364,7 +319,7 @@ export class TenantDashboard {
     return this.page.locator('#enroll-admin-command');
   }
 
-  // Addressed by id for the same reason as connectErrorAlert above.
+  // By id for the same reason as connectErrorAlert.
   enrollErrorAlert(): Locator {
     return this.page.locator('#platform-enroll-error');
   }
@@ -375,11 +330,7 @@ export class TenantDashboard {
     });
   }
 
-  // tenant-mismatch is the one platform-readiness state that is not a failed
-  // resolution: the identity resolved and the platform answered, with a tenant
-  // that is not the local tenant the dashboard was opened from. Its body names
-  // both tenants, so the whole card is the locator — the second name is the
-  // point, and a locator on the heading alone cannot hold the card to it.
+  // The whole card is the locator: its body names both tenants.
   tenantMismatchHeading(): Locator {
     return this.page.getByText('This platform connection belongs to a different tenant', {
       exact: true,
@@ -394,18 +345,11 @@ export class TenantDashboard {
     return this.page.getByText('Platform:', { exact: false });
   }
 
-  // platformTenantLine is the header line naming whose rows the panels below
-  // render: the platform's own name for the tenant behind the credential, from
-  // whoami. The heading above it names the local tenant the dashboard was
-  // opened from, and the two are joined only by whichever alias the credential
-  // reaches -- so this line is the only place the surface says whether they
-  // are the same tenant. Absent when the platform reports no name.
+  // The only place the surface says whether the platform tenant is the local one.
   platformTenantLine(): Locator {
     return this.page.getByText('Platform tenant:', { exact: false });
   }
 
-  // Registration tab: the tenant/environment registration path
-  // `erun platform` gives the CLI, surfaced in the desktop.
   twoRegistriesNotice(): Locator {
     return this.activePanel().getByText('live in this machine', { exact: false });
   }
@@ -418,9 +362,7 @@ export class TenantDashboard {
     return this.activePanel().getByText('No cloud contexts registered', { exact: true });
   }
 
-  // FieldLabel appends a visually-hidden "(required)" to the accessible
-  // name, so this intentionally does not use exact matching; .first() picks
-  // the context form's Name field over the environment register form's.
+  // Not exact: FieldLabel appends "(required)"; .first() is the context form's field.
   contextNameInput(): Locator {
     return this.activePanel().getByLabel('Name').first();
   }
@@ -449,8 +391,7 @@ export class TenantDashboard {
     return this.activePanel().getByText('No hosted environments registered', { exact: true });
   }
 
-  // The environment form: one field set backs both Preview and Register.
-  // .last() picks it over the cloud-context form's own "Name" field.
+  // .last() picks the environment form over the context form's "Name".
   envNameInput(): Locator {
     return this.activePanel().getByLabel('Name').last();
   }
@@ -498,11 +439,7 @@ export class TenantDashboard {
     return this.environmentsTable().locator('tbody tr').filter({ hasText: name });
   }
 
-  // environmentRowAlert is the element announcing why a row failed. It is the
-  // surface the whole row's payload hangs on: a bare destructive line states
-  // the failure only in colour, and a name, ARN or upstream error long enough
-  // to matter is ellipsised out by the cell it sits in unless the alert
-  // itself wraps it.
+  // The alert must wrap long payloads rather than ellipsising them.
   environmentRowAlert(name: string): Locator {
     return this.environmentRow(name).getByRole('alert');
   }
@@ -515,10 +452,7 @@ export class TenantDashboard {
     return this.environmentRow(name).getByRole('button', { name: 'Stop' });
   }
 
-  // deleteButtonFor is the same control before and after the confirmation
-  // step starts (DeleteControl keeps the label "Delete" for both — only the
-  // surrounding row changes), so one locator serves the initial click and
-  // the confirmed one.
+  // DeleteControl keeps the "Delete" label through confirmation.
   deleteButtonFor(name: string): Locator {
     return this.environmentRow(name).getByRole('button', { name: 'Delete', exact: true });
   }
@@ -531,15 +465,11 @@ export class TenantDashboard {
     return this.environmentRow(name).getByRole('button', { name: 'Cancel' });
   }
 
-  // recoverableNote is the "expected, not broken" outcome — a quota cap or a
-  // deploy already in flight — rendered role="status", never role="alert".
+  // Expected outcomes render role="status", never role="alert".
   recoverableNote(text: string): Locator {
     return this.activePanel().getByText(text, { exact: false });
   }
 
-  // RequestInvitationDialog: the "Request an invitation" action off
-  // NotEnrolledState. The dialog's accessible name comes from
-  // aria-labelledby -> DialogTitle "Request an invitation".
   requestInvitationButton(): Locator {
     return this.page.getByRole('button', { name: 'Request an invitation' });
   }
@@ -553,9 +483,7 @@ export class TenantDashboard {
   }
 
   requestInvitationIdentitySummary(): Locator {
-    // exact: true -- the dialog's own description sentence also contains the
-    // substring "Your verified identity" ("... Your verified identity goes
-    // with the request"), so a non-exact match is ambiguous between the two.
+    // exact: the dialog description also contains this substring.
     return this.requestInvitationDialog().getByText('Your verified identity', { exact: true });
   }
 
@@ -595,12 +523,8 @@ export class TenantDashboard {
     return this.page.getByText('Declined', { exact: true });
   }
 
-  // The MyInviteRequestError branch: a transport failure reading the
-  // caller's own invite request must never render as "never requested" --
-  // see tenant_platform_invite_requests.go's loadTenantDashboardMyInviteRequest.
-  // No `name` filter: InlineAlert's role="alert" element has no aria-label,
-  // and ARIA's accname algorithm does not compute "name from content" for
-  // the alert role, so a role+name locator would never match it.
+  // A transport failure must never read as "never requested".
+  // No name filter: the alert role does not compute a name from content.
   requestStatusCheckFailedAlert(): Locator {
     return this.page.getByRole('alert').filter({ hasText: 'invitation request status' });
   }
@@ -609,7 +533,6 @@ export class TenantDashboard {
     return this.page.getByRole('button', { name: 'Try again' });
   }
 
-  // Requests tab: the operator/admin queue.
   requestsTable(): Locator {
     return this.activePanel().getByRole('table');
   }

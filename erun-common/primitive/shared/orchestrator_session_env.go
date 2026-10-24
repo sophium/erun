@@ -1,16 +1,8 @@
 package shared
 
-// Host-side orchestrator session environment.
-//
-// An orchestrator session has no pod, so none of the environment-scoped ERUN_*
-// variables the helm chart sets apply to it. The desktop app sets this smaller,
-// disjoint set on the session process at launch, and the shared orchestrator
-// contract resolves the session's scope from OrchestratorIDEnvVar: matching that
-// id against the orchestrators: list in erun's config.yaml is what says which
-// environments are the session's own. An identity variable an orchestrator
-// cannot look up is the defect these names being in one place exists to prevent.
+// Host-side orchestrator session environment, set by the desktop app at launch. It is
+// disjoint from the pod's ERUN_* variables.
 const (
-	// OrchestratorIDEnvVar names the orchestrator's own id. Empty for a
-	// transient (Investigate) session, which has no id and no linked envs.
+	// OrchestratorIDEnvVar is empty for a transient (Investigate) session.
 	OrchestratorIDEnvVar = "ERUN_ORCHESTRATOR_ID"
 )

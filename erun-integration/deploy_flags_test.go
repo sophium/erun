@@ -11,9 +11,6 @@ import (
 )
 
 func testDeployVersionRequiredWithoutSwitchErrors(t *testing.T) {
-	// deploy is a pure consume operation: with no --version and no
-	// --current it must fail with an actionable "version required" error
-	// rather than building the working tree.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -25,10 +22,7 @@ func testDeployVersionRequiredWithoutSwitchErrors(t *testing.T) {
 }
 
 func testDeployForceFlagAppearsInTrace(t *testing.T) {
-	// --force surfaces in the deploy trace so dry-run callers can see
-	// the cache-bypass decision, and it propagates to the resolved
-	// plan: SkipHelm cannot short-circuit when fingerprint promotion
-	// is disabled, so the helm upgrade always runs.
+	// With fingerprint promotion disabled, SkipHelm cannot short-circuit.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -37,9 +31,6 @@ func testDeployForceFlagAppearsInTrace(t *testing.T) {
 }
 
 func testDeployDryRunEnvDeployTimeoutOverridesDefault(t *testing.T) {
-	// The env's deploy.timeout (7m0s) flows into the helm `upgrade
-	// --timeout` arg, overriding the 5m0s default. Locks per-env rollout
-	// timeout resolution (config > default).
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithDeployTimeout(t, setup, "team", "dev", "7m0s")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -51,9 +42,6 @@ func testDeployDryRunEnvDeployTimeoutOverridesDefault(t *testing.T) {
 }
 
 func testDeployDryRunRolloutTimeoutFlagOverridesEnvConfig(t *testing.T) {
-	// --rollout-timeout 9m beats the env's deploy.timeout (7m0s), which in
-	// turn beats the default. Locks the full precedence chain (flag > env
-	// config > default) at the resolved helm `--timeout` arg.
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithDeployTimeout(t, setup, "team", "dev", "7m0s")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -65,8 +53,6 @@ func testDeployDryRunRolloutTimeoutFlagOverridesEnvConfig(t *testing.T) {
 }
 
 func testDeployRolloutTimeoutFlagInvalidDurationErrors(t *testing.T) {
-	// A malformed --rollout-timeout fails the deploy loudly rather than
-	// silently falling back to the default.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -78,9 +64,6 @@ func testDeployRolloutTimeoutFlagInvalidDurationErrors(t *testing.T) {
 }
 
 func testDeployDryRunMaxCPUMemoryStorageFlagsApplyNamespaceQuota(t *testing.T) {
-	// All three of --max-cpu/--max-memory/--max-storage together trace the
-	// kubectl apply that would create the namespace's ResourceQuota +
-	// LimitRange, alongside the existing namespace-ensure trace.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -92,10 +75,7 @@ func testDeployDryRunMaxCPUMemoryStorageFlagsApplyNamespaceQuota(t *testing.T) {
 }
 
 func testDeployMaxCPUMemoryStorageFlagsPartialSetErrors(t *testing.T) {
-	// A namespace ResourceQuota with only some resources capped would leave
-	// Kubernetes to admit unbounded amounts of the rest, so a partial set
-	// (here, --max-cpu alone) fails loudly rather than silently applying an
-	// incomplete quota.
+	// A partial quota would let Kubernetes admit unbounded amounts of the rest.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -107,9 +87,6 @@ func testDeployMaxCPUMemoryStorageFlagsPartialSetErrors(t *testing.T) {
 }
 
 func testDeployEnvDeployTimeoutInvalidDurationErrors(t *testing.T) {
-	// A malformed per-env deploy.timeout fails the deploy loudly at spec
-	// resolution (EnvironmentDeployConfig.Resolve) rather than reverting to
-	// the default.
 	setup := env.New(t)
 	fixture.SeedTenantEnvWithDeployTimeout(t, setup, "team", "dev", "nonsense")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")

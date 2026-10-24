@@ -12,11 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
-// The per-env erun-mcp server is exposed publicly and its `raw` tool can
-// kubectl-exec, so once a trust anchor is configured every request must be
-// authenticated. Auth mirrors the erun api's issuer→tenant model, and the
-// crypto verification lives in erun-common so the desktop signer and this
-// verifier share one contract.
+// The edge is public and `raw` can kubectl-exec, so once a trust anchor is
+// configured every request must authenticate.
 const (
 	EnvMCPTrustedIssuers = "ERUN_MCP_TRUSTED_ISSUERS"
 	EnvMCPTrustedIssuer  = "ERUN_MCP_TRUSTED_ISSUER"
@@ -31,10 +28,7 @@ type McpAuthConfig struct {
 	oidc           *mcpauth.OIDCVerifier
 }
 
-// McpAuthConfigFromEnv builds the auth config from the environment. An empty
-// result leaves auth unconfigured — the legacy loopback-only behavior — so
-// deployments that predate desktop-key injection keep working; a desktop
-// deployment always sets a trust anchor, so its edge stays authenticated.
+// McpAuthConfigFromEnv builds the auth config; an empty result leaves auth off (loopback-only).
 func McpAuthConfigFromEnv() McpAuthConfig {
 	cfg := McpAuthConfig{
 		trustedIssuers: map[string]string{},
@@ -70,15 +64,8 @@ func AuthHTTPMiddleware(cfg McpAuthConfig, next http.Handler) http.Handler {
 	return authHTTPMiddlewareWithTokenResolver(cfg, bearerToken, next)
 }
 
-// WsAttachAuthHTTPMiddleware is the attach route's own auth wrapper: it
-// resolves the bearer token the same way authHTTPMiddleware does, but falls
-// back to a WebSocket-subprotocol-carried token (attachSubprotocolBearerToken)
-// when no Authorization header is present. A browser's WebSocket constructor
-// cannot set an Authorization header on the handshake at all -- the
-// subprotocol list is the only header-bearing surface it exposes -- so
-// without this fallback a browser client could never authenticate to this
-// route, regardless of capability. Every other route keeps the header-only
-// resolver; this wider acceptance is scoped to the one route that needs it.
+// WsAttachAuthHTTPMiddleware also accepts a token in the WebSocket subprotocol,
+// since browsers cannot set Authorization on the handshake. Only attach uses it.
 func WsAttachAuthHTTPMiddleware(cfg McpAuthConfig, next http.Handler) http.Handler {
 	return authHTTPMiddlewareWithTokenResolver(cfg, resolveAttachBearerToken, next)
 }
@@ -110,8 +97,7 @@ func authHTTPMiddlewareWithTokenResolver(cfg McpAuthConfig, resolveToken func(*h
 			writeUnauthorized(w, "token issuer is not a trusted MCP issuer")
 			return
 		}
-		// A per-env edge serves exactly one tenant; a token resolving to another
-		// tenant means the trusted-issuer map is misconfigured for this env.
+		// A per-env edge serves one tenant; another tenant means a misconfigured issuer map.
 		if cfg.tenant != "" && tenant != cfg.tenant {
 			writeUnauthorized(w, "token tenant does not match this environment")
 			return
@@ -121,9 +107,7 @@ func authHTTPMiddlewareWithTokenResolver(cfg McpAuthConfig, resolveToken func(*h
 			writeUnauthorized(w, err.Error())
 			return
 		}
-		// Authentication is done; what the caller may do travels with the request
-		// from here, so the tool surface can be built for this caller rather than
-		// filtered after the fact.
+		// Capabilities travel with the request so the tool surface is built per caller.
 		identity := AuthIdentity{Tenant: tenant, User: claims.Subject, Capabilities: claims.Capabilities()}
 		if identity.Capabilities.Empty() {
 			WriteForbidden(w, "token grants no erun capabilities")
@@ -154,22 +138,12 @@ func bearerToken(req *http.Request) string {
 	return strings.TrimSpace(header[len(prefix):])
 }
 
-// AttachAuthSubprotocol is the Sec-WebSocket-Protocol scheme name a browser
-// attach client offers alongside its bearer token, e.g.
-// new WebSocket(url, [attachAuthSubprotocol, token]) -- the RFC 6455 handshake
-// joins that array into one comma-separated header, which is the only place a
-// browser's WebSocket constructor lets a caller put a credential; it exposes
-// no way to set an Authorization header. The scheme name is versioned so a
-// future change to how the token is framed can't be silently misparsed by an
-// old client.
+// AttachAuthSubprotocol is the scheme a browser offers with its token:
+// new WebSocket(url, [AttachAuthSubprotocol, token]).
 const AttachAuthSubprotocol = "erun.bearer.v1"
 
-// attachSubprotocolBearerToken extracts a bearer token from a two-entry
-// Sec-WebSocket-Protocol offer whose first entry is attachAuthSubprotocol.
-// Anything else -- no header, wrong scheme, wrong arity -- resolves to "",
-// which resolveAttachBearerToken then reports as the same "a bearer token is
-// required" 401 a missing Authorization header produces: a malformed offer is
-// refused the ordinary way, not with an error that leaks which channel was tried.
+// attachSubprotocolBearerToken returns the token from a [scheme, token] offer, or ""
+// so a malformed offer gets the ordinary missing-token 401.
 func attachSubprotocolBearerToken(req *http.Request) string {
 	protocols := websocket.Subprotocols(req)
 	if len(protocols) != 2 || protocols[0] != AttachAuthSubprotocol {
@@ -178,10 +152,7 @@ func attachSubprotocolBearerToken(req *http.Request) string {
 	return strings.TrimSpace(protocols[1])
 }
 
-// A caller whose token is valid but grants nothing is authenticated and not
-// authorized, which is 403 rather than 401: retrying with the same credentials
-// is pointless, and saying so is the difference between "log in again" and "ask
-// for a role".
+// WriteForbidden answers 403: the token is valid but grants nothing, so retrying won't help.
 func WriteForbidden(w http.ResponseWriter, reason string) {
 	http.Error(w, "forbidden: "+reason, http.StatusForbidden)
 }

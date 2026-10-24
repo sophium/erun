@@ -18,41 +18,27 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
-// MCP auth edge. The per-env erun-mcp server is publicly exposed and its `raw`
-// tool can kubectl-exec, so every call must be authenticated. A trusted issuer
-// is one of two kinds, dispatched on its scheme:
-//
-//   - `file://<path>` — desktop identity. EdDSA only: `alg` is hard-checked, so
-//     the alg-confusion class (accepting `none`/HMAC/RS256 against a public key)
-//     cannot occur.
-//   - `https://…` — an OIDC issuer, verified against its published JWKS; standard
-//     OIDC signing algorithms apply, so the EdDSA alg-lock does not.
-//
-// Security invariant, both branches: the key/issuer trusted is only ever the one
-// the caller configured, never an arbitrary issuer taken from the token. The
-// tenant is resolved from the trusted-issuer→tenant map by the caller (erun-mcp).
+// MCP auth edge. The edge is public and can kubectl-exec, so every call is authenticated.
+// file:// issuers are EdDSA-only (no alg confusion); https:// issuers verify via OIDC JWKS.
+// Only the caller-configured issuer is ever trusted, never one taken from the token.
 
-// MCPTokenClaims is the registered-claim subset the MCP auth edge uses.
+// MCPTokenClaims is the claim subset the MCP auth edge uses.
 type MCPTokenClaims struct {
 	Issuer    string `json:"iss"`
 	Subject   string `json:"sub,omitempty"`
 	Audience  string `json:"aud,omitempty"`
 	IssuedAt  int64  `json:"iat,omitempty"`
 	ExpiresAt int64  `json:"exp,omitempty"`
-	// Scope and Roles carry what the caller may do, in the two shapes issuers
-	// actually produce: a space-delimited OAuth scope string, and a roles array
-	// of the kind project roles arrive in. Both are optional — a token carrying
-	// neither is the desktop's single-admin case.
+	// A token with neither Scope nor Roles is the desktop's single-admin case.
 	Scope string   `json:"scope,omitempty"`
 	Roles []string `json:"roles,omitempty"`
 }
 
-// Capabilities resolves what this token permits at the edge.
+// Capabilities resolves what the token permits at the edge.
 func (c MCPTokenClaims) Capabilities() mcptools.MCPCapabilitySet {
 	return mcptools.MCPCapabilitiesFromClaims(c.Scope, c.Roles)
 }
 
-// Only EdDSA is ever produced or accepted.
 type mcpTokenHeader struct {
 	Algorithm string `json:"alg"`
 	Type      string `json:"typ"`
@@ -60,10 +46,7 @@ type mcpTokenHeader struct {
 
 const mcpTokenAlgorithm = "EdDSA"
 
-// GenerateDesktopIdentity creates a new Ed25519 desktop identity keypair,
-// PEM-encoded (PKCS#8 private, PKIX public). It is the desktop's trust anchor:
-// the private key signs MCP tokens, the public key is injected into the runtime
-// pod for verification.
+// GenerateDesktopIdentity creates the desktop's Ed25519 trust anchor as PKCS#8/PKIX PEM.
 func GenerateDesktopIdentity() (privatePEM, publicPEM []byte, err error) {
 	public, private, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -82,24 +65,16 @@ func GenerateDesktopIdentity() (privatePEM, publicPEM []byte, err error) {
 	return privatePEM, publicPEM, nil
 }
 
-// FileIssuer formats a public-key path as the `file://` issuer the desktop
-// stamps in the token's `iss` claim and the MCP server is configured to trust.
-// The path is rendered as a valid RFC 8089 file URL on every OS: a Windows drive
-// path (C:\dir\key.pub) must become file:///C:/dir/key.pub, or url.Parse fails to
-// recognize the file scheme and verification falls through to the OIDC path.
+// FileIssuer renders a public-key path as an RFC 8089 file URL; a Windows drive path must
+// become file:///C:/... or url.Parse misses the scheme.
 func FileIssuer(publicKeyPath string) string {
 	return FileIssuerScheme + fileURLPath(publicKeyPath)
 }
 
-// FileIssuerScheme distinguishes an issuer backed by a local public key from an
-// OIDC issuer the edge fetches a JWKS from; the two have different recoveries
-// when a deploy would drop authentication.
+// FileIssuerScheme marks an issuer backed by a local public key rather than OIDC.
 const FileIssuerScheme = "file://"
 
-// fileURLPath renders an OS path as the path component of a file:// URL:
-// forward-slashed with a leading slash, so a Windows drive path (C:\dir) becomes
-// /C:/dir. A Unix absolute path already starts with a slash and is returned
-// unchanged, keeping the in-pod issuer file:///etc/erun/mcp-auth/desktopid.pub.
+// fileURLPath forward-slashes an OS path with a leading slash (C:\dir -> /C:/dir).
 func fileURLPath(p string) string {
 	p = filepath.ToSlash(p)
 	if !strings.HasPrefix(p, "/") {
@@ -108,10 +83,7 @@ func fileURLPath(p string) string {
 	return p
 }
 
-// fileURLPathToOSPath is the inverse of fileURLPath: it turns a file:// URL path
-// back into an OS path so the key file can be read. On Windows the path arrives as
-// /C:/dir/key.pub; the leading slash before the drive letter is dropped and the
-// separators are flipped back.
+// fileURLPathToOSPath inverts fileURLPath.
 func fileURLPathToOSPath(p string) string {
 	if runtime.GOOS == "windows" && len(p) >= 3 && p[0] == '/' && p[2] == ':' &&
 		((p[1] >= 'A' && p[1] <= 'Z') || (p[1] >= 'a' && p[1] <= 'z')) {
@@ -121,42 +93,27 @@ func fileURLPathToOSPath(p string) string {
 }
 
 const (
-	// DesktopMCPPublicKeyDir is the in-pod directory the local-key signer's
-	// public key is mounted into by the runtime chart — the desktop's own key
-	// for a desktop deploy, or the hosted backend's MCP-signing public key for
-	// a hosted deploy.
+	// DesktopMCPPublicKeyDir holds the local-key signer's public key, desktop or hosted backend.
 	DesktopMCPPublicKeyDir  = "/etc/erun/mcp-auth"
 	DesktopMCPPublicKeyFile = "desktopid.pub"
 )
 
-// DesktopMCPPublicKeyPath is the in-pod path the local-key signer's public key
-// is mounted at — the single location the chart mount, the signer's `iss`
-// claim, and the server's trusted-issuer env all derive from, so they cannot
-// drift.
+// DesktopMCPPublicKeyPath is the one path the chart mount, `iss` claim, and trusted issuer derive from.
 func DesktopMCPPublicKeyPath() string {
 	return DesktopMCPPublicKeyDir + "/" + DesktopMCPPublicKeyFile
 }
 
-// DesktopMCPIssuer is the fixed `file://` issuer every local-key-signed MCP
-// token carries and the MCP server is configured to trust: the desktop signs
-// with it directly, and the hosted backend signs with it too when minting
-// per-env tokens on the console's behalf (mcptoken.Signer) — same mechanism,
-// two signers, one issuer. Despite the name, this is not desktop-only.
+// DesktopMCPIssuer is the file:// issuer for every local-key-signed token, desktop or hosted backend.
 func DesktopMCPIssuer() string {
 	return FileIssuer(DesktopMCPPublicKeyPath())
 }
 
-// MCPTokenAudience is the stable per-environment audience a token must carry and
-// the env's MCP edge enforces, so a token minted for one environment cannot be
-// replayed against another. The value is transport-independent, so the signer
-// and the chart's ERUN_MCP_AUDIENCE always agree.
+// MCPTokenAudience is per environment so a token cannot be replayed against another environment.
 func MCPTokenAudience(tenant, environment string) string {
 	return "erun-mcp:" + strings.TrimSpace(tenant) + "/" + strings.TrimSpace(environment)
 }
 
-// SignMCPToken signs an EdDSA (Ed25519) JWT for the given claims with the
-// PEM-encoded private key. The claims' Issuer must be a `file://<path>` URL
-// naming the public-key file the verifier will load.
+// SignMCPToken signs an EdDSA JWT; claims.Issuer must be the file:// URL of the verifier's public key.
 func SignMCPToken(privatePEM []byte, claims MCPTokenClaims) (string, error) {
 	key, err := parseEd25519PrivateKey(privatePEM)
 	if err != nil {
@@ -178,11 +135,7 @@ func SignMCPToken(privatePEM []byte, claims MCPTokenClaims) (string, error) {
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }
 
-// VerifyMCPToken verifies an MCP bearer token against trustedIssuer — the issuer
-// the MCP server is configured to trust, never an arbitrary issuer from the
-// token — dispatching file:// to Ed25519 local-key verification (used by both
-// the desktop and a hosted backend's signer) and https:// to OIDC JWKS
-// verification.
+// VerifyMCPToken verifies a bearer against trustedIssuer: file:// via Ed25519, https:// via OIDC.
 func VerifyMCPToken(ctx context.Context, oidc *OIDCVerifier, token, trustedIssuer, expectedAudience string, now time.Time) (MCPTokenClaims, error) {
 	trustedIssuer = strings.TrimSpace(trustedIssuer)
 	if trustedIssuer == "" {
@@ -204,8 +157,7 @@ func verifyFileMCPToken(token, trustedIssuer, expectedAudience string, now time.
 	if err != nil {
 		return MCPTokenClaims{}, err
 	}
-	// Only ever load the key from the issuer we already trust — never a
-	// file:// path supplied by the (unverified) token.
+	// Never load a key from a path the unverified token supplies.
 	if claims.Issuer != trustedIssuer {
 		return MCPTokenClaims{}, fmt.Errorf("MCP token issuer %q is not the trusted issuer", claims.Issuer)
 	}
@@ -225,8 +177,7 @@ func verifyFileMCPToken(token, trustedIssuer, expectedAudience string, now time.
 	return claims, nil
 }
 
-// The OIDC verifier already checks the signature and time claims; the expiry is
-// re-checked here only for parity with the file:// path.
+// Expiry is re-checked only for parity with the file:// path.
 func verifyOIDCMCPToken(ctx context.Context, oidc *OIDCVerifier, token, trustedIssuer, expectedAudience string, now time.Time) (MCPTokenClaims, error) {
 	if oidc == nil {
 		return MCPTokenClaims{}, fmt.Errorf("no OIDC verifier configured for issuer %q", trustedIssuer)
@@ -242,16 +193,13 @@ func verifyOIDCMCPToken(ctx context.Context, oidc *OIDCVerifier, token, trustedI
 	if err := validateMCPExpiry(claims.ExpiresAt, now); err != nil {
 		return MCPTokenClaims{}, err
 	}
-	// An OIDC `aud` may list multiple audiences; the per-env audience must be one
-	// of them — the same membership contract the file:// path enforces.
 	if err := validateMCPAudience(verified.Audience, expectedAudience); err != nil {
 		return MCPTokenClaims{}, err
 	}
 	return claims, nil
 }
 
-// The single Audience field carries only the first audience as a human-readable
-// hint; the authoritative multi-audience check stays in validateMCPAudience.
+// Audience holds only the first audience as a hint; validateMCPAudience is authoritative.
 func mcpClaimsFromOIDC(verified OIDCClaims) MCPTokenClaims {
 	claims := MCPTokenClaims{Issuer: verified.Issuer, Subject: verified.Subject}
 	if exp, ok := verified.Raw["exp"].(float64); ok {
@@ -273,8 +221,7 @@ func mcpClaimsFromOIDC(verified OIDCClaims) MCPTokenClaims {
 	return claims
 }
 
-// Hard-requires the EdDSA algorithm in the header, closing the alg-confusion
-// class (none / HMAC verified against the public-key bytes).
+// Requiring EdDSA closes the alg-confusion class (none/HMAC against the public key).
 func parseMCPToken(token string) (signingInput string, claims MCPTokenClaims, signature []byte, err error) {
 	segments := strings.Split(strings.TrimSpace(token), ".")
 	if len(segments) != 3 {
@@ -297,7 +244,6 @@ func parseMCPToken(token string) (signingInput string, claims MCPTokenClaims, si
 	return segments[0] + "." + segments[1], claims, signature, nil
 }
 
-// An absent exp (0) is not enforced.
 func validateMCPExpiry(expiresAt int64, now time.Time) error {
 	if expiresAt != 0 && now.After(time.Unix(expiresAt, 0)) {
 		return fmt.Errorf("MCP token expired")
@@ -305,7 +251,7 @@ func validateMCPExpiry(expiresAt int64, now time.Time) error {
 	return nil
 }
 
-// An empty expectedAudience disables the check: the chart did not pin an audience.
+// An empty expectedAudience means the chart pinned none.
 func validateMCPAudience(audiences []string, expectedAudience string) error {
 	if expectedAudience == "" {
 		return nil
@@ -318,10 +264,7 @@ func validateMCPAudience(audiences []string, expectedAudience string) error {
 	return fmt.Errorf("MCP token audience %v does not contain %q", audiences, expectedAudience)
 }
 
-// UnverifiedMCPTokenIssuer extracts the `iss` claim WITHOUT verifying the
-// signature — used only to select which trusted issuer (and tenant) the token
-// claims to come from. VerifyMCPToken then re-checks the issuer and verifies the
-// signature, so the per-issuer alg policy is enforced there, not here.
+// UnverifiedMCPTokenIssuer reads `iss` without verifying, only to pick the trusted issuer; VerifyMCPToken re-checks it.
 func UnverifiedMCPTokenIssuer(token string) (string, error) {
 	return IssuerFromUnverifiedJWT(token)
 }
@@ -346,9 +289,7 @@ func loadEd25519PublicKeyFromFileIssuer(issuer string) (ed25519.PublicKey, error
 	return parseEd25519PublicKey(data)
 }
 
-// DesktopPublicKeyPEM derives the PKIX public-key PEM from the private key, so
-// the private key is the single thing the desktop persists and the public half
-// is recomputed for injection on deploy.
+// DesktopPublicKeyPEM derives the public half so only the private key is persisted.
 func DesktopPublicKeyPEM(privatePEM []byte) ([]byte, error) {
 	key, err := parseEd25519PrivateKey(privatePEM)
 	if err != nil {

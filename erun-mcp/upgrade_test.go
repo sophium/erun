@@ -11,8 +11,6 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/upgrade"
 )
 
-// TestUpgradeToolPreviewResolvesPlan verifies the upgrade preview path resolves
-// the plan without deploying, so callers can inspect the work with no side effects.
 func TestUpgradeToolPreviewResolvesPlan(t *testing.T) {
 	t.Setenv(lifecycle.UpgradeVersionsOverrideEnv, "stable=3.0.0")
 	projectRoot := t.TempDir()

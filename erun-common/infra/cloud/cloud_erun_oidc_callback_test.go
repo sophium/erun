@@ -21,15 +21,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// TestRunERunAuthorizationCodeLoginRoundTrip drives the whole PKCE fallback
-// end to end: it lets the function open its own loopback listener, recovers
-// the redirect_uri/state it generated from the printed sign-in URL (the only
-// channel a black-box caller has), simulates the browser's GET to that
-// callback, and confirms the resulting token exchange reaches the real code
-// verifier.
-// authorizationCodeExchangeHandler simulates the token endpoint's
-// authorization_code grant, asserting the exchange carries the given code and
-// a non-empty PKCE code_verifier.
+// authorizationCodeExchangeHandler asserts the exchange carries wantCode and a PKCE code_verifier.
 func authorizationCodeExchangeHandler(t *testing.T, wantCode string, tokens ERunTokens) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
@@ -45,9 +37,6 @@ func authorizationCodeExchangeHandler(t *testing.T, wantCode string, tokens ERun
 	}
 }
 
-// startERunAuthorizationCodeLogin runs the login in the background and
-// returns channels for its result, mirroring how a real caller would await it
-// while a browser callback happens concurrently.
 func startERunAuthorizationCodeLogin(discovery OIDCDiscovery, clientID string, stdout io.Writer) (<-chan ERunTokens, <-chan error) {
 	resultCh := make(chan ERunTokens, 1)
 	errCh := make(chan error, 1)
@@ -121,9 +110,7 @@ func TestERunLoginBrowserCommandPerOS(t *testing.T) {
 	}
 }
 
-// writeExecutableStub writes a script that exits immediately with exitCode,
-// for pointing an ERUN_<NAME>_BIN override at a fake browser opener without a
-// live desktop session.
+// writeExecutableStub writes a fake browser opener that exits with exitCode.
 func writeExecutableStub(t *testing.T, exitCode int) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "browser-opener-stub")
@@ -147,10 +134,6 @@ func TestOpenERunLoginBrowserSucceedsAndFailsNonFatally(t *testing.T) {
 	}
 }
 
-// TestAwaitERunOIDCCallbackReportsBrowserLaunchOutcome pins the trace/prompt
-// contract the desktop and CLI both rely on: the operator is told what
-// actually happened, and a launch failure never blocks the callback wait
-// that follows.
 func TestAwaitERunOIDCCallbackReportsBrowserLaunchOutcome(t *testing.T) {
 	t.Setenv("ERUN_HOST_OS_OVERRIDE", "linux")
 	tokenSrv := httptest.NewServer(authorizationCodeExchangeHandler(t, "auth-code-2", ERunTokens{AccessToken: "access-2", RefreshToken: "refresh-2", ExpiresIn: time.Hour}))
@@ -215,8 +198,7 @@ func mustParseRedirectAndState(t *testing.T, authURL string) (string, string) {
 	return redirectURI, state
 }
 
-// syncBuffer lets the test goroutine poll for the sign-in URL the login
-// printed while the login's own goroutine concurrently writes it.
+// syncBuffer lets the test poll output the login goroutine is writing.
 type syncBuffer struct {
 	mu   sync.Mutex
 	data []byte
@@ -242,9 +224,7 @@ func (b *syncBuffer) awaitURL(t *testing.T, timeout time.Duration) string {
 		b.mu.Lock()
 		snapshot := string(b.data)
 		b.mu.Unlock()
-		// The authorization endpoint's own scheme, not "http://127.0.0.1" —
-		// the redirect_uri (which does start with that) is percent-encoded
-		// inside the printed URL's query string, so it never appears literally.
+		// The redirect_uri is percent-encoded in the printed URL, so match the authorize endpoint.
 		if idx := strings.Index(snapshot, "https://auth.example.test/authorize"); idx >= 0 {
 			rest := snapshot[idx:]
 			if end := strings.IndexAny(rest, "\n \t"); end >= 0 {
@@ -279,19 +259,8 @@ func TestExchangeERunAuthorizationCodeAndCallbackHandler(t *testing.T) {
 	}
 }
 
-// TestAwaitERunOIDCCallbackTimesOutNamingTheListener locks the failure a
-// too-short wait produces. The symptom shows up on the browser's side - the
-// sign-in completes, the redirect hits a closed port, and it reads as a broken
-// redirect URI - so the error has to name the listener and say to re-run,
-// otherwise the operator debugs the wrong thing.
 func TestAwaitERunOIDCCallbackTimesOutNamingTheListener(t *testing.T) {
-	// This drives the real wait, which opens the operator's browser at the
-	// authorize URL as its first act. Left unstubbed the suite launches the
-	// machine's actual browser at a fixture hostname on every run -- an
-	// outward side effect from a unit test, and on a laptop the operator sees a
-	// stray tab resolving nowhere. The override is the seam the opener's own
-	// doc names for exactly this, so the flow under test is unchanged and only
-	// the launch is stubbed.
+	// Stub the opener so the test never launches the real browser.
 	t.Setenv("ERUN_HOST_OS_OVERRIDE", "linux")
 	t.Setenv("ERUN_XDG_OPEN_BIN", writeExecutableStub(t, 0))
 
@@ -312,8 +281,6 @@ func TestAwaitERunOIDCCallbackTimesOutNamingTheListener(t *testing.T) {
 	}
 }
 
-// The default has to stay long enough for a person who is handed the URL and
-// opens it later; five minutes expired routinely in exactly that case.
 func TestERunLoginCallbackTimeoutLeavesRoomForAHumanSignIn(t *testing.T) {
 	if erunLoginCallbackTimeout < 10*time.Minute {
 		t.Fatalf("erunLoginCallbackTimeout = %s, want at least 10m for an asynchronous sign-in", erunLoginCallbackTimeout)
@@ -396,11 +363,7 @@ func TestOAuthTokenErrorFallsBackToServerMessage(t *testing.T) {
 	}
 }
 
-// The login flow opens the authorize URL with the host's own opener, and a
-// test that forgot to stub it launched the operator's real browser at a
-// fixture hostname -- invisible in the Linux gate, a stray tab on a desktop.
-// With no per-test stub, every platform's opener must resolve to the inert
-// binary the package's TestMain installs.
+// Every platform's opener must resolve to the inert binary TestMain installs.
 func TestNoTestCanReachTheHostBrowserOpener(t *testing.T) {
 	inert, err := exec.LookPath("true")
 	if err != nil {

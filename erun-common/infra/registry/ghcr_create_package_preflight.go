@@ -10,29 +10,14 @@ import (
 	"time"
 )
 
-// A release that introduces a new component discovers it cannot create that
-// component's package only at the push, after every image has been built for
-// every architecture. VerifyGHCRPushScope (ghcr_push_preflight.go) already
-// checks the credential's write:packages scope up front, but that scope does
-// not by itself grant the right to CREATE a package that has never existed —
-// an org can restrict creation to its owner even for a token that pushes
-// every existing package fine. Whether creation is allowed is not knowable
-// from the token's scopes; it is knowable from the registry itself, the same
-// way `docker push`/`helm push` learn it: by asking for a token scoped to push
-// the specific repository and starting (never finishing) a blob upload. That
-// costs one small HTTP exchange and uploads nothing, so it is cheap enough to
-// run before the build spend for every resolved image and chart.
+// write:packages does not imply the right to create a new package (an org can
+// restrict creation), so this preflight asks the registry by opening, and
+// abandoning, a blob upload before the build.
 
-// ghcrCreatePackageProbeTimeout bounds each registry round trip this preflight
-// makes, so an unreachable registry cannot hang a release; it makes the check
-// inconclusive instead.
+// ghcrCreatePackageProbeTimeout makes an unreachable registry inconclusive instead of hanging.
 const ghcrCreatePackageProbeTimeout = 10 * time.Second
 
-// MissingGHCRCreatePackageError is returned when the registry has already told
-// erun a resolved artifact cannot be pushed, whether because its package does
-// not exist yet and this credential cannot create one, or for any other reason
-// the registry denies push — the registry's own denial is preserved verbatim
-// so the reader sees exactly what a real push would have hit.
+// MissingGHCRCreatePackageError carries the registry's push denial verbatim.
 type MissingGHCRCreatePackageError struct {
 	Registry   string
 	Repository string
@@ -62,11 +47,8 @@ func (e *MissingGHCRCreatePackageError) Error() string {
 		e.Registry, e.Repository, detail, e.Registry, e.Registry)
 }
 
-// VerifyGHCRCanPushImage is the image-tag entry point: it answers only for
-// ghcr, and only when it can answer with certainty. An inconclusive check —
-// no credential resolved, the registry unreachable, an unexpected response —
-// returns nil rather than blocking a build on a guess; a credential that is
-// actually bad still fails at the real push exactly as it does today.
+// VerifyGHCRCanPushImage blocks only on a conclusive denial; anything
+// inconclusive returns nil.
 func VerifyGHCRCanPushImage(ctx context.Context, client *http.Client, tag string) error {
 	registry := DockerRegistryFromImageTag(tag)
 	if !IsGHCRRegistry(registry) {
@@ -83,9 +65,7 @@ func VerifyGHCRCanPushImage(ctx context.Context, client *http.Client, tag string
 	return verifyGHCRCanPushRepositoryFor(ctx, client, registry, repository, auth, "https://"+registry)
 }
 
-// VerifyGHCRCanPushChart is the chart entry point: ociRepo is the
-// `oci://<registry>/<path>` a chart publishes under and chartName is the
-// segment that names the specific chart within it.
+// VerifyGHCRCanPushChart checks chartName under the oci://<registry>/<path> ociRepo.
 func VerifyGHCRCanPushChart(ctx context.Context, client *http.Client, ociRepo, chartName string) error {
 	registry, path := splitOCIChartRepo(ociRepo)
 	if !IsGHCRRegistry(registry) || strings.TrimSpace(chartName) == "" {
@@ -99,10 +79,7 @@ func VerifyGHCRCanPushChart(ctx context.Context, client *http.Client, ociRepo, c
 	return verifyGHCRCanPushRepositoryFor(ctx, client, registry, repository, auth, "https://"+registry)
 }
 
-// dockerRepositoryFromTag returns the repository path a registry addresses —
-// everything between the registry host and the tag — or "" when tag names no
-// separate registry host (a bare name docker would resolve against Docker
-// Hub, which this preflight does not apply to).
+// dockerRepositoryFromTag returns the repository path, or "" for a tag with no registry host.
 func dockerRepositoryFromTag(tag string) string {
 	tag = strings.TrimSpace(tag)
 	registry := DockerRegistryFromImageTag(tag)
@@ -119,7 +96,6 @@ func dockerRepositoryFromTag(tag string) string {
 	return rest
 }
 
-// splitOCIChartRepo splits `oci://<registry>/<path>` into its host and path.
 func splitOCIChartRepo(ociRepo string) (string, string) {
 	trimmed := strings.TrimPrefix(strings.TrimSpace(ociRepo), "oci://")
 	registry, path, ok := strings.Cut(trimmed, "/")
@@ -129,16 +105,12 @@ func splitOCIChartRepo(ociRepo string) (string, string) {
 	return registry, path
 }
 
-// namespaceFromOCIPath returns the first path segment, which is the owning
-// namespace for a chart OCI repo the same way it is for a docker image tag.
+// namespaceFromOCIPath returns the owning namespace (first segment).
 func namespaceFromOCIPath(path string) string {
 	segment, _, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
 	return segment
 }
 
-// verifyGHCRCanPushRepositoryFor is the decision, with the credential and the
-// registry API base URL as explicit inputs so it can be exercised without a
-// real credential or a live registry.
 func verifyGHCRCanPushRepositoryFor(ctx context.Context, client *http.Client, registry, repository string, auth RegistryBasicAuth, baseURL string) error {
 	if client == nil {
 		client = &http.Client{Timeout: ghcrCreatePackageProbeTimeout}
@@ -154,11 +126,8 @@ func verifyGHCRCanPushRepositoryFor(ctx context.Context, client *http.Client, re
 	return &MissingGHCRCreatePackageError{Registry: registry, Repository: repository, Detail: detail}
 }
 
-// ghcrRepositoryPushToken exchanges the resolved credential for a registry
-// token scoped to push this one repository — the same exchange a real
-// `docker push`/`helm push` performs before its first request. Getting a
-// token back is not yet proof of anything; ghcrProbeBlobUploadSession is what
-// tells push-denied apart from push-granted.
+// ghcrRepositoryPushToken exchanges the credential for a push-scoped token; that
+// alone proves nothing.
 func ghcrRepositoryPushToken(ctx context.Context, client *http.Client, registry, repository string, auth RegistryBasicAuth, baseURL string) (string, bool) {
 	tokenURL := fmt.Sprintf("%s/token?service=%s&scope=repository:%s:pull,push", baseURL, registry, repository)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL, nil)
@@ -186,14 +155,8 @@ func ghcrRepositoryPushToken(ctx context.Context, client *http.Client, registry,
 	return payload.Token, true
 }
 
-// ghcrProbeBlobUploadSession starts a blob upload — the first request any
-// docker/helm push makes — and never finishes it. The registry allocates the
-// session exactly when push is allowed, including creating the repository for
-// the first time, so a 202/201 is conclusive proof push would have succeeded;
-// a 401/403 is the registry's own denial, conclusive the other way, with the
-// same detail (e.g. create_package) a real push would have surfaced. Any
-// other outcome — network failure, an unexpected status — is inconclusive:
-// this preflight only ever blocks on a definite answer.
+// ghcrProbeBlobUploadSession starts a blob upload: 201/202 proves push (including
+// package creation), 401/403 is a conclusive denial, anything else is inconclusive.
 func ghcrProbeBlobUploadSession(ctx context.Context, client *http.Client, repository, token, baseURL string) (allowed bool, detail string, conclusive bool) {
 	uploadURL := fmt.Sprintf("%s/v2/%s/blobs/uploads/", baseURL, repository)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, nil)
@@ -219,11 +182,7 @@ func ghcrProbeBlobUploadSession(ctx context.Context, client *http.Client, reposi
 	}
 }
 
-// abandonGHCRBlobUploadSession cancels the probe's own upload session so
-// nothing about it lingers in the registry's view of in-progress uploads.
-// Best effort: a session the registry never sees a DELETE for is garbage
-// collected on its own, so a failure here is not worth failing the release
-// over.
+// abandonGHCRBlobUploadSession is best effort; the registry GCs unclosed sessions.
 func abandonGHCRBlobUploadSession(ctx context.Context, client *http.Client, location, token, baseURL string) {
 	location = strings.TrimSpace(location)
 	if location == "" {

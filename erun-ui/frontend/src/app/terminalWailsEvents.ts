@@ -36,9 +36,6 @@ import {
   handleTerminalExit,
 } from './wailsEventThunks';
 
-// Owns the desktop's Wails event subscriptions as one lifecycle: they are
-// registered together and detached together, so a listener cannot be added
-// without also being torn down on unmount.
 export class TerminalWailsEvents {
   private offs: (() => void)[] = [];
 

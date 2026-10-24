@@ -9,14 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// TestPersistRuntimeVersionFromDeploySpecs pins how the runtime version advances
-// after a deploy: a real rollout records the built-and-pushed version, while a
-// cached no-op must NOT record the freshly minted version — it was never pushed —
-// and instead heals to the version the release is actually running, leaving it
-// untouched when that can't be read.
-//
-// Persist is a real, non-dry-run side effect, so it is unreachable from the
-// dry-run integration binary and this white-box unit test is the contract owner.
+// A cached no-op must not persist the freshly minted, never-pushed version.
 func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 	const tenant = "erun"
 	const mintedVersion = "1.0.86-snapshot-20260608124610"
@@ -67,7 +60,7 @@ func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 	t.Run("cached deploy (SkipHelm) with an unreadable running version leaves it unchanged", func(t *testing.T) {
 		saved := false
 		save := func(string, config.EnvConfig) error { saved = true; return nil }
-		// Empty string models a missing release / unavailable helm.
+		// Empty models a missing release or unavailable helm.
 		persistOrFatal(t, core.Context{}, []DeploySpec{runtimeSpec(true)}, save, fixedRunningVersion(""))
 		if saved {
 			t.Fatalf("could not read the running version; must not persist (would be a phantom)")
@@ -105,11 +98,7 @@ func persistOrFatal(t *testing.T, ctx core.Context, specs []DeploySpec, save fun
 	}
 }
 
-// TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage: RuntimeVersion and RuntimeImage are one coordinate, so whatever
-// writes the version back after a deploy must write the image in the same
-// commit -- but only when the resolution actually knows a concrete name for
-// it (PersistRuntimeImage), never clobbering an operator's own pin with a
-// guess.
+// Version and image are one coordinate; persist the image only when known.
 func TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage(t *testing.T) {
 	const tenant = "frs"
 	const version = "1.0.86"
@@ -155,8 +144,6 @@ func TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage(t *testing.T) {
 				ReleaseName:          config.RuntimeReleaseName("erun"),
 				Version:              version,
 				ResolvedRuntimeImage: "ghcr.io/sophium/erun-devops:" + version,
-				// PersistRuntimeImage left empty: the erun product's own
-				// environments have no line of their own to persist.
 			},
 		}
 		persistOrFatal(t, core.Context{}, []DeploySpec{spec}, save, nil)
@@ -192,13 +179,6 @@ func TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage(t *testing.T) {
 	})
 }
 
-// TestPersistRuntimeVersionFromDeploySpecsPersistsRuntimeChart pins the
-// deploy-time twin of the RuntimeImage-persistence tests above: an operator's
-// --runtime-chart override installs the named chart correctly for this one
-// deploy (applyRuntimeChartOverride already rewrites the helm inputs), but
-// until PersistRuntimeChart existed nothing wrote the coordinate back to
-// EnvConfig.RuntimeChart -- so the next plain deploy or open re-derived the
-// chart from the version and lost the operator's override.
 func TestPersistRuntimeVersionFromDeploySpecsPersistsRuntimeChart(t *testing.T) {
 	const tenant = "frs"
 	const version = "1.0.86"
@@ -237,7 +217,6 @@ func TestPersistRuntimeVersionFromDeploySpecsPersistsRuntimeChart(t *testing.T) 
 				ReleaseName:       config.RuntimeReleaseName(tenant),
 				Version:           version,
 				ContainerRegistry: "ghcr.io/sophium",
-				// PersistRuntimeChart left empty: this deploy named no override.
 			},
 		}
 		persistOrFatal(t, core.Context{}, []DeploySpec{spec}, save, nil)
@@ -250,11 +229,6 @@ func TestPersistRuntimeVersionFromDeploySpecsPersistsRuntimeChart(t *testing.T) 
 	})
 }
 
-// TestCachedDeployRunThenPersistHealsToRunningVersion drives RunDeploySpecs then
-// PersistRuntimeVersionFromDeploySpecs — the exact sequence the CLI deploy command
-// runs — to prove that a cached deploy never reaches the registry or rolls the pod
-// and still heals the runtime version to the one actually running rather than the
-// freshly minted, never-pushed version.
 func TestCachedDeployRunThenPersistHealsToRunningVersion(t *testing.T) {
 	const tenant = "erun"
 	const mintedVersion = "1.0.86-snapshot-20260608124610"

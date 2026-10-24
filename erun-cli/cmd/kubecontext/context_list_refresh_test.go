@@ -13,9 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// listRefreshTestStore is the smallest CloudContextStore the list path needs:
-// four contexts that all share one (alias, region) group, so a single
-// describe-instances call covers every one of them.
+// listRefreshTestStore holds four contexts sharing one (alias, region) batch.
 type listRefreshTestStore struct {
 	config configpkg.ERunConfig
 }
@@ -55,10 +53,7 @@ func listRefreshTestStoreWithIDs(instanceIDs ...string) listRefreshTestStore {
 	}}
 }
 
-// listRefreshTestFailingRunAWS reproduces the upstream shape an expired SSO
-// session produces: the aws CLI echoes the whole command it was given --
-// including the comma-joined instance IDs of every context in the batch --
-// before the error text.
+// The aws CLI echoes the whole command, instance IDs included, before the error.
 func listRefreshTestFailingRunAWS() func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
 	return func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
 		command := "aws " + strings.Join(args, " ")
@@ -66,10 +61,6 @@ func listRefreshTestFailingRunAWS() func(core.Context, configpkg.CloudProviderCo
 	}
 }
 
-// The structured form owes the same fact once. A JSON consumer that only sees
-// per-context messages would have to re-derive the batch from N identical
-// copies -- and would read the batch's whole command, instance IDs included,
-// in every row.
 func TestContextListJSONCarriesTheBatchFailureOnce(t *testing.T) {
 	instanceIDs := []string{"i-0aaaa11111aaaa1111", "i-0bbbb22222bbbb2222"}
 	store := listRefreshTestStoreWithIDs(instanceIDs...)
@@ -108,8 +99,6 @@ func TestContextListJSONCarriesTheBatchFailureOnce(t *testing.T) {
 	}
 }
 
-// requireUnknownWithoutSharedCause pins what a row owes once its batch failed:
-// the refuted state, and no copy of a cause that belongs to the batch.
 func requireUnknownWithoutSharedCause(t *testing.T, context configpkg.CloudContextStatus) {
 	t.Helper()
 	if context.Message != "" {

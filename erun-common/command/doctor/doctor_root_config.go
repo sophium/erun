@@ -9,10 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// RepairOrphanedAliasParams carries the fields needed to re-init a
-// provider for one orphan. Region is sourced from a referenced cloud
-// context when available; SSORegion / SSOStartURL come from the
-// caller because they are not derivable from any persisted state.
+// RepairOrphanedAliasParams carries the fields needed to re-init one orphan's provider.
 type RepairOrphanedAliasParams struct {
 	Orphan        configpkg.OrphanedAlias
 	SSORegion     string
@@ -23,9 +20,7 @@ type RepairOrphanedAliasParams struct {
 	SkipLogin     bool
 }
 
-// RepairOrphanedAlias re-creates a provider for one orphaned alias by
-// delegating to InitAWSCloudProvider; it stays a thin adapter so the init
-// flow's SSO/identity/OIDC handling is not forked here.
+// RepairOrphanedAlias re-creates a provider for one orphaned alias via InitAWSCloudProvider.
 func RepairOrphanedAlias(ctx core.Context, store cloud.CloudStore, params RepairOrphanedAliasParams, deps cloud.CloudDependencies) (configpkg.CloudProviderConfig, error) {
 	if !params.Orphan.Parsed {
 		return configpkg.CloudProviderConfig{}, fmt.Errorf("orphaned alias %q cannot be parsed; recreate the provider manually with `erun cloud init aws`", params.Orphan.Alias)

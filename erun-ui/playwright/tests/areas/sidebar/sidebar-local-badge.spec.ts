@@ -2,11 +2,8 @@ import { test, expect } from '../../../fixtures/erunApp.js';
 import type { AppShell } from '../../../pages/index.js';
 import { SEED_ENV_ALPHA, SEED_ENV_BETA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// Regression guard: the sidebar LOCAL badge once keyed off the legacy `remote`
-// flag instead of the resolved env type, so a local-agent env in the new
-// `type` shape (`remote` unset) showed no badge even though the Manage dialog
-// reported "Local agent". The seeded envs carry that exact shape, so the
-// sidebar pill must agree with the dialog's reported type.
+// The LOCAL badge must follow the resolved env type, not the legacy `remote` flag, and agree with
+// the Manage dialog.
 test.describe('sidebar LOCAL badge', () => {
   test('badge matches the environment type and the (local) label suffix', async ({ app }) => {
     for (const env of [SEED_ENV_ALPHA, SEED_ENV_BETA]) {
@@ -31,8 +28,7 @@ interface BadgeState {
   hasSuffix: boolean;
 }
 
-// The dialog is opened via the keyboard path because a mouse click on the row
-// gets intercepted by the env hover-card popover the pointer trails over.
+// A mouse click on the row is intercepted by the hover-card popover, so open via keyboard.
 async function readBadgeState(app: AppShell, tenant: string, env: string): Promise<BadgeState> {
   await app.sidebar.openManageDialogViaKeyboard(tenant, env);
   await app.manageDialog.waitForOpen();

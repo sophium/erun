@@ -16,15 +16,8 @@ import (
 )
 
 func testDeployRealRunDedupSkipWhenIdenticalMarkerAlive(t *testing.T) {
-	// Real-run arm of the singleflight skip: a live marker (our own pid)
-	// with the identical params hash and a fresh StartedAt makes the
-	// second deploy a no-op success without ever invoking helm. The hash
-	// comes from a first dry-run against the same resolved spec; the
-	// real run must use -vv because the helm argv (and therefore the
-	// params hash) embeds verbosity flags and dry-run always traces at
-	// raised verbosity — a verbosity-0 real run computes a hash the
-	// dry-run probe never reports. The marker must also be recent or the
-	// max-age reclaim arm would fire first.
+	// -vv is required: the params hash embeds verbosity, and dry-run always traces
+	// raised verbosity. The marker must be fresh or the max-age reclaim fires first.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -54,13 +47,7 @@ func testDeployRealRunDedupSkipWhenIdenticalMarkerAlive(t *testing.T) {
 }
 
 func testDeployRealRunDedupReclaimsAgedMarker(t *testing.T) {
-	// Real-run max-age reclaim arm: the marker's pid is alive (our own),
-	// but its StartedAt (the fixture's fixed 2026-05-10 default) is far
-	// past the 15-minute deploy ceiling, so the deploy reclaims the
-	// marker and proceeds. The reclaim trace embeds the marker's current
-	// wall-clock age, which no normalization rule can pin down, so this
-	// scenario asserts the stable fragments instead of a whole-stream
-	// golden.
+	// The reclaim trace embeds the marker's wall-clock age, so only stable fragments are asserted.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -93,9 +80,6 @@ func testDeployRealRunDedupReclaimsAgedMarker(t *testing.T) {
 }
 
 func testDeployRealRunDedupReplacesUnreadableMarker(t *testing.T) {
-	// Real-run unreadable-marker arm: a corrupt marker (truncated JSON)
-	// must not block the deploy — the runner traces the replacement,
-	// removes the file, claims a fresh marker, and proceeds.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -118,11 +102,6 @@ func testDeployRealRunDedupReplacesUnreadableMarker(t *testing.T) {
 }
 
 func testDeployRealRunDedupConflictOnDifferentParams(t *testing.T) {
-	// Real-run conflict arm: a live, fresh marker with a different params
-	// hash means another deploy with different intent owns the release;
-	// the second invocation must fail fast with
-	// HelmReleaseConcurrentDeployError instead of stomping the live helm
-	// upgrade.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -147,9 +126,6 @@ func testDeployRealRunDedupConflictOnDifferentParams(t *testing.T) {
 }
 
 func testDeployRealRunDedupReclaimWhenMarkerPIDDead(t *testing.T) {
-	// Real-run dead-pid reclaim arm: a fresh marker whose recorded pid is
-	// already reaped is leftover state from a crashed deploy; the runner
-	// reclaims it and proceeds with the rollout.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -174,14 +150,8 @@ func testDeployRealRunDedupReclaimWhenMarkerPIDDead(t *testing.T) {
 }
 
 func testDeployDryRunDedupSkipWhenIdenticalMarkerAlive(t *testing.T) {
-	// When another erun deploy is in flight against the same release with
-	// the same params hash, dry-run reports "would skip" and exits 0.
-	// We seed the marker with our own pid (always alive during this
-	// test) and the params hash erun --dry-run will compute on the
-	// first run. The second run sees the live identical marker. The
-	// marker must also be recent or the max-age reclaim arm would fire
-	// first (the fixture's default StartedAt is fixed, so it ages past
-	// the 15-minute ceiling as real time passes).
+	// Our own pid is always alive. The marker must be fresh: the fixture's fixed
+	// StartedAt ages past the 15-minute ceiling.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -212,13 +182,7 @@ func testDeployDryRunDedupSkipWhenIdenticalMarkerAlive(t *testing.T) {
 }
 
 func testDeployDryRunDedupConflictOnDifferentParams(t *testing.T) {
-	// A live in-flight deploy with a different params hash should fail
-	// the second invocation with HelmReleaseConcurrentDeployError so two
-	// callers with conflicting intent surface the conflict instead of
-	// stomping on each other's helm release. The marker must also be
-	// recent or the max-age reclaim arm would fire first (the fixture's
-	// default StartedAt is fixed, so it ages past the 15-minute ceiling
-	// as real time passes).
+	// The marker must be fresh or the max-age reclaim fires first.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -244,18 +208,11 @@ func testDeployDryRunDedupConflictOnDifferentParams(t *testing.T) {
 }
 
 func testDeployDryRunDedupReclaimWhenMarkerPIDDead(t *testing.T) {
-	// A leftover marker whose pid is no longer running should not block
-	// a fresh dry-run; it reports "would reclaim" so the user can see
-	// the stale-state recovery path was taken.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
-	// Use a real reaped child PID (positive, dead) instead of PID 0.
-	// PID 0 short-circuits in isProcessAlive without ever calling
-	// Signal(0); a reaped PID forces the live signal-error path that
-	// surfaces darwin's os.ErrProcessDone vs. linux's ESRCH. Without
-	// that distinction the marker stays "alive" on darwin and deploy
-	// is locked out for the full 15-minute max-age fallback.
+	// PID 0 short-circuits isProcessAlive; a reaped PID exercises the darwin
+	// os.ErrProcessDone vs linux ESRCH path.
 	deadPID := reapedChildPID(t)
 	fixture.SeedDeployInflightMarker(t, setup, "test-context", "team-dev", "team-devops", fixture.DeployInflightRecord{
 		PID:         deadPID,
@@ -274,11 +231,7 @@ func testDeployDryRunDedupReclaimWhenMarkerPIDDead(t *testing.T) {
 	}
 }
 
-// extractDedupHash pulls the live params hash off a "dedup: ready (release=..., hash=<HEX>)"
-// line emitted by erun deploy --dry-run -vv. Tests use this to seed an
-// identical-hash marker for the dedup-skip path. The raw output is captured
-// before normalization so the hash is the real 16-char hex value, not the
-// <HASH> placeholder.
+// extractDedupHash reads the hash from raw (pre-normalization) -vv dry-run output.
 func extractDedupHash(t *testing.T, raw string) string {
 	t.Helper()
 	const marker = "dedup: ready ("
@@ -306,21 +259,12 @@ func isHex(c byte) bool {
 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
-// reapedChildPID returns the PID of an already-exited child, so isProcessAlive
-// hits the real signal(0) error path (ESRCH on linux, os.ErrProcessDone on
-// darwin). PID reuse between the wait and the marker read is theoretically
-// possible but vanishingly unlikely.
 func reapedChildPID(t *testing.T) int {
 	t.Helper()
-	// The reaped-pid reclaim path is Unix liveness semantics (Signal(0) →
-	// ESRCH/os.ErrProcessDone). Windows checks liveness via the process handle
-	// and recycles PIDs aggressively, so a freshly reaped PID reads as
-	// non-deterministically alive — the reclaim behaviour itself is covered on
-	// Unix, so skip the seeding here rather than ship a flaky test.
+	// Windows recycles PIDs aggressively, so a reaped PID may read as alive.
 	if runtime.GOOS == "windows" {
 		t.Skip("reaped-pid reclaim relies on Unix signal liveness; Windows PID reuse is non-deterministic")
 	}
-	// Spawn and reap a real child to get a positive, dead PID.
 	cmd := harnessexec.Command("/bin/sh", "-c", "exit 0")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("seed reaped child: %v", err)

@@ -9,10 +9,7 @@ import {
   soleServicePort,
 } from './exposeServicePickController';
 
-// The whole point of the picker: a repo-native Service keeps its own name as
-// the Ingress backend. Deriving <tenant>-<label> here would route to a Service
-// that does not exist, producing a hostname that resolves and an ingress that
-// 503s.
+// A repo-native Service keeps its own name; a derived <tenant>-<label> would 503.
 test('a picked service routes to itself, not to a derived name', () => {
   const patch = exposeFormPatchForService(
     { name: 'validation-agent-backend-api', ports: [{ port: 8000 }] },
@@ -35,8 +32,6 @@ test('only a real prefix is stripped, never a coincidence of letters', () => {
   assert.equal(publicLabelForService('frs-api', ''), 'frs-api');
 });
 
-// Guessing between an app port and a metrics port is how internals get
-// published by accident, so several ports means the operator picks.
 test('the port is filled only when there is no choice to make', () => {
   assert.equal(soleServicePort({ name: 'api', ports: [{ port: 8080 }] }), '8080');
   assert.equal(

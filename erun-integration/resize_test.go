@@ -13,13 +13,8 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// These scenarios run with inEnvironment(...) (ERUN_REPO_REMOTE=true), the
-// same seam environment_half_test.go's other two-homes commands use, so
-// resize's own occupancy check reads the isolated local lease store directly
-// instead of dispatching to a (nonexistent, in this harness) MCP edge for a
-// remote environment. TestResizeOffEnvironment covers the other half: a
-// host-side resize targeting a remote environment, where the occupancy check
-// must reach that environment's own edge instead of the caller's local store.
+// TestResize runs in-environment, so the occupancy check reads the local lease store;
+// TestResizeOffEnvironment covers dispatch to a remote edge.
 func TestResize(t *testing.T) {
 	t.Parallel()
 	t.Run("help", testResizeHelp)
@@ -53,10 +48,7 @@ func testResizeHelp(t *testing.T) {
 }
 
 func testResizeDryRunMissingTenant(t *testing.T) {
-	// resize resolves its target through the same shared resolver as
-	// usage/observe/deploy. With no tenant configured the failure must name
-	// resize and its own --tenant recovery, not another command's; resize's
-	// --tenant scopes resolution, so offering it is a real next step.
+	// The no-tenant failure must name resize's own --tenant recovery.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"resize", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode == 0 {
@@ -66,9 +58,6 @@ func testResizeDryRunMissingTenant(t *testing.T) {
 }
 
 func testResizeDryRunExplicitValues(t *testing.T) {
-	// --dry-run must trace the resolved plan (current -> target per
-	// resource) and the note on what moves/doesn't, without writing the
-	// env config or rolling anything.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--cpu", "6", "--memory", "20480Mi", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -80,9 +69,7 @@ func testResizeDryRunExplicitValues(t *testing.T) {
 }
 
 func testResizeDryRunNoOpWhenAlreadySized(t *testing.T) {
-	// The default runtimepod is cpu=4 memory=16384Mi (runtime_resources.go);
-	// asking for exactly that must report a no-op and never reach the
-	// lease check or the deploy composition.
+	// The default runtimepod (cpu=4, 16384Mi) is a no-op that skips the lease check and deploy.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--cpu", "4", "--memory", "16384Mi", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -93,10 +80,7 @@ func testResizeDryRunNoOpWhenAlreadySized(t *testing.T) {
 }
 
 func testResizeDryRunApplyRecommendationWithoutHistoryRefuses(t *testing.T) {
-	// A host-side invocation has no retained usage history to read (it is
-	// only ever written in-pod), so --apply-recommendation must refuse
-	// with an explicit, actionable message rather than silently sizing
-	// from nothing.
+	// Usage history is only written in-pod, so host-side --apply-recommendation refuses.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--apply-recommendation", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -127,10 +111,7 @@ func testResizeDryRunNoTargetGivenRefuses(t *testing.T) {
 }
 
 func testResizeDryRunExceedsNamespaceQuotaRefuses(t *testing.T) {
-	// The namespace quota is 10 CPU; the erun-dind sidecar's own fixed 4
-	// CPU is spent before the runtime container gets anything, so a
-	// requested 8 (8+4=12) must be refused naming the resource, the
-	// sidecar's share, and what is actually available (6).
+	// Quota is 10 CPU and the dind sidecar takes 4, so 8 is refused with 6 available.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	appendEnvConfigForTest(t, setup, "team", "dev", "namespacequota:\n  cpu: \"10\"\n  memory: 32Gi\n  storage: 80Gi\n")
@@ -142,11 +123,7 @@ func testResizeDryRunExceedsNamespaceQuotaRefuses(t *testing.T) {
 }
 
 func testResizeDryRunDindExplicitValues(t *testing.T) {
-	// --dind-cpu/--dind-memory resize the erun-dind sidecar independent
-	// of --cpu/--memory: only a "dind-cpu"/"dind-memory" action is
-	// resolved, the runtime pod's own resource is left alone, and the
-	// resolved command carries the runtime pod's unchanged defaults
-	// alongside the new sidecar values.
+	// Sidecar flags resize only the sidecar; the runtime pod keeps its defaults.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--dind-cpu", "6", "--dind-memory", "16Gi", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -158,8 +135,6 @@ func testResizeDryRunDindExplicitValues(t *testing.T) {
 }
 
 func testResizeDryRunDindCombinedWithRuntimePodValues(t *testing.T) {
-	// The runtime-pod and sidecar flags are independent knobs that may be
-	// resized together in one call.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--cpu", "6", "--dind-memory", "16Gi", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -170,10 +145,7 @@ func testResizeDryRunDindCombinedWithRuntimePodValues(t *testing.T) {
 }
 
 func testResizeDryRunDindCombinedWithApplyRecommendation(t *testing.T) {
-	// --apply-recommendation only ever sizes the runtime pod, but it is
-	// never in conflict with an explicit --dind-cpu/--dind-memory: the
-	// two combine in one call, unlike --apply-recommendation with an
-	// explicit --cpu/--memory (dry_run_conflicting_inputs_refuses).
+	// Unlike explicit --cpu/--memory, --apply-recommendation combines with the dind flags.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
@@ -189,10 +161,7 @@ func testResizeDryRunDindCombinedWithApplyRecommendation(t *testing.T) {
 }
 
 func testResizeDryRunDindExceedsNamespaceQuotaRefuses(t *testing.T) {
-	// The sidecar's own requested target, not just its default, counts
-	// against the namespace quota: raising --dind-cpu past what the
-	// runtime pod's default leaves available must refuse the same way
-	// raising --cpu does (dry_run_exceeds_namespace_quota_refuses).
+	// The sidecar's requested target counts against the namespace quota too.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	appendEnvConfigForTest(t, setup, "team", "dev", "namespacequota:\n  cpu: \"10\"\n  memory: 32Gi\n  storage: 80Gi\n")
@@ -204,13 +173,7 @@ func testResizeDryRunDindExceedsNamespaceQuotaRefuses(t *testing.T) {
 }
 
 func testResizeRealRunPersistsDindAndRedeploysViaStubs(t *testing.T) {
-	// Mirrors real_run_persists_and_redeploys_via_stubs for the sidecar:
-	// a real (non-dry-run) --dind-cpu/--dind-memory persists
-	// EnvConfig.runtimedindpod and rolls the pod through the same deploy
-	// composition. The runtime pod's own recorded size is written too
-	// (resize always normalizes and re-persists both), but at its
-	// unchanged default (cpu=4/16384Mi) rather than the sidecar's new
-	// values, proving the two knobs stayed independent.
+	// The runtime pod is re-persisted at its unchanged default, proving the knobs are independent.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -244,10 +207,7 @@ func testResizeRealRunPersistsDindAndRedeploysViaStubs(t *testing.T) {
 }
 
 func testResizeDryRunHeldLeaseRefusesAndNamesHolder(t *testing.T) {
-	// The lease-held refusal is the safety property the resize command
-	// exists to enforce: staging a held exclusive lease (an orchestrator
-	// mid-build) must refuse the resize and name the holder, even under
-	// --dry-run, since dry-run must show every decision including this one.
+	// A held exclusive lease refuses the resize and names the holder, even under --dry-run.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedHeldExclusiveLease(t, setup, "team", "dev", "eng-42", "exec_job_attach")
@@ -265,10 +225,7 @@ func testResizeDryRunHeldLeaseRefusesAndNamesHolder(t *testing.T) {
 }
 
 func testResizeDryRunHeldLeaseWithOverrideProceeds(t *testing.T) {
-	// The override is explicit and is recorded: passing --override-lease
-	// against the same held lease must let the dry-run plan through, and
-	// the trace must say the override happened rather than staying silent
-	// about it.
+	// --override-lease lets the plan through and the trace records the override.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedHeldExclusiveLease(t, setup, "team", "dev", "eng-42", "exec_job_attach")
@@ -283,11 +240,7 @@ func testResizeDryRunHeldLeaseWithOverrideProceeds(t *testing.T) {
 }
 
 func testResizeDryRunApplyRecommendationTracesTheEvidence(t *testing.T) {
-	// The recommendation resize resolves its target from must not stay
-	// invisible: the trace must show the same verdict/evidence reasoning
-	// `erun list` prints under `runtime-pod:`, so a caller sees not just
-	// what changes but why. This reuses list_test.go's shrink-eligible
-	// fixture (a long, quiet window comfortably under the limit).
+	// The trace shows the same verdict and evidence as `erun list`'s `runtime-pod:`.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
@@ -306,16 +259,8 @@ func testResizeDryRunApplyRecommendationTracesTheEvidence(t *testing.T) {
 }
 
 func testResizeDryRunApplyRecommendationHoldsCPUAtLiveLimit(t *testing.T) {
-	// The apply plan must be built from the live cgroup limits the verdict
-	// is scored against, not the configured runtimepod (silent in-pod, so it
-	// normalizes to the package defaults cpu=4/16384Mi). Fixture mirrors a real
-	// environment running at 12 CPUs / 23552Mi with a silent config: the
-	// verdict says "cpu hold from 12" and "memory lower ... from
-	// 23552Mi", so the resolved plan must carry cpu=12 through unchanged
-	// and read memory's "from" as 23552Mi, never fall back to cpu=4 or
-	// memory 16384Mi. The leading space on each needle keeps the check from
-	// tripping on the unrelated, default-valued "dind-cpu=4"/"dind-memory=20Gi"
-	// fields the same trace line also carries.
+	// The plan uses the live cgroup limits (12 CPU / 23552Mi), not the silent config's
+	// defaults. Leading spaces keep needles off the dind-cpu/dind-memory fields.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
@@ -343,11 +288,7 @@ func testResizeDryRunApplyRecommendationHoldsCPUAtLiveLimit(t *testing.T) {
 }
 
 func testResizeDryRunApplyRecommendationNoOpStillTracesWhy(t *testing.T) {
-	// The exact case the recommendation's evidence has to answer: a
-	// no-op that reports "already sized" must not go silent about why --
-	// here a comfortable peak that hasn't been watched long enough for
-	// erun to trust a shrink (short window, `insufficient-evidence`),
-	// which resolves to no action at all.
+	// An "already sized" no-op must still say why (insufficient-evidence here).
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	seedUsageHistory(t, setup, "team", "dev", usageHistorySpec{
@@ -369,9 +310,6 @@ func testResizeDryRunApplyRecommendationNoOpStillTracesWhy(t *testing.T) {
 }
 
 func testResizeRealRunPersistsAndRedeploysViaStubs(t *testing.T) {
-	// Drives the real (non-dry-run) path: persist EnvConfig.runtimepod,
-	// take-and-release the resize's own exclusive lease, then roll the
-	// pod through the same deploy composition `erun deploy` uses.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -398,8 +336,6 @@ func testResizeRealRunPersistsAndRedeploysViaStubs(t *testing.T) {
 	}
 }
 
-// assertEnvConfigUnchanged guards the dry-run no-write contract: the env
-// config on disk must not carry the resize's target values.
 func assertEnvConfigUnchanged(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", tenant, environment, "config.yaml"))
@@ -411,10 +347,7 @@ func assertEnvConfigUnchanged(t testing.TB, setup env.Setup, tenant, environment
 	}
 }
 
-// appendEnvConfigForTest mirrors the package-private fixture.appendEnvConfig,
-// duplicated here because that helper is not exported across the fixture
-// package boundary and resize is the first scenario file outside fixture.go
-// needing a namespace quota on an otherwise-default SeedTenantEnv env.
+// appendEnvConfigForTest duplicates fixture.appendEnvConfig, which is not exported.
 func appendEnvConfigForTest(t testing.TB, setup env.Setup, tenant, environment, extra string) {
 	t.Helper()
 	path := filepath.Join(setup.ConfigHome, "erun", tenant, environment, "config.yaml")
@@ -427,12 +360,8 @@ func appendEnvConfigForTest(t testing.TB, setup env.Setup, tenant, environment, 
 	}
 }
 
-// seedHeldExclusiveLease writes an exclusive activity lease file directly
-// into the isolated cache root, bypassing the real `erun activity lease take`
-// command: this test only needs a lease to already be held when `resize`
-// runs, not to exercise the take path itself. Mirrors the on-disk shape
-// activity's takeExclusiveEnvironmentActivityLease
-// writes (exclusiveEnvironmentActivityLeaseDir, keyed by sanitized scope).
+// seedHeldExclusiveLease writes the lease file in the on-disk shape
+// takeExclusiveEnvironmentActivityLease uses, bypassing `erun activity lease take`.
 func seedHeldExclusiveLease(t testing.TB, setup env.Setup, tenant, environment, orchestrator, name string) {
 	t.Helper()
 	dir := filepath.Join(setup.CacheHome, "erun", "activity", tenant, environment, "leases", "exclusive")

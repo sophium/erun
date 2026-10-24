@@ -98,9 +98,6 @@ func writeObserveLimitRanges(ctx core.Context, limitRanges []observe.ObservedLim
 	return nil
 }
 
-// writeObserveServices lists what the namespace runs, with the port an Ingress
-// would route to. Services come before Ingresses because that is the order the
-// question is asked in: what is running, then what is published.
 func writeObserveServices(ctx core.Context, services []clusterread.ObservedService) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Services (%d):\n", len(services)); err != nil {
 		return err
@@ -220,9 +217,7 @@ func writeObserveHelmRelease(ctx core.Context, release *clusterread.ObservedHelm
 	return nil
 }
 
-// writeObserveHelmReleaseNotFound distinguishes a confirmed absence (no
-// Error) from a read that failed (Error set): a caller must never see the
-// same "nothing here" line for both.
+// writeObserveHelmReleaseNotFound distinguishes a confirmed absence from a failed read.
 func writeObserveHelmReleaseNotFound(ctx core.Context, release *clusterread.ObservedHelmRelease) error {
 	if release.Error != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: could not read: %s\n", release.Name, release.Error)

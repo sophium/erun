@@ -15,10 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewReviewCmd builds `erun review`, the CLI's client for the erun platform's
-// collaboration API (erun-backend-api's reviews/comments/builds/merge-queue
-// routes), authenticating with the `erun`-type cloud alias `erun cloud init
-// erun` / `erun cloud login` set up.
+// NewReviewCmd builds `erun review`, the client for the platform's collaboration API.
 func NewReviewCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
 	cmd := shared.NewCommandGroup(
@@ -103,13 +100,8 @@ func writeReviewList(ctx core.Context, reviews []platformclient.PlatformReview) 
 	return nil
 }
 
-// writeReviewLine renders one review. The repository is named on every line
-// because a review's source/target pair does not tell two repositories a
-// tenant serves apart, and a listing that renders them identically is how
-// another tenant's -- or another repository's -- queue read as this one's.
-// A review created before the platform recorded a repository says so rather
-// than printing nothing, which would read as an empty value rather than an
-// absent identity.
+// writeReviewLine renders one review. The repository is always named so queues of
+// different repositories cannot read as the same one.
 func writeReviewLine(ctx core.Context, review platformclient.PlatformReview) error {
 	repository := review.Repository
 	if strings.TrimSpace(repository) == "" {
@@ -121,13 +113,8 @@ func writeReviewLine(ctx core.Context, review platformclient.PlatformReview) err
 	return err
 }
 
-// reviewIssueSuffix renders the review's issue link and its provenance, or an
-// empty string when it is linked to none.
-//
-// The provenance is not decoration: a reference parsed out of a branch name is
-// a guess that the branch was named honestly, and printing it the way a
-// declared one prints would tell an operator the author had recorded an issue
-// they never mentioned. Both are shown, told apart.
+// reviewIssueSuffix renders the review's issue link with its provenance; an issue
+// parsed from a branch name is a guess and must not print like a declared one.
 func reviewIssueSuffix(review platformclient.PlatformReview) string {
 	if strings.TrimSpace(review.IssueRef) == "" {
 		return ""
@@ -182,9 +169,7 @@ func writeReviewDetail(ctx core.Context, detail reviewpkg.ReviewDetail) error {
 	return nil
 }
 
-// writeReviewCommentLine renders one comment. A thread's status lives on its
-// root comment only (a reply's own status is never separately settable), so
-// only root lines carry status=.
+// writeReviewCommentLine renders one comment. Thread status lives on root comments only.
 func writeReviewCommentLine(ctx core.Context, comment platformclient.PlatformComment) error {
 	if strings.TrimSpace(comment.ParentCommentID) != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "    ↳ [%s] %s:%d %s\n", comment.CommentID, comment.FilePath, comment.Line, comment.Body)

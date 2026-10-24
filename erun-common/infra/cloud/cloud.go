@@ -14,9 +14,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// ErrCloudProviderNoOIDC reports that a provider type does not participate in
-// OIDC web-identity federation, so callers aggregating issuers skip it rather
-// than fail. Cloudflare authenticates with a scoped API token, not a JWT issuer.
+// ErrCloudProviderNoOIDC marks a provider (Cloudflare) that has no OIDC issuer, so
+// issuer aggregation skips it.
 var ErrCloudProviderNoOIDC = errors.New("cloud provider does not support OIDC issuance")
 
 type CloudStore interface {
@@ -56,32 +55,22 @@ type InitAWSCloudProviderParams struct {
 type CloudLoginParams struct {
 	Alias string
 	Force bool
-	// Scopes are extra OAuth scopes to request on top of the baseline
-	// "openid offline_access". A provider's reserved scopes are often not
-	// advertised in discovery, so they can only be asked for by name — e.g.
-	// urn:zitadel:iam:user:resourceowner, which is what makes a Zitadel token
-	// carry the org claim an org-scoped issuer resolves tenants by.
+	// Scopes are added to "openid offline_access"; reserved scopes such as
+	// urn:zitadel:iam:user:resourceowner are often not advertised in discovery.
 	Scopes []string
-	// Flow selects the OIDC grant used for an erun-hosted alias:
-	// ERunLoginFlowDevice, ERunLoginFlowAuthCode, or empty/ERunLoginFlowAuto.
-	// Ignored by every other provider, which has only one login path.
+	// Flow selects the OIDC grant for an erun-hosted alias; other providers ignore it.
 	Flow string
 }
 
-// The OIDC grants an erun-hosted alias can sign in with. Auto is the default:
-// it prefers the device grant when the issuer advertises one, and falls back to
-// authorization code + PKCE when that grant cannot complete — a single
-// unusable authentication method must not lock the CLI out when a second,
-// working flow exists.
+// Auto prefers the device grant and falls back to auth code + PKCE, so one unusable
+// method never locks the CLI out.
 const (
 	ERunLoginFlowAuto     = "auto"
 	ERunLoginFlowDevice   = "device"
 	ERunLoginFlowAuthCode = "authcode"
 )
 
-// NormalizeERunLoginFlow validates a requested flow and resolves the empty
-// value to auto. The error names the accepted values, since this is operator
-// input from a flag or a tool argument.
+// NormalizeERunLoginFlow validates a flow and resolves empty to auto.
 func NormalizeERunLoginFlow(flow string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(flow)) {
 	case "", ERunLoginFlowAuto:
@@ -123,15 +112,11 @@ type CloudDependencies struct {
 	ResolveAWSIdentity      func(core.Context, string) (AWSIdentity, error)
 	CheckAWSStatus          func(core.Context, configpkg.CloudProviderConfig) CloudProviderStatus
 
-	// CloudSecretStore is nil unless a transport wires one; Cloudflare and erun
-	// operations that need it fail clearly when it is absent.
+	// CloudSecretStore is nil unless a transport wires one.
 	VerifyCloudflareToken  func(core.Context, string) (CloudflareTokenInfo, error)
 	ListCloudflareAccounts func(core.Context, string) ([]CloudflareAccount, error)
 	CloudSecretStore       CloudSecretStore
 
-	// erun cloud provider: platform/OIDC discovery, the device authorization
-	// grant, the Authorization Code + PKCE fallback, and the refresh_token
-	// grant. See cloud_erun.go / cloud_erun_oidc.go.
 	FetchPlatformInfo            func(core.Context, string) (platformclient.PlatformInfo, error)
 	FetchOIDCDiscovery           func(core.Context, string) (OIDCDiscovery, error)
 	StartERunDeviceAuthorization func(core.Context, OIDCDiscovery, string, string) (ERunDeviceAuthorization, error)
@@ -140,26 +125,14 @@ type CloudDependencies struct {
 	RefreshERunTokens            func(core.Context, OIDCDiscovery, string, string) (ERunTokens, error)
 	ClientCredentialsERunTokens  func(core.Context, OIDCDiscovery, string, string) (ERunTokens, error)
 
-	// FetchVersionJSON resolves a deployed version surface's own build version
-	// (GET <surfaceURL>/version.json, unauthenticated) -- a control plane's
-	// console and its docs site both answer it the same way. See
-	// control_plane_version_drift.go.
+	// FetchVersionJSON reads a surface's unauthenticated /version.json.
 	FetchVersionJSON func(core.Context, string) (string, error)
-	// ResolveHostAddrs resolves a hostname to its IP addresses -- used by
-	// control_plane_version_drift.go to tell a plane's own discovery document
-	// naming a benign canonical alias apart from one advertising a genuinely
-	// different backend.
+	// ResolveHostAddrs lets drift detection tell a benign canonical alias from a different backend.
 	ResolveHostAddrs func(core.Context, string) ([]string, error)
 }
 
-// DefaultCloudDependencies returns a CloudDependencies with CloudSecretStore
-// set to the default file-backed store when one can be constructed there,
-// left nil otherwise. Every transport needs this same tolerant-nil
-// construction (the store's directory may not exist, or may be otherwise
-// unavailable) — call this from each rather than open-coding it again, which
-// is how the listing path went a full release without it.
-// Cloudflare/erun operations that need the store fail clearly downstream when
-// it stays nil, rather than here.
+// DefaultCloudDependencies sets CloudSecretStore when the default store can be built and
+// leaves it nil otherwise; every transport must use it.
 func DefaultCloudDependencies() CloudDependencies {
 	deps := CloudDependencies{}
 	if store, err := DefaultCloudSecretStore(); err == nil {
@@ -168,9 +141,7 @@ func DefaultCloudDependencies() CloudDependencies {
 	return deps
 }
 
-// CloudProviderCredentials is a snapshot of temporary AWS credentials derived
-// from a configured host profile, for injecting into a remote runtime so it
-// acts as the host's IAM identity. AWS hands out roughly 1h windows, so
+// CloudProviderCredentials are temporary (~1h) AWS credentials for a remote runtime;
 // callers must refresh.
 type CloudProviderCredentials struct {
 	Alias           string    `json:"alias"`
@@ -280,9 +251,6 @@ func ResolveTenantCloudProviderIssuers(store configpkg.CloudReadStore, tenant co
 			return nil, err
 		}
 		if !cloudProviderSupportsOIDC(provider.Provider) {
-			// Cloudflare aliases authenticate the runtime with a scoped API
-			// token, not an OIDC JWT, so they contribute no issuer. Skip them
-			// rather than fail the tenant's issuer aggregation.
 			continue
 		}
 		issuer := CloudProviderOIDCIssuerURL(provider)
@@ -298,9 +266,7 @@ func ResolveTenantCloudProviderIssuers(store configpkg.CloudReadStore, tenant co
 	return issuers, nil
 }
 
-// cloudProviderSupportsOIDC gates issuer aggregation strictly on provider type
-// (only Cloudflare is exempt) so an AWS alias with a genuinely missing issuer
-// still surfaces as an error instead of being silently skipped.
+// Gate strictly on provider type so an AWS alias missing its issuer still errors.
 func cloudProviderSupportsOIDC(provider string) bool {
 	return strings.ToLower(strings.TrimSpace(provider)) != configpkg.CloudProviderCloudflare
 }
@@ -317,16 +283,8 @@ func CloudProviderOIDCIssuerURL(provider configpkg.CloudProviderConfig) string {
 	return startURL
 }
 
-// AttachTenantCloudProviderAlias attaches alias to a tenant's own cloud
-// provider selection, making it the tenant's primary at the same time: the
-// tenant-scoped platform resolution reads the tenant's own selection and, with
-// more than one erun alias there and no primary naming one, has to render the
-// choose-alias state instead. An attach is therefore never an ambiguous
-// selection — the alias just attached is the one the caller meant.
-//
-// Existing aliases are preserved: this adds to a selection the operator built
-// elsewhere, and pruning a different provider's alias here would silently
-// revoke an attachment this call knows nothing about.
+// AttachTenantCloudProviderAlias adds alias and makes it primary, so the selection is never
+// ambiguous. Existing aliases are kept.
 func AttachTenantCloudProviderAlias(aliases []string, primary, alias string) ([]string, string) {
 	alias = strings.TrimSpace(alias)
 	if alias == "" {

@@ -19,25 +19,10 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// runtime_usage.go wires the desktop's Runtime tab to the same reader
-// podruntime.RunRuntimeUsage already gives `erun usage` and the MCP usage
-// tool: CPU quota utilisation, memory against the runtime container's own
-// cgroup limit with a real OOM-kill count, and disk on the workspace mount.
-// The tab already holds the CPU/memory sliders, so this reading is directly
-// actionable there in a way `erun usage` on the CLI is not.
-
-// runtimeUsageTimeout bounds the on-demand probe, matching
-// runtimeActivityTimeout in runtime_activity.go: a wedged pod must surface as
-// unavailable quickly rather than hanging the Runtime tab. This is a
-// refresh-button probe, not a poller.
 const runtimeUsageTimeout = 10 * time.Second
 
-// LoadRuntimeUsage reports the selected environment's own CPU, memory and
-// disk usage against its cgroup limits.
-//
-// Fail-soft in the same way as LoadRuntimeActivity: an unreachable or stopped
-// environment yields an unavailable report with the reason, never an error
-// that turns the Runtime tab into a failure surface.
+// LoadRuntimeUsage reports the environment's CPU, memory and disk usage against its
+// cgroup limits; it fails soft to an unavailable report.
 func (a *App) LoadRuntimeUsage(selection uiSelection) (uiRuntimeUsage, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("load runtime usage", selection.Tenant, selection.Environment); err != nil {
@@ -54,8 +39,6 @@ func (a *App) LoadRuntimeUsage(selection uiSelection) (uiRuntimeUsage, error) {
 	return usage, nil
 }
 
-// loadRuntimeUsageViaKubectl resolves the selected env to a shell launch
-// target and runs the shared reader against it, bounded by runtimeUsageTimeout.
 func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selection uiSelection) (uiRuntimeUsage, error) {
 	if store == nil {
 		return uiRuntimeUsage{}, fmt.Errorf("configuration store is unavailable")
@@ -79,10 +62,7 @@ func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selec
 	return uiRuntimeUsageFromReading(reading), nil
 }
 
-// runtimeUsageRunner wraps the kubectl exec RunRuntimeUsage needs with the
-// bounded ctx above. erun-common's own RunRuntimeContainerCommand has no
-// timeout, since a CLI or MCP call is fine waiting on a real terminal; a UI
-// probe on a refresh button is not.
+// erun-common's RunRuntimeContainerCommand has no timeout; a UI probe needs one.
 func runtimeUsageRunner(ctx context.Context) diagnosis.RuntimeContainerCommandRunnerFunc {
 	return func(req config.ShellLaunchParams, container, script string) (kube.RemoteCommandResult, error) {
 		args := make([]string, 0, 10)
@@ -104,11 +84,6 @@ func runtimeUsageRunner(ctx context.Context) diagnosis.RuntimeContainerCommandRu
 	}
 }
 
-// runtimePodRequestsRunner is runtimeUsageRunner's sibling for the reservation
-// read: the same bounded ctx, so a `kubectl get pods` that hangs on an
-// unreachable API server cannot hold the Runtime tab open past the probe's own
-// deadline. The invocation itself is erun-common's (RuntimePodRequestsArgs) so
-// the desktop reads the identical pod spec the CLI and the MCP tool read.
 func runtimePodRequestsRunner(ctx context.Context) podruntime.RuntimePodRequestsRunnerFunc {
 	return func(args []string) ([]byte, error) {
 		cmd := exec.CommandContext(ctx, "kubectl", args...)
@@ -123,9 +98,7 @@ func runtimePodRequestsRunner(ctx context.Context) podruntime.RuntimePodRequests
 	}
 }
 
-// uiRuntimeUsageFromReading maps the shared reader's output onto the UI
-// model. Every field carries its own unavailability rather than collapsing to
-// zero, matching the reader's own fail-soft contract.
+// Every field keeps its own unavailability rather than collapsing to zero.
 func uiRuntimeUsageFromReading(reading config.RuntimeUsage) uiRuntimeUsage {
 	usage := uiRuntimeUsage{
 		Tenant:         reading.Tenant,
@@ -140,11 +113,7 @@ func uiRuntimeUsageFromReading(reading config.RuntimeUsage) uiRuntimeUsage {
 	for _, disk := range reading.Disk {
 		usage.Disk = append(usage.Disk, uiRuntimeDiskUsageFromReading(disk))
 	}
-	// The sidecar is carried through whole rather than folded into CPU/Memory
-	// above: those two describe the runtime container, and the whole point of
-	// the field is that on a build-capable environment they are not the
-	// environment's usage. A nil reading stays nil — an older runtime image
-	// without the sidecar-readable path must render as "not read", not as zero.
+	// Builds run in the dind sidecar, so it is carried separately; nil (older image) stays nil, not zero.
 	if reading.Dind != nil {
 		usage.Dind = &uiRuntimeDindUsage{
 			CPU:    uiRuntimeCPUUsageFromReading(reading.Dind.CPU),
@@ -156,9 +125,7 @@ func uiRuntimeUsageFromReading(reading config.RuntimeUsage) uiRuntimeUsage {
 }
 
 func uiRuntimeCPUUsageFromReading(cpu config.RuntimeCPUUsage) uiRuntimeCPUUsage {
-	// UsageUsec travels with both branches: it is read before the quota is
-	// resolved (erun-common's runtimeCPUUsageFromValues), so a container with no
-	// ceiling still reports the work it has done.
+	// UsageUsec is read before the quota, so it is set even without a ceiling.
 	if cpu.Unavailable != "" {
 		return uiRuntimeCPUUsage{Unavailable: cpu.Unavailable, UsageUsec: cpu.UsageUsec}
 	}
@@ -193,11 +160,7 @@ func uiRuntimeMemoryUsageFromReading(memory config.RuntimeMemoryUsage) uiRuntime
 	return result
 }
 
-// uiRuntimeUsageRequestsFromReading maps the reservation reading, keeping the
-// two failure shapes apart: no reading at all (a dry run, or a caller that
-// never asked) stays nil, while a pod spec that could not be read arrives as an
-// unavailable reading with its reason -- so the card renders "not read" and
-// never a reservation of nothing.
+// nil means never read; an unreadable pod spec arrives as unavailable with its reason.
 func uiRuntimeUsageRequestsFromReading(requests *config.RuntimeUsageRequests) *uiRuntimeUsageRequests {
 	if requests == nil {
 		return nil
@@ -208,11 +171,7 @@ func uiRuntimeUsageRequestsFromReading(requests *config.RuntimeUsageRequests) *u
 	}
 }
 
-// uiRuntimeContainerRequestsFromReading carries a request pair in both the
-// numbers a renderer compares and the strings it shows: the millicores/bytes
-// are what the card sorts and labels against a limit, and the rendered CPU/
-// memory are formatted once here so the hover card, the Runtime tab and the
-// Manage dialog cannot spell the same reservation differently.
+// CPU/memory strings are formatted once here so every view spells them the same.
 func uiRuntimeContainerRequestsFromReading(requests config.KubernetesRequests) uiRuntimeContainerRequests {
 	rendered := uiRuntimeContainerRequests{
 		CPUMilli:    requests.CPUMilli,
@@ -243,9 +202,6 @@ func uiRuntimeDiskUsageFromReading(disk config.RuntimeDiskUsage) uiRuntimeDiskUs
 	}
 }
 
-// uiRuntimeUsageMessage states what is actually known in one line, omitting
-// whichever of CPU/memory could not be read rather than reporting a zero for
-// it.
 func uiRuntimeUsageMessage(usage uiRuntimeUsage) string {
 	var parts []string
 	if usage.CPU.Available {
@@ -261,10 +217,7 @@ func uiRuntimeUsageMessage(usage uiRuntimeUsage) string {
 	if len(parts) == 0 {
 		return "This environment's own CPU and memory usage could not be read."
 	}
-	// The runtime container's figures are the whole story on an environment
-	// with no sidecar and are never the whole story on one that has it: builds
-	// run in erun-dind, so this line must not be read as "this environment is
-	// idle". The sidecar's own reading is the panel's Builds block.
+	// Builds run in erun-dind, so an idle runtime container does not mean an idle environment.
 	builds := ""
 	if usage.ExcludesBuilds {
 		builds = ", excluding builds (they run in the erun-dind sidecar)"

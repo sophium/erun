@@ -12,8 +12,6 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// reportAISession reports one ai-session event for team/dev and fails the
-// scenario unless the report is accepted.
 func reportAISession(t *testing.T, setup env.Setup, args ...string) erun.Result {
 	t.Helper()
 	full := append([]string{"activity", "ai-session", "report", "--tenant", "team", "--environment", "dev"}, args...)
@@ -24,7 +22,6 @@ func reportAISession(t *testing.T, setup env.Setup, args ...string) erun.Result 
 	return result
 }
 
-// aiSessionStatusJSON reads ai-session status for team/dev as decoded rows.
 func aiSessionStatusJSON(t *testing.T, setup env.Setup, args ...string) []map[string]any {
 	t.Helper()
 	full := append([]string{"activity", "ai-session", "status", "--tenant", "team", "--environment", "dev", "--json"}, args...)
@@ -39,12 +36,8 @@ func aiSessionStatusJSON(t *testing.T, setup env.Setup, args ...string) []map[st
 	return rows
 }
 
-// TestActivityAISession exercises the ai-session verbs a tool's own
-// turn-boundary hooks report through: the structured status replacing a
-// guess made from PTY output volume. The load-bearing case is
-// awaiting_input_survives_silence_and_is_not_idle_or_exited below - a PTY
-// output-volume heuristic cannot distinguish "waiting on the human" from
-// "idle" or "gone" because both produce the same signal, no output at all.
+// TestActivityAISession: hook-reported status must distinguish awaiting input
+// from idle or exited, which output volume cannot.
 func TestActivityAISession(t *testing.T) {
 	t.Parallel()
 
@@ -71,18 +64,13 @@ func testActivityAISessionAwaitingInputSurvivesSilenceAndIsNotIdleOrExited(t *te
 		t.Fatalf("after turn-start: want busy, got %v", busy[0]["state"])
 	}
 
-	// Reporting turn-end is the only thing that changes here: no further
-	// process output ever arrives for this session, exactly like a real
-	// session that is genuinely waiting on the human. A volume/silence
-	// heuristic would read this as idle; the structured status must not.
+	// No further output arrives, yet this must not read as idle.
 	reportAISession(t, setup, "--session", "sess-1", "--event", "turn-end")
 	awaiting := aiSessionStatusJSON(t, setup, "--session", "sess-1")
 	if awaiting[0]["state"] != "awaiting-input" {
 		t.Fatalf("after turn-end with no further output: want awaiting-input, got %v", awaiting[0]["state"])
 	}
 
-	// A session that never reported anything is genuinely idle, and must
-	// read differently from the one silently awaiting input above.
 	neverStarted := aiSessionStatusJSON(t, setup, "--session", "never-started")
 	if neverStarted[0]["state"] != "idle" {
 		t.Fatalf("session with no recorded event: want idle, got %v", neverStarted[0]["state"])
@@ -91,8 +79,6 @@ func testActivityAISessionAwaitingInputSurvivesSilenceAndIsNotIdleOrExited(t *te
 		t.Fatalf("awaiting-input must not collapse into idle")
 	}
 
-	// Once the process actually exits, the state changes again and must
-	// not be confused with the awaiting-input state that preceded it.
 	reportAISession(t, setup, "--session", "sess-1", "--event", "exit", "--exit-code", "0")
 	exited := aiSessionStatusJSON(t, setup, "--session", "sess-1")
 	if exited[0]["state"] != "exited" {
@@ -142,13 +128,7 @@ func testActivityAISessionStatusListsEveryRecordedSessionWhenNoneNamed(t *testin
 	}
 }
 
-// status_json_reports_empty_array_when_none_recorded pins the actual JSON
-// text emitted for an environment with no recorded sessions: it must be
-// "[]", never "null" - a caller doing result.length or
-// ranging over the field must not have to special-case this one command.
-// json.Unmarshal happily decodes "null" into a nil slice with no error,
-// so aiSessionStatusJSON's []map[string]any helper cannot tell the two apart;
-// this scenario asserts on the raw stdout text instead.
+// json.Unmarshal decodes "null" as nil, so this asserts the raw "[]" text.
 func testActivityAISessionStatusJSONReportsEmptyArrayWhenNoneRecorded(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")

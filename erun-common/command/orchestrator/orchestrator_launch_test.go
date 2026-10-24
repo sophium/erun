@@ -22,9 +22,6 @@ func orchestratorLaunchTestCatalog() *config.OpenRouterConfig {
 	}
 }
 
-// An orchestrator that records no settings must launch exactly as every
-// orchestrator did before the settings existed, even on a host whose gateway
-// catalog is configured for its environments.
 func TestResolveOrchestratorLaunchWithNoSettingsKeepsTheHistoricalLaunch(t *testing.T) {
 	for name, catalog := range map[string]*config.OpenRouterConfig{
 		"no catalog":         nil,
@@ -176,19 +173,14 @@ func TestResolveOrchestratorLaunchRefusesSettingsItCannotHonour(t *testing.T) {
 	}
 }
 
-// A model the gateway cannot drive is only a problem through the gateway: off
-// it, the same id is the operator's own choice to make.
 func TestValidateOrchestratorLaunchSettingsAllowsAnEchoModelOffTheGateway(t *testing.T) {
 	if err := ValidateOrchestratorLaunchSettings(config.OrchestratorConfig{Model: "vendor/echo-model"}, orchestratorLaunchTestCatalog()); err != nil {
 		t.Fatalf("ValidateOrchestratorLaunchSettings: %v", err)
 	}
 }
 
-// The shared model-token guard promised that a persisted model could never
-// reach a launch as flag syntax, but its character class admitted a leading
-// '-', so an environment's recorded model `--dangerously-skip-permissions` was
-// passed to `claude --model` verbatim. It must be ignored like any other
-// unsafe value, falling back to a model the environment can serve.
+// TestClaudeConfiguredModelIgnoresAModelThatIsFlagSyntax: a recorded model with a leading '-' must
+// be ignored, not passed as a flag.
 func TestClaudeConfiguredModelIgnoresAModelThatIsFlagSyntax(t *testing.T) {
 	for _, model := range []string{"--dangerously-skip-permissions", "-p", "-"} {
 		value := model
@@ -204,11 +196,8 @@ func TestClaudeConfiguredModelIgnoresAModelThatIsFlagSyntax(t *testing.T) {
 	}
 }
 
-// A catalog is operator-authored config that can be hand-edited or shared, and
-// an orchestrator naming no model launches on the catalog's default. That
-// default was spliced unquoted into the host launch line without the token
-// check a recorded model gets, so a catalog id carrying shell or flag syntax
-// ran on the host when the orchestrator started.
+// TestResolveOrchestratorLaunchNeverLaunchesAnUnsafeCatalogModel: a catalog default model is
+// spliced into the host launch line, so it gets the token check too.
 func TestResolveOrchestratorLaunchNeverLaunchesAnUnsafeCatalogModel(t *testing.T) {
 	catalog := &config.OpenRouterConfig{
 		BaseURL:      "https://gateway.example/api",
@@ -229,15 +218,11 @@ func TestResolveOrchestratorLaunchNeverLaunchesAnUnsafeCatalogModel(t *testing.T
 	if got := catalog.ModelIDs(); !reflect.DeepEqual(got, []string{"vendor/safe-model"}) {
 		t.Fatalf("ModelIDs() = %v, want only the safe id offered", got)
 	}
-	// The environment lane resolves its fallback through the same catalog.
 	if got := open.ResolveGatewayLaunchModel(config.EnvironmentClaudeConfig{}, catalog); got != "vendor/safe-model" {
 		t.Fatalf("resolveGatewayLaunchModel = %q, want the first safe catalog model", got)
 	}
 }
 
-// "default" is how the CLI clears a model. Stored literally -- the desktop's
-// free-entry field could do that -- it would launch `--model default` while
-// every surface showed the default.
 func TestValidateOrchestratorLaunchSettingsRefusesTheDefaultTokenAsAModel(t *testing.T) {
 	for _, model := range []string{"default", " Default "} {
 		err := ValidateOrchestratorLaunchSettings(config.OrchestratorConfig{Model: model}, nil)

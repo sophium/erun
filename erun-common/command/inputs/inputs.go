@@ -16,15 +16,11 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-// UploadRuntimeInputParams selects the file `inputs upload` places inside the
-// runtime pod.
+// UploadRuntimeInputParams selects the file `inputs upload` places in the runtime pod.
 type UploadRuntimeInputParams struct {
-	// LocalPath is the host filesystem source; must be a regular file.
 	LocalPath string
-	// RemotePath is the absolute destination path inside the pod, including the
-	// file name. It is never defaulted: the caller must always name exactly
-	// where the file lands, so it can never land inside a directory the
-	// workspace-sync mirror or another background process reconciles away.
+	// RemotePath is never defaulted, so a file cannot land somewhere a
+	// background sync reconciles away.
 	RemotePath string
 }
 
@@ -35,20 +31,12 @@ type UploadRuntimeInputResult struct {
 	SHA256     string `json:"sha256"`
 }
 
-// RuntimeInputUploadRunner runs a /bin/sh script in the env's runtime pod,
-// streaming stdin to it, and returns its captured output.
+// RuntimeInputUploadRunner runs a /bin/sh script in the runtime pod with stdin streamed to it.
 type RuntimeInputUploadRunner func(req config.ShellLaunchParams, script string, stdin io.Reader) (kube.RemoteCommandResult, error)
 
-// UploadRuntimeInput streams one local file into the env's runtime pod over
-// the same kubectl-exec transport ExecShell uses to seed an SSH key onto
-// stdin, so the bytes never pass through the model's context and never touch
-// a command line. Dry-run returns a preview result with no bytes sent.
-//
-// The source file lives on the host, so this always runs host-side: from the
-// erun-cli command, or from the inputs_upload local tool erun mcp proxy
-// serves (mirroring workspace_sync) for an MCP-connected orchestrator. It has
-// no in-pod MCP counterpart — the edge in erun-mcp runs inside the pod and
-// has no path back to the operator's filesystem.
+// UploadRuntimeInput streams a host file into the runtime pod over kubectl exec
+// stdin, so the bytes never touch the model's context or a command line.
+// It is host-only: the in-pod MCP edge has no path to the operator's filesystem.
 func UploadRuntimeInput(ctx core.Context, req config.ShellLaunchParams, params UploadRuntimeInputParams, run RuntimeInputUploadRunner) (UploadRuntimeInputResult, error) {
 	dir, name, info, err := resolveRuntimeInputUpload(params)
 	if err != nil {
@@ -80,9 +68,6 @@ func UploadRuntimeInput(ctx core.Context, req config.ShellLaunchParams, params U
 	return UploadRuntimeInputResult{RemotePath: target, Bytes: info.Size(), SHA256: localSHA}, nil
 }
 
-// resolveRuntimeInputUpload validates params and stats the local source,
-// isolated from UploadRuntimeInput so its own branching doesn't inflate that
-// function's complexity.
 func resolveRuntimeInputUpload(params UploadRuntimeInputParams) (dir, name string, info os.FileInfo, err error) {
 	localPath := strings.TrimSpace(params.LocalPath)
 	if localPath == "" {
@@ -106,9 +91,7 @@ func resolveRuntimeInputUpload(params UploadRuntimeInputParams) (dir, name strin
 	return dir, name, info, nil
 }
 
-// verifyRuntimeInputUpload decodes the upload script's response and confirms
-// it matches what was sent, so a transfer never reports success on a
-// corrupted or partial write.
+// verifyRuntimeInputUpload rejects a corrupted or partial write.
 func verifyRuntimeInputUpload(target, localSHA string, localSize int64, stdout string) error {
 	remoteSize, remoteSHA, err := parseRuntimeInputUploadResponse(stdout)
 	if err != nil {
@@ -123,9 +106,6 @@ func verifyRuntimeInputUpload(target, localSHA string, localSize int64, stdout s
 	return nil
 }
 
-// splitRuntimeInputDestination validates the remote path and splits it into
-// the directory the script writes into and the sanitized entry name, reusing
-// the same path validation outputs relies on for its own pod-side paths.
 func splitRuntimeInputDestination(remotePath string) (dir, name string, err error) {
 	cleaned, err := core.ValidateAbsolutePodPath(remotePath, "remote path")
 	if err != nil {
@@ -141,8 +121,7 @@ func splitRuntimeInputDestination(remotePath string) (dir, name string, err erro
 	return path.Dir(cleaned), name, nil
 }
 
-// traceRuntimeInputUploadScript returns true when the context is in dry-run,
-// in which case the caller must not run the command.
+// traceRuntimeInputUploadScript returns true in dry-run, when the caller must not run.
 func traceRuntimeInputUploadScript(ctx core.Context, req config.ShellLaunchParams, label, script string) bool {
 	traceArgs := append([]string{}, kubectlRemoteExecStdinArgs(req, script)...)
 	if len(traceArgs) > 0 {
@@ -153,10 +132,8 @@ func traceRuntimeInputUploadScript(ctx core.Context, req config.ShellLaunchParam
 	return ctx.DryRun
 }
 
-// runtimeInputUploadScript writes stdin to dir/name atomically (via a
-// same-directory temp file and rename, so a killed transfer never leaves a
-// partial file visible at the final path) and reports the written size and
-// sha256 so the caller can verify the transfer landed byte-identical.
+// runtimeInputUploadScript writes via temp file + rename so a killed transfer
+// leaves nothing at the final path, and reports size and sha256.
 func runtimeInputUploadScript(dir, name string) string {
 	quotedDir := core.ShellQuote(dir)
 	quotedName := core.ShellQuote(name)
@@ -165,12 +142,8 @@ func runtimeInputUploadScript(dir, name string) string {
 		"dir=" + quotedDir,
 		"name=" + quotedName,
 		"mkdir -p \"$dir\" 2>/dev/null || true",
-		// A refusal must still drain stdin before exiting: kubectl exec -i keeps
-		// writing the local file to this process's stdin regardless of whether
-		// anything is reading it, and a remote exit that leaves bytes unread
-		// hangs the client until every last byte is accepted rather than failing
-		// fast (confirmed live: a 256KB payload against an unwritable directory
-		// hung past a 20s timeout before this drain was added).
+		// Drain stdin before refusing: kubectl exec -i otherwise hangs until
+		// every byte is accepted.
 		"if [ ! -d \"$dir\" ] || [ ! -w \"$dir\" ]; then cat >/dev/null; echo \"erun-inputs: destination directory is not writable: $dir\" >&2; exit 3; fi",
 		"tmp=\"$dir/.$name.erun-upload-tmp\"",
 		"cat > \"$tmp\"",
@@ -181,8 +154,7 @@ func runtimeInputUploadScript(dir, name string) string {
 	}, "\n")
 }
 
-// parseRuntimeInputUploadResponse decodes the upload script's response: a
-// single "<size>\t<sha256>" line.
+// parseRuntimeInputUploadResponse decodes the single "<size>\t<sha256>" line.
 func parseRuntimeInputUploadResponse(stdout string) (size int64, sha string, err error) {
 	trimmed := strings.TrimSpace(stdout)
 	if trimmed == "" {
@@ -203,17 +175,13 @@ func parseRuntimeInputUploadResponse(stdout string) (size int64, sha string, err
 	return size, sha, nil
 }
 
-// kubectlRemoteExecStdinArgs mirrors kubectlRemoteExecArgs but adds -i so
-// stdin is attached: the local file's bytes stream through it, never through
-// argv, matching the pattern seedRemoteSSHKey already uses to seed a key.
 func kubectlRemoteExecStdinArgs(req config.ShellLaunchParams, script string) []string {
 	args := config.KubectlTargetArgs(req)
 	args = append(args, "exec", "-i", "deployment/"+config.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-c", script)
 	return args
 }
 
-// RunRemoteCommandWithStdin is the stdin-streaming counterpart of
-// RunRemoteCommand.
+// RunRemoteCommandWithStdin is the stdin-streaming counterpart of RunRemoteCommand.
 func RunRemoteCommandWithStdin(req config.ShellLaunchParams, script string, stdin io.Reader) (kube.RemoteCommandResult, error) {
 	cmd := core.Command("kubectl", kubectlRemoteExecStdinArgs(req, script)...)
 	cmd.Stdin = stdin

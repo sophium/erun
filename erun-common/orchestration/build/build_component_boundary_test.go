@@ -18,8 +18,6 @@ const unconsumedTestStageDockerfileContent = "" +
 	"FROM scratch AS runtime\n" +
 	"COPY app /app\n"
 
-// boundaryProject lays out a <tenant>-devops tree with one component under
-// docker/ and one suite under e2e/, beside a VERSION the build can resolve.
 func boundaryProject(t *testing.T, componentDockerfile string) (projectRoot, componentDir, suiteDir string) {
 	t.Helper()
 	projectRoot = t.TempDir()
@@ -43,9 +41,7 @@ func boundaryTarget(projectRoot string) shared.DockerCommandTarget {
 	return shared.DockerCommandTarget{ProjectRoot: projectRoot, Environment: "dev", VersionOverride: "1.0.0", NoIncremental: true}
 }
 
-// The reproduction: a Dockerfile declaring a `test` stage nothing consumes
-// built, wrote its fingerprint and reported success, because BuildKit prunes
-// the unreferenced stage and the tests never ran. Resolution must refuse it.
+// A `test` stage nothing consumes is pruned by BuildKit, so its tests never run.
 func TestBuildResolutionRefusesAnUnconsumedTestStage(t *testing.T) {
 	projectRoot, componentDir, _ := boundaryProject(t, unconsumedTestStageDockerfileContent)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, componentDir)
@@ -60,14 +56,11 @@ func TestBuildResolutionRefusesAnUnconsumedTestStage(t *testing.T) {
 		}
 	}
 
-	// erun push resolves its own builds; it must not publish what build refuses.
 	if _, err := ResolveDockerPushExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot)); err == nil {
 		t.Fatal("expected erun push to refuse the same Dockerfile")
 	}
 }
 
-// The reproduction: run from an e2e suite's directory, erun build took its
-// Dockerfile as a component and would fingerprint, promote and push it.
 func TestBuildResolutionRefusesAnE2ESuiteDockerfile(t *testing.T) {
 	projectRoot, _, suiteDir := boundaryProject(t, consumedTestStageDockerfileContent)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, suiteDir)

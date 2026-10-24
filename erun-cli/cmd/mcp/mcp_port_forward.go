@@ -64,12 +64,8 @@ func ensureMCPPortForward(ctx core.Context, result config.OpenResult) (int, erro
 	return startMCPPortForward(ctx, statePath, expectedState, args, localPort)
 }
 
-// adoptForeignMCPPortForward reuses a pre-existing kubectl port-forward already
-// targeting this env so repeated opens share one forward; a port held by any
-// other process is a hard error rather than an adoption. A holder of erun's own
-// shape that no longer carries traffic is neither: it is the forward that
-// outlived its pod, so it is stopped and (false, nil) sends the caller on to
-// start a replacement.
+// adoptForeignMCPPortForward reuses an existing forward for this env, errors on a
+// foreign holder, and stops a dead erun forward so the caller starts a new one.
 func adoptForeignMCPPortForward(ctx core.Context, statePath string, expected shared.McpPortForwardState, expectedArgs []string, localPort int) (bool, error) {
 	pid, argv, ok := shared.FindLocalPortHolder(localPort)
 	if !ok {
@@ -141,20 +137,14 @@ func launchMCPPortForwardProcess(logPath string, args []string) (*os.Process, er
 	return cmd.Process, nil
 }
 
-// logStart is where this attempt's own output begins in logPath; see
-// portForwardLogReportsListenConflict for why the caller takes it before
-// launching rather than here.
+// logStart is where this attempt's output begins in logPath; the caller takes it before launching.
 func waitForMCPPortForward(localPort int, logPath string, logStart int64) error {
 	deadline := time.Now().Add(shared.McpPortForwardStartupTimeout)
 	for time.Now().Before(deadline) {
 		if shared.CanReachLocalMCPEndpoint(localPort) {
 			return nil
 		}
-		// kubectl exits the moment its listen fails, so waiting out the rest of
-		// the startup timeout would spend it to learn what the log already
-		// says — and the bind retry cannot afford that per attempt. Only what
-		// this attempt appended counts, so a conflict an earlier attempt wrote
-		// cannot be read as this one's.
+		// kubectl exits on a failed listen; only this attempt's log output counts.
 		if shared.PortForwardLogReportsListenConflict(logPath, logStart) {
 			return shared.ListenConflictError(localPort, logPath)
 		}

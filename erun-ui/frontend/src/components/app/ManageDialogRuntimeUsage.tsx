@@ -15,30 +15,13 @@ import type {
   UIRuntimeUsage,
 } from '@/uiRuntimeTypes';
 
-// These mirror the named thresholds the reader itself branches on --
-// eruncommon.RuntimeUsageMemoryWarnPercent / MemoryPeakWarnPercent /
-// DiskWarnPercent (erun-common/runtime_usage.go). They are duplicated here
-// only so a crossing can colour its own meter at a glance; the authoritative
-// crossing is still the backend's own `warnings` list, which is rendered
-// below and is what an operator should act on. Keep them in step with the Go
-// constants -- a drift shows up as a bar that disagrees with the warning
-// beside it.
+// Mirror erun-common/runtime_usage.go warn thresholds for meter colour only; the backend's warnings are authoritative.
 const MEMORY_WARN_PERCENT = 85;
 const MEMORY_PEAK_WARN_PERCENT = 95;
 const DISK_WARN_PERCENT = 90;
 
-// RuntimeUsageField answers "how close is this environment to its own
-// limits" right beside the sliders that move those limits. Unlike
-// RuntimeResourceControls (a reading of the node), this is the environment's
-// own opinion: CPU against its quota, memory current/peak against its own
-// cgroup limit with the real OOM-kill count, and disk on the workspace mount.
-//
-// Fail-soft by contract (Nielsen #1, visibility of system status): a field
-// the reader could not measure (cgroup v1, an unlimited limit, an unreadable
-// file) renders its own "unavailable" state, never a confident 0 or 0%, since
-// that would read as "idle" or "empty" rather than "unknown". That contract is
-// why percentages are passed around as `number | undefined` rather than being
-// defaulted at the formatting boundary.
+// RuntimeUsageField shows the env's usage against its own limits.
+// An unmeasured field renders as unavailable, never 0, hence `number | undefined`.
 export function RuntimeUsageField({
   selection,
   disabled,
@@ -78,9 +61,6 @@ export function RuntimeUsageField({
   );
 }
 
-// Split out so the available/unavailable branching for the figures and the
-// warnings both live in one place, keeping RuntimeUsageField's own branching
-// within budget.
 function RuntimeUsageDetails({
   data,
 }: {
@@ -106,22 +86,8 @@ function RuntimeUsageDetails({
 
 const BUILDS_ZONE_CLASS = 'grid gap-2.5 border-t border-border/60 pt-2.5';
 
-// BuildsZone is the erun-dind sidecar's own reading, in its own zone under the
-// runtime container's. On a build-capable environment the figures above are
-// near-idle by construction — a release lane spends its time waiting on bounded
-// `erun exec job await` calls, so the CPU is near zero whether the build is
-// healthy or wedged — and this is the container the work is actually in. The
-// heading is not decoration: without it the operator has two CPU figures and no
-// way to tell which domain each belongs to, which is the whole defect.
-//
-// An absent reading is likewise two states, and only one of them is no zone.
-// An environment that carries no sidecar has nothing to show here; an
-// environment that carries one and whose reading failed gets the heading and
-// says so, because the alternative is the near-idle figures above qualified
-// only by the reader's own "excluding builds" prose — a statement that reads as
-// "idle" rather than as "unknown", which is the opposite of what it means.
-// `excludesBuilds` is what separates the two, and the reader sets it from the
-// environment's own type rather than from whether the sidecar answered.
+// BuildsZone is the erun-dind sidecar's reading, where build work actually runs.
+// `excludesBuilds` (set from env type) separates no sidecar from a failed sidecar read.
 function BuildsZone({
   dind,
   excludesBuilds,
@@ -170,9 +136,7 @@ function RuntimeUsageSummary({
       </p>
     );
   }
-  // An unreachable pod explains itself rather than rendering an empty panel
-  // that reads as "nothing to see", through the Runtime tab's one rendering
-  // for a failed read so this panel cannot drift from its neighbours.
+  // Shares the Runtime tab's failed-read rendering.
   return (
     <RuntimePanelNotice
       failure={message}
@@ -190,9 +154,7 @@ function RuntimeUsageWarnings({
     return null;
   }
   return (
-    // Each row already carries its own glyph, so what is missing is the wrap:
-    // `overflow-wrap` inherits from the list down to the warning text, which is
-    // where a threshold crossing names its number and its limit.
+    // overflow-wrap inherits down to the warning text.
     <ul className="grid gap-1 [overflow-wrap:anywhere]" role="alert">
       {warnings.map((warning) => (
         <li
@@ -207,9 +169,6 @@ function RuntimeUsageWarnings({
   );
 }
 
-// cpu is the runtime container's own reading by default, and the erun-dind
-// sidecar's when the Builds block passes its own label; nothing else differs,
-// so the same meter renders both.
 function CPUMeter({
   cpu,
   label = 'CPU',
@@ -218,12 +177,7 @@ function CPUMeter({
   label?: string;
 }): React.ReactElement {
   if (!cpu.available) {
-    // A container with no cpu.max quota cannot report utilisation — but it can
-    // report what it has done, and that is the common shape of the sidecar
-    // (declared without a limit so a build can use the node). Rendering the
-    // cumulative figure keeps a busy build from reading as an unavailable one;
-    // it is stated as CPU-seconds precisely because it is NOT a rate, and a
-    // "386 CPU-s of no quota" percentage-shaped line would invent the rate.
+    // Without a cpu.max quota, show cumulative CPU-seconds rather than inventing a rate.
     const seconds = cumulativeCPUSeconds(cpu.usageUsec);
     if (seconds !== null) {
       return (
@@ -244,8 +198,7 @@ function CPUMeter({
       label={label}
       valueText={cpu.utilization ?? percentText(cpu.utilizationPercent)}
       percent={cpu.utilizationPercent}
-      // CPU has no named warn threshold in erun-common -- bursting to the
-      // quota is normal for a build -- so the meter shows magnitude only.
+      // CPU has no warn threshold: bursting to quota is normal for a build.
       warnAt={undefined}
       detail={quota}
     />
@@ -263,8 +216,7 @@ function MemoryMeters({
     return <UnavailableRow label={label} reason={memory.unavailable} />;
   }
   if (memory.unlimited) {
-    // A real reading, not a failure: there is no ceiling to be a fraction of,
-    // so a meter would have nothing to fill against.
+    // No ceiling, so no meter.
     return (
       <div className="grid gap-1">
         <div className="flex items-baseline justify-between gap-2">
@@ -292,9 +244,6 @@ function MemoryMeters({
   );
 }
 
-// Peak and OOM kills are evidence for the same slider decision as the current
-// figure, so they sit under it rather than as sibling rows -- but subordinate,
-// because the current reading is what the operator came for.
 function MemoryPeakAndKills({ memory }: { memory: UIRuntimeMemoryUsage }): React.ReactElement {
   const peakOverThreshold =
     memory.limitBytes !== undefined &&
@@ -345,9 +294,7 @@ function DiskMeter({ disk }: { disk: UIRuntimeDiskUsage }): React.ReactElement {
   );
 }
 
-// A stated unavailability, never a zero. Kept visually parallel to a meter row
-// so the panel does not reflow into a different shape when one field cannot be
-// read -- the label stays where the eye expects it.
+// Parallel to a meter row so the panel does not reflow.
 function UnavailableRow({
   label,
   reason,
@@ -365,16 +312,12 @@ function UnavailableRow({
   );
 }
 
-// percentText and percentDetail never substitute a 0 for a missing reading:
-// "0%" is a measurement, and rendering one where none was taken is exactly the
-// confident-wrong-number failure this panel exists to avoid.
+// Never substitute 0% for a missing reading.
 function percentText(value: number | undefined): string {
   return value === undefined || !Number.isFinite(value) ? '—' : `${value.toFixed(0)}%`;
 }
 
-// The qualifier is the caller's, because the noun differs by resource and the
-// wrong one is user-facing nonsense: memory is a fraction "of the limit" it was
-// given, while a disk mount has capacity, not a limit, and is simply "used".
+// Memory is "of the limit"; a disk mount is just "used".
 function percentDetail(value: number | undefined, qualifier: string): string | undefined {
   return value === undefined || !Number.isFinite(value)
     ? undefined

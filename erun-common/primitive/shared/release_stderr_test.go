@@ -7,10 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
-// release.go's git-backed helpers: git's stderr is already captured (onto
-// exec.ExitError.Stderr for Output(), or directly in CombinedOutput()'s own
-// return value), and each caller must surface it rather than the
-// content-free "exit status N" a bare "%w" wrap renders.
+// Callers must surface git's stderr, not a bare "exit status N".
 func TestGitRemoteTagExistsIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: 'not-a-remote' does not appear to be a git repository", 128)
 	_, err := GitRemoteTagExists(testTraceContext(false), t.TempDir(), "not-a-remote", "v1.0.0")
@@ -23,10 +20,7 @@ func TestGitRemoteTagExistsIncludesGitStderr(t *testing.T) {
 }
 
 func TestGitResolvedRefIncludesGitOutputForNonExitError(t *testing.T) {
-	// gitResolvedRef treats every *exec.ExitError with a nonzero exit code as
-	// "ref does not exist" (ok=false, err=nil) by design -- only a non-exit
-	// failure (e.g. the git binary itself missing) reaches the bare-error
-	// path, so point ERUN_GIT_BIN at a binary that cannot run at all.
+	// Only a non-exit failure reaches the bare-error path; an exit error means "no such ref".
 	t.Setenv("ERUN_GIT_BIN", t.TempDir()+"/does-not-exist")
 	_, ok, err := GitResolvedRef(testTraceContext(false), t.TempDir(), "HEAD")
 	if ok {

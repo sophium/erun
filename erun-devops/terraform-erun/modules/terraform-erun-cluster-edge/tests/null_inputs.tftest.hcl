@@ -1,14 +1,9 @@
-# Locks #1161: a wrapper module cannot conditionally omit an argument in HCL, so
-# "use this module's default" has to be expressible as an explicit null. Terraform
-# does not substitute a variable's default for a caller-assigned null -- the null
-# reaches validation and every use -- so without normalization `length(null)`
-# aborts before any plan and `null != ""` is *true*, quietly selecting the wrong
-# branch of a guard. Runs entirely against mocked providers: no real cluster.
+# Wrappers pass explicit null for "use the default", and Terraform does not
+# substitute defaults for caller-assigned nulls. Runs against mocked providers.
 
 mock_provider "helm" {}
 mock_provider "kubernetes" {
-  # install_coredns_forward = true below reads CoreDNS's Corefile back, so the
-  # mock has to look like a cluster that imports the custom directory.
+  # install_coredns_forward reads the Corefile back; it must import the custom dir.
   mock_data "kubernetes_config_map" {
     defaults = {
       data = {
@@ -33,9 +28,6 @@ variables {
   cloudflare_api_token = "test-token"
 }
 
-# The reported reproduction: a wrapper threading its own optional variables
-# through passes null for the ones its caller left unset. Every one of these was
-# either an abort or a wrong-branch selection before normalization.
 run "null_for_every_optional_input_resolves_the_documented_defaults" {
   command = plan
 
@@ -72,14 +64,12 @@ run "null_for_every_optional_input_resolves_the_documented_defaults" {
     manage_coredns_custom_configmap  = null
   }
 
-  # The originally-reported abort: length(null) on the upstreams list.
   assert {
     condition     = can(regex("forward \\. 1\\.1\\.1\\.1 1\\.0\\.0\\.1 8\\.8\\.8\\.8", kubernetes_config_map_v1_data.coredns_forward[0].data["erunpaas-com.server"]))
     error_message = "coredns_forward_upstreams = null must resolve to the module's documented default resolvers, not abort on length(null)"
   }
 
-  # The trap that cost a release: `null != ""` is true, so the guard selected
-  # null as the image and left the helm release with a valueless set block.
+  # `null != ""` is true, so an unnormalized guard selects null.
   assert {
     condition     = can(regex("^ghcr\\.io/sophium/erun-dns01-webhook:", local.dns01_webhook_image))
     error_message = "dns01_webhook_image = null must fall back to the bundled chart's own release, not be selected as the image"
@@ -110,9 +100,7 @@ run "null_for_every_optional_input_resolves_the_documented_defaults" {
     error_message = "install_ingress_controller = null must resolve to the default true, not a null condition"
   }
 
-  # Both default false, and a null must select that branch rather than leak into
-  # the `&&` the redirect and the precondition are built on -- where a null
-  # operand would abort the plan instead of resolving to "not declared".
+  # A null operand in the redirect's `&&` would abort the plan.
   assert {
     condition     = output.edge_transport_policy.acme_challenge_path_exempt == false && length(output.edge_transport_policy.redirect_objects) == 0
     error_message = "acme_challenge_path_exempt = null must resolve to the default false"
@@ -124,10 +112,7 @@ run "null_for_every_optional_input_resolves_the_documented_defaults" {
   }
 }
 
-# The normalization must test for null specifically. coalesce() is the obvious
-# reach and is wrong twice over: it skips empty strings as well as nulls, and
-# coalesce("", "") is a hard error -- so an optional string that is legitimately
-# empty would either be silently replaced by the default or abort the apply.
+# coalesce() is wrong here: it also skips "" and coalesce("", "") errors.
 run "an_explicitly_empty_input_is_not_replaced_by_the_default" {
   command = plan
 
@@ -143,16 +128,12 @@ run "an_explicitly_empty_input_is_not_replaced_by_the_default" {
   }
 }
 
-# The mirror for booleans: an explicit false against a true default must be
-# honored, not promoted to the default.
 run "an_explicit_false_is_honored_against_a_true_default" {
   command = plan
 
   variables {
     install_ingress_controller = false
-    # install_ingress_controller = false alone is refused outright (see
-    # edge_transport_policy.tftest.hcl): with the policy still managed here
-    # there is no controller to carry it.
+    # install_ingress_controller = false alone is refused while the policy is managed.
     manage_transport_policy = false
   }
 

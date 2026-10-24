@@ -7,9 +7,7 @@ import (
 	"testing"
 )
 
-// devopsDockerfileRunsByStage reads the erun-devops Dockerfile and returns each
-// stage's RUN instructions, continuation lines joined. Reads a sibling module,
-// so its tests run uncached (go test -count=1) in the image's cli-test stage.
+// Reads a sibling module, so its tests run uncached (go test -count=1).
 func devopsDockerfileRunsByStage(t *testing.T) map[string][]string {
 	t.Helper()
 	path := filepath.Join(repoRootForDockerignoreTest(t), "erun-devops", "docker", "erun-devops", "Dockerfile")
@@ -42,11 +40,7 @@ func devopsDockerfileRunsByStage(t *testing.T) map[string][]string {
 	return runs
 }
 
-// The Homebrew formula and Scoop manifest build erun and emcp from source on
-// macOS and Windows, which no Linux build compiles: a darwin- or windows-only
-// break in erun-common would ship and fail only on a user's machine. The
-// cli-test stage cross-builds both modules for both systems, so every erun
-// build proves those source builds compile.
+// Homebrew and Scoop build from source on macOS and Windows, which no Linux build compiles.
 func TestDevopsCLITestStageCrossBuildsForHomebrewAndScoop(t *testing.T) {
 	runs := devopsDockerfileRunsByStage(t)
 	for _, module := range []string{"erun-cli", "erun-mcp"} {
@@ -70,10 +64,7 @@ func TestDevopsCLITestStageCrossBuildsForHomebrewAndScoop(t *testing.T) {
 	}
 }
 
-// A bare `claude` typed in a pod shell resumes the directory's last
-// conversation because /usr/local/bin/claude is erun, which dispatches on its
-// argv[0]. The link must be made after the npm install that writes the real
-// /usr/local/bin/claude, or that install would replace it.
+// The link must follow the npm install that writes the real /usr/local/bin/claude.
 func TestDevopsRuntimeLinksClaudeToErunAfterInstallingClaudeCode(t *testing.T) {
 	const link = "ln -sf /usr/local/bin/erun /usr/local/bin/claude"
 	installed := false

@@ -23,9 +23,7 @@ type OutputsDownloadInput struct {
 	Preview bool   `json:"preview,omitempty" jsonschema:"when true, return the entry's metadata (name, type, size) without reading or returning its bytes"`
 }
 
-// OutputsDownloadResult is the structured result of the outputs_download tool.
-// The MCP server is co-located with the files inside the pod, so bytes are
-// returned inline as base64 rather than written to a host path.
+// OutputsDownloadResult returns bytes inline as base64, since the server is in the pod.
 type OutputsDownloadResult struct {
 	Name          string `json:"name"`
 	IsArchive     bool   `json:"isArchive"`
@@ -33,9 +31,7 @@ type OutputsDownloadResult struct {
 	Size          int64  `json:"size"`
 	SHA256        string `json:"sha256,omitempty"`
 	Content       string `json:"content,omitempty"`
-	// Signing is present only when the download ran on a macOS host and ad-hoc
-	// code signing had something to report. macOS kills an unsigned Mach-O with
-	// SIGKILL and no message, so a caller must be able to see what was done.
+	// Signing is reported because macOS SIGKILLs an unsigned Mach-O silently.
 	Signing *codesign.HostArtifactSigning `json:"signing,omitempty"`
 }
 

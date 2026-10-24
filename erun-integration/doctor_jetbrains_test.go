@@ -21,28 +21,15 @@ func doctorJetBrainsScenarios(t *testing.T) {
 }
 
 func testDoctorRepairJetbrainsGatewayDryRunThenRealRun(t *testing.T) {
-	// JetBrains Gateway repair against a seeded
-	// sshRecentConnections.v2.xml carrying a latestUsedIde block (the
-	// state IntelliJ leaves behind after a remote session; shape
-	// mirrors open_test.go's gateway scenario). Pass 1 (--dry-run)
-	// must preview the clear and leave the XML untouched; pass 2
-	// (real) must route through
-	// jetbrainsconfig.ClearRecentProjectLatestUsedIDE and strip the
-	// block while preserving the rest of the project entry. The file
-	// mutation is unreachable from dry-run by design.
-	// ERUN_HOST_OS_OVERRIDE=linux pins the options-dir resolution to
-	// ~/.config/JetBrains (per erun-integration/AGENTS.md, platform-
-	// dependent goldens).
+	// Dry-run previews the clear and leaves the XML untouched; the real pass strips
+	// latestUsedIde. HOST_OS_OVERRIDE=linux pins the options dir to ~/.config/JetBrains.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	configID := jetBrainsStableConfigID("erun-team-dev")
 	projectPath := "/home/erun/git/" + filepath.Base(setup.Cwd)
 	idePath := filepath.Join(setup.Home, "jetbrains-backends", "ideaIU-243.22562.222")
 	xmlPath := seedJetBrainsRecentProject(t, setup, configID, projectPath, idePath)
-	// The real pass execs kubectl for the read-only pod sections (the
-	// resources reading among them); the scrubbed PATH means an undeclared
-	// binary would otherwise be answered by whatever the host has
-	// installed.
+	// The PATH is scrubbed, so kubectl must be stubbed for the pod sections.
 	stubs := filepath.Join(setup.Cwd, "stubs")
 	stubDoctorKubectl(t, stubs, "")
 	envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=linux")
@@ -72,18 +59,8 @@ func testDoctorRepairJetbrainsGatewayDryRunThenRealRun(t *testing.T) {
 }
 
 func testDoctorRepairJetbrainsGatewayNoMetadata(t *testing.T) {
-	// --repair-jetbrains-gateway with no JetBrains install at all:
-	// the options-dir resolution fails, the repair finds nothing to
-	// clear, and doctor must say so and stop (covering the not-found
-	// arm of runSelectedJetBrainsGatewayRepair) instead of falling
-	// through to the kubectl-driven cleanup actions.
-	//
-	// Only kubectl is declared: every read-only pod section before the
-	// repair (the resources reading among them) reaches for it, and this
-	// suite's scrubbed PATH refuses to let a scenario depend on whatever
-	// the host happens to have installed. helm stays undeclared on purpose
-	// -- its own diagnosis already degrades to an unreadable release
-	// without this scenario's golden having to carry a stubbed one.
+	// With no JetBrains install, doctor reports nothing to clear and stops. helm
+	// stays unstubbed: its diagnosis degrades on its own.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	stubs := filepath.Join(setup.Cwd, "stubs")
@@ -97,9 +74,8 @@ func testDoctorRepairJetbrainsGatewayNoMetadata(t *testing.T) {
 	golden.Equal(t, "doctor/repair_jetbrains_gateway_no_metadata", normalize.Apply(result.Combined))
 }
 
-// jetBrainsStableConfigID duplicates jetbrainsconfig.StableConfigID because that
-// internal package cannot be imported across modules; the seeded XML must carry
-// the same configId or FindRecentProject never matches.
+// jetBrainsStableConfigID duplicates jetbrainsconfig.StableConfigID, which is internal
+// to another module; the configId must match for FindRecentProject.
 func jetBrainsStableConfigID(hostAlias string) string {
 	sum := sha1.Sum([]byte(strings.TrimSpace(hostAlias)))
 	b := sum[:16]
@@ -115,12 +91,8 @@ func jetBrainsStableConfigID(hostAlias string) string {
 	)
 }
 
-// seedJetBrainsRecentProject writes the linux-side IntelliJ options dir
-// with a sshRecentConnections.v2.xml whose single recent project
-// carries a latestUsedIde block — the exact state `erun open
-// --intellij` plus a finished Gateway session leaves behind (shape
-// cribbed from open_test.go's gateway scenario). Returns the XML path
-// so callers can assert the on-disk mutation.
+// seedJetBrainsRecentProject writes a linux-side sshRecentConnections.v2.xml whose
+// project carries latestUsedIde, and returns its path.
 func seedJetBrainsRecentProject(t *testing.T, setup env.Setup, configID, projectPath, idePath string) string {
 	t.Helper()
 	optionsDir := filepath.Join(setup.ConfigHome, "JetBrains", "IntelliJIdea2024.3", "options")

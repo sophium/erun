@@ -38,10 +38,6 @@ func TestListOrchestratorLaunchChoices(t *testing.T) {
 	}
 }
 
-// TestTheRestartFlagComparesWhatTheSessionRunsOn: the flag is a question about
-// the launch, not the record. Naming the default explicitly changes the record
-// and not the launch; a catalog's default moving changes the launch under a
-// record that never changed.
 func TestTheRestartFlagComparesWhatTheSessionRunsOn(t *testing.T) {
 	t.Run("naming the defaults explicitly needs no restart", func(t *testing.T) {
 		app, _ := launchSettingsTestApp(t)
@@ -124,8 +120,7 @@ func TestTheRestartFlagComparesWhatTheSessionRunsOn(t *testing.T) {
 	})
 }
 
-// TestTheDialogNeverStoresTheClearingToken: "default" is the CLI's spelling of
-// the empty default; stored literally it would launch `--model default`.
+// "default" is the CLI's spelling of the empty default; stored it would launch `--model default`.
 func TestTheDialogNeverStoresTheClearingToken(t *testing.T) {
 	app, _ := launchSettingsTestApp(t)
 	defer app.shutdown(context.Background())
@@ -170,7 +165,6 @@ func TestLaunchChoicesNameTheCatalogsUndriveableModels(t *testing.T) {
 	}
 }
 
-// unreadableRootConfigStore is a store whose root config cannot be read.
 type unreadableRootConfigStore struct{ stubUIStore }
 
 func (unreadableRootConfigStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {

@@ -38,11 +38,7 @@ afterEach(() => {
   delete window.__ERUN_PLATFORM_BRAND__;
 });
 
-// The pre-resolution paint must not use a bundled name of its own, or the page
-// shows one product name and then another once GET /v1/platform answers. The
-// console image serves the instance's own brand in the page
-// (window.__ERUN_PLATFORM_BRAND__, from the same platform.brand the API
-// serves), so the first paint and the resolved paint are the same value.
+// The first paint uses the server-injected brand, so it never flips once discovery answers.
 describe('App brand', () => {
   it('shows the server-supplied brand before discovery resolves and after', async () => {
     const brand = 'ErunPaaS';
@@ -54,14 +50,11 @@ describe('App brand', () => {
 
     renderWithStore(<App />);
 
-    // The first paint, before the platform request has answered: the same name
-    // the server is about to supply, not a bundled one that then flips.
     expect(document.title).toBe(`${brand} console`);
     expect(screen.getAllByText(brand).length).toBeGreaterThan(0);
 
     await screen.findByRole('heading', { level: 1, name: PLATFORM.tagline });
 
-    // Discovery answered with the very same value, so nothing changed.
     expect(document.title).toBe(`${brand} console`);
     expect(screen.getAllByText(brand).length).toBeGreaterThan(0);
     expect(screen.queryByText('ERun console')).not.toBeInTheDocument();
@@ -69,9 +62,7 @@ describe('App brand', () => {
 });
 
 describe('App signed-out route', () => {
-  // The signed-out screen must have real headings and a <main> landmark, not a
-  // CenteredCard whose CardTitle is a <div>. LandingScreen renders a real <h1>
-  // pitch and an <h2> differentiators heading inside a <main> landmark.
+  // The signed-out screen needs real <h1>/<h2> headings inside a <main> landmark.
   it('is a real landing page, not merely a CenteredCard sign-in prompt', async () => {
     renderWithStore(<App />);
 
@@ -94,10 +85,6 @@ describe('App signed-out route', () => {
     ).toBeInTheDocument();
   });
 
-  // The bundled defaults are what an unconfigured instance shows, and they are
-  // what every instance showed while the platform still had no way to send
-  // these three fields — so the configured case needs its own coverage, end to
-  // end from the discovery response to the rendered page.
   it("renders the instance's own logo from platform discovery", async () => {
     vi.stubGlobal(
       'fetch',
@@ -128,9 +115,7 @@ describe('App signed-out route', () => {
     );
     renderWithStore(<App />);
 
-    // The bundled tagline, the public docs site, and the generic mark — a
-    // half-configured instance renders a coherent page, never a blank hero or
-    // a broken image.
+    // A half-configured instance falls back per field, never a blank hero or broken image.
     expect(
       await screen.findByRole('heading', {
         level: 1,
@@ -161,12 +146,7 @@ function stubConfigFetch(tenant: { tenantId: string; name: string; type: string 
   );
 }
 
-// This is the acceptance-criteria-level check: the console never keeps the
-// old token and relabels which tenant it claims to be on. A switch attempt is
-// only real once the API itself resolves the new token to the requested
-// tenant — a caller that comes back resolved to some *other* tenant (still
-// signed into the same account, chose a different one, whatever the cause)
-// must be told, not silently shown as if the switch worked.
+// A switch is real only once the API resolves the new token to the requested tenant.
 describe('App tenant switch mismatch', () => {
   it('surfaces a mismatch banner when a switch attempt resolves to a different tenant than requested', async () => {
     vi.stubEnv('VITE_DEV_BEARER_TOKEN', 'dev-token');
@@ -192,8 +172,7 @@ describe('App tenant switch mismatch', () => {
   });
 });
 
-// A signed-in-but-unenrolled user must be able to sign in as a different
-// account from the not-enrolled card. Sign-out has to actually return the whole app to the sign-in flow, not just fire a callback.
+// Sign-out from the not-enrolled card must return the whole app to sign-in.
 describe('App not-enrolled route', () => {
   it('returns to the sign-in flow when the operator signs out from the not-enrolled card', async () => {
     vi.stubEnv('VITE_DEV_BEARER_TOKEN', 'dev-token');
@@ -226,10 +205,7 @@ describe('App not-enrolled route', () => {
   });
 });
 
-// A 401 coded TENANT_UNRESOLVED (an org-scoped issuer whose token
-// carries no matching org claim, most commonly) must render distinctly from
-// the not-enrolled card above -- the caller may already be enrolled
-// somewhere, so "an operator has to enrol you" would be wrong advice.
+// TENANT_UNRESOLVED must not render the not-enrolled advice; the caller may be enrolled.
 describe('App tenant-unresolved route', () => {
   it('shows the tenant-unresolved card, not the not-enrolled card, for a TENANT_UNRESOLVED 401', async () => {
     vi.stubEnv('VITE_DEV_BEARER_TOKEN', 'dev-token');
@@ -264,12 +240,7 @@ describe('App tenant-unresolved route', () => {
   });
 });
 
-// A resolution failure caused by an internal error (already
-// sanitized server-side of any raw database detail into RESOLUTION_FAILED)
-// must render its own card -- neither the not-enrolled card (a link may
-// already exist for this identity, so "an operator has to enrol you" would
-// send them in a loop that cannot terminate) nor the tenant-unresolved card
-// (this was never about which tenant the token resolves to).
+// RESOLUTION_FAILED gets its own card, neither not-enrolled nor tenant-unresolved.
 describe('App resolution-error route', () => {
   it('shows the resolution-error card, offering no enroll command, for a RESOLUTION_FAILED 401', async () => {
     vi.stubEnv('VITE_DEV_BEARER_TOKEN', 'dev-token');

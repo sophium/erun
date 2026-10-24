@@ -6,9 +6,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestPinRepoCheckoutStatusResolvesForALocalWorktree covers the common case: a
-// local-agent (or host) environment's worktree already lives on this machine,
-// so there is nothing to check against sibling environments.
 func TestPinRepoCheckoutStatusResolvesForALocalWorktree(t *testing.T) {
 	app := &App{
 		deps: erunUIDeps{
@@ -28,10 +25,7 @@ func TestPinRepoCheckoutStatusResolvesForALocalWorktree(t *testing.T) {
 	}
 }
 
-// TestPinRepoCheckoutStatusResolvesFromASiblingsCheckout covers the reported
-// case: a sourceless runtime environment has no worktree of its own,
-// but a sibling environment of the same tenant does, and every environment of
-// a tenant shares one repo.
+// A sourceless runtime env resolves through a sibling's checkout of the shared repo.
 func TestPinRepoCheckoutStatusResolvesFromASiblingsCheckout(t *testing.T) {
 	checkout := t.TempDir()
 	app := &App{
@@ -53,11 +47,6 @@ func TestPinRepoCheckoutStatusResolvesFromASiblingsCheckout(t *testing.T) {
 	}
 }
 
-// TestPinRepoCheckoutStatusRefusesASourcelessEnvWithNoTenantCheckout covers the
-// dead end this exists to prevent: a runtime environment with no MountSource
-// and no sibling environment checked out on this machine has nothing pin
-// could ever rewrite, and the dialog needs to know before offering
-// Preview/Apply.
 func TestPinRepoCheckoutStatusRefusesASourcelessEnvWithNoTenantCheckout(t *testing.T) {
 	app := &App{
 		deps: erunUIDeps{

@@ -17,19 +17,13 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// connectWithCapabilities serves the tool surface a caller with these
-// capabilities would get, and returns a connected session. It bypasses the auth
-// middleware deliberately: what is under test is the surface built for an
-// already-resolved caller, not the token parsing that resolves one.
+// connectWithCapabilities bypasses auth middleware: it tests the surface, not token parsing.
 func connectWithCapabilities(t *testing.T, capabilities ...string) *mcp.ClientSession {
 	t.Helper()
 	return connectWithRuntime(t, shared.RuntimeConfig{}, capabilities...)
 }
 
-// connectWithRuntime is connectWithCapabilities for a tool whose handler reads
-// beyond the caller's identity — a store-backed resolution, say — so the
-// assertions exercise the payload the server really returns for that runtime
-// rather than a hand-built one.
+// connectWithRuntime is connectWithCapabilities with a real runtime for handlers that read it.
 func connectWithRuntime(t *testing.T, runtime shared.RuntimeConfig, capabilities ...string) *mcp.ClientSession {
 	t.Helper()
 	for _, key := range []string{shared.EnvMCPTrustedIssuers, shared.EnvMCPTrustedIssuer, shared.EnvMCPAudience, shared.EnvTenant} {
@@ -74,15 +68,11 @@ func listToolNames(t *testing.T, session *mcp.ClientSession) []string {
 	return names
 }
 
-// tools/list must be the same answer as what the caller may do. A menu that
-// lists tools the caller cannot call teaches it about a surface it has no
-// business knowing, and invites an error where there should be none.
+// tools/list must match exactly what the caller may call.
 func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
 	got := listToolNames(t, connectWithCapabilities(t, string(mcptools.MCPCapabilityRead)))
 
-	// diff/exec_diff and the job_*/exec_job_* pairs both appear during their
-	// rename's one-release alias window; the retired name
-	// authorizes as its replacement, so a read-only caller keeps it.
+	// Retired alias names authorize as their replacements during the alias window.
 	want := []string{
 		"activity_lease_list", "ai_sessions", "cloud_list", "context_list", "diff", "environment", "exec_diff",
 		"exec_job_await", "exec_job_output", "exec_job_status",
@@ -95,7 +85,6 @@ func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
 	}
 }
 
-// The tools that matter most: remote execution and everything that mutates.
 func TestReadCapabilityCannotSeeExecutionOrMutation(t *testing.T) {
 	got := listToolNames(t, connectWithCapabilities(t, string(mcptools.MCPCapabilityRead)))
 
@@ -118,7 +107,6 @@ func TestAdminCapabilitySeesEveryTool(t *testing.T) {
 			t.Fatalf("admin is missing %q: %v", required, admin)
 		}
 	}
-	// Read is a subset, not a different set.
 	for _, tool := range read {
 		if !slices.Contains(admin, tool) {
 			t.Fatalf("admin should include every read tool, missing %q", tool)
@@ -126,10 +114,7 @@ func TestAdminCapabilitySeesEveryTool(t *testing.T) {
 	}
 }
 
-// Operate is the lifecycle tier: a caller that only drives the
-// lifecycle of an environment that already exists must see exactly those
-// tools, and no more -- neither observation (it is not a wider read) nor
-// anything that decides what environments exist or runs arbitrary code.
+// Operate is lifecycle only: no observation, no environment creation, no arbitrary code.
 func TestOperateCapabilitySeesOnlyLifecycleTools(t *testing.T) {
 	got := listToolNames(t, connectWithCapabilities(t, string(mcptools.MCPCapabilityOperate)))
 
@@ -152,10 +137,6 @@ func TestOperateCapabilityCannotSeeExecutionOrEnvironmentLifecycleDecisions(t *t
 	}
 }
 
-// An operate-scoped caller can actually reach its tools' handlers at call
-// time, not just see them listed -- the same guard-level proof
-// TestGuardRefusesEvenWhenAHandlerIsReachedDirectly uses for the negative
-// case, mirrored here for the positive one.
 func TestOperateCapabilityReachesItsHandlerAtCallTime(t *testing.T) {
 	identity := shared.AuthIdentity{
 		Tenant:       "acme",
@@ -176,8 +157,7 @@ func TestOperateCapabilityReachesItsHandlerAtCallTime(t *testing.T) {
 	}
 }
 
-// Calling a tool outside the caller's capabilities fails. It is unknown rather
-// than forbidden, because it was never registered for this caller.
+// Unknown rather than forbidden: it was never registered for this caller.
 func TestCallingAToolOutsideTheCapabilityFails(t *testing.T) {
 	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityRead))
 
@@ -190,7 +170,6 @@ func TestCallingAToolOutsideTheCapabilityFails(t *testing.T) {
 	}
 }
 
-// A read-only caller must still be able to do what it is for.
 func TestReadCapabilityCanStillCallAReadTool(t *testing.T) {
 	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityRead))
 
@@ -199,12 +178,7 @@ func TestReadCapabilityCanStillCallAReadTool(t *testing.T) {
 	}
 }
 
-// environment and ai_sessions are the authenticated-edge read model a scoped
-// mobile caller needs to reach; both must actually be reachable, not
-// just listed. Calling either with no tenant/environment context resolves to
-// a business error naming the missing target, not an authorization refusal --
-// proof the call reached the handler rather than being turned away at
-// registration.
+// A business error naming the missing target proves the handler was reached.
 func TestReadCapabilityCanReachTheEnvironmentReadModelTools(t *testing.T) {
 	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityRead))
 
@@ -219,9 +193,7 @@ func TestReadCapabilityCanReachTheEnvironmentReadModelTools(t *testing.T) {
 	}
 }
 
-// An edge with no trust anchor is the loopback-only deployment that predates
-// authentication. Turning authentication off must not quietly turn
-// authorization on and strand that deployment with an empty tool set.
+// No trust anchor means the loopback-only edge, which must keep the admin surface.
 func TestAnUnauthenticatedEdgeKeepsTheCoarseAdminSurface(t *testing.T) {
 	identity := shared.AuthIdentityFrom(context.Background())
 	if !identity.Capabilities.AllowsTool("raw") {
@@ -229,9 +201,7 @@ func TestAnUnauthenticatedEdgeKeepsTheCoarseAdminSurface(t *testing.T) {
 	}
 }
 
-// The guard is defence in depth: registration already filtered, so this only
-// matters if a handler is reached another way — exactly when a check that
-// relied on registration would have been useless.
+// Defence in depth for handlers reached without registration.
 func TestGuardRefusesEvenWhenAHandlerIsReachedDirectly(t *testing.T) {
 	identity := shared.AuthIdentity{
 		Tenant:       "acme",
@@ -252,12 +222,7 @@ func TestGuardRefusesEvenWhenAHandlerIsReachedDirectly(t *testing.T) {
 	}
 }
 
-// captureAuditLog redirects the standard logger, which auditToolDecision
-// writes to, into a buffer for the duration of the test. log.SetOutput is
-// process-global, so the previous writer is restored on cleanup (see
-// erun-ui's restoreLogOutputAfter for the same pattern); the standard
-// logger serializes concurrent writers internally, so concurrent callers may
-// safely log through it while the test holds no lock of its own.
+// captureAuditLog swaps the process-global standard logger and restores it on cleanup.
 func captureAuditLog(t *testing.T) *strings.Builder {
 	t.Helper()
 	var out strings.Builder
@@ -267,11 +232,7 @@ func captureAuditLog(t *testing.T) *strings.Builder {
 	return &out
 }
 
-// The closure guardTool returns is built once per tool registration and
-// reused for every call to that tool, so the captured identity must not
-// become shared mutable state across concurrent callers. Each of many
-// concurrent callers, released at the same instant, must see its own audit
-// line -- not another caller's, and not a mix.
+// guardTool's closure is shared across calls, so identity must not be shared state.
 func TestGuardToolAttributesEachConcurrentCallToItsOwnCaller(t *testing.T) {
 	out := captureAuditLog(t)
 
@@ -322,11 +283,6 @@ func TestGuardToolAttributesEachConcurrentCallToItsOwnCaller(t *testing.T) {
 	}
 }
 
-// A call with no live auth context in it (the loopback-only edge, or a
-// misrouted request) must not be audited as whoever called previously. The
-// captured parameter starts at "registration-time" and is never touched by a
-// call that carries no identity, so it must still read that way after a
-// live caller has been through the same closure.
 func TestGuardToolWithNoAuthContextDoesNotInheritThePreviousCaller(t *testing.T) {
 	out := captureAuditLog(t)
 
@@ -354,9 +310,6 @@ func TestGuardToolWithNoAuthContextDoesNotInheritThePreviousCaller(t *testing.T)
 	}
 }
 
-// bearerRoundTripper injects a fixed bearer token on every request -- the
-// transport-level equivalent of what a real MCP client (console, or a
-// mobile client) sets on its own HTTP client.
 type bearerRoundTripper struct {
 	token string
 }
@@ -367,21 +320,9 @@ func (rt bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	return http.DefaultTransport.RoundTrip(req)
 }
 
-// TestOperateScopedTokenOverTheRealEdgeReachesLifecycleToolsAndIsRefusedElsewhere
-// is the live-edge proof every other capability test in this file stops short
-// of: connectWithCapabilities injects an authIdentity directly, bypassing
-// authHTTPMiddleware entirely, so nothing here yet proved that a real signed
-// bearer token carrying erun:operate is actually accepted, resolved, and
-// scoped correctly by the production wiring (newHTTPHandler's
-// authHTTPMiddleware -> per-request capability resolution -> guardTool) a
-// deployed edge runs. identityWithScopedToken signs with the same
-// mcpauth.SignMCPToken call mcptoken.Signer.Sign wraps (same EdDSA JWT
-// shape, same file:// issuer scheme, just a test-scoped key and path rather
-// than the fixed in-pod one) -- erun-mcp cannot import erun-backend-api to
-// call its mint route directly (module boundary, root AGENTS.md), so this is
-// as close to the hosted backend's real output as this module can produce,
-// and it is the exact production code path a deployed edge runs against a
-// backend-minted token.
+// Drives a real signed erun:operate bearer through the production auth middleware.
+// erun-mcp cannot import erun-backend-api, so the token is signed with the same
+// mcpauth.SignMCPToken call.
 func TestOperateScopedTokenOverTheRealEdgeReachesLifecycleToolsAndIsRefusedElsewhere(t *testing.T) {
 	issuer, token := identityWithScopedToken(t, string(mcptools.MCPCapabilityOperate))
 	t.Setenv(shared.EnvMCPTrustedIssuer, issuer)
@@ -403,19 +344,13 @@ func TestOperateScopedTokenOverTheRealEdgeReachesLifecycleToolsAndIsRefusedElsew
 	}
 	t.Cleanup(func() { _ = session.Close() })
 
-	// tools/list over the real edge must be exactly the lifecycle surface --
-	// TestOperateCapabilitySeesOnlyLifecycleTools' claim, now driven by a real
-	// signed token through the production auth middleware instead of an
-	// injected authIdentity.
 	got := listToolNames(t, session)
 	want := []string{"context_start", "context_stop", "deploy", "resize"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("operate-scoped edge exposed %v, want %v", got, want)
 	}
 
-	// A permitted tool reaches its own business logic instead of being turned
-	// away for lack of capability: deploy with no version refuses for a reason
-	// that has nothing to do with authorization.
+	// deploy without a version fails for a non-authorization reason.
 	deployed, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "deploy", Arguments: map[string]any{"version": ""}})
 	if err != nil {
 		t.Fatalf("an operate-scoped token must reach deploy's handler, got a transport error: %v", err)
@@ -427,9 +362,6 @@ func TestOperateScopedTokenOverTheRealEdgeReachesLifecycleToolsAndIsRefusedElsew
 		t.Fatalf("deploy's refusal should name the missing version, got %q", text)
 	}
 
-	// Tools the tier deliberately excludes -- everything that decides what
-	// environments exist or runs arbitrary code -- are not just missing from
-	// the menu; calling them by name is refused too, over the real edge.
 	for _, forbidden := range []string{"exec_raw", "delete", "terraform", "init"} {
 		if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: forbidden}); err == nil {
 			t.Fatalf("an operate-scoped token must not be able to call %q", forbidden)

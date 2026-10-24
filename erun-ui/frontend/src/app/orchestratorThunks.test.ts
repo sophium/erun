@@ -16,11 +16,7 @@ type ThunkGetState = Parameters<AppThunk>[1];
 type ThunkExtraArg = Parameters<AppThunk>[2];
 type LooseDispatch = (action: unknown) => unknown;
 
-// A minimal thunk harness: no real store or Wails bindings, since
-// openOrchestrator dispatches only plain actions and nested thunks, never a
-// Wails call. Nested thunk dispatches are unwrapped the same way redux-thunk
-// middleware would, so a helper thunk composed of several dispatches (e.g.
-// focusOrchestratorSession) reports every action it dispatches, not itself.
+// Unwraps nested thunks as redux-thunk would, recording only plain actions.
 function collectDispatched(thunk: AppThunk): RecordedAction[] {
   const actions: RecordedAction[] = [];
   const getState = (() => ({})) as ThunkGetState;
@@ -40,9 +36,6 @@ function collectDispatched(thunk: AppThunk): RecordedAction[] {
   return actions;
 }
 
-// Clicking a running orchestrator while the tenant dashboard is open must show
-// its session: setSessionId alone leaves the pane hidden behind
-// state.tenantDashboard.tenant.
 test('opening a running orchestrator clears the tenant dashboard, not just the session id', () => {
   const actions = collectDispatched(openOrchestrator(42));
   const types = actions.map((action) => action.type);

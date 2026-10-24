@@ -73,15 +73,8 @@ func ensureAPIPortForward(ctx core.Context, result config.OpenResult) (int, erro
 	return startAPIPortForward(ctx, statePath, expectedState, args, localPort)
 }
 
-// ensureAPIPortForwardDryRun previews the port-forward without a live cluster
-// read: the real path (common.DeploymentPresent, above) skips the whole
-// forward when the tenant's <tenant>-api deployment is not present, but
-// resolving that here would need every open dry-run scenario in the suite to
-// declare a kubectl stub for a check it otherwise has no reason to. So the
-// forward is stated as conditional on the presence check already traced by
-// the caller, rather than asserted outright — the same split
-// TraceEnsureKubernetesNamespace uses for the analogous namespace-create
-// decision.
+// ensureAPIPortForwardDryRun previews the forward without reading the cluster;
+// it is conditional on the deployment presence check the caller traces.
 func ensureAPIPortForwardDryRun(ctx core.Context, result config.OpenResult, state, expectedState shared.McpPortForwardState, localPort int) (int, error) {
 	args := kubectlAPIPortForwardArgs(result, localPort)
 	if previewed, port := shared.PreviewAdoptOrConflict(ctx, "api", localPort, args, canReachLocalAPIEndpoint); previewed {
@@ -94,7 +87,6 @@ func ensureAPIPortForwardDryRun(ctx core.Context, result config.OpenResult, stat
 	return localPort, nil
 }
 
-// adoptForeignAPIPortForward mirrors adoptForeignMCPPortForward; see it for the adoption contract.
 func adoptForeignAPIPortForward(ctx core.Context, statePath string, expected shared.McpPortForwardState, expectedArgs []string, localPort int) (bool, error) {
 	pid, argv, ok := shared.FindLocalPortHolder(localPort)
 	if !ok {
@@ -166,18 +158,14 @@ func launchAPIPortForwardProcess(logPath string, args []string) (*os.Process, er
 	return cmd.Process, nil
 }
 
-// logStart is where this attempt's own output begins in logPath; see
-// portForwardLogReportsListenConflict for why the caller takes it before
-// launching rather than here.
+// logStart is where this attempt's output begins in logPath; the caller takes it before launching.
 func waitForAPIPortForward(localPort int, logPath string, logStart int64) error {
 	deadline := time.Now().Add(shared.McpPortForwardStartupTimeout)
 	for time.Now().Before(deadline) {
 		if canReachLocalAPIEndpoint(localPort) {
 			return nil
 		}
-		// See waitForMCPPortForward: kubectl exits on a failed listen, so the
-		// conflict is readable from the log long before the startup timeout,
-		// and the bind retry depends on being told promptly.
+		// kubectl exits on a failed listen, so report the conflict promptly for the bind retry.
 		if shared.PortForwardLogReportsListenConflict(logPath, logStart) {
 			return shared.ListenConflictError(localPort, logPath)
 		}
@@ -198,22 +186,8 @@ func kubectlAPIPortForwardArgs(result config.OpenResult, localPort int) []string
 	if namespace != "" {
 		args = append(args, "--namespace", namespace)
 	}
-	// The far side is the environment's own API port, not the canonical
-	// APIServicePort: `erun deploy` renders the erun-backend-api chart's
-	// apiPort from this same per-env allocation (HelmDeploySpec.APIPort, out
-	// of LocalPortsForResult), so an environment allocated 17300 publishes its
-	// API Service on 17333. Pinning the far side to 17033 asks kubectl for a
-	// service port the Service does not expose, and the whole forward fails
-	// for every environment outside the 17000-17099 range. The local side
-	// staying per-env is what keeps concurrent forwards for different
-	// environments from colliding on the laptop, and it is why the two sides
-	// carry the same number here rather than one being rewritten to a
-	// constant: MCP and SSH forward the same way.
-	//
-	// APIServicePortForResult carries deploy's own fallback with it: an
-	// environment that resolves no port block at all deploys the chart's
-	// `default 17033`, so that is the port its Service answers on and the one
-	// to ask kubectl for.
+	// The remote side is the environment's own API service port, which deploy
+	// renders from the same per-env allocation (or the chart default 17033).
 	servicePort := config.APIServicePortForResult(result)
 	args = append(args,
 		"port-forward",

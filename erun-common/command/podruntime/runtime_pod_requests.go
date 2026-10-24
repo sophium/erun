@@ -9,35 +9,21 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// RuntimePodRequestsRunnerFunc runs the one read-only kubectl invocation this
-// reading needs (RuntimePodRequestsArgs) and returns its stdout. The nil
-// default shells out on this process; a transport that must bound the call --
-// the desktop's on-demand probe, whose whole budget is a few seconds -- injects
-// one carrying its own deadline, so a `kubectl get pods` that hangs cannot
-// outlive the reading it belongs to.
+// RuntimePodRequestsRunnerFunc lets a transport inject a runner with its own deadline.
 type RuntimePodRequestsRunnerFunc func(args []string) ([]byte, error)
 
-// RuntimePodRequestsArgs is the read-only invocation the request reading runs:
-// the same `get pods -o json` shape observe's own pod read uses, scoped to this
-// release's pods by the label the chart sets. Exported so a transport that
-// supplies its own runner builds the identical command rather than a second
-// spelling of it.
+// RuntimePodRequestsArgs is exported so an injected runner runs the identical command.
 func RuntimePodRequestsArgs(req config.ShellLaunchParams) []string {
 	args := config.KubectlTargetArgs(req)
 	args = append(args, "get", "pods", "-l", "app="+config.RuntimeReleaseName(req.Tenant), "-o", "json")
 	return args
 }
 
-// readRuntimeUsageRequests traces and runs the pod-spec read. It never fails
-// its caller: everything that can go wrong here is reported on the reading as
-// Unavailable, because losing the reservation figures must not cost the cgroup
-// reading beside them.
+// readRuntimeUsageRequests never fails its caller: losing requests must not cost the cgroup reading.
 func readRuntimeUsageRequests(ctx core.Context, runner RuntimePodRequestsRunnerFunc, req config.ShellLaunchParams) *config.RuntimeUsageRequests {
 	ctx.TraceCommand("", "kubectl", RuntimePodRequestsArgs(req)...)
 	if ctx.DryRun {
-		// Nothing was read, and a zero reading would be a reservation of
-		// nothing: dry-run carries no Requests at all, matching the empty
-		// RuntimeUsage the rest of a dry run returns.
+		// A zero reading would claim a reservation of nothing.
 		return nil
 	}
 	if runner == nil {
@@ -54,9 +40,6 @@ func readRuntimeUsageRequests(ctx core.Context, runner RuntimePodRequestsRunnerF
 	return requests
 }
 
-// runPodRequestsKubectl is the default runner: the same read-only kubectl get
-// observe's pod read runs, with its stderr folded into the error so an
-// unreachable API server is reported as what it is.
 func runPodRequestsKubectl(args []string) ([]byte, error) {
 	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
@@ -65,9 +48,6 @@ func runPodRequestsKubectl(args []string) ([]byte, error) {
 	return raw, nil
 }
 
-// parseRuntimePodRequests turns one `kubectl get pods -o json` response into the
-// request reading. Pure, so the pod selection and the quantity rules are
-// testable without a cluster.
 func parseRuntimePodRequests(raw []byte) (*config.RuntimeUsageRequests, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return nil, fmt.Errorf("kubectl returned no pod list for this environment's release")
@@ -91,11 +71,7 @@ func parseRuntimePodRequests(raw []byte) (*config.RuntimeUsageRequests, error) {
 	return &config.RuntimeUsageRequests{Containers: containers, Pod: podRequests}, nil
 }
 
-// selectRuntimePodForRequests picks the pod whose spec the reading reports. A
-// rollout leaves two pods carrying the same label for a moment, and the one
-// actually serving is the Running one, so it wins over a Pending or terminating
-// predecessor; a name-sorted first pod decides everything else, so the reading
-// is deterministic rather than dependent on list order.
+// During a rollout the Running pod wins; ties sort by name for a deterministic reading.
 func selectRuntimePodForRequests(items []deploy.PodStatusItem) (deploy.PodStatusItem, bool) {
 	running := make([]deploy.PodStatusItem, 0, len(items))
 	for _, item := range items {
@@ -119,10 +95,8 @@ func selectRuntimePodForRequests(items []deploy.PodStatusItem) (deploy.PodStatus
 	return selected, true
 }
 
-// declaredContainerRequests reads each container's own declared request. A
-// quantity this parser cannot read is an error rather than a zero: reporting a
-// smaller reservation than the pod declares is the one wrong answer that
-// matters here, since the whole reading exists to be compared against a limit.
+// An unparseable quantity is an error, not a zero: understating the reservation is the
+// one wrong answer that matters.
 func declaredContainerRequests(pod deploy.PodStatusItem) (map[string]config.KubernetesRequests, error) {
 	var containers map[string]config.KubernetesRequests
 	for _, container := range pod.Spec.Containers {
@@ -138,7 +112,6 @@ func declaredContainerRequests(pod deploy.PodStatusItem) (map[string]config.Kube
 	return containers, nil
 }
 
-// effectivePodRequests is the request the scheduler admits the pod on.
 func effectivePodRequests(pod deploy.PodStatusItem) (config.KubernetesRequests, error) {
 	return EffectiveKubernetesPodRequests(
 		kubernetesContainerResources(pod.Spec.Containers),
@@ -146,15 +119,8 @@ func effectivePodRequests(pod deploy.PodStatusItem) (config.KubernetesRequests, 
 	)
 }
 
-// KubernetesContainerResources is one container's declared resources as a pod
-// spec carries them: the resources.requests map the scheduler sums, and the
-// name a quantity this parser cannot read is reported against.
-//
-// It is exported because the admission rule below is not a caller's to
-// re-derive. The desktop's node-capacity reading applies it to every pod on a
-// node, and a second spelling of "max over the init containers, sum over the
-// containers" would disagree with this one the first time either changed --
-// silently, since both would still return a plausible number.
+// KubernetesContainerResources is exported so callers apply the same admission rule
+// instead of re-deriving it.
 type KubernetesContainerResources struct {
 	Name     string
 	Requests map[string]string
@@ -171,15 +137,8 @@ func kubernetesContainerResources(containers []deploy.SpecContainerEntry) []Kube
 	return out
 }
 
-// EffectiveKubernetesPodRequests is the request the scheduler admits a pod on:
-// max(max over the init containers, sum over the containers), per resource.
-// Summing the containers alone understates any pod whose init container asks
-// for more than their total, and a node-capacity reading that understates what
-// is committed reports free capacity the scheduler does not have.
-//
-// A container that declares nothing for a resource contributes zero, which is
-// the scheduler's own reading of it; a declared quantity that cannot be parsed
-// is an error, never a dropped zero.
+// EffectiveKubernetesPodRequests is max(max over init containers, sum over containers),
+// per resource, matching the scheduler.
 func EffectiveKubernetesPodRequests(containers, initContainers []KubernetesContainerResources) (config.KubernetesRequests, error) {
 	sum, err := sumContainerRequests(containers)
 	if err != nil {
@@ -224,9 +183,6 @@ func kubectlRequestsMax(a, b config.KubernetesRequests) config.KubernetesRequest
 	}
 }
 
-// kubernetesRequestsFromValues reads the cpu/memory entries of one
-// resources.requests map. An absent entry is no declaration; a present entry
-// that cannot be read is an error, never a dropped zero.
 func kubernetesRequestsFromValues(values map[string]string) (config.KubernetesRequests, error) {
 	requests := config.KubernetesRequests{}
 	if raw := strings.TrimSpace(values["cpu"]); raw != "" {

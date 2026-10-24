@@ -106,9 +106,7 @@ func runTerraformCommand(ctx core.Context, store terraform.TerraformStore, findP
 	return writeTerraformCommandOutput(ctx, result)
 }
 
-// writeTerraformCommandOutput prints the dispatched run's captured output (a
-// dispatch has no local Directory to print progress against) and the final
-// status line, non-dry-run only — dry-run already traced the full plan.
+// writeTerraformCommandOutput prints a dispatched run's captured output and status, outside dry-run.
 func writeTerraformCommandOutput(ctx core.Context, result terraform.TerraformResult) error {
 	stdout := strings.TrimSpace(result.Stdout)
 	stderr := strings.TrimSpace(result.Stderr)
@@ -143,8 +141,7 @@ func terraformArgOrFlag(flag string, args []string, index int) string {
 	return ""
 }
 
-// terraformConfirmer guards apply/destroy against hitting the wrong env; init
-// and plan never mutate cloud/cluster state, so they need no confirmation.
+// terraformConfirmer confirms only apply/destroy; init and plan never mutate state.
 func terraformConfirmer(op terraform.TerraformOperation, confirmEnvironment string) terraform.TerraformConfirmFunc {
 	if op != terraform.TerraformApply && op != terraform.TerraformDestroy {
 		return nil

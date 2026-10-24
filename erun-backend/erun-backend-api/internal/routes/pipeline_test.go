@@ -30,9 +30,6 @@ func getPipeline(t *testing.T, builder PipelineBuilder) *httptest.ResponseRecord
 	return rec
 }
 
-// TestGetPipelineWritesTheUnionItWasHanded: the route is a thin adapter, so
-// what it must get right is that the union reaches the wire intact -- the
-// issue key, the rung, and which record the item came from.
 func TestGetPipelineWritesTheUnionItWasHanded(t *testing.T) {
 	rec := getPipeline(t, &stubPipelineBuilder{issues: []service.PipelineIssue{{
 		IssueKey: "sophium/erun#2683",
@@ -55,10 +52,6 @@ func TestGetPipelineWritesTheUnionItWasHanded(t *testing.T) {
 	}
 }
 
-// TestGetPipelineOfNothingMarshalsAsAnEmptyArray: a tenant with nothing
-// recorded is a valid answer, and a caller ranging over the body must not
-// need a null check to tell "nothing is going on" apart from "the read
-// failed".
 func TestGetPipelineOfNothingMarshalsAsAnEmptyArray(t *testing.T) {
 	rec := getPipeline(t, &stubPipelineBuilder{})
 
@@ -70,9 +63,6 @@ func TestGetPipelineOfNothingMarshalsAsAnEmptyArray(t *testing.T) {
 	}
 }
 
-// TestGetPipelineReportsARepositoryFailure: a read that failed must not be
-// answered as an empty pipeline, which an operator would read as "nothing is
-// going on" -- the conclusion this whole view exists to make trustworthy.
 func TestGetPipelineReportsARepositoryFailure(t *testing.T) {
 	rec := getPipeline(t, &stubPipelineBuilder{err: repository.ErrNotFound})
 

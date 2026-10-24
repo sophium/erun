@@ -22,11 +22,7 @@ import { InlineAlert } from './InlineAlert';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 import { RelativeTime } from './TenantDashboardMessage';
 
-// commentAuthorDisplay prefers the resolved tenant-user-directory username
-// over the raw creator id — the same fallback order
-// displayReviewAuthor uses in the reviews list, minus the "You" special case:
-// the dialog has no signed-in user id threaded down to it, and the raw id is
-// still a meaningful fallback rather than nothing.
+// commentAuthorDisplay falls back to the raw creator id; there is no signed-in user id for "You".
 function commentAuthorDisplay(comment: UIReviewComment): string {
   const id = comment.creatorUserId?.trim() ?? '';
   if (!id) {
@@ -35,28 +31,11 @@ function commentAuthorDisplay(comment: UIReviewComment): string {
   return comment.creatorUsername?.trim() ?? id;
 }
 
-// COMMENT_PREVIEW_LENGTH bounds a comment body before it needs an explicit
-// "Show more" — long enough that ordinary comments never see it, short
-// enough that a very long one doesn't push Reply/Resolve off without warning.
+// COMMENT_PREVIEW_LENGTH keeps a very long body from pushing Reply/Resolve away.
 const COMMENT_PREVIEW_LENGTH = 400;
 
-// ReviewDetailComments renders the review's threads (root comments with their
-// replies nested under them) and, per thread, a reply composer. Starting a
-// new top-level thread needs a diff-line anchor this dialog does not have —
-// that's the diff panel's job — so only replying to an existing thread is
-// wired here.
-//
-// Threads share the terminal tab strip's roving-tabindex shape
-// (TerminalTabStrip.tsx): one thread is a real Tab stop at a time, Up/Down
-// roam between them, and the focused thread carries the review surface's
-// `R`/`Enter` bindings for reply and resolve/unresolve (erun-ui/AGENTS.md §
-// "The keyboard model the review surface still owes"). The list container
-// carries one native `keydown` listener (delegated by `data-thread-index`),
-// not per-thread JSX `onKeyDown` -- jsx-a11y's non-interactive-element rules
-// have no ARIA role that satisfies both "needs a role for its handler" and
-// "should not have a handler for its role" at once for a div whose only fit
-// is `role="region"` (TerminalController's own installReviewDiffKeydown hits
-// the identical conflict for the diff panel and resolves it the same way).
+// ReviewDetailComments renders threads with reply composers; new threads need a diff anchor, so only replies are wired.
+// One delegated keydown listener (by `data-thread-index`) avoids jsx-a11y's role/handler conflict on the thread divs.
 export function ReviewDetailComments({
   detail,
 }: {
@@ -83,18 +62,7 @@ export function ReviewDetailComments({
       element.removeEventListener('keydown', listener);
     };
   }, []);
-  // Cancelling a reply unmounts the composer's Input, and the browser drops
-  // focus to <body> when its focused element is removed -- stranding a
-  // keyboard user there with no further binding reachable. Detect the
-  // replyingTo transition away from the roving-focused thread and reclaim
-  // focus for it, the same correction React apps make after any control
-  // that closes itself removes the element that held focus. A successful
-  // submit closes the composer the same way, but loadReviewDetail's own
-  // reload (submitReviewReply's last step) flashes the whole dialog to its
-  // loading state first, unmounting this component before this effect would
-  // run -- true for a mouse-driven Send today too, so it is not this
-  // effect's problem to solve; the remounted list's default roving focus
-  // (the first thread) is still reachable with one more Tab press either way.
+  // Cancelling a reply unmounts the focused input and drops focus to <body>; reclaim it for the thread.
   const previousReplyingToRef = React.useRef(detail.replyingTo);
   React.useEffect(() => {
     const closedFor = previousReplyingToRef.current;
@@ -129,10 +97,7 @@ export function ReviewDetailComments({
     setFocusedIndex(index);
     threadRefs.current[index]?.focus();
   };
-  // The reply Input mounts only once setReviewReplyTarget's state update
-  // lands, one render after this dispatch -- the same
-  // dispatch-then-setTimeout(0)-then-query shape reviewThunks.ts's own
-  // selectDiffPath uses to act on an element that has not rendered yet.
+  // The reply input mounts a render after this dispatch.
   const focusReplyInput = (index: number): void => {
     window.setTimeout(() => {
       threadRefs.current[index]
@@ -167,9 +132,7 @@ export function ReviewDetailComments({
   );
 }
 
-// replyToFocusedThread re-dispatches setReviewReplyTarget only when this
-// thread isn't already the reply target -- doing so unconditionally would
-// wipe an in-progress draftBody every time `R` is pressed again.
+// Re-dispatching unconditionally would wipe an in-progress draft.
 function replyToFocusedThread(
   dispatch: ReturnType<typeof useAppDispatch>,
   detail: ReviewDetailState,
@@ -201,9 +164,6 @@ function resolveOrReopenFocusedThread(
   );
 }
 
-// resolveFocusedThread reads which thread the delegated keydown listener's
-// event bubbled up from, via the `data-thread-index` CommentThread stamps on
-// itself -- null when the target isn't (or is no longer) a known thread.
 function resolveFocusedThread(
   event: KeyboardEvent,
   roots: UIReviewComment[],
@@ -216,13 +176,7 @@ function resolveFocusedThread(
   return root ? { index, root } : null;
 }
 
-// commentThreadKeyDownHandler mirrors tabStripKeyDownHandler's shape
-// (TerminalTabStrip.tsx): one factory closing over the list-level state,
-// returning one delegated handler that resolves its thread from
-// `data-thread-index` on the event target. Guarded the same way as the diff
-// panel's own handler (reviewKeyboardShortcuts.ts): no binding fires while a
-// text field has focus (the reply composer's Input) or a Cmd/Ctrl/Alt chord
-// is held.
+// No binding fires while a text field has focus or a Cmd/Ctrl/Alt chord is held.
 function commentThreadKeyDownHandler(
   dispatch: ReturnType<typeof useAppDispatch>,
   detail: ReviewDetailState,
@@ -310,8 +264,6 @@ function CommentThread({
   );
 }
 
-// ReplyAction is hidden once this thread is already being replied to (the
-// composer takes its place) and whenever the caller may not comment at all.
 function ReplyAction({
   root,
   detail,
@@ -349,10 +301,7 @@ function ThreadReplyComposer({
   return <ReplyComposer detail={detail} />;
 }
 
-// ResolveThreadAction is offered only on a thread's root — never a reply —
-// so the surface cannot ask for a status change the platform will refuse.
-// Hidden entirely when the caller lacks the write permission (degrade by
-// permission, not by a failed submit).
+// Root-only, since the platform refuses a status change on a reply; hidden without write permission.
 function ResolveThreadAction({
   root,
   resolved,
@@ -367,11 +316,7 @@ function ResolveThreadAction({
     return null;
   }
   const busy = detail.resolvingCommentId === root.commentId;
-  // Resolving is the action that moves the review forward, so it carries the
-  // primary button weight — Reply stays outline (secondary) beside it,
-  // matching how the repo already distinguishes primary from secondary
-  // actions elsewhere. Reopening a thread is a correction, not the
-  // forward action, so it keeps the outline treatment.
+  // Resolving is primary; Reply and Reopen stay outline.
   return (
     <Button
       type="button"
@@ -420,8 +365,7 @@ function CommentLine({ comment }: { comment: UIReviewComment }): React.ReactElem
         <span className="flex-none font-medium text-foreground">
           {commentAuthorDisplay(comment)}
         </span>
-        {/* The anchor is commit + file + line — the line stays flex-none so it
-            is never the part truncation eats; only the file path shrinks. */}
+        {/* The line stays flex-none so only the file path truncates. */}
         <span className="flex-none font-mono text-muted-foreground">
           {comment.commitId.slice(0, 7)}
         </span>
@@ -436,12 +380,7 @@ function CommentLine({ comment }: { comment: UIReviewComment }): React.ReactElem
   );
 }
 
-// CommentBody gives a long comment a visible way to read the rest instead of
-// relying on an invisible scroll region: a native scrollbar inside a
-// max-height box gives no affordance that more text exists, so a long
-// comment reads as silently clipped. Collapsed text still shows a preview
-// (not just "click to reveal a blank box"), and the toggle is a real control
-// rather than a hover-only scrollbar a keyboard user cannot discover.
+// CommentBody uses an explicit "Show more", since a scroll region gives no sign of hidden text.
 function CommentBody({ body }: { body: string }): React.ReactElement {
   const [expanded, setExpanded] = React.useState(false);
   const isLong = body.length > COMMENT_PREVIEW_LENGTH;
@@ -466,10 +405,7 @@ function CommentBody({ body }: { body: string }): React.ReactElement {
   );
 }
 
-// ReplyComposer: body is genuine free text the operator authors; every other
-// field a reply needs (commitId, filePath, line, parentCommentId) is carried
-// automatically from the thread it replies to (see reviewDetailThunks.ts), so
-// nothing here asks the operator to type an anchor they didn't choose.
+// Only the body is typed; the anchor fields come from the thread.
 function ReplyComposer({ detail }: { detail: ReviewDetailState }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
@@ -521,9 +457,7 @@ function ReplyComposer({ detail }: { detail: ReviewDetailState }): React.ReactEl
   );
 }
 
-// CommentsRestrictedNotice is the thread list's denial. It says what is
-// missing and hands over the grant that would lift it, so a caller refused
-// this read is not left to work out which command an administrator runs.
+// CommentsRestrictedNotice names the missing grant.
 function CommentsRestrictedNotice({ detail }: { detail: ReviewDetailState }): React.ReactElement {
   const restricted = detail.data?.commentsRestricted ?? '';
   return (

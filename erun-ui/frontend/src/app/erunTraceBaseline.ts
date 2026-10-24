@@ -1,7 +1,5 @@
 import * as React from 'react';
 
-// ErunTraceBaseline is the resolved state of the erun-trace "Clear" view
-// baseline.
 export interface ErunTraceBaseline {
   cleared: boolean;
   rotatedOut: boolean;
@@ -10,12 +8,8 @@ export interface ErunTraceBaseline {
   showAll: () => void;
 }
 
-// useErunTraceBaseline implements erun-trace "Clear" as a per-env view aid: after
-// Clear the pane shows only lines that arrive afterwards, so new activity stands
-// out on a busy env. It never truncates the persistent log — Refresh / Copy / Copy
-// report still read the full content — and it degrades safely when the bounded
-// on-disk trace rotates past the cut point by falling back to showing everything.
-// The baseline resets per env so a stale cut point never carries across environments.
+// useErunTraceBaseline is a per-env view-only Clear: the persistent log is never
+// truncated, and a cut point lost to log rotation falls back to showing everything.
 export function useErunTraceBaseline(envKey: string, content: string): ErunTraceBaseline {
   const [baseline, setBaseline] = React.useState<string | null>(null);
   React.useEffect(() => {

@@ -10,10 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// consumedTestStageDockerfileContent is the repository's component shape:
-// build -> test -> dist -> runtime. The `runtime` image takes its artifact from
-// `dist`, which is built FROM test, so the image is only produced once the
-// tests passed, and a version stamp in `dist` leaves `test` cached.
+// build -> test -> dist -> runtime: the image is produced only after tests pass.
 const consumedTestStageDockerfileContent = "" +
 	"FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build\n" +
 	"RUN go build -o /out/app ./...\n" +
@@ -54,9 +51,7 @@ func TestDockerfileHasConsumedTestStageIgnoresOrdinaryDockerfiles(t *testing.T) 
 	}
 }
 
-// A stage merely *prefixed* with `test` is a different stage: naming a stage
-// after the toolchain it installs is ordinary. Reading it as a test stage would
-// grant the build the host-network entitlement for nothing.
+// Granting host networking to a merely test-prefixed stage would be for nothing.
 func TestDockerfileTestStagePredicatesIgnoreATestPrefixedStageName(t *testing.T) {
 	path := writeTestDockerfile(t, t.TempDir(), "FROM alpine:3.20 AS test-toolchain\nRUN apk add curl\n\n"+
 		"FROM golang:1.26.0 AS builder\nCOPY --from=test-toolchain /usr/bin/curl /usr/bin/curl\n")
@@ -68,9 +63,6 @@ func TestDockerfileTestStagePredicatesIgnoreATestPrefixedStageName(t *testing.T)
 	}
 }
 
-// A `test` stage nobody depends on still declares a place for tests to run,
-// which is what the host-network entitlement is scoped by, but nothing in the
-// build graph requires it to have run.
 func TestDockerfileDeclaresTestStageIsBroaderThanTheConsumedCheck(t *testing.T) {
 	declared := writeTestDockerfile(t, t.TempDir(), "FROM golang:1.26.0 AS test\nRUN make check\n\nFROM scratch\nCOPY . /app\n")
 	if shared.DockerfileHasConsumedTestStage(declared) {
@@ -85,8 +77,6 @@ func TestDockerfileDeclaresTestStageIsBroaderThanTheConsumedCheck(t *testing.T) 
 	}
 }
 
-// DockerImageBuilder promotes a tested Dockerfile by re-tagging its cached
-// fingerprint image, with no docker build behind it.
 func TestDockerImageBuilderPromotesATestStageDockerfile(t *testing.T) {
 	invocations := newFakeDockerImageStore(t, "ghcr.io/sophium/erun-console:fp-abc123-amd64")
 	build := testPromoteBuildInput()
@@ -101,12 +91,6 @@ func TestDockerImageBuilderPromotesATestStageDockerfile(t *testing.T) {
 	}
 }
 
-// TestRealDevopsDockerfileStillConsumesItsTestStage pins the real artefact the
-// synthetic cases only model: the erun-devops image, which ships erun and
-// emcp, must be produced only once its test stage has passed, so a successful
-// build of it -- and the fp tag written after one -- means its tests ran and
-// passed.
-//
 // Reads a sibling module, so it must run uncached (go test -count=1).
 func TestRealDevopsDockerfileStillConsumesItsTestStage(t *testing.T) {
 	path := filepath.Join(erunRepoRoot(t), "erun-devops", "docker", "erun-devops", "Dockerfile")

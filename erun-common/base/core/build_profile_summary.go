@@ -4,39 +4,20 @@ import (
 	"sort"
 )
 
-// build_profile_summary.go bounds a build's step-timing tree down to a
-// payload small enough to carry alongside ReportBuildOutcome's self-report to
-// the erun platform -- the operator ask was "go to builds, select a build,
-// see what consumed CPU or hit an I/O bottleneck", which needs the timing
-// tree that already lands in ~/.erun/timing/build-*.json to also reach the
-// platform the desktop reads.
-//
-// A build's step tree is small today (image -> platform), but breaking
-// each image into its Dockerfile steps and `>> <phase>` markers has been
-// proposed and could turn that into dozens of rows. Rather than carry the
-// full tree, BuildProfileSummary stores the build's own totals plus the
-// buildProfileTopStepCount costliest steps by duration -- bounded regardless
-// of how deep a future step tree grows.
+// buildProfileTopStepCount bounds the profile a build reports to the platform,
+// however deep the step tree grows.
 const buildProfileTopStepCount = 10
 
-// BuildProfileStepSummary is one entry in BuildProfileSummary's bounded
-// top-N costliest-steps list. Name is the step's full path (parent > child)
-// so two same-named steps under different parents (e.g. two images both
-// building "linux/amd64") stay distinguishable once flattened out of the
-// tree. Cgroup reuses BuildCgroupMetrics (build_cgroup_metrics.go) directly
-// rather than a duplicate type, since the step's own JSON record already
-// carries that exact shape.
+// BuildProfileStepSummary names a step by its full path so same-named steps under
+// different parents stay distinct.
 type BuildProfileStepSummary struct {
 	Name            string              `json:"name"`
 	DurationSeconds float64             `json:"durationSeconds"`
 	Cgroup          *BuildCgroupMetrics `json:"cgroup,omitempty"`
 }
 
-// BuildProfileSummary is the bounded profile a build self-reports alongside
-// its outcome (see ReportBuildOutcomeParams.Profile). TotalStepCount is the
-// number of steps the full tree actually had, so a caller can tell "this
-// build had few enough steps that TopSteps is the whole tree" from "steps
-// were dropped" without needing TruncatedStepCount to be nonzero.
+// BuildProfileSummary is the bounded profile a build reports with its outcome.
+// TotalStepCount tells whether steps were dropped.
 type BuildProfileSummary struct {
 	DurationSeconds    float64                   `json:"durationSeconds"`
 	Failed             bool                      `json:"failed,omitempty"`
@@ -46,12 +27,8 @@ type BuildProfileSummary struct {
 	TruncatedStepCount int                       `json:"truncatedStepCount,omitempty"`
 }
 
-// SummarizeTimingRecordForProfile flattens record's step tree (at every
-// depth) into one list, sorts it by duration descending, and keeps only the
-// costliest buildProfileTopStepCount -- the same ordering
-// RenderTimingRecordRows-style tooling already uses to put the dominant cost
-// first, applied here to decide what gets kept rather than just what gets
-// shown first.
+// SummarizeTimingRecordForProfile keeps the buildProfileTopStepCount longest
+// steps from every depth of record's tree.
 func SummarizeTimingRecordForProfile(record TimingRecord) BuildProfileSummary {
 	flattened := flattenTimingStepJSONForProfile(record.Steps, "")
 	sort.SliceStable(flattened, func(i, j int) bool {
@@ -73,10 +50,6 @@ func SummarizeTimingRecordForProfile(record TimingRecord) BuildProfileSummary {
 	return summary
 }
 
-// flattenTimingStepJSONForProfile walks steps recursively, naming each
-// flattened entry with its full ancestry path so siblings that share a leaf
-// name (two images each building "linux/amd64") stay distinguishable once
-// they are no longer nested.
 func flattenTimingStepJSONForProfile(steps []TimingStepJSON, ancestryPath string) []BuildProfileStepSummary {
 	var flattened []BuildProfileStepSummary
 	for _, step := range steps {

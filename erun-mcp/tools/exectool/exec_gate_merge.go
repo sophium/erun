@@ -9,17 +9,14 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// ExecGateMergeSource is one branch to squash into the prospective merge, in
-// the order it should land, carrying its own commit message.
+// ExecGateMergeSource is one branch to squash, in landing order.
 type ExecGateMergeSource struct {
 	Branch  string `json:"branch" jsonschema:"branch to fetch and squash-merge in"`
 	Message string `json:"message" jsonschema:"this branch's own squash commit message — its review's name, since that commit is what ends up on targetBranch if its build succeeds. The branch's own load-bearing trailers (Closes #N, Reproduces:, Regression-Test:) are appended beneath it automatically, and a trailer the message already carries is not repeated"`
 }
 
-// ExecGateMergeInput prepares the prospective merge a merge queue promotion
-// (or batch) builds: fetch targetBranch and every source, check out a fresh
-// local branch named targetBranch at its own current remote tip, and
-// squash-merge each source onto it in turn, each as its own commit.
+// ExecGateMergeInput squash-merges each source, in order, onto a fresh branch
+// at targetBranch's remote tip.
 type ExecGateMergeInput struct {
 	Sources      []ExecGateMergeSource `json:"sources" jsonschema:"branches to squash-merge in, in order; more than one batches several unmerged branches into one prospective merge so the build that follows tests whether they compile together"`
 	TargetBranch string                `json:"targetBranch" jsonschema:"branch the squash merge(s) land onto, checked out fresh from its own current remote tip"`

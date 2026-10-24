@@ -13,38 +13,26 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// jobReportStore is the config store the reporting contract is exercised
-// against. job_record.go reads it only to decide whether a platform alias
-// exists at all, so the zero value is the case that matters most: an install
-// that has never configured one.
+// jobReportStore's zero value is an install with no platform alias.
 type jobReportStore struct{ config configpkg.ERunConfig }
 
 func (s jobReportStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 	return s.config, "", nil
 }
 
-// erunAliasStore is the other half: an install that has an erun-type alias
-// configured but no usable API URL on it (an interrupted login), which is the
-// first thing that can go wrong after the alias check.
+// erunAliasStore has an erun alias with no usable API URL.
 func erunAliasStore() jobReportStore {
 	return jobReportStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{
 		{Alias: "erun", Provider: configpkg.CloudProviderERun, ERun: &configpkg.ERunProviderConfig{}},
 	}}}
 }
 
-// traceBuffer wires a Context whose trace lines are captured rather than
-// printed, so a test can assert on what a caller would actually see.
 func traceBuffer() (core.Context, *bytes.Buffer) {
 	buf := &bytes.Buffer{}
 	return core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, buf, buf)}, buf
 }
 
-// TestReportJobStartWithoutAnAliasSaysNothingAtAll is the contract's sharpest
-// edge: an install with no platform alias configured -- the overwhelming
-// majority of invocations -- must behave exactly as it did before job
-// reporting existed. Not merely "not fail": say nothing, trace nothing, and
-// touch no network. A single trace line here would be a behaviour change on
-// every agent run in every unconfigured environment.
+// No alias must mean no trace and no network at all.
 func TestReportJobStartWithoutAnAliasSaysNothingAtAll(t *testing.T) {
 	ctx, trace := traceBuffer()
 
@@ -63,10 +51,6 @@ func TestReportJobStartWithoutAnAliasSaysNothingAtAll(t *testing.T) {
 	}
 }
 
-// TestReportJobStartWithAnUnusableAliasTracesAndKeepsGoing: every failure
-// after the alias check is a recorded skip -- traced, never silent, never
-// propagated as a failure of the work being recorded. A caller has no error
-// to handle because there is none to give.
 func TestReportJobStartWithAnUnusableAliasTracesAndKeepsGoing(t *testing.T) {
 	ctx, trace := traceBuffer()
 
@@ -85,9 +69,6 @@ func TestReportJobStartWithAnUnusableAliasTracesAndKeepsGoing(t *testing.T) {
 	}
 }
 
-// TestReportJobOutcomeWithoutAJobIDSaysNothing: an empty job id means the
-// start was never recorded, so there is nothing to close. The caller that had
-// no id already saw why, and repeating it here would double every skip notice.
 func TestReportJobOutcomeWithoutAJobIDSaysNothing(t *testing.T) {
 	ctx, trace := traceBuffer()
 
@@ -101,9 +82,6 @@ func TestReportJobOutcomeWithoutAJobIDSaysNothing(t *testing.T) {
 	}
 }
 
-// TestReportJobOutcomeWithoutAnAliasSaysNothingAtAll is the same silent-no-op
-// contract for the closing half: a caller that recorded a job on one machine
-// and closes it on another has no alias there, and must not be told about it.
 func TestReportJobOutcomeWithoutAnAliasSaysNothingAtAll(t *testing.T) {
 	ctx, trace := traceBuffer()
 
@@ -122,10 +100,7 @@ func jobStatusError(t *testing.T, status int, body string) error {
 	return platformclient.NewPlatformStatusError(http.MethodPost, "/v1/jobs", status, []byte(body), http.Header{})
 }
 
-// TestPlatformJobScopeHeldDetailsRefusesAnyOtherConflict: a conflict that is
-// not a held scope -- an already-finished job, say -- must not be reported as
-// one. A caller told "someone else has this" when they in fact own it would
-// abandon work that is still theirs to finish.
+// Any other conflict must not read as a held scope.
 func TestPlatformJobScopeHeldDetailsRefusesAnyOtherConflict(t *testing.T) {
 	for name, err := range map[string]error{
 		"another conflict code": jobStatusError(t, http.StatusConflict, `{"code":"JOB_ALREADY_FINISHED","message":"finished"}`),

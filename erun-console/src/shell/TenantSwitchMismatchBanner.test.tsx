@@ -34,9 +34,6 @@ describe('TenantSwitchMismatchBanner', () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
-  // No retry is offered with nothing to retry against (the dev-token
-  // fallback, which has no OIDC config to redirect through) — a dead-end
-  // button would be worse than no button.
   it('omits the retry action when none is given', () => {
     render(<TenantSwitchMismatchBanner mismatch={MISMATCH} onDismiss={vi.fn()} />);
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();

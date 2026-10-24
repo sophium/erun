@@ -8,16 +8,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// verifyDockerBuildPlatforms fails fast when the host lacks binfmt/QEMU for a
-// required architecture, so the multi-arch build surfaces an actionable message
-// instead of the opaque error a per-platform `docker build` would otherwise emit.
+// verifyDockerBuildPlatforms fails fast when binfmt/QEMU is missing for a required architecture.
 func verifyDockerBuildPlatforms(required []string) error {
 	available, err := dockerBuildxPlatforms()
 	if err != nil {
 		return err
 	}
-	// An empty/unparseable platform list cannot prove anything is unsupported, so
-	// degrade to the prior behavior rather than block a build that would succeed.
+	// An unparseable platform list proves nothing; don't block a build that may succeed.
 	if len(available) == 0 {
 		return nil
 	}
@@ -28,9 +25,6 @@ func verifyDockerBuildPlatforms(required []string) error {
 	return newUnsupportedBuildPlatformError(required, missing)
 }
 
-// dockerBuildxPlatforms probes the current builder; its platform list reflects
-// the kernel's registered binfmt handlers, so it faithfully answers whether
-// `docker build --platform X` can emulate X here.
 func dockerBuildxPlatforms() (map[string]bool, error) {
 	cmd := core.Command("docker", "buildx", "inspect")
 	out := new(bytes.Buffer)
@@ -46,9 +40,7 @@ func dockerBuildxPlatforms() (map[string]bool, error) {
 	return parseBuildxPlatforms(out.String()), nil
 }
 
-// parseBuildxPlatforms unions the platforms across every `Platforms:` line (one
-// per builder node) so a multi-node builder reports its full reachable set, and
-// strips the trailing `*` buildx uses to mark a node's default platform.
+// One Platforms: line per builder node; buildx marks a node's default with a trailing `*`.
 func parseBuildxPlatforms(inspectOutput string) map[string]bool {
 	platforms := make(map[string]bool)
 	for _, line := range strings.Split(inspectOutput, "\n") {
@@ -67,8 +59,6 @@ func parseBuildxPlatforms(inspectOutput string) map[string]bool {
 	return platforms
 }
 
-// missingBuildPlatforms preserves the required-list order so the resulting error
-// message is deterministic.
 func missingBuildPlatforms(required []string, available map[string]bool) []string {
 	var missing []string
 	for _, platform := range required {

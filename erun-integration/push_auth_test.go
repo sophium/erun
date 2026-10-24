@@ -23,13 +23,8 @@ func pushRegistryAuthScenarios(t *testing.T) {
 }
 
 func testPushRealRunRefusesBeforeBuildWhenNoRegistryCredentialConfigured(t *testing.T) {
-	// A pod that has never authenticated to ghcr.io (no docker config, no gh
-	// session, no GH_TOKEN) must be refused before any multi-arch build. `docker image inspect` is stubbed only
-	// because fingerprint resolution needs an answer before the push plan can
-	// even be built; every other docker verb (build/push/manifest/login) is
-	// deliberately left to print a loud marker and fail, so a regression that
-	// let the flow reach an actual build or push shows up unmistakably in the
-	// golden instead of silently succeeding.
+	// Only `docker image inspect` is stubbed (fingerprinting needs it); every other docker verb
+	// fails loudly so reaching a build or push shows in the golden.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"
@@ -51,9 +46,7 @@ func testPushRealRunRefusesBeforeBuildWhenNoRegistryCredentialConfigured(t *test
 }
 
 func testPushRealRunAuthFailureRetriesAfterLoginViaAutoLoginEnv(t *testing.T) {
-	// push builds from source, so the build's image push is what hits the
-	// auth failure. ERUN_AUTO_LOGIN_ON_PUSH bypasses the interactive login
-	// prompt so this non-TTY harness can drive the failure-then-retry path.
+	// ERUN_AUTO_LOGIN_ON_PUSH bypasses the login prompt for this non-TTY harness.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"
@@ -77,9 +70,7 @@ func testPushRealRunAuthFailureRetriesAfterLoginViaAutoLoginEnv(t *testing.T) {
 	}, "\n"))
 	fixture.StubBinary(t, stubs, "helm", "")
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
-	// The registry-credential preflight refuses up front when no
-	// ghcr.io credential resolves at all; GH_TOKEN gives it one so this
-	// scenario still reaches the auth-failure-at-push it is about.
+	// GH_TOKEN gets past the credential preflight to the auth failure at push.
 	envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1", "GH_TOKEN=integration-test-token")
 	result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode != 0 {
@@ -89,10 +80,7 @@ func testPushRealRunAuthFailureRetriesAfterLoginViaAutoLoginEnv(t *testing.T) {
 }
 
 func testPushRealRunAuthFailurePromptsLoginAndRetries(t *testing.T) {
-	// The interactive login-retry path (no ERUN_AUTO_LOGIN_ON_PUSH): the
-	// first push fails auth, "\r" confirms the "Login and retry push"
-	// select, and the retried push lands. That select is the run's single
-	// interactive prompt.
+	// "\r" confirms the run's single prompt, "Login and retry push".
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"
@@ -116,8 +104,6 @@ func testPushRealRunAuthFailurePromptsLoginAndRetries(t *testing.T) {
 		`esac`,
 	}, "\n"))
 	fixture.StubBinary(t, stubs, "helm", "")
-	// Give the registry-credential preflight a resolvable credential
-	// so this scenario still reaches the interactive login-retry it is about.
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 	envVars = append(envVars, "GH_TOKEN=integration-test-token")
 	result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{
@@ -132,9 +118,6 @@ func testPushRealRunAuthFailurePromptsLoginAndRetries(t *testing.T) {
 }
 
 func testPushRealRunCreatePackageDeniedEmitsGuidance(t *testing.T) {
-	// GHCR "create_package" denial: when the namespace login cannot grant
-	// access, the user gets the create-a-new-package guidance and a
-	// non-zero exit.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"
@@ -148,17 +131,13 @@ func testPushRealRunCreatePackageDeniedEmitsGuidance(t *testing.T) {
 		`  *) exit 0 ;;`,
 		`esac`,
 	}, "\n"))
-	// Stub gh to "exist but fail" so LookPath finds it, runs it, and falls
-	// through gracefully instead of taking the gh-absent branch.
+	// gh exists but fails, so the flow falls through instead of taking the gh-absent branch.
 	fixture.StubBinaryAdvanced(t, stubs, "gh", fixture.StubBinarySpec{ExitCode: 1})
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh")...)
-	// Force PATH so `exec.LookPath("gh")` finds our stub (production
-	// uses LookPath directly, not the ERUN_<NAME>_BIN override).
+	// Production resolves gh via LookPath, not ERUN_GH_BIN.
 	envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+setup.PathDir)
 	envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
-	// GH_TOKEN gives the registry-credential preflight a resolvable
-	// credential without changing the failing gh stub the login-retry
-	// behavior above still depends on.
+	// GH_TOKEN passes the preflight without changing the failing gh stub.
 	envVars = append(envVars, "GH_TOKEN=integration-test-token")
 	result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode == 0 {
@@ -168,14 +147,8 @@ func testPushRealRunCreatePackageDeniedEmitsGuidance(t *testing.T) {
 }
 
 func testPushRealRunScopeDeniedAttemptsScopeRefresh(t *testing.T) {
-	// The scope-denied path (distinct from create_package: the error
-	// matches IsDockerScopeDenied, not IsDockerCreatePackageDenied): scope
-	// refresh via `gh auth refresh` succeeds and the retry push lands.
-	//
-	// ERUN_FORCE_TTY=1 is the deliberate seam that makes this piped-stdin
-	// run count as interactive so the interactive scope-refresh success
-	// path stays covered; the two scenarios below assert the
-	// non-interactive and in-pod paths fail clearly instead of launching gh.
+	// Scope-denied (not create_package): `gh auth refresh` succeeds and the retry lands.
+	// ERUN_FORCE_TTY=1 makes piped stdin count as interactive.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"
@@ -187,10 +160,7 @@ func testPushRealRunScopeDeniedAttemptsScopeRefresh(t *testing.T) {
 		`    if [ -f '` + counter + `' ]; then count=$(cat '` + counter + `'); fi`,
 		`    count=$((count + 1))`,
 		`    printf '%s' "$count" > '` + counter + `'`,
-		// Push #1: original failure that triggers handleNamespaceAuthError.
-		// Push #2: namespace-login retry path also fails so scopeStillDenied
-		//   stays true and retryAfterScopeRefresh runs.
-		// Push #3+: succeed (after gh auth refresh).
+		// Pushes 1-2 fail so retryAfterScopeRefresh runs; later pushes succeed.
 		`    if [ "$count" -le "2" ]; then`,
 		`      printf 'denied: token does not match expected scopes\n' >&2`,
 		`      exit 1`,
@@ -201,10 +171,7 @@ func testPushRealRunScopeDeniedAttemptsScopeRefresh(t *testing.T) {
 		`  *) exit 0 ;;`,
 		`esac`,
 	}, "\n"))
-	// Stub gh: auth switch fails (so RefreshGHCRPackageScopes uses
-	// the auth-refresh path against the active account), auth
-	// refresh succeeds, auth token returns a non-empty token so
-	// TryGHCRNamespaceLogin's docker-login attempt runs.
+	// auth switch fails (forcing auth refresh); auth token is non-empty so docker login runs.
 	fixture.StubBinaryWithScript(t, stubs, "gh", strings.Join([]string{
 		`case "$1 $2" in`,
 		`  "auth switch") exit 1 ;;`,
@@ -225,16 +192,11 @@ func testPushRealRunScopeDeniedAttemptsScopeRefresh(t *testing.T) {
 }
 
 func testPushRealRunScopeDeniedNonInteractiveFailsClearly(t *testing.T) {
-	// With no interactive terminal (piped stdin, ERUN_FORCE_TTY unset),
-	// RefreshGHCRPackageScopes must NOT launch gh's interactive device-code
-	// flow — which would hang forever — and must instead return the
-	// actionable write:packages-scope error.
+	// Without a TTY, gh's device-code flow would hang; the scope error is returned instead.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"
 	marker := setup.Cwd + "/gh-interactive-marker"
-	// docker push always fails the scope check, so the only way the push
-	// could succeed is the (gated) interactive scope refresh.
 	fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
 		`case "$1" in`,
 		`  push)`,
@@ -245,8 +207,7 @@ func testPushRealRunScopeDeniedNonInteractiveFailsClearly(t *testing.T) {
 		`  *) exit 0 ;;`,
 		`esac`,
 	}, "\n"))
-	// gh: token works (so the namespace-login retry runs), but any
-	// interactive auth call writes the marker — it must never fire.
+	// Any interactive gh auth call writes the marker; it must never fire.
 	fixture.StubBinaryWithScript(t, stubs, "gh", strings.Join([]string{
 		`case "$1 $2" in`,
 		`  "auth switch"|"auth refresh"|"auth login") printf 'launched\n' > '` + marker + `'; exit 0 ;;`,
@@ -268,11 +229,7 @@ func testPushRealRunScopeDeniedNonInteractiveFailsClearly(t *testing.T) {
 }
 
 func testPushRealRunScopeDeniedInPodFailsClearly(t *testing.T) {
-	// inside a chart-injected runtime pod (ERUN_TENANT/
-	// ERUN_ENVIRONMENT set) the desktop terminal is a PTY-backed pod
-	// shell, so ERUN_FORCE_TTY=1 is set to prove the in-pod check wins
-	// over the TTY seam: even with a "terminal", there is no browser, so
-	// the gate must still fire and the interactive gh flow must not run.
+	// In a runtime pod there is no browser, so the gate fires even with ERUN_FORCE_TTY=1.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	stubs := setup.Cwd + "/stubs"

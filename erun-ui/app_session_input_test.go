@@ -62,15 +62,10 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	}
 
 	got := strings.Join(actions, "\n")
-	// The ERun tab runs a pure `erun open`: it no longer deploys (the shared thin
-	// reconnect rebinds forwarders, deploy is the caller's job), so there is no
-	// --skip-ensure flag any more.
 	if got != "terminal open frs prod --app-session open-0" {
 		t.Fatalf("expected only terminal start action, got:\n%s", got)
 	}
-	// Cloud-context Status is no longer persisted, so we rely on the
-	// action log above to prove the desktop ran no AWS start
-	// commands — startup is `erun open`'s job.
+	// Cloud-context Status is not persisted; the action log above proves no AWS start ran.
 }
 
 func TestStartSessionAllocatesIndependentSlots(t *testing.T) {
@@ -253,10 +248,7 @@ func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 		store:          store,
 		resolveCLIPath: func() string { return "/tmp/erun" },
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
-			// A silent session: streamSession's 2s output-activity ticker fires on
-			// the first chunk (its last-activity stamp starts at the zero time), so
-			// a stub that emits the ready line would race a third, asynchronous
-			// event against the assertion below.
+			// Silent: the 2s activity ticker fires on the first chunk and would race the assertion.
 			return newSilentStubTerminalSession(), nil
 		},
 		recordActivity: func(params activity.EnvironmentActivityParams) error {
@@ -289,11 +281,7 @@ func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 }
 
 func TestSendSessionInputClearsAwaitingPostRespawnInputFlag(t *testing.T) {
-	// After a respawn, streamSession suppresses the 2s output-activity
-	// ticker (reconnect noise must not count as user activity).
-	// SendSessionInput is the signal that the user actually re-engaged
-	// with the session, and it must clear the flag so subsequent
-	// output once again refreshes the idle marker.
+	// Input after a respawn must re-enable output-driven idle refreshes.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]configpkg.TenantConfig{

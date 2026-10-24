@@ -14,10 +14,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewServicesCmd builds `erun services`: the CLI surface for the read model the
-// desktop's Ports tab renders as its Service picker
-// (expose.ListEnvironmentServices), so a caller can discover the names `erun
-// expose`'s SERVICE argument accepts instead of knowing them in advance.
+// NewServicesCmd builds `erun services`, listing the names `erun expose` accepts.
 func NewServicesCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	var tenant, environment string
 	cmd := &cobra.Command{
@@ -69,10 +66,7 @@ func runServicesCommand(ctx core.Context, resolveOpen shared.OpenResolver, param
 	return writeServicesResult(ctx, services)
 }
 
-// writeServicesResult renders the listing as the report it is. An exposed
-// Service carries its public address on an indented line beneath it, the same
-// shape `erun observe` uses for an Ingress's backends: the Service line stays
-// about what is running, and the address is what the exposure added to it.
+// writeServicesResult renders the listing, with an exposed Service's address on an indented line.
 func writeServicesResult(ctx core.Context, result expose.EnvironmentServiceList) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Namespace: %s\n", result.Namespace); err != nil {
 		return err
@@ -100,10 +94,7 @@ func writeServicesResult(ctx core.Context, result expose.EnvironmentServiceList)
 	return nil
 }
 
-// formatServicePorts renders the ports an Ingress would route to, named the
-// way the Service names them and bare where kubectl reports none -- a
-// single-port Service is the common case and the reason a picker cannot rely
-// on names alone.
+// formatServicePorts renders a Service's ports, named where kubectl names them.
 func formatServicePorts(ports []clusterread.ObservedServicePort) string {
 	rendered := make([]string, 0, len(ports))
 	for _, port := range ports {

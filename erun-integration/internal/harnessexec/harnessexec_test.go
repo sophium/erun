@@ -14,32 +14,17 @@ import (
 	"time"
 )
 
-// descendantHold is how long the fixture's descendant holds the child's
-// inherited stdout open after the child itself is gone. It has to outlast the
-// window TestBareExecCommandLeavesTheWaitUnbounded asserts in, and it is short
-// enough that the copier goroutine that window leaves blocked resolves on its
-// own shortly after the test returns rather than living out the run.
+// descendantHold must outlast TestBareExecCommandLeavesTheWaitUnbounded's window
+// yet be short enough that its blocked copier goroutine ends soon after.
 const descendantHold = 10 * time.Second
 
-// writePipeHolder writes the fixture both tests drive: a child that forks a
-// descendant inheriting its stdout, announces it, and then exits on its own.
-//
-// The shape is the defect exactly. The child concludes, so os/exec reaps it
-// and Process.Wait returns; the descendant still holds the write end of the
-// stdout pipe, so the copier goroutine os/exec runs against that pipe never
-// reaches EOF and Cmd.Wait has nothing left to conclude from. Nothing is slow
-// here and nothing has to be killed: the fixture is a child that has already
-// exited, which is what makes the wait unbounded rather than merely long.
-//
-// It is a POSIX shell script, so the two tests that drive it are POSIX-only --
-// the pipe-inheritance defect they reproduce is POSIX-shaped, the same
-// limitation the supervisor's own regression carries.
+// writePipeHolder writes a POSIX child that backgrounds a descendant holding its
+// stdout, then exits: the state where Cmd.Wait never reaches EOF.
 func writePipeHolder(t *testing.T) string {
 	t.Helper()
 	script := filepath.Join(t.TempDir(), "holder.sh")
 	body := "#!/bin/sh\n" +
-		// Outlives its parent by design: this is the process that keeps the
-		// inherited stdout open after the child it came from is gone.
+		// Outlives its parent, holding the inherited stdout.
 		"sleep " + strconv.Itoa(int(descendantHold.Seconds())) + " &\n" +
 		"echo fixture: descendant started\n" +
 		"exit 0\n"
@@ -49,11 +34,7 @@ func writePipeHolder(t *testing.T) string {
 	return script
 }
 
-// awaitWait observes cmd.Wait from its own goroutine and returns what it
-// returned, failing if it has not returned within limit. The return has to be
-// observed from another goroutine because the failure being reproduced is
-// precisely "it never returns", which the goroutine that would have to notice
-// it cannot assert.
+// awaitWait runs cmd.Wait on another goroutine and fails if it exceeds limit.
 func awaitWait(t *testing.T, cmd *exec.Cmd, limit time.Duration, stdout *bytes.Buffer) error {
 	t.Helper()
 	done := make(chan error, 1)
@@ -68,15 +49,8 @@ func awaitWait(t *testing.T, cmd *exec.Cmd, limit time.Duration, stdout *bytes.B
 	}
 }
 
-// TestCommandBoundsTheWaitOnADescendantsHeldPipe is the regression for the
-// harness hang: the fixture's child exits, a descendant of it holds the
-// inherited stdout open, and the harness's wait still concludes.
-//
-// The bound it concludes on is Cmd.WaitDelay's, which os/exec applies to a
-// child that has exited whether or not the Cmd carries a context. Asserting
-// ErrWaitDelay specifically, rather than merely "it returned", is what pins
-// that: a wait that returned for some other reason would mean the fixture
-// stopped reproducing the state this test exists for.
+// TestCommandBoundsTheWaitOnADescendantsHeldPipe requires WaitDelay, specifically
+// ErrWaitDelay, to end the wait on a descendant-held pipe.
 func TestCommandBoundsTheWaitOnADescendantsHeldPipe(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -101,15 +75,8 @@ func TestCommandBoundsTheWaitOnADescendantsHeldPipe(t *testing.T) {
 	}
 }
 
-// TestCommandBoundsTheWaitOnAChildThatNeverExits covers the shape Cmd.WaitDelay
-// cannot reach: the child itself never exits, so Process.Wait never returns and
-// the post-exit path that consults the delay is never reached. The harness's
-// own backstop is a context cancellation, and this test drives it at test speed
-// rather than waiting one out.
-//
-// Without the backstop the wait is unbounded, so the failure this asserts is
-// "the wait returned at all"; the guard against the backstop being dropped is
-// the watchdog in awaitWait, which fails the test rather than hanging it.
+// TestCommandBoundsTheWaitOnAChildThatNeverExits drives the context backstop
+// that ends a child WaitDelay cannot reach.
 func TestCommandBoundsTheWaitOnAChildThatNeverExits(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -134,16 +101,8 @@ func TestCommandBoundsTheWaitOnAChildThatNeverExits(t *testing.T) {
 	}
 }
 
-// TestBareExecCommandLeavesTheWaitUnbounded drives the same fixture through
-// exec.Command, the constructor this package exists to replace, and requires
-// the wait to still be blocked when the bound has already ended the run above.
-//
-// It is the reproduction the reported failure described, kept as a test rather
-// than as prose: it is what makes exec_bound_test.go's refusal to accept a bare
-// exec.Command anywhere in the harness a statement about a real wedge instead
-// of a style preference. If os/exec ever grows a default drain bound this fails,
-// and the failure means the constructor below no longer needs its bound -- not
-// that the fixture drifted.
+// TestBareExecCommandLeavesTheWaitUnbounded shows a bare exec.Command still
+// blocks on the same fixture; if os/exec gains a drain bound this fails.
 func TestBareExecCommandLeavesTheWaitUnbounded(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -165,19 +124,12 @@ func TestBareExecCommandLeavesTheWaitUnbounded(t *testing.T) {
 		t.Fatalf("a bare exec.Command concluded after %s (%v); the fixture no longer reproduces the unbounded wait, so this test no longer shows why Command arms a bound", descendantHold, err)
 	case <-time.After(2 * time.Second):
 	}
-	// The child has already exited and the descendant still holds the pipe, so
-	// there is nothing left to end this wait; the copier goroutine unblocks
-	// when the descendant exits, which is why the fixture keeps that short.
+	// Nothing ends this wait; the copier unblocks when the descendant exits.
 	_ = cmd.Process.Kill()
 }
 
-// TestCommandArmsBothBounds pins the exported constructors to the two arms the
-// package comment promises, so the tests above cannot keep passing against the
-// inner function while the ones the harness actually calls lose an arm.
-//
-// A Cmd carrying a cancellable context is what os/exec keys the backstop on,
-// and it is observable without starting anything: exec.CommandContext sets
-// Cancel where exec.Command leaves it nil.
+// TestCommandArmsBothBounds pins the exported constructors to both bounds;
+// exec.CommandContext sets Cancel where exec.Command leaves it nil.
 func TestCommandArmsBothBounds(t *testing.T) {
 	t.Parallel()
 	cmd := Command("true")
@@ -196,15 +148,8 @@ func TestCommandArmsBothBounds(t *testing.T) {
 	}
 }
 
-// TestGitChildrenDetachNoMaintenance reproduces the TempDir cleanup race
-// deterministically: a local push makes both the pushing git and the
-// receive-pack it runs for the bare remote detach `git maintenance run
-// --auto`, a process that outlives the push and can still be writing into the
-// repositories when t.TempDir removes them ("directory not empty"). GIT_TRACE
-// names every child git starts, so the push run through Command must start no
-// maintenance on either side, while the same push with the plain environment
-// still does -- which is what keeps this test honest if git ever stops
-// detaching on its own.
+// TestGitChildrenDetachNoMaintenance uses GIT_TRACE to require no detached
+// maintenance from a Command push, and some from a plain one.
 func TestGitChildrenDetachNoMaintenance(t *testing.T) {
 	root := t.TempDir()
 	run := func(cmd *exec.Cmd) string {

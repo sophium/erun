@@ -6,64 +6,35 @@ type uiRuntimeResourceInput struct {
 	Environment       string `json:"environment,omitempty"`
 }
 
-// uiRuntimeResourceStatus is a reading of node capacity taken at one instant,
-// not a fixed ceiling: allocatable moves as the node's own reservations move,
-// and every free figure depends on what the other pods currently hold.
-//
-// It carries two readings because the two capacity questions have different
-// answers, and reporting one of them without saying which it is was the defect
-// this shape exists to close: the limits sum can read zero on a node with ample
-// room to place a pod, and an operator who reads that as scheduling then
-// shrinks a limit the node's own capacity planning assumes will be burst into.
+// uiRuntimeResourceStatus is a point-in-time node capacity reading. Schedulable
+// and WorstCase answer different questions and must not be conflated.
 type uiRuntimeResourceStatus struct {
 	KubernetesContext string `json:"kubernetesContext"`
 	Available         bool   `json:"available"`
-	// Message is why no reading was taken. Empty whenever one was: the headline
-	// an operator reads then belongs to a reading, because the two differ.
+	// Message is why no reading was taken; empty whenever one was.
 	Message string `json:"message,omitempty"`
 	Node    string `json:"node,omitempty"`
-	// Schedulable is what the scheduler will do on the chosen node: allocatable
-	// minus the pods' declared requests. This is the reading a deploy's outcome
-	// follows, and the one the configuration dialog's bounds come from.
+	// Schedulable is allocatable minus declared requests; the dialog's bounds use it.
 	Schedulable uiRuntimeResourceReading `json:"schedulable"`
-	// SchedulableComplete is false when a pod on the chosen node declares a
-	// request the reading could not parse. The free figure above is then an
-	// upper bound, never a zero and never an exact answer.
+	// SchedulableComplete false makes the free figure an upper bound.
 	SchedulableComplete bool `json:"schedulableComplete"`
-	// WorstCase is what would be left on the chosen node if every container on
-	// it ran to its declared limit at once -- oversubscription headroom, a
-	// capacity-planning figure that is not scheduling capacity.
+	// WorstCase assumes every container runs at its limit; it is not scheduling capacity.
 	WorstCase uiRuntimeResourceReading `json:"worstCase"`
-	// Floored marks a worst-case reading clamped up to what this environment
-	// already holds, so its maximum equals its current limit. Without it the
-	// slider reads as a hard product limit rather than "the node is full".
-	Floored bool `json:"floored"`
-	// MeasuredUsage reports whether a metrics source answered, so the UI can say
-	// whether unlimited containers were counted at their real usage or not
-	// counted at all.
+	// Floored: the worst case was clamped up to this environment's current limit.
+	Floored       bool `json:"floored"`
 	MeasuredUsage bool `json:"measuredUsage"`
-	// UnmeasuredContainers counts containers on the chosen node that declare no
-	// limits and had no measured usage either — capacity the worst-case reading
-	// cannot see.
-	UnmeasuredContainers int `json:"unmeasuredContainers,omitempty"`
-	// UnreadableRequests counts pods on the chosen node whose declared requests
-	// could not be read, which is what makes SchedulableComplete false.
-	UnreadableRequests int                     `json:"unreadableRequests,omitempty"`
-	Nodes              []uiRuntimeResourceNode `json:"nodes,omitempty"`
+	// UnmeasuredContainers have no limits and no measured usage, so WorstCase misses them.
+	UnmeasuredContainers int                     `json:"unmeasuredContainers,omitempty"`
+	UnreadableRequests   int                     `json:"unreadableRequests,omitempty"`
+	Nodes                []uiRuntimeResourceNode `json:"nodes,omitempty"`
 }
 
-// uiRuntimeResourceReading is one node's answer to one capacity question, and
-// states which question that is. Message and Notice travel with the reading
-// rather than with the status because the two readings answer different
-// questions and need different remedies named.
+// uiRuntimeResourceReading is one node's answer to one capacity question.
 type uiRuntimeResourceReading struct {
-	CPU    uiRuntimeResourceMetric `json:"cpu"`
-	Memory uiRuntimeResourceMetric `json:"memory"`
-	// Message says which question this reading answers, in its own figures.
-	Message string `json:"message,omitempty"`
-	// Notice carries what the figures alone cannot: why a figure is capped,
-	// what is invisible to it, and which lever actually moves it.
-	Notice string `json:"notice,omitempty"`
+	CPU     uiRuntimeResourceMetric `json:"cpu"`
+	Memory  uiRuntimeResourceMetric `json:"memory"`
+	Message string                  `json:"message,omitempty"`
+	Notice  string                  `json:"notice,omitempty"`
 }
 
 type uiRuntimeResourceMetric struct {
@@ -72,13 +43,10 @@ type uiRuntimeResourceMetric struct {
 	Free      float64 `json:"free"`
 	Unit      string  `json:"unit"`
 	Formatted string  `json:"formatted"`
-	// Floored marks this metric's free value as clamped up to the environment's
-	// own current limit because the node had nothing left to give.
-	Floored bool `json:"floored"`
+	Floored   bool    `json:"floored"`
 }
 
-// uiRuntimeActivity is one live reading of what an environment's runtime pod is
-// running: its persistent desktop sessions and the processes holding memory.
+// uiRuntimeActivity is a live reading of the runtime pod's sessions and processes.
 type uiRuntimeActivity struct {
 	Tenant          string                  `json:"tenant"`
 	Environment     string                  `json:"environment"`
@@ -91,17 +59,14 @@ type uiRuntimeActivity struct {
 	MemoryHeldMiB   int64                   `json:"memoryHeldMiB,omitempty"`
 }
 
-// uiRuntimeSession is one persistent desktop session as the pod reports it:
-// Running is observed (a live program behind the socket), never inferred from
-// how recently the session printed something.
+// uiRuntimeSession.Running is observed, never inferred from recent output.
 type uiRuntimeSession struct {
 	ID      string `json:"id"`
 	Running bool   `json:"running"`
 	Program string `json:"program,omitempty"`
 }
 
-// uiRuntimeProcessGroup is a class of resource-holding process the operator can
-// recognise and, when Reclaim is set, act on.
+// uiRuntimeProcessGroup is a class of resource-holding process, reclaimable when Reclaim is set.
 type uiRuntimeProcessGroup struct {
 	ID           string `json:"id"`
 	Label        string `json:"label"`
@@ -123,12 +88,8 @@ type uiRuntimeReclaimResult struct {
 	Message string `json:"message"`
 }
 
-// uiRuntimeUsage is one live reading of the selected environment's own CPU,
-// memory and disk usage against its cgroup limits — as opposed to
-// uiRuntimeResourceStatus, which reads the node. Available is the probe's own
-// reachability; CPU/Memory/Disk each additionally state their own
-// unavailability, since cgroup v1, an unlimited limit, or an unreadable file
-// are all normal readings, not probe failures.
+// uiRuntimeUsage is the environment's own cgroup usage. Available is probe
+// reachability; each metric states its own unavailability.
 type uiRuntimeUsage struct {
 	Tenant      string               `json:"tenant"`
 	Environment string               `json:"environment"`
@@ -138,44 +99,21 @@ type uiRuntimeUsage struct {
 	Memory      uiRuntimeMemoryUsage `json:"memory"`
 	Disk        []uiRuntimeDiskUsage `json:"disk,omitempty"`
 	Warnings    []string             `json:"warnings,omitempty"`
-	// ExcludesBuilds marks an environment whose runtime pod carries the
-	// erun-dind sidecar builds actually run in: CPU and Memory above are the
-	// runtime container's alone and can never see a build. Mirrors
-	// config.RuntimeUsage.ExcludesBuilds.
+	// ExcludesBuilds: builds run in the erun-dind sidecar, invisible to CPU/Memory.
 	ExcludesBuilds bool `json:"excludesBuilds,omitempty"`
-	// Dind is the sidecar's own reading, and is what makes a build-capable
-	// environment's CPU legible: a release lane waiting on bounded `erun exec
-	// job await` calls is near-idle in the runtime container by construction, so
-	// without this the one figure a build-capable env reports is always ~0 and a
-	// healthy build is indistinguishable from a wedged one.
-	//
-	// Nil on every other environment, and nil (not a zero value) when the exec
-	// into the sidecar failed, so "could not read it" never renders as "read as
-	// zero".
+	// Dind is nil when there is no sidecar or it could not be read, never a zero reading.
 	Dind *uiRuntimeDindUsage `json:"dind,omitempty"`
-	// Requests is what the scheduler admits this environment's pod on -- the
-	// declared resources.requests, which no cgroup file records. It is what the
-	// limits above must be read against: `Mem 0% of 27.0GiB` measures a ceiling
-	// that reserves nothing, so the card states the reservation beside it.
-	// Mirrors config.RuntimeUsage.Requests; nil when nothing was read, and
-	// carrying Unavailable (never a zero) when the pod spec could not be.
+	// Requests are the declared reservations; nil when nothing was read.
 	Requests *uiRuntimeUsageRequests `json:"requests,omitempty"`
 }
 
-// uiRuntimeUsageRequests mirrors the half of config.RuntimeUsageRequests
-// this surface renders: the runtime container's own request, which is the
-// reservation the CPU and Memory rows above are measured against, resolved here
-// rather than in the component so no frontend code has to know the chart's
-// container name.
+// uiRuntimeUsageRequests is the runtime container's part of config.RuntimeUsageRequests.
 type uiRuntimeUsageRequests struct {
 	Runtime     uiRuntimeContainerRequests `json:"runtime"`
 	Unavailable string                     `json:"unavailable,omitempty"`
 }
 
-// uiRuntimeContainerRequests is one container's declared request in the units a
-// comparison needs (millicores, bytes) and in the strings a card shows. A
-// zero/empty pair is a container that declares nothing for that resource, which
-// reserves nothing -- it is rendered as absent, never as a measured zero.
+// uiRuntimeContainerRequests: a zero value means no request declared, rendered as absent.
 type uiRuntimeContainerRequests struct {
 	CPUMilli    int64  `json:"cpuMilli,omitempty"`
 	MemoryBytes int64  `json:"memoryBytes,omitempty"`
@@ -183,19 +121,13 @@ type uiRuntimeContainerRequests struct {
 	Memory      string `json:"memory,omitempty"`
 }
 
-// uiRuntimeDindUsage is the erun-dind sidecar's own CPU/memory reading.
-// Deliberately carries no disk field: the sidecar mounts the same workspace
-// volume uiRuntimeUsage.Disk already reports, and a second figure under its own
-// name invites reading it as an independent filesystem.
+// uiRuntimeDindUsage has no disk field: the sidecar shares uiRuntimeUsage.Disk's volume.
 type uiRuntimeDindUsage struct {
 	CPU    uiRuntimeCPUUsage    `json:"cpu"`
 	Memory uiRuntimeMemoryUsage `json:"memory"`
 }
 
-// uiRuntimeCPUUsage carries Available=false with Unavailable set when the
-// reader could not measure utilisation at all (no cgroup v2, or cpu.max
-// reports no quota) — never a zero utilisation, which would read as "idle"
-// rather than "unknown".
+// uiRuntimeCPUUsage reports unmeasurable utilisation as Unavailable, never as zero.
 type uiRuntimeCPUUsage struct {
 	Available          bool    `json:"available"`
 	Unavailable        string  `json:"unavailable,omitempty"`
@@ -203,20 +135,11 @@ type uiRuntimeCPUUsage struct {
 	Quota              string  `json:"quota,omitempty"`
 	UtilizationPercent float64 `json:"utilizationPercent,omitempty"`
 	Utilization        string  `json:"utilization,omitempty"`
-	// UsageUsec is cpu.stat's cumulative usage for the current container
-	// lifetime. It is carried on an unavailable reading as well as an available
-	// one, because it is the only CPU figure a container with no cpu.max quota
-	// can offer: utilisation needs a ceiling to be a fraction of, and the
-	// erun-dind sidecar is commonly declared without one, so without this a
-	// build-capable environment's real CPU work has no representation at all.
+	// UsageUsec is set even when unavailable: it is the only figure without a cpu.max quota.
 	UsageUsec int64 `json:"usageUsec,omitempty"`
 }
 
-// uiRuntimeMemoryUsage mirrors the reader's own fail-soft shape: Unlimited is
-// a real, available reading (the container simply has no ceiling declared),
-// distinct from Unavailable (the cgroup file itself could not be read). Both
-// suppress the percent-of-limit figure, but only Unavailable is an error
-// state the panel should call out.
+// uiRuntimeMemoryUsage: Unlimited is a valid reading; only Unavailable is an error.
 type uiRuntimeMemoryUsage struct {
 	Available      bool    `json:"available"`
 	Unavailable    string  `json:"unavailable,omitempty"`
@@ -243,9 +166,7 @@ type uiRuntimeDiskUsage struct {
 	Percent     string  `json:"percent,omitempty"`
 }
 
-// uiClusterRegistryStatus reports whether the selected Kubernetes context has an
-// in-cluster erun-registry deployed, so the new-environment dialog can default to
-// a resolvable cluster: registry entry instead of a hardcoded host.
+// uiClusterRegistryStatus reports whether the context has an in-cluster erun-registry.
 type uiClusterRegistryStatus struct {
 	KubernetesContext string `json:"kubernetesContext"`
 	Deployed          bool   `json:"deployed"`
@@ -256,12 +177,7 @@ type uiClusterRegistryStatus struct {
 	Message           string `json:"message,omitempty"`
 }
 
-// uiHostedRegistryStatus reports whether erun's hosted container registry
-// (registry.erunpaas.com) is currently reachable, so the new-environment
-// dialog can gate offering it the same way uiClusterRegistryStatus gates the
-// in-cluster registry. Reason and Recovery are only set when Available is
-// false, and name the specific cause the probe observed and the action that
-// resolves it.
+// uiHostedRegistryStatus reports whether erun's hosted registry is reachable.
 type uiHostedRegistryStatus struct {
 	Host      string `json:"host"`
 	Available bool   `json:"available"`
@@ -269,10 +185,7 @@ type uiHostedRegistryStatus struct {
 	Recovery  string `json:"recovery,omitempty"`
 }
 
-// uiRuntimeResourceNode is one node's pair of readings. Unlike the chosen
-// node's, a node here carries no message of its own: the panel states the two
-// questions once, for the node it anchors to, and a per-node paragraph would
-// repeat it once per node on any cluster worth inspecting.
+// uiRuntimeResourceNode is one node's pair of readings.
 type uiRuntimeResourceNode struct {
 	Name                string                   `json:"name"`
 	Schedulable         uiRuntimeResourceReading `json:"schedulable"`
@@ -280,31 +193,24 @@ type uiRuntimeResourceNode struct {
 	WorstCase           uiRuntimeResourceReading `json:"worstCase"`
 }
 
-// Health-check statuses. "ok" is a passing check, "error" a blocking problem
-// the operator must fix before the env can run, "unknown" a check that could
-// not be evaluated (e.g. no kube-context to query).
 const (
 	healthCheckStatusOK      = "ok"
 	healthCheckStatusError   = "error"
 	healthCheckStatusUnknown = "unknown"
 )
 
-// Health-check fix affordances the frontend maps to a recovery action.
 const (
 	healthCheckFixNone        = ""
 	healthCheckFixDeploy      = "deploy"
 	healthCheckFixSetRegistry = "set-registry"
 )
 
-// Stable health-check ids so the frontend can key on the check, not its prose.
+// Stable health-check ids the frontend keys on instead of prose.
 const (
 	healthCheckIDRegistry = "container-registry"
 	healthCheckIDRuntime  = "runtime-deployed"
 )
 
-// uiEnvironmentHealthCheck is one out-of-pod diagnostic result. Title is the
-// user-facing check name; Detail explains the current outcome; Fix names the
-// recovery action the frontend renders (empty when the check passed).
 type uiEnvironmentHealthCheck struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
@@ -313,8 +219,6 @@ type uiEnvironmentHealthCheck struct {
 	Fix    string `json:"fix,omitempty"`
 }
 
-// uiEnvironmentHealth is the result of a "Check environment" run: the checks it
-// evaluated and whether every one passed.
 type uiEnvironmentHealth struct {
 	Tenant      string                     `json:"tenant"`
 	Environment string                     `json:"environment"`

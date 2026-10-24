@@ -44,9 +44,7 @@ func TestBuildKitProgressPhasesParsesDockerfileSteps(t *testing.T) {
 }
 
 func TestBuildKitProgressPhasesNestsMakefilePhaseMarkersUnderTheirStep(t *testing.T) {
-	// Real shape from a gate build: BuildKit prefixes every line a step prints
-	// with elapsed seconds since the step started, and the Makefile's own `>>
-	// <phase>` markers ride inside that stream.
+	// BuildKit prefixes each line with elapsed seconds; the Makefile's `>> <phase>` markers ride inside.
 	output := `#8 [4/8] RUN make check
 #8 0.12 >> golangci-lint erun-common
 #8 5.20 >> golangci-lint erun-cli
@@ -79,9 +77,6 @@ func TestBuildKitProgressPhasesNestsMakefilePhaseMarkersUnderTheirStep(t *testin
 		if step.Children[i].Name != w.name {
 			t.Fatalf("child %d: name = %q, want %q (children: %+v)", i, step.Children[i].Name, w.name, step.Children)
 		}
-		// Floating-point subtraction of the offsets can land a few
-		// nanoseconds off an exact decimal value; a millisecond of slack is
-		// well below anything that would matter to a reader of the table.
 		diff := step.Children[i].Duration - w.dur
 		if diff < -time.Millisecond || diff > time.Millisecond {
 			t.Fatalf("child %d (%s): duration = %v, want ~%v", i, w.name, step.Children[i].Duration, w.dur)
@@ -111,7 +106,6 @@ func TestBuildKitProgressPhasesBoundsToTopNAndFoldsTheRest(t *testing.T) {
 	if !strings.Contains(last.Name, "smaller steps") {
 		t.Fatalf("expected a trailing synthetic 'smaller steps' row, got: %+v", last)
 	}
-	// The 5 smallest (durations 1s..5s) fold into the synthetic row: 1+2+3+4+5=15s.
 	if last.Duration != 15*time.Second {
 		t.Fatalf("expected the folded row to keep the real total (15s), got %v", last.Duration)
 	}
@@ -173,11 +167,7 @@ func TestAttachBuildProgressPhasesIsANoOpForUnparseableOutput(t *testing.T) {
 	}
 }
 
-// A step that announces its own fan-out must have its marker-derived rows
-// labelled as elapsed windows: once several targets interleave output, the
-// gap between one `>> phase` line and the next covers whatever else was
-// running, so a reader who sums those rows concludes the wrong step is
-// expensive. The sentinel itself is consumed, never rendered as a phase.
+// Once targets interleave, marker spans overlap, so summing them misleads.
 func TestMarkerPhasesLabelsConcurrentSpansAndDropsSentinel(t *testing.T) {
 	markers := []core.BuildKitPhaseMarker{
 		{OffsetSecs: 0, Name: "concurrent-phase-spans: check-gate runs 10 targets at -j10"},
@@ -195,9 +185,6 @@ func TestMarkerPhasesLabelsConcurrentSpansAndDropsSentinel(t *testing.T) {
 	}
 }
 
-// Without the sentinel the rows stay unlabelled: a step that runs its phases
-// one at a time still reports real per-phase cost, and suffixing those would
-// be a lie in the other direction.
 func TestMarkerPhasesLeavesSerialSpansUnlabelled(t *testing.T) {
 	phases := core.MarkerPhases([]core.BuildKitPhaseMarker{{OffsetSecs: 0, Name: "lint"}, {OffsetSecs: 4, Name: "test"}}, 10)
 	for _, p := range phases {
@@ -207,11 +194,7 @@ func TestMarkerPhasesLeavesSerialSpansUnlabelled(t *testing.T) {
 	}
 }
 
-// A marker carrying its own measured duration wins over the span to the next
-// marker, and is not labelled concurrent: scripts/parallel-gate.sh replays a
-// batch's output only once every job has finished, so the interval between
-// its markers measures the replay. The self-reported figure is the job's own
-// wall clock and is the only honest number available for those rows.
+// parallel-gate.sh replays output after every job finishes, so marker spans measure the replay.
 func TestMarkerPhasesPrefersSelfReportedDuration(t *testing.T) {
 	markers := []core.BuildKitPhaseMarker{
 		{OffsetSecs: 0, Name: "concurrent-phase-spans: check-gate runs 11 targets at -j11"},

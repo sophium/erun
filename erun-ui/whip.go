@@ -13,17 +13,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// WhipNow is the desktop's own operator-triggered whip pass -- the control
-// the CLI and MCP surfaces already carried and the desktop did not. Unlike
-// those transports (which whip everything configured when given no target), a
-// desktop click always resolves an explicit target list first -- the focused
-// environment/orchestrator by default, or whatever the operator checked in the
-// selection surface -- and passes it here. An empty list is refused rather
-// than read as "every target": fanning a live-session write across every
-// configured environment and orchestrator on a single click is too wide a
-// blast radius. Every requested target still lands
-// in the returned report, pushed or skipped with its reason, so a click
-// answers "did it run" without the operator hunting for a refresh.
+// WhipNow whips an explicit target list; an empty list is refused rather than
+// read as "every target", to bound a single click's blast radius.
 func (a *App) WhipNow(targets []uiWhipTargetRef) (uiWhipReport, error) {
 	if len(targets) == 0 {
 		return uiWhipReport{}, fmt.Errorf("whip: no targets selected")
@@ -51,15 +42,10 @@ func (a *App) WhipNow(targets []uiWhipTargetRef) (uiWhipReport, error) {
 	return whipReportToUI(results), nil
 }
 
-// whipEnvironmentTarget is one environment the whip selection surface can
-// offer -- tenant/name gathered without deciding or pushing anything.
 type whipEnvironmentTarget struct{ tenant, environment string }
 
-// listWhipEnvironmentTargets enumerates every environment eligible to be
-// whipped, sorted for stable rendering. It is the single source both
-// WhipTargets (the selection surface's population) and whipEnvironmentsNow
-// (the actual push) enumerate from, so "select all environments" and "push
-// the selected environments" can never disagree about what is eligible.
+// listWhipEnvironmentTargets is the single source for both selection and push,
+// so the two never disagree on eligibility.
 func (a *App) listWhipEnvironmentTargets() ([]whipEnvironmentTarget, error) {
 	tenants, err := a.deps.store.ListTenantConfigs()
 	if err != nil {
@@ -72,11 +58,7 @@ func (a *App) listWhipEnvironmentTargets() ([]whipEnvironmentTarget, error) {
 			return nil, fmt.Errorf("whip: listing %s's environments: %w", tenant.Name, err)
 		}
 		for _, env := range envs {
-			// A host-type env has no pod and no cluster contact at all
-			// (EnvConfig.HasPod's doc comment), so it can never carry an AI
-			// session to push -- listing it as a selectable target, or
-			// reporting it every pass, is pure noise, not a skip the operator
-			// can act on.
+			// A host env has no pod, so no AI session to push.
 			if !env.HasPod() {
 				continue
 			}
@@ -92,13 +74,7 @@ func (a *App) listWhipEnvironmentTargets() ([]whipEnvironmentTarget, error) {
 	return targets, nil
 }
 
-// whipEnvironmentsNow pushes only the requested environments (keyed
-// "tenant/environment"), one WhipResult each. An environment with no MCP edge
-// currently open in the desktop reports skipped as not-alive -- the same
-// semantics erun-cli's own `whipOneEnvironment` reports for an environment
-// nobody has opened. A requested id that no longer resolves against the
-// configured population is silently excluded rather than attempted, since
-// there is nothing real behind it to push.
+// whipEnvironmentsNow silently drops requested ids that no longer resolve.
 func (a *App) whipEnvironmentsNow(ctx context.Context, want map[string]struct{}) ([]orchestrator.WhipResult, error) {
 	targets, err := a.listWhipEnvironmentTargets()
 	if err != nil {
@@ -115,16 +91,8 @@ func (a *App) whipEnvironmentsNow(ctx context.Context, want map[string]struct{})
 	return results, nil
 }
 
-// whipOneEnvironmentNow pushes one environment's own AI session through its
-// MCP edge, reusing the pod's own decision (orchestrator.RunLocalEnvironmentWhip,
-// run by the "whip" MCP tool) rather than re-deriving it host-side. An
-// environment the desktop has no live edge to at all -- nobody has opened it
-// in this session -- is reported not-alive without attempting the call. A
-// stale forward (something holds the port, but the edge behind it never
-// answers) is reported unreachable instead: a pod may well be running a
-// session behind it, so reporting not-alive there would tell the operator
-// there is nothing to push when the true answer is "cannot tell" -- the same
-// distinction jobsReachability (environment_jobs.go) already draws.
+// whipOneEnvironmentNow reuses the pod's own whip decision. A stale forward is
+// unreachable, not not-alive: a session may still run behind it.
 func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment string) orchestrator.WhipResult {
 	id := tenant + "/" + environment
 	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{Tenant: tenant, Environment: environment})
@@ -155,13 +123,7 @@ func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment str
 
 	decoded, err := a.deps.whipEnvironment(ctx, tenant, environment, mcpEndpointForOpenResult(result), a.mcpBearer(tenant, environment))
 	if err != nil {
-		// A failed call is not the same claim as WhipReasonNotAlive: the whip
-		// tool itself already reports a dead session as a *successful* result
-		// carrying that reason, so an error here always means the call itself
-		// did not work (a target mismatch, a stale runtime image, a transport
-		// failure) -- a different problem asking for different operator action
-		// than "go start the session" (root AGENTS.md's "Smooth, Seamless, No
-		// Dead Ends" -- distinguish causes before writing copy).
+		// A dead session is a successful result, so an error is a call failure.
 		return orchestrator.WhipResult{
 			Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
 			Decision:  orchestrator.WhipDecisionNone,
@@ -169,23 +131,15 @@ func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment str
 			Error:     err.Error(),
 		}
 	}
-	// The desktop already knows which target this is -- it built id above and
-	// used it in every other return path. Stamp it here too rather than
-	// trusting the remote payload for host-side identity: a report row must
-	// never depend on what a pod chose to echo back.
+	// Host-side identity never depends on what the pod echoes back.
 	decoded.Candidate.Kind = orchestrator.WhipTargetEnvironment
 	decoded.Candidate.ID = id
 	decoded.Candidate.Name = id
 	return decoded
 }
 
-// orchestratorWhipOutcomeToResult folds one orchestratorWhipOutcome into the
-// same orchestrator.WhipResult shape the environment side already reports in,
-// so WhipNow's report is one flat list rather than two differently-shaped
-// ones. Pushed is inferred from the decision: the reconciler does not
-// separately surface a nudge write failure or an in-flight typing deferral to
-// its caller today, so a decided nudge is reported pushed, matching what the
-// automatic pass has always assumed.
+// orchestratorWhipOutcomeToResult reports a decided nudge as pushed: the
+// reconciler does not surface write failures.
 func orchestratorWhipOutcomeToResult(outcome orchestratorWhipOutcome) orchestrator.WhipResult {
 	name := strings.TrimSpace(outcome.name)
 	if name == "" {

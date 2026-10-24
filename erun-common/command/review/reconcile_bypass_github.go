@@ -12,7 +12,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// githubRuleSuiteSummary is one entry from GitHub's rule-suites list.
 type githubRuleSuiteSummary struct {
 	ID        int64  `json:"id"`
 	ActorName string `json:"actor_name"`
@@ -35,9 +34,6 @@ type githubRuleSuiteDetail struct {
 	RuleEvaluations []githubRuleEvaluation `json:"rule_evaluations"`
 }
 
-// githubRuleSuitesURL builds the bypassed-rule-suites lookup URL for owner/
-// repo/targetBranch, optionally narrowed by since (rule-suites' own
-// time_period values: hour, day, week, month).
 func githubRuleSuitesURL(owner, repo, targetBranch, since string) string {
 	values := url.Values{
 		"ref":               {"refs/heads/" + targetBranch},
@@ -50,9 +46,7 @@ func githubRuleSuitesURL(owner, repo, targetBranch, since string) string {
 	return fmt.Sprintf("%srepos/%s/%s/rulesets/rule-suites?%s", registry.GithubAPIBaseURL, owner, repo, values.Encode())
 }
 
-// listBypassedRuleSuites walks GitHub's rule-suites pagination (via the
-// response's Link header) up to maxRuleSuitePages, returning every bypassed
-// suite it read and whether it stopped early because more pages remained.
+// listBypassedRuleSuites reports whether it stopped at maxRuleSuitePages.
 func listBypassedRuleSuites(ctx context.Context, client *http.Client, token, firstURL string) ([]githubRuleSuiteSummary, bool, error) {
 	var all []githubRuleSuiteSummary
 	next := firstURL
@@ -68,8 +62,6 @@ func listBypassedRuleSuites(ctx context.Context, client *http.Client, token, fir
 	return all, next != "", nil
 }
 
-// githubNextPageLink extracts the rel="next" URL from a GitHub Link header,
-// or "" when there is no next page.
 func githubNextPageLink(linkHeader string) string {
 	for _, part := range strings.Split(linkHeader, ",") {
 		segments := strings.Split(strings.TrimSpace(part), ";")
@@ -86,10 +78,8 @@ func githubNextPageLink(linkHeader string) string {
 	return ""
 }
 
-// resolveBypassedPushesForRuleset fetches each bypassed suite's own detail
-// and keeps only the pushes where rulesetID's own rule -- not some other
-// ruleset's -- is the one a rule evaluation shows actually failing (and
-// therefore needed the bypass).
+// resolveBypassedPushesForRuleset keeps pushes where rulesetID's own rule
+// failed and needed the bypass.
 func resolveBypassedPushesForRuleset(ctx context.Context, client *http.Client, token, owner, repo string, rulesetID int64, suites []githubRuleSuiteSummary) ([]BypassedPush, error) {
 	pushes := make([]BypassedPush, 0, len(suites))
 	for _, suite := range suites {
@@ -112,8 +102,6 @@ func resolveBypassedPushesForRuleset(ctx context.Context, client *http.Client, t
 	return pushes, nil
 }
 
-// bypassedRuleForRuleset returns the rule_type of the first evaluation that
-// belongs to rulesetID and would have failed without the bypass.
 func bypassedRuleForRuleset(evaluations []githubRuleEvaluation, rulesetID int64) (string, bool) {
 	for _, eval := range evaluations {
 		if eval.RuleSource.Type == "ruleset" && eval.RuleSource.ID == rulesetID && eval.Result == "fail" {
@@ -123,9 +111,6 @@ func bypassedRuleForRuleset(evaluations []githubRuleEvaluation, rulesetID int64)
 	return "", false
 }
 
-// listGitHubCompareCommits returns every commit a push added, oldest first --
-// GitHub's own answer to "what did this push actually land", rather than an
-// inference from the tip commit.
 func listGitHubCompareCommits(ctx context.Context, client *http.Client, token, owner, repo, base, head string) ([]string, error) {
 	if strings.TrimSpace(base) == "" || strings.TrimSpace(head) == "" {
 		return nil, fmt.Errorf("the rule-suites ledger recorded no before/after pair for this push")
@@ -146,8 +131,6 @@ func listGitHubCompareCommits(ctx context.Context, client *http.Client, token, o
 	return commits, nil
 }
 
-// listGitHubTagCommits maps each tag's own commit to the tag name, walking
-// pagination up to maxReleaseTagPages.
 func listGitHubTagCommits(ctx context.Context, client *http.Client, token, owner, repo string) (map[string]string, error) {
 	tagByCommit := make(map[string]string)
 	next := fmt.Sprintf("%srepos/%s/%s/tags?per_page=100", registry.GithubAPIBaseURL, owner, repo)
@@ -177,8 +160,6 @@ func getGitHubJSON(ctx context.Context, client *http.Client, token, requestURL s
 	return err
 }
 
-// getGitHubJSONPage performs one authenticated GET, decodes it, and returns
-// the rel="next" link so a paginated caller can keep walking.
 func getGitHubJSONPage(ctx context.Context, client *http.Client, token, requestURL string, into any) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {

@@ -7,11 +7,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// stockPinTarget is the state the reported failure was reproduced in: an environment whose
-// runtime coordinates are all on erun's own release line and all at 1.0.282,
-// with a deploy asking for 1.0.283. Every field names one coordinate, so a
-// deploy that installs the older artifacts while recording the newer version
-// reports a roll that did not happen.
 func stockPinTarget() config.OpenResult {
 	const at = "1.0.282"
 	return config.OpenResult{
@@ -27,10 +22,6 @@ func stockPinTarget() config.OpenResult {
 	}
 }
 
-// TestDeployMovesStockRuntimePinWithTheDeployVersion is the reproduction of the
-// reported failure: a deploy of 1.0.283 onto an environment pinned at 1.0.282 on
-// erun's own line must install 1.0.283, not honor the older chart and image while
-// recording the newer version.
 func TestDeployMovesStockRuntimePinWithTheDeployVersion(t *testing.T) {
 	const version = "1.0.283"
 	spec, err := ResolvePublishedDevopsDeploySpecWithReason(core.Context{}, stockPinTarget(), version, "no local runtime chart", "", false)
@@ -52,14 +43,7 @@ func TestDeployMovesStockRuntimePinWithTheDeployVersion(t *testing.T) {
 	}
 }
 
-// TestStockRuntimePinMoveLeavesADeliberateCoordinateAlone is the other half of
-// the same decision: a tenant that publishes a devops image of its own runs its
-// components on its own version line, which is exactly why it states the stock
-// runtime chart separately. That chart is on erun's line, not this deploy's, so
-// the stated version is the operator's coordinate and must not move onto the
-// deploy version. A tenant stating its *own* <tenant>-devops umbrella is naming
-// a chart on the deploy's own line instead, and that one does move -- see
-// TestDeployMovesTenantUmbrellaPinWithTheDeployVersion.
+// A tenant's stated stock chart is on erun's line, not the deploy's, so it must not move.
 func TestStockRuntimePinMoveLeavesADeliberateCoordinateAlone(t *testing.T) {
 	target := config.OpenResult{
 		Tenant: "frs",
@@ -84,10 +68,6 @@ func TestStockRuntimePinMoveLeavesADeliberateCoordinateAlone(t *testing.T) {
 	}
 }
 
-// TestPersistKeepsRecordedVersionAndRunningImageInStep closes the reported loop:
-// after the deploy persists, the recorded runtime version and the image that
-// version describes are the same coordinate, and `erun list`'s runtime-version
-// is the version the pods run.
 func TestPersistKeepsRecordedVersionAndRunningImageInStep(t *testing.T) {
 	const version = "1.0.283"
 	spec, err := ResolvePublishedDevopsDeploySpecWithReason(core.Context{}, stockPinTarget(), version, "no local runtime chart", "", false)

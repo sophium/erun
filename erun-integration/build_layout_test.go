@@ -42,9 +42,7 @@ func testBuildDryRunFromDevopsCwd(t *testing.T) {
 }
 
 func testBuildDryRunGitignoredProjectConfigWarns(t *testing.T) {
-	// A project config that resolves from disk but is excluded by .gitignore
-	// silently works on this machine only, since git never sees it. The
-	// build trace must surface that as a warning instead of staying silent.
+	// A gitignored project config works on this machine only, so warn.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -59,12 +57,7 @@ func testBuildDryRunGitignoredProjectConfigWarns(t *testing.T) {
 }
 
 func testBuildDryRunClusterRegistryResolvesHostPortForward(t *testing.T) {
-	// A cluster: container registry resolves its concrete push host from the
-	// kube-context at build time. On the host (not in-pod) the push host is a
-	// managed port-forward to the registry Service; dry-run traces the ClusterIP
-	// lookup and the port-forward and uses placeholders so no cluster is touched.
-	// Locks the cluster-registry build resolution (Concrete → expandClusterEntry
-	// → resolver → port-forward) that plain registries skip.
+	// Dry-run traces the ClusterIP lookup and port-forward with placeholders.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -79,11 +72,7 @@ func testBuildDryRunClusterRegistryResolvesHostPortForward(t *testing.T) {
 }
 
 func testBuildDryRunConfiguredDockerAndVersionPaths(t *testing.T) {
-	// paths.docker and paths.version in .erun/config.yaml relocate the docker
-	// build root and VERSION file out of the <tenant>-devops convention: the
-	// build discovers the component context under build/docker, mints the
-	// version from build/VERSION, and traces both decisions. No -devops module
-	// exists, yet the build-env advisory is suppressed because paths.docker is set.
+	// No -devops module exists, yet paths.docker suppresses the build-env advisory.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -98,11 +87,6 @@ func testBuildDryRunConfiguredDockerAndVersionPaths(t *testing.T) {
 }
 
 func testBuildDryRunComponentAutoSelectsLoneEntry(t *testing.T) {
-	// A single components: entry auto-selects with no --component flag,
-	// exactly like today's implicit single-paths behavior. Each harness's
-	// docker/version root lives outside the shared paths: block (the
-	// monorepo-of-independent-deployables shape), so without selection this
-	// harness's build would be unreachable at all.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -121,16 +105,8 @@ func testBuildDryRunComponentAutoSelectsLoneEntry(t *testing.T) {
 }
 
 func testBuildDryRunDockerfileTestStageGrantsHostNetworkEntitlement(t *testing.T) {
-	// BuildKit default-denies `RUN --network=host`, so a component test stage
-	// that starts a container fixture cannot build at all unless erun grants
-	// the network.host entitlement. The grant is scoped to a Dockerfile that
-	// declares a `test` stage: `--allow network.host` hands a build step the
-	// *builder's* network namespace — this environment pod's — which a
-	// production image with no tests has no use for. This scenario is the
-	// granted arm. The ungranted arm is every other build golden in this
-	// suite, none of whose Dockerfiles declare a test stage: make the grant
-	// unconditional again and all of them fail on the stray token, which is
-	// the only reason this boundary is visible at all.
+	// network.host is granted only when a test stage exists; every other build
+	// golden is the ungranted arm.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -154,10 +130,7 @@ func testBuildDryRunDockerfileTestStageGrantsHostNetworkEntitlement(t *testing.T
 }
 
 func testBuildDryRunUnconsumedTestStageIsRefused(t *testing.T) {
-	// A `test` stage no later stage consumes would be pruned by BuildKit, so
-	// the image would build without its tests ever running. The build spec
-	// refuses it before anything is fingerprinted or built, naming the two
-	// ways to consume it.
+	// An unconsumed test stage would be pruned by BuildKit and never run.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -181,10 +154,7 @@ func testBuildDryRunUnconsumedTestStageIsRefused(t *testing.T) {
 }
 
 func testBuildDryRunFromAnE2eSuiteDirectoryIsRefused(t *testing.T) {
-	// An e2e suite's Dockerfile sits beside docker/ and k8s/ in the devops
-	// module, so a build run from its directory would otherwise take it as
-	// the current component and fingerprint, promote and push it. It is
-	// refused with the command that does run it.
+	// An e2e suite's Dockerfile must not be taken as the current component.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	suiteDir := filepath.Join(setup.Cwd, "erun-devops", "e2e", "console")
@@ -201,9 +171,6 @@ func testBuildDryRunFromAnE2eSuiteDirectoryIsRefused(t *testing.T) {
 }
 
 func testBuildDryRunComponentFlagSelectsEntry(t *testing.T) {
-	// Two components: entries declared (two independent harnesses in one
-	// monorepo); --component selects one by name, without editing the
-	// committed config — two operators, two harnesses, no local edit.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -234,9 +201,6 @@ func testBuildDryRunComponentFlagSelectsEntry(t *testing.T) {
 }
 
 func testBuildComponentSelectionAmbiguousErrors(t *testing.T) {
-	// More than one components: entry with no --component flag fails naming
-	// the choices, rather than silently building whichever one convention
-	// discovery happens to land on.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -257,8 +221,6 @@ func testBuildComponentSelectionAmbiguousErrors(t *testing.T) {
 }
 
 func testBuildComponentFlagUnknownNameErrors(t *testing.T) {
-	// --component naming a component that .erun/config.yaml does not declare
-	// fails loudly rather than silently falling back to convention discovery.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -275,10 +237,7 @@ func testBuildComponentFlagUnknownNameErrors(t *testing.T) {
 }
 
 func testBuildDryRunPathsVersionKeepsPinnedBase(t *testing.T) {
-	// A project-global paths.version is the project-level default and
-	// must NOT clobber a component's own in-build-dir VERSION. The pinned base
-	// keeps its 9.9.9 tag; a component without its own VERSION takes the
-	// configured project version (snapshotted, since it is not build-dir-local).
+	// paths.version must not clobber a component's own build-dir VERSION.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -291,8 +250,7 @@ func testBuildDryRunPathsVersionKeepsPinnedBase(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// Versions normalize to <VERSION> in the golden, so assert on the raw output
-	// that the pinned base kept 9.9.9 and was not snapshotted by paths.version.
+	// Versions normalize to <VERSION>, so assert on the raw output.
 	if !strings.Contains(result.Combined, "ghcr.io/sophium/pinnedbase:9.9.9 ") {
 		t.Errorf("expected pinned base image ghcr.io/sophium/pinnedbase:9.9.9 in output:\n%s", result.Combined)
 	}
@@ -303,9 +261,6 @@ func testBuildDryRunPathsVersionKeepsPinnedBase(t *testing.T) {
 }
 
 func testBuildConfiguredDockerPathWrongNameErrors(t *testing.T) {
-	// A paths.docker override pointing at a directory not named "docker" fails
-	// with an error explaining the naming constraint, rather than silently
-	// falling back to convention discovery.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -319,13 +274,8 @@ func testBuildConfiguredDockerPathWrongNameErrors(t *testing.T) {
 }
 
 func testBuildDryRunDockerContextRepoRoot(t *testing.T) {
-	// paths.dockercontext: repo-root forces the docker build context to the
-	// project root for a component nested deeper than the conventional
-	// <devops>/docker/<component> layout (here docker is the 3rd path segment),
-	// where the positional heuristic would otherwise pick the component dir.
-	// This lets the Dockerfile COPY sibling repo paths. The context dir
-	// normalizes to <TMP> in the golden, so the raw assert below proves the
-	// resolved context is the project root.
+	// docker is the 3rd path segment, where the positional heuristic would
+	// pick the component dir.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -337,8 +287,7 @@ func testBuildDryRunDockerContextRepoRoot(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// The context dir is masked by <TMP> normalization; assert on the raw
-	// output that docker build runs from the project root, not the component dir.
+	// The context dir is masked by <TMP>, so assert on the raw output.
 	if !strings.Contains(result.Combined, "cd "+setup.Cwd+" && docker build") {
 		t.Errorf("expected docker build context at project root %q:\n%s", setup.Cwd, result.Combined)
 	}
@@ -349,11 +298,7 @@ func testBuildDryRunDockerContextRepoRoot(t *testing.T) {
 }
 
 func testBuildDryRunDockerContextComponent(t *testing.T) {
-	// paths.dockercontext: component forces the docker build context to the
-	// component dir even at the conventional <devops>/docker/<component> layout,
-	// where the positional heuristic would otherwise pick the repo root. This is
-	// the reverse override. The context dir normalizes to <TMP>, so the raw
-	// assert below proves the resolved context is the component dir.
+	// The reverse override; the context dir is masked by <TMP>.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -376,8 +321,6 @@ func testBuildDryRunDockerContextComponent(t *testing.T) {
 }
 
 func testBuildConfiguredDockerContextInvalidErrors(t *testing.T) {
-	// An unrecognized paths.dockercontext value fails the build loudly rather
-	// than silently falling back to the positional heuristic.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -392,9 +335,7 @@ func testBuildConfiguredDockerContextInvalidErrors(t *testing.T) {
 }
 
 func testBuildDryRunNoDevopsRecommendsBuildEnvSkill(t *testing.T) {
-	// A build in a project with no <tenant>-devops module emits the
-	// erun-build-env skill advisory — even when the build itself succeeds via
-	// a project build.sh, not only on failure.
+	// The advisory appears even when a build.sh build succeeds.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	if err := os.WriteFile(filepath.Join(setup.Cwd, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
@@ -410,10 +351,6 @@ func testBuildDryRunNoDevopsRecommendsBuildEnvSkill(t *testing.T) {
 }
 
 func testBuildNoBuildRegistryErrors(t *testing.T) {
-	// A project registry list that marks no build registry cannot build:
-	// `erun build` fails fast with the "no build registry" contract message
-	// instead of silently falling back to the default registry. The list is
-	// valid (from+to, deploy on to) — it simply omits the build role.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	fixture.SeedProjectK8sConfig(t, setup,

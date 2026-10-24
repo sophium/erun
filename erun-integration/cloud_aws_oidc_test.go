@@ -29,13 +29,7 @@ func testCloudOidcDryRunTracesBearerTokenCommand(t *testing.T) {
 }
 
 func testCloudOidcDryRunUnaffectedByLibraryExecutionMode(t *testing.T) {
-	// Locks the dry-run/audit contract for the second aws-sts operation:
-	// awsCloudProviderBearerToken's status check + bearer-token trace must
-	// stay byte-identical to the subprocess-mode golden even when
-	// execution.modes.aws-sts-web-identity-token opts into the library
-	// path, since both defaultRunAWSBearerToken and libraryRunAWSBearerToken
-	// trace through the same awsGetWebIdentityTokenArgs and return before
-	// ever calling AWS on a dry run.
+	// Library mode must not change the dry-run trace: both paths return before calling AWS.
 	setup := env.New(t)
 	seedCloudProviderAlias(t, setup, "rihards+123456789012@aws", "test-profile")
 	seedExecutionMode(t, setup, "aws-sts-web-identity-token", "library")
@@ -48,16 +42,7 @@ func testCloudOidcDryRunUnaffectedByLibraryExecutionMode(t *testing.T) {
 }
 
 func testCloudOidcRealRunLibraryExecutionModeNeedsNoAwsBinary(t *testing.T) {
-	// Proves the library path produces the same observable result as the
-	// subprocess path: with both execution.modes.aws-sts and
-	// execution.modes.aws-sts-web-identity-token set to "library", and a
-	// real static-credential AWS profile on disk, both the status check
-	// (CheckAWSStatus) and the bearer-token mint (RunAWSBearerToken)
-	// resolve via aws-sdk-go-v2 against a fake STS endpoint
-	// (AWS_ENDPOINT_URL) instead of shelling out, so the scenario declares
-	// no "aws" stub at all — the PATH scrub in internal/env would fail the
-	// run with "executable file not found" if production code fell
-	// through to a subprocess for either call.
+	// No "aws" stub is declared: a subprocess fallback would fail on the PATH scrub.
 	setup := env.New(t)
 	seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 	seedExecutionMode(t, setup, "aws-sts", "library")
@@ -83,11 +68,7 @@ func testCloudOidcRealRunLibraryExecutionModeNeedsNoAwsBinary(t *testing.T) {
 }
 
 func testCloudOidcRealRunEnablesFederationAndPersistsIssuer(t *testing.T) {
-	// Federation-disabled recovery: the first token call fails with
-	// OutboundWebIdentityFederationDisabledException, the command enables
-	// federation and retries. A marker file makes the stub stateful so it
-	// fails then succeeds across the two token calls. Issuer persistence is
-	// a side effect outside the captured streams, so it is read from disk.
+	// A marker file makes the stub fail the first token call and succeed the retry.
 	setup := env.New(t)
 	seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 	stubs := setup.Cwd + "/stubs"
@@ -130,10 +111,6 @@ func testCloudOidcRealRunEnablesFederationAndPersistsIssuer(t *testing.T) {
 }
 
 func testCloudOidcRealRunToleratesAlreadyEnabledFederation(t *testing.T) {
-	// Already-enabled tolerance: if the enable call fails with
-	// "FeatureEnabled / already enabled" — a race where another principal
-	// enabled federation first — the command treats it as success and
-	// retries the token.
 	setup := env.New(t)
 	seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 	stubs := setup.Cwd + "/stubs"
@@ -170,9 +147,6 @@ func testCloudOidcRealRunToleratesAlreadyEnabledFederation(t *testing.T) {
 }
 
 func testCloudOidcRealRunTokenAccessDeniedFails(t *testing.T) {
-	// AccessDenied on `sts get-web-identity-token` — not the
-	// federation-disabled exception — must fail without attempting the
-	// enable-federation recovery (the stub's enable arm guards against it).
 	setup := env.New(t)
 	seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 	stubs := setup.Cwd + "/stubs"
@@ -199,10 +173,7 @@ func testCloudOidcRealRunTokenAccessDeniedFails(t *testing.T) {
 }
 
 func testCloudOidcRealRunExpiredSessionLogsInBeforeToken(t *testing.T) {
-	// When the session is expired the flow must run `aws sso login` before
-	// requesting the web identity token. A marker file records the login
-	// (a side effect outside the captured streams) so the ordering can be
-	// asserted.
+	// A marker file records the login so ordering can be asserted.
 	setup := env.New(t)
 	seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 	stubs := setup.Cwd + "/stubs"
@@ -236,8 +207,6 @@ func testCloudOidcRealRunExpiredSessionLogsInBeforeToken(t *testing.T) {
 }
 
 func testCloudOidcRealRunNonJwtTokenFails(t *testing.T) {
-	// A token without the three JWT segments must fail with "bearer token
-	// is not a JWT" rather than persist a bogus issuer.
 	setup := env.New(t)
 	seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 	stubs := setup.Cwd + "/stubs"
@@ -259,9 +228,6 @@ func testCloudOidcRealRunNonJwtTokenFails(t *testing.T) {
 }
 
 func testCloudOidcRealRunEnableFederationFailureFails(t *testing.T) {
-	// When the enable-federation call fails with a real error (not
-	// "already enabled"), that failure must surface as the command's error
-	// — contrast the already-enabled tolerance path.
 	setup := env.New(t)
 	seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
 	stubs := setup.Cwd + "/stubs"
@@ -287,11 +253,8 @@ func testCloudOidcRealRunEnableFederationFailureFails(t *testing.T) {
 	golden.Equal(t, "cloud/oidc_real_run_enable_federation_failure_fails", normalize.Apply(result.Combined))
 }
 
-// awsSTSActionStubServer discriminates by the AWS Query protocol's Action
-// form field, so one fake STS endpoint can back both GetCallerIdentity
-// (CheckAWSStatus) and GetWebIdentityToken (RunAWSBearerToken) in the same
-// real-run scenario — a scenario that flips both operations to library mode
-// exercises both against a single AWS_ENDPOINT_URL.
+// awsSTSActionStubServer dispatches on the Action form field to serve both
+// GetCallerIdentity and GetWebIdentityToken from one endpoint.
 func awsSTSActionStubServer(t testing.TB, webIdentityToken string) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

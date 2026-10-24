@@ -6,11 +6,7 @@ import (
 	"testing"
 )
 
-// job start's off-environment dispatch (exec_raw/exec_agent) gates on
-// --exclusive the same way activity_lease_take does, so an edge that
-// predates the feature produces the identical raw schema-rejection shape --
-// see activity_lease_version_skew_test.go's rawExclusiveLeaseSchemaError for
-// the field-observed wire text this is modeled on.
+// Same raw schema-rejection shape as activity_lease_take on an old edge.
 const rawExclusiveJobStartSchemaError = `MCP tools/call failed: invalid params: validating "arguments": validating root: unexpected additional properties ["exclusive"] (code -32602)`
 
 func TestDescribeExclusiveJobStartVersionSkewNamesTheVersionMismatch(t *testing.T) {

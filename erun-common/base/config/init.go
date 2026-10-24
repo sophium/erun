@@ -34,21 +34,11 @@ func NormalizeNamespaceName(value string) string {
 	return result
 }
 
-// maxTenantNameLength caps a tenant name at the RFC 1123 DNS label limit. The
-// combined `<tenant>-<env>` namespace is normalized and truncated separately by
-// normalizeNamespaceName; this bound just keeps a tenant name a single label.
+// maxTenantNameLength is the RFC 1123 DNS label limit.
 const maxTenantNameLength = 63
 
-// ValidateTenantName enforces that a tenant name is a single DNS-safe label of
-// lowercase letters and digits with no hyphens. Tenant names feed the
-// `<tenant>-<env>` namespace mapping (KubernetesNamespaceName); forbidding
-// hyphens keeps that mapping unambiguous (split on the first hyphen) and
-// injective, so `a-b`+`c` and `a`+`b-c` can no longer collide on one namespace.
-//
-// The rule is checked before normalization so a caller cannot rely on
-// normalizeNamespaceName to silently repair an invalid name. It is enforced at
-// tenant creation only; tenants created before this rule keep working unchanged
-// (no re-validation on load), preserving back-compat.
+// ValidateTenantName requires one lowercase alphanumeric label with no hyphens,
+// so the `<tenant>-<env>` namespace split stays injective. Enforced at creation only.
 func ValidateTenantName(name string) error {
 	if name == "" {
 		return fmt.Errorf("tenant name is required")
@@ -69,8 +59,7 @@ func KubernetesNamespaceName(tenant, envName string) string {
 	return NormalizeNamespaceName(tenant + "-" + envName)
 }
 
-// NormalizeImagePullSecrets trims and de-duplicates the requested secret names,
-// keeping the order the operator gave so the chart renders them predictably.
+// NormalizeImagePullSecrets trims and de-duplicates names, preserving order.
 func NormalizeImagePullSecrets(names []string) []string {
 	normalized := make([]string, 0, len(names))
 	for _, name := range names {

@@ -5,14 +5,7 @@ import (
 	"time"
 )
 
-// This covers what the integration suite cannot reach deterministically: the
-// exact 23:59 boundary needs an injected clock, since driving the compiled
-// binary against the real wall clock only lands on that minute once a day.
-
-// TestWorkingHoursAllDaySpanIsAlwaysInside pins the boundary fix: 00:00-23:59
-// is the only literal all-day span HH:MM-HH:MM can express (24:00 is not a
-// valid clock value), so it must never exclude the day's last minute the way
-// an ordinary end-exclusive window does.
+// 00:00-23:59 is the only literal all-day span, so it must include 23:59.
 func TestWorkingHoursAllDaySpanIsAlwaysInside(t *testing.T) {
 	for _, second := range []int{0, 1, 30, 59} {
 		now := time.Date(2026, time.January, 1, 23, 59, second, 0, time.UTC)
@@ -26,9 +19,7 @@ func TestWorkingHoursAllDaySpanIsAlwaysInside(t *testing.T) {
 	}
 }
 
-// TestWorkingHoursOrdinaryWindowStillExcludesItsEndMinute guards against
-// overcorrecting the fix above: an ordinary window's end-exclusive behavior
-// (09:00-17:00 excludes 17:00 exactly) is deliberate and must not change.
+// An ordinary window stays end-exclusive.
 func TestWorkingHoursOrdinaryWindowStillExcludesItsEndMinute(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 17, 0, 0, 0, time.UTC)
 	outside, _, err := WorkingHoursStatus("09:00-17:00", "UTC", now)

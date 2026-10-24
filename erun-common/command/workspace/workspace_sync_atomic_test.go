@@ -12,21 +12,13 @@ import (
 	"time"
 )
 
-// The mirror is the surface an orchestrator runs host-native artifacts from, so
-// a reader of it must never see a prefix of a file that is still arriving. These
-// tests drive a whole pass against the stub `ssh` from workspace_sync_pass_test.go
-// and park it mid-transfer, so the partial state is a fact of the test rather
-// than something it waits and hopes for.
+// These tests park a pass mid-transfer via the stub `ssh` so a partial state is deterministic.
 
 const (
 	workspaceSyncTestMTime    = 1700000000
 	workspaceSyncTestBigBytes = 8 << 20
 )
 
-// TestSyncWorkspaceOnceNeverPublishesAPartialFile parks a pass with half the
-// archive delivered and asserts the mirror still holds the previous, complete
-// file. Before staging, tar extracted in place and this is exactly the window in
-// which a copy came back short with no error from any step.
 func TestSyncWorkspaceOnceNeverPublishesAPartialFile(t *testing.T) {
 	mirror := t.TempDir()
 	previous := []byte("the previous complete artifact")
@@ -50,15 +42,11 @@ func TestSyncWorkspaceOnceNeverPublishesAPartialFile(t *testing.T) {
 		done <- err
 	}()
 
-	// The stub announces only after handing the extractor the first half, then
-	// holds the rest until the gate opens — so every assertion below runs against
-	// a transfer that has plainly started and provably cannot finish.
+	// The stub announces after delivering half the archive and holds the rest until the gate opens.
 	awaitWorkspaceSyncFile(t, gate+".reached")
 	if got := readWorkspaceSyncFile(t, filepath.Join(mirror, "app", "big.bin")); !bytes.Equal(got, previous) {
 		t.Fatalf("the mirror published a file that is still arriving: %d bytes at the final path, want the previous %d", len(got), len(previous))
 	}
-	// The one partial state is in a directory that says so by name, and the
-	// source lane refuses to treat it as mirror content.
 	staging := findWorkspaceSyncStagingDir(t, mirror)
 	awaitWorkspaceSyncSize(t, filepath.Join(staging, "app", "big.bin"), 1<<20)
 	stagingRel, relErr := filepath.Rel(mirror, staging)
@@ -79,8 +67,6 @@ func TestSyncWorkspaceOnceNeverPublishesAPartialFile(t *testing.T) {
 	requireNoWorkspaceSyncStaging(t, mirror)
 }
 
-// A fetch that dies mid-stream must leave the mirror on its previous content and
-// must not litter it with debris a later pass would read as content.
 func TestSyncWorkspaceOnceLeavesNoDebrisWhenTheFetchFails(t *testing.T) {
 	mirror := t.TempDir()
 	previous := []byte("the previous complete artifact")
@@ -108,8 +94,6 @@ func TestSyncWorkspaceOnceLeavesNoDebrisWhenTheFetchFails(t *testing.T) {
 	requireWorkspaceSyncMirrorFiles(t, mirror, []string{"app/big.bin"})
 }
 
-// A cancelled context kills the transfer wherever it happens to be, and the
-// mirror must come out of it the same way a failed fetch leaves it.
 func TestSyncWorkspaceOnceLeavesNoDebrisWhenTheContextIsCancelled(t *testing.T) {
 	mirror := t.TempDir()
 	previous := []byte("the previous complete artifact")
@@ -150,10 +134,7 @@ func TestSyncWorkspaceOnceLeavesNoDebrisWhenTheContextIsCancelled(t *testing.T) 
 	requireWorkspaceSyncMirrorFiles(t, mirror, []string{"app/big.bin"})
 }
 
-// The outputs lane keeps its read-only marking and its pruning across the
-// staged publish, and a second pass still overwrites the read-only copy it wrote
-// itself — the rename lands on a file the previous pass stripped write access
-// from, which is what Windows would otherwise refuse.
+// A second pass must overwrite the read-only copy it wrote itself, which Windows would refuse.
 func TestSyncOutputsArtifactsPublishesCompletelyAndKeepsItsMarkingAndPruning(t *testing.T) {
 	mirror := t.TempDir()
 	artifacts := filepath.Join(mirror, WorkspaceSyncArtifactsSubdir)
@@ -193,7 +174,6 @@ func TestSyncOutputsArtifactsPublishesCompletelyAndKeepsItsMarkingAndPruning(t *
 	}
 	requireNoWorkspaceSyncStaging(t, artifacts)
 
-	// A second pass republishes over the read-only copy the first one left.
 	if _, err := SyncWorkspaceOnce(context.Background(), WorkspaceSyncParams{
 		HostAlias:  "pod",
 		RemotePath: "/workspace",
@@ -207,17 +187,7 @@ func TestSyncOutputsArtifactsPublishesCompletelyAndKeepsItsMarkingAndPruning(t *
 	requireNoWorkspaceSyncStaging(t, artifacts)
 }
 
-// TestPrepareWorkspaceSyncStagingNeverClobbersAConcurrentPass is the regression
-// for the defect: a fixed-name staging directory meant every pass started by
-// wiping it, including one a *different*, concurrently-running pass's tar
-// extraction was actively writing into (the desktop's own periodic workspace
-// sync poller and a manually invoked `erun sshd sync` can both reach the same
-// mirror at once). This test parks a real `tar` mid-extraction into the first
-// pass's staging directory, then starts a second pass concurrently and asserts
-// the first pass's extraction is unaffected -- reproducing, with the real tar
-// binary, the exact failure shape reported in the issue: some subdirectories
-// fail to be created ("No such file or directory") and the extraction exits
-// non-zero, on an otherwise-healthy first populate.
+// Parks a real tar mid-extraction while a concurrent pass prepares its own staging.
 func TestPrepareWorkspaceSyncStagingNeverClobbersAConcurrentPass(t *testing.T) {
 	mirror := t.TempDir()
 
@@ -245,9 +215,6 @@ func TestPrepareWorkspaceSyncStagingNeverClobbersAConcurrentPass(t *testing.T) {
 		done <- streamRemoteWorkspaceArchive(context.Background(), "pod", "/workspace", firstStaging, paths)
 	}()
 
-	// The stub only announces once tar has half the archive in hand, so the
-	// first pass has genuinely started extracting -- some of its 200
-	// directories already exist -- before the second pass below can start.
 	awaitWorkspaceSyncFile(t, gate+".reached")
 
 	if _, err := prepareWorkspaceSyncStaging(mirror); err != nil {
@@ -266,10 +233,6 @@ func TestPrepareWorkspaceSyncStagingNeverClobbersAConcurrentPass(t *testing.T) {
 	}
 }
 
-// TestSweepStaleWorkspaceSyncStagingDirsOnlyRemovesTrulyOrphanedOnes proves the
-// sweep this fix adds (to replace the fixed-name wipe every pass used to do)
-// still reclaims debris from a killed pass, without touching a directory a
-// live, in-progress pass could still own.
 func TestSweepStaleWorkspaceSyncStagingDirsOnlyRemovesTrulyOrphanedOnes(t *testing.T) {
 	mirror := t.TempDir()
 
@@ -297,9 +260,7 @@ func TestSweepStaleWorkspaceSyncStagingDirsOnlyRemovesTrulyOrphanedOnes(t *testi
 	}
 }
 
-// writeWorkspaceSyncArchive builds the tar the stub streams. Entries carry a
-// fixed mtime because the mirror's incremental check compares it: a publish that
-// rewrote the file instead of renaming it would re-fetch on every pass.
+// Fixed mtime: a publish that rewrote rather than renamed would re-fetch every pass.
 func writeWorkspaceSyncArchive(t *testing.T, files map[string][]byte) string {
 	t.Helper()
 	var buffer bytes.Buffer
@@ -348,9 +309,7 @@ func readWorkspaceSyncFile(t *testing.T, path string) []byte {
 	return body
 }
 
-// awaitWorkspaceSyncFile and awaitWorkspaceSyncSize wait on the condition the
-// test needs, never on a duration; the deadline only turns a hang into a
-// readable failure.
+// These wait on the condition; the deadline only turns a hang into a failure.
 func awaitWorkspaceSyncFile(t *testing.T, path string) {
 	t.Helper()
 	awaitWorkspaceSyncCondition(t, "file "+path+" to appear", func() bool {
@@ -390,10 +349,7 @@ func requireNoWorkspaceSyncStaging(t *testing.T, root string) {
 	}
 }
 
-// findWorkspaceSyncStagingDir locates the one staging directory a pass created
-// under root -- its name carries a random suffix (prepareWorkspaceSyncStaging),
-// so a test that wants to observe bytes mid-transfer cannot assume the old
-// fixed name.
+// Staging dir names carry a random suffix.
 func findWorkspaceSyncStagingDir(t *testing.T, root string) string {
 	t.Helper()
 	deadline := time.Now().Add(60 * time.Second)

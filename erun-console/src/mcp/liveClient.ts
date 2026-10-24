@@ -1,13 +1,7 @@
 import { asString, isRecord } from 'erun-kit';
 
-// liveClient speaks the MCP edge's own wire protocol directly from the
-// browser: JSON-RPC 2.0 over POST, an `initialize` handshake that returns a
-// session id in the `Mcp-Session-Id` response header, a `notifications/
-// initialized` confirmation carrying that header, then `tools/call` — the
-// same sequence `erun-mcp/AGENTS.md` documents for a raw-HTTP probe. Each
-// call opens a fresh session rather than caching one across calls: this is
-// the console's first caller of the live edge, and a cached session adds
-// reconnect/expiry handling this increment does not need yet.
+// JSON-RPC 2.0 over POST: initialize (returns Mcp-Session-Id), notifications/initialized,
+// then tools/call. Each call opens a fresh session.
 
 const PROTOCOL_VERSION = '2025-06-18';
 const SESSION_HEADER = 'Mcp-Session-Id';
@@ -17,11 +11,7 @@ export interface McpToolResult {
   text: string;
 }
 
-// mcpEdgeUrl builds the JSON-RPC endpoint from the hostname an operator
-// copies out of `erun expose <tenant> <env> mcp`'s own output (a bare host,
-// no scheme or path) -- tolerant of a pasted scheme or trailing path too, so
-// a caller who pastes what they see elsewhere (e.g. a browser address bar)
-// is not refused for it.
+// Tolerates a pasted scheme or trailing path around the bare host.
 export function mcpEdgeUrl(hostname: string): string {
   const trimmed = hostname.trim().replace(/\/+$/, '');
   const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
@@ -148,12 +138,6 @@ function parseToolResult(result: unknown): McpToolResult {
   return { isError: result.isError === true, text: toolResultText(result) };
 }
 
-// callMcpTool drives one tool call against a deployed environment's exposed
-// MCP edge, from the browser, using a bearer token the console already
-// minted (see mcpApi.ts). It is the one function that actually exercises
-// that token; everything upstream only requests and displays it. args
-// defaults to an empty object for the read-only smoke-test caller
-// (DriveToolForm's `version` call), which takes no input.
 export async function callMcpTool(
   hostname: string,
   token: string,

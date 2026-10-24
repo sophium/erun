@@ -10,10 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-// seedPortForwardLogForTest writes the log a forward appends to, and the
-// rotated generation its size cap leaves beside it, so a test can tell a
-// removal that clears the whole record from one that clears only the state
-// file.
+// seedPortForwardLogForTest writes a forward's log and its rotated generation.
 func seedPortForwardLogForTest(t *testing.T, kind, tenant, environment string) string {
 	t.Helper()
 	logPath, err := kube.PortForwardLogPath(kind, tenant, environment)
@@ -38,11 +35,6 @@ func requireMissing(t *testing.T, path string) {
 	}
 }
 
-// TestRunDeleteEnvironmentRemovesTheForwardLogBesideTheStateFile is the
-// reproduction: a delete reclaimed the environment's port-forward state file
-// but stranded the log next to it, so the forward tree kept records -- and
-// whole tenant directories -- for environments that no longer existed, which
-// nothing would ever open, restart, or rotate again.
 func TestRunDeleteEnvironmentRemovesTheForwardLogBesideTheStateFile(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	tenant, environment := "team", "dev"

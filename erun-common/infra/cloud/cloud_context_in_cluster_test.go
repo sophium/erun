@@ -12,8 +12,7 @@ func inClusterPreflightTestContext() core.Context {
 	return core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
 }
 
-// countingRunAWS fails the test's intent if any AWS call is made: an in-cluster
-// context has nothing to power on, so preflight must not reach AWS at all.
+// countingRunAWS counts AWS calls; an in-cluster context must make none.
 func countingRunAWS(calls *int) func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
 	return func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, _ []string) (string, error) {
 		*calls++
@@ -21,8 +20,6 @@ func countingRunAWS(calls *int) func(core.Context, configpkg.CloudProviderConfig
 	}
 }
 
-// TestCloudContextPreflightInClusterMatchedByKubernetesContext covers a context
-// whose name differs from the kube-context it serves.
 func TestCloudContextPreflightInClusterMatchedByKubernetesContext(t *testing.T) {
 	store := stubCloudContextStore{config: configpkg.ERunConfig{
 		CloudProviders: []configpkg.CloudProviderConfig{{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS}},
@@ -44,9 +41,6 @@ func TestCloudContextPreflightInClusterMatchedByKubernetesContext(t *testing.T) 
 	}
 }
 
-// TestCloudContextPreflightPowerManagedWithoutInstanceIDStillFails is the other
-// direction: a genuinely power-managed context with no instance ID is a real
-// error, not an in-cluster one, and must keep failing with today's message.
 func TestCloudContextPreflightPowerManagedWithoutInstanceIDStillFails(t *testing.T) {
 	store := stubCloudContextStore{config: configpkg.ERunConfig{
 		CloudProviders: []configpkg.CloudProviderConfig{{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS, Profile: "dev-profile"}},
@@ -73,9 +67,6 @@ func TestCloudContextPreflightPowerManagedWithoutInstanceIDStillFails(t *testing
 	}
 }
 
-// TestIsInClusterCloudContextDistinguishesPowerManagedContexts keeps the
-// predicate honest: it names the pod's own cluster, not "any context without an
-// instance ID".
 func TestIsInClusterCloudContextDistinguishesPowerManagedContexts(t *testing.T) {
 	cases := []struct {
 		name   string

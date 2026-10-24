@@ -17,8 +17,6 @@ type adoptFixture struct {
 	output bytes.Buffer
 }
 
-// newAdoptFixture stages the home volume and the worktree claim side by side,
-// as the runtime chart's init container mounts them.
 func newAdoptFixture(t *testing.T) *adoptFixture {
 	t.Helper()
 	root := t.TempDir()
@@ -31,8 +29,6 @@ func newAdoptFixture(t *testing.T) *adoptFixture {
 	return f
 }
 
-// seedLegacyRepo writes what a pre-worktree-volume environment's checkout
-// held: a real .git plus tracked and untracked working files.
 func (f *adoptFixture) seedLegacyRepo(t *testing.T) {
 	t.Helper()
 	mustWriteFile(t, filepath.Join(f.legacy, ".git", "HEAD"), "ref: refs/heads/main\n")
@@ -147,8 +143,6 @@ func TestAdoptWorktreeLeavesANonRepositoryOnTheHomeVolume(t *testing.T) {
 }
 
 func TestAdoptWorktreeIgnoresASymlinkedReleaseTree(t *testing.T) {
-	// A sourceless runtime environment's git folder is a symlink at its baked
-	// release, never a checkout to take over.
 	f := newAdoptFixture(t)
 	release := filepath.Join(filepath.Dir(f.claim), "opt-release")
 	mustWriteFile(t, filepath.Join(release, "main.tf"), "baked\n")

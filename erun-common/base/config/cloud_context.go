@@ -7,10 +7,7 @@ import (
 	"strings"
 )
 
-// CloudContextConfig is the on-disk shape for a managed cloud context.
-// It must contain only configuration the user actually authors —
-// runtime/operational fields (current power state, AWS-observed status)
-// belong on CloudContextStatus and are never persisted.
+// CloudContextConfig is the persisted cloud context; runtime state belongs on CloudContextStatus.
 type CloudContextConfig struct {
 	Name                string `json:"name" yaml:"name"`
 	Provider            string `json:"provider" yaml:"provider"`
@@ -37,11 +34,8 @@ const (
 	DefaultCloudContextDiskSizeGB   = 100
 )
 
-// CloudContextStatus pairs the persisted config with a live, in-memory
-// Status this package never writes to disk, so a consumer needing a current
-// value must reach a live source rather than a cached one. The StopProtection
-// fields are filled only on the dedicated stop-protection paths; the bulk
-// refresh skips them to stay one AWS call per (alias,region) group.
+// CloudContextStatus pairs the config with live Status that is never persisted. StopProtection
+// is filled only on stop-protection paths to keep bulk refresh to one AWS call per group.
 type CloudContextStatus struct {
 	CloudContextConfig  `json:",inline" yaml:",inline"`
 	Status              string `json:"status,omitempty" yaml:"status,omitempty"`

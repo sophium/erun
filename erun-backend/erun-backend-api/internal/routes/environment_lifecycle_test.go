@@ -119,10 +119,7 @@ func TestStopEnvironmentSurfacesLifecycleFailure(t *testing.T) {
 	}
 }
 
-// TestDeleteEnvironmentStartsDeleteAsynchronously pins the bounded-delete
-// contract: the handler claims the delete (moving the row to `deleting`) and
-// starts the durable workflow, then returns 202 immediately rather than
-// waiting on the teardown itself — which could run long or wedge entirely.
+// The teardown can run long or wedge, so the handler returns 202 without waiting.
 func TestDeleteEnvironmentStartsDeleteAsynchronously(t *testing.T) {
 	environments := runtimeEnvironment()
 	deleter := &stubEnvironmentDeleter{}
@@ -147,9 +144,6 @@ func TestDeleteEnvironmentStartsDeleteAsynchronously(t *testing.T) {
 	}
 }
 
-// TestDeleteEnvironmentResolvesTheDeleteInput checks the resolved
-// provision.EnvDeleteInput's fields separately from the response-shape
-// assertions above, so each assertion failure names exactly what went wrong.
 func TestDeleteEnvironmentResolvesTheDeleteInput(t *testing.T) {
 	deleter := &stubEnvironmentDeleter{}
 	deleteEnvironmentRequest(t, runtimeEnvironment(), deleter)
@@ -174,10 +168,7 @@ func assertEqual(t *testing.T, field, got, want string) {
 	}
 }
 
-// TestDeleteEnvironmentAllowsNonRuntime: a remote-agent/local-agent row was
-// never server-side deployed, so deleting it is a plain row removal — still
-// routed through the durable workflow, which skips the Job when
-// RunningVersion is empty.
+// The workflow skips the Job when RunningVersion is empty.
 func TestDeleteEnvironmentAllowsNonRuntime(t *testing.T) {
 	environments := &stubEnvironmentRepository{environment: model.Environment{
 		EnvironmentID: "env-1", Name: "agents", Type: model.EnvironmentTypeRemoteAgent,
@@ -203,9 +194,6 @@ func TestDeleteEnvironmentReportsUnconfiguredExecutor(t *testing.T) {
 	}
 }
 
-// TestDeleteEnvironmentRejectsConcurrentDelete mirrors
-// TestDeployEnvironmentRejectsConcurrentDeploy: a double-submit must not
-// start two delete Jobs against the same namespace.
 func TestDeleteEnvironmentRejectsConcurrentDelete(t *testing.T) {
 	environments := runtimeEnvironment()
 	environments.claimDeleteTaken = true
@@ -220,14 +208,8 @@ func TestDeleteEnvironmentRejectsConcurrentDelete(t *testing.T) {
 	}
 }
 
-// The three tests below cover the refusal messages only: the guard itself
-// lives in ClaimDeploy/ClaimDelete's SQL, which the stub repository cannot
-// exercise. A refusal caused by an outstanding teardown must be reported as
-// such, not as "a deploy is already in progress".
+// These cover refusal messages only; the guard itself is ClaimDeploy/ClaimDelete SQL.
 
-// TestDeployEnvironmentRefusalNamesAnOutstandingDelete: a deploy refused
-// because the environment is mid-teardown must say so, not send the caller
-// looking for a concurrent deploy that does not exist.
 func TestDeployEnvironmentRefusalNamesAnOutstandingDelete(t *testing.T) {
 	for _, tc := range []struct {
 		status model.EnvironmentStatus
@@ -254,9 +236,6 @@ func TestDeployEnvironmentRefusalNamesAnOutstandingDelete(t *testing.T) {
 	}
 }
 
-// TestDeleteEnvironmentRefusalNamesAnInFlightDeploy is the mirror: a delete
-// refused because a deploy holds the row should point at the deploy, since
-// waiting for it is the actionable step.
 func TestDeleteEnvironmentRefusalNamesAnInFlightDeploy(t *testing.T) {
 	environments := runtimeEnvironment()
 	environments.environment.Status = model.EnvironmentStatusProvisioning
@@ -275,9 +254,6 @@ func TestDeleteEnvironmentRefusalNamesAnInFlightDeploy(t *testing.T) {
 	}
 }
 
-// TestClaimRefusalMessages pins each mapping directly, including that an
-// ordinary status still yields the original concurrent-lifecycle wording — the
-// teardown cases must not swallow the common one.
 func TestClaimRefusalMessages(t *testing.T) {
 	if got := deployClaimRefusal(model.EnvironmentStatusRunning); got != "a deploy is already in progress for this environment" {
 		t.Fatalf("running deploy refusal = %q, want the concurrent-deploy message", got)
@@ -296,10 +272,6 @@ func TestClaimRefusalMessages(t *testing.T) {
 	}
 }
 
-// TestDeleteEnvironmentStartFailureMarksBlocked mirrors
-// TestDeployEnvironmentStartFailureMarksFailed: ClaimDelete already moved the
-// row to `deleting` before Start ran, so a failure to even enqueue the
-// durable workflow must not strand it there — it moves to deletion-blocked.
 func TestDeleteEnvironmentStartFailureMarksBlocked(t *testing.T) {
 	environments := runtimeEnvironment()
 	deleter := &stubEnvironmentDeleter{err: foreignKeyError{}}

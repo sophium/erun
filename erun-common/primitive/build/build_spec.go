@@ -30,13 +30,8 @@ func ResolveDockerImageReference(ctx core.Context, store shared.DockerStore, fin
 	return shared.ResolveDockerImageReferenceForProject(ctx, now, projectRoot, environment, buildDir, strings.TrimSpace(target.VersionOverride), target.Component)
 }
 
-// ResolveDockerBuildForComponent resolves a single image by componentName —
-// the name of the Docker build context directory anywhere in the project
-// (MCP's existing single-image selector), not a components: map selection.
-// It passes "" for newDockerBuildSpec's selectedComponent so version/context
-// resolution stays on the project-global paths: block unless the project also
-// declares a matching components: entry, which FindComponentDockerBuildContext
-// (and currentComponentDockerBuildContext's own cwd match) already scope to.
+// ResolveDockerBuildForComponent resolves a single image by its build context directory name.
+// It is not a components: selection, so version/context resolution stays project-global.
 func ResolveDockerBuildForComponent(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, projectRoot, environment, componentName, versionOverride string, platformOverride []string) (*shared.DockerBuildSpec, error) {
 	store, _, resolveBuildContext, now = shared.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 

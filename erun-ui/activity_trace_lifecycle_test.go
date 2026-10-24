@@ -6,10 +6,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestActivityTraceLineHandlerStartsAndFinishesDoctor: `erun doctor` runs
-// piped into the shared Local shell, which never produces a PTY exit, so the
-// `==> Doctor ...` trace lines are its only completion signal — mirroring
-// init/build, not a bespoke mechanism.
+// Doctor runs piped into the Local shell with no PTY exit; trace lines are its only completion signal.
 func TestActivityTraceLineHandlerStartsAndFinishesDoctor(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "team", Environment: "dev"}
@@ -51,9 +48,7 @@ func TestActivityTraceLineHandlerFinalizesDoctorOnFailure(t *testing.T) {
 	}
 }
 
-// TestStartDoctorFromTraceDoesNotLockTerminal: doctor's recovery actions
-// prompt interactively in the very terminal it runs in, so unlike deploy/init
-// it must not lock terminals — locking would block the prompt it is waiting on.
+// Locking would block doctor's interactive prompts.
 func TestStartDoctorFromTraceDoesNotLockTerminal(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "team", Environment: "dev"}
@@ -65,10 +60,6 @@ func TestStartDoctorFromTraceDoesNotLockTerminal(t *testing.T) {
 	}
 }
 
-// TestDoctorCompletedEventRecordsLastRunOutcome: doctor's outcome must reach
-// the frontend even though it runs piped into the shared Local shell (no PTY
-// exit) — this is what the Manage dialog's SSH tab renders as the persisted
-// last-run result.
 func TestDoctorCompletedEventRecordsLastRunOutcome(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
@@ -98,10 +89,6 @@ func TestDoctorCompletedEventRecordsLastRunOutcome(t *testing.T) {
 	}
 }
 
-// TestActivityTraceLineHandlerStartsAndFinishesSSHDInit: `erun sshd init` runs
-// piped into the shared Local shell, which never produces a PTY exit, so the
-// `==> SSHD init ...` trace lines are its only completion signal, as with
-// doctor.
 func TestActivityTraceLineHandlerStartsAndFinishesSSHDInit(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "team", Environment: "dev"}
@@ -143,11 +130,6 @@ func TestActivityTraceLineHandlerFinalizesSSHDInitOnFailure(t *testing.T) {
 	}
 }
 
-// TestStartSSHDInitFromTraceLocksTerminals: sshd init runs no interactive
-// recovery prompts of its own — unlike doctor, it is a one-shot provisioning
-// action like init/deploy — so it takes the same lockTerminalsForActivity
-// path those do (today a no-op for non-deploy commands per
-// sessionMatchesActivity, but consistent with init's own call).
 func TestStartSSHDInitFromTraceLocksTerminals(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "team", Environment: "dev"}
@@ -159,10 +141,6 @@ func TestStartSSHDInitFromTraceLocksTerminals(t *testing.T) {
 	}
 }
 
-// TestSSHDInitCompletedEventRecordsLastRunOutcome: sshd init's outcome must
-// reach the frontend even though it runs piped into the shared Local shell (no
-// PTY exit) — this is what the Manage dialog's SSH access section renders as
-// the persisted last-run result.
 func TestSSHDInitCompletedEventRecordsLastRunOutcome(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
@@ -193,9 +171,7 @@ func TestSSHDInitCompletedEventRecordsLastRunOutcome(t *testing.T) {
 }
 
 func TestStartCommandFromTraceDoesNotLockTerminal(t *testing.T) {
-	// Build/release/push run IN the user's terminal, so locking the session
-	// would freeze the very tab they are reading output in — unlike deploy, they
-	// must not take the concurrency lock.
+	// Locking would freeze the tab showing their output.
 	for _, command := range []string{"build", "release", "push"} {
 		app := newTestAppForActivityQueue(t)
 		selection := uiSelection{Tenant: "erun", Environment: "local"}
@@ -208,12 +184,8 @@ func TestStartCommandFromTraceDoesNotLockTerminal(t *testing.T) {
 	}
 }
 
-// TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession guards against
-// the deploy⇄reopen loop: a remote-agent `erun open` re-runs the remote-worktree
-// bootstrap and prints the init lifecycle ("==> Initializing" / "==> Initialized"),
-// but only the Local session that runs `erun init` may own it. Honoring it from an
-// open/ai session would fire a spurious deploy, which rolls the pod, kills the
-// open shell, respawns it, and re-emits the line — an endless loop.
+// Only the Local session may own init: honoring a remote open's re-printed init
+// lines would trigger a deploy→reopen loop.
 func TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}
@@ -234,7 +206,6 @@ func TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession(t *testing.T) {
 		t.Fatalf("ai-session init trace must be display-only, got %+v", got)
 	}
 
-	// The Local session that actually runs `erun init` still owns the lifecycle.
 	localHandler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 	localHandler("==> Initializing erun/local")
 	if _, ok := app.activityQueue.findActiveByCommand("init", "erun", "local"); !ok {
@@ -242,10 +213,7 @@ func TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession(t *testing.T) {
 	}
 }
 
-// TestEmitEnvironmentInitializedFiresOncePerEnv guards the create→deploy loop
-// fix: a Windows ConPTY repaint re-sends the "==> Initialized" trace as fresh
-// output, so the event must fire at most once per env (each re-fire composed
-// another deploy, an endless loop), and reset for a re-create.
+// A Windows ConPTY repaint re-sends "==> Initialized"; it must fire once per env.
 func TestEmitEnvironmentInitializedFiresOncePerEnv(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
@@ -258,13 +226,12 @@ func TestEmitEnvironmentInitializedFiresOncePerEnv(t *testing.T) {
 		t.Fatalf("environment-initialized fired %d times for one env, want 1 (repaints must not re-fire)", got)
 	}
 
-	// A different env is independent.
 	app.emitEnvironmentInitialized("frs", "other")
 	if got := len(emits.events(environmentInitializedEvent)); got != 2 {
 		t.Fatalf("distinct env total = %d, want 2", got)
 	}
 
-	// Delete/failure resets, so a legitimate re-create fires again.
+	// Delete/failure resets, so a re-create fires again.
 	app.clearInitEmitted("frs", "dev")
 	app.emitEnvironmentInitialized("frs", "dev")
 	if got := len(emits.events(environmentInitializedEvent)); got != 3 {
@@ -273,10 +240,7 @@ func TestEmitEnvironmentInitializedFiresOncePerEnv(t *testing.T) {
 }
 
 func TestResolveActivityKubeContextFallsBackToEnvConfig(t *testing.T) {
-	// Without the env-config fallback, a selection-less Local tab emits an empty
-	// KubernetesContext and the container-status poller's kubectl hits the host's
-	// `current-context` (orbstack on a dev machine), not the env's cluster — so
-	// the deploy card renders with no container pills.
+	// Without the env-config fallback, kubectl would hit the host's current-context.
 	app := newTestAppForActivityQueue(t)
 	app.deps.store = stubUIStore{
 		envs: map[string]config.EnvConfig{

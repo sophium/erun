@@ -131,8 +131,6 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 	}
 }
 
-// TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags pins the desktop round-
-// trip of the per-env Claude launch fields (default model, verbose+debug).
 func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -184,10 +182,7 @@ func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
 }
 
 func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
-	// AutoStart is the desktop's per-env auto-start gate. The three modes
-	// map to *bool: ask=nil (prompt on next open), always=true, never=false.
-	// SetEnvironmentAutoStart must round-trip each mode through the store
-	// without rewriting unrelated fields.
+	// AutoStart modes map to *bool: ask=nil, always=true, never=false.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]configpkg.TenantConfig{

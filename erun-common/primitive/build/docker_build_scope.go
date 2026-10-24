@@ -53,9 +53,7 @@ func resolveCurrentDevopsDockerDir(findProjectRoot shared.ProjectFinderFunc, dir
 		return "", false, err
 	}
 
-	// A configured paths.docker override (or a selected components: entry) is
-	// authoritative: it wins over the -devops cwd shortcut and the project-root
-	// convention scan, and applies from any cwd inside the project.
+	// A paths.docker override or selected components: entry wins over convention, from any cwd.
 	if projectRoot != "" {
 		if configured, ok, err := ResolveComponentAwareDockerDir(projectRoot, target.Component); err != nil || ok {
 			return configured, ok, err
@@ -65,9 +63,7 @@ func resolveCurrentDevopsDockerDir(findProjectRoot shared.ProjectFinderFunc, dir
 	return resolveConventionDevopsDockerDir(findProjectRoot, dir, projectRoot)
 }
 
-// resolveConventionDevopsDockerDir is the convention discovery used when no
-// paths.docker override applies: the cwd -devops shortcut, then the project-root
-// <tenant>-devops/docker scan (only when cwd is the project root).
+// resolveConventionDevopsDockerDir tries the cwd -devops shortcut, then <tenant>-devops/docker from the project root.
 func resolveConventionDevopsDockerDir(findProjectRoot shared.ProjectFinderFunc, dir, projectRoot string) (string, bool, error) {
 	dockerDir := filepath.Join(dir, "docker")
 	if strings.HasSuffix(filepath.Base(dir), "-devops") {
@@ -85,10 +81,7 @@ func resolveConventionDevopsDockerDir(findProjectRoot shared.ProjectFinderFunc, 
 	return ResolveProjectRootDevopsDockerDir(findProjectRoot, projectRoot)
 }
 
-// ResolveComponentAwareDockerDir resolves the docker build root a build/push
-// command should use: the selected components: entry when the project
-// declares one or more (see resolveProjectComponent), otherwise the unchanged
-// paths.docker override via configuredDockerDir.
+// ResolveComponentAwareDockerDir resolves the docker build root for the selected component or paths.docker override.
 func ResolveComponentAwareDockerDir(projectRoot, selectedComponent string) (string, bool, error) {
 	name, paths, ok, err := config.ResolveProjectComponent(projectRoot, selectedComponent)
 	if err != nil {
@@ -161,9 +154,7 @@ func findDevopsDockerDirs(projectRoot string) ([]string, error) {
 	return candidates, nil
 }
 
-// projectHasDevopsFolder is a bare presence check — it does not require a
-// buildable docker module — so the build-env advisory fires only when there is
-// no devops module at all, not when one exists but is still being set up.
+// projectHasDevopsFolder only checks presence, so a half-set-up devops module suppresses the advisory.
 func projectHasDevopsFolder(projectRoot string) (bool, error) {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
@@ -184,11 +175,7 @@ func projectHasDevopsFolder(projectRoot string) (bool, error) {
 	return false, nil
 }
 
-// ResolveDockerBuildEnvConfig returns the saved EnvConfig a build resolves to,
-// or nil when none matches. The build path is otherwise env-agnostic; this is
-// the seam for reading per-env build toggles such as DisableBuildScript.
-// Best-effort: any store error or a miss yields nil so the build proceeds with
-// default behaviour.
+// ResolveDockerBuildEnvConfig returns the saved EnvConfig a build resolves to, or nil on any miss or error.
 func ResolveDockerBuildEnvConfig(store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) *config.EnvConfig {
 	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {

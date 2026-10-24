@@ -23,11 +23,7 @@ func TestList(t *testing.T) {
 	}{
 		{"help", testListHelp},
 
-		// `erun list --tenant` reports erun-version drift across a
-		// tenant's own environments instead of the full listing, and
-		// --gate-environment additionally flags whether the environment driving
-		// that tenant's merge-queue gate runs an older erun version than any
-		// environment it gates -- the concrete defect this exists to catch.
+		// --gate-environment flags a gate environment older than one it gates.
 		{"version_drift_gate_environment_requires_tenant", testListVersionDriftGateEnvironmentRequiresTenant},
 		{"version_drift_tenant_not_found", testListVersionDriftTenantNotFound},
 		{"version_drift_reports_every_environment_and_the_max", testListVersionDriftReportsEveryEnvironmentAndTheMax},
@@ -36,10 +32,7 @@ func TestList(t *testing.T) {
 		{"version_drift_gate_environment_not_found", testListVersionDriftGateEnvironmentNotFound},
 		{"version_drift_gate_environment_version_unresolved", testListVersionDriftGateEnvironmentVersionUnresolved},
 
-		// Three distinct situations must not collapse into `version=none` or drop
-		// silently from the drift verdict: nothing deployed, a release deployed
-		// but this config never learned its version, and an unreachable cluster.
-		// These four scenarios lock each rendering plus the dry-run trace that makes the live check auditable.
+		// Not deployed, version unknown to config, and unreachable must each render distinctly.
 		{"version_drift_environment_confirmed_not_deployed", testListVersionDriftEnvironmentConfirmedNotDeployed},
 		{"version_drift_resolves_live_version_from_deployed_release", testListVersionDriftResolvesLiveVersionFromDeployedRelease},
 		{"version_drift_environment_cluster_unreachable", testListVersionDriftEnvironmentClusterUnreachable},
@@ -48,10 +41,7 @@ func TestList(t *testing.T) {
 		{"version_drift_unresolved_environment_json_output", testListVersionDriftUnresolvedEnvironmentJSONOutput},
 		{"version_drift_json_output", testListVersionDriftJSONOutput},
 
-		// `list` is a reporting command and always exits 0 on its own
-		// findings; --fail-on-drift is the opt-in that lets one invocation of a
-		// drift report be wired into a gate instead (erun-cli/AGENTS.md § "Exit-
-		// Code Contract: Reporting Commands Vs Gating Checks").
+		// list always exits 0 on findings unless --fail-on-drift.
 		{"fail_on_drift_requires_tenant_or_control_planes", testListFailOnDriftRequiresTenantOrControlPlanes},
 		{"fail_on_drift_with_tenant_behind_max_exits_non_zero", testListFailOnDriftWithTenantBehindMaxExitsNonZero},
 		{"fail_on_drift_with_tenant_no_drift_exits_zero", testListFailOnDriftWithTenantNoDriftExitsZero},
@@ -61,24 +51,16 @@ func TestList(t *testing.T) {
 		{"with_seeded_host_env", testListWithSeededHostEnv},
 		{"platform_account_env_shows_enabled", testListPlatformAccountEnvShowsEnabled},
 
-		// runtime-version alone reads as an erun version even when it
-		// is not one, and a Helm release name can disagree with the image it
-		// actually runs. These four scenarios lock the shapes `erun list` must
-		// tell apart: a tenant's own aligned line, erun's own stock line, the
-		// release-name-disagrees-with-image trap, and honestly not knowing.
+		// Runtime version line: aligned tenant line, stock erun line, release/image
+		// mismatch, and unknown.
 		{"runtime_version_line_aligned_tenant_line", testListRuntimeVersionLineAlignedTenantLine},
 		{"runtime_version_line_stock_erun_line", testListRuntimeVersionLineStockErunLine},
 		{"runtime_version_line_release_name_disagrees_with_image", testListRuntimeVersionLineReleaseNameDisagreesWithImage},
 		{"runtime_version_line_undetermined_on_malformed_recorded_image", testListRuntimeVersionLineUndeterminedOnMalformedRecordedImage},
 		{"erun_version_reads_off_a_stated_runtime_chart_reference", testListErunVersionReadsOffAStatedRuntimeChartReference},
 
-		// The undetermined shape (a deployed env whose deploy never recorded a
-		// resolved image -- predates this feature, or went through a repo-local
-		// runtime chart whose own values decide the image) is already covered by
-		// every plain SeedTenantEnv scenario above, e.g. with_seeded_tenant_env:
-		// it never sets runtimerunningimage, so "line undetermined" is exactly
-		// what its golden shows. Must never guess a line from the tenant name
-		// instead.
+		// The undetermined line is covered by plain SeedTenantEnv goldens such as
+		// with_seeded_tenant_env.
 		{"with_orchestrator_environment_roles", testListWithOrchestratorEnvironmentRoles},
 		{"with_orchestrator_runtime_role_on_a_runtime_type_environment", testListWithOrchestratorRuntimeRoleOnARuntimeTypeEnvironment},
 		{"with_orchestrator_pairing_invalid_before_the_role_gate_existed", testListWithOrchestratorPairingInvalidBeforeTheRoleGateExisted},
@@ -96,17 +78,8 @@ func TestList(t *testing.T) {
 		{"with_cloud_providers_and_runtime_details", testListWithCloudProvidersAndRuntimeDetails},
 		{"with_claude_config", testListWithClaudeConfig},
 
-		// The sizing recommendation's four directions, driven from a retained
-		// history rather than from a live container. The history is the recommender's
-		// whole input, so seeding it is what makes each direction reachable — a real
-		// 26-hour observation window is not something a scenario can wait for, and
-		// the shrink gate exists precisely to require one.
-		//
-		// Each seeds an env whose declared runtimepod is deliberately absent, which
-		// is the in-pod reality: the chart injects the container's limits and the
-		// pod's own config never learns them. The lines must therefore score against
-		// the cgroup limit in the history, not against the defaults an empty
-		// runtimepod normalizes to.
+		// Sizing is driven from a seeded history; runtimepod is left absent, as in a
+		// real pod, so lines score against the history's cgroup limit.
 		{"runtime_sizing_lowers_memory_on_a_long_quiet_window", testListRuntimeSizingLowersMemoryOnALongQuietWindow},
 		{"runtime_sizing_raises_memory_on_an_oom_kill", testListRuntimeSizingRaisesMemoryOnAnOOMKill},
 		{"runtime_sizing_raises_cpu_on_sustained_throttling", testListRuntimeSizingRaisesCPUOnSustainedThrottling},
@@ -145,8 +118,7 @@ func testListWithSeededTenantEnv(t *testing.T) {
 }
 
 func testListWithSeededHostEnv(t *testing.T) {
-	// A host env lists like any other environment, with its type named
-	// plainly — it is not shown as a pod that failed to start.
+	// A host env is not shown as a pod that failed to start.
 	setup := env.New(t)
 	fixture.SeedHostTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -157,8 +129,6 @@ func testListWithSeededHostEnv(t *testing.T) {
 }
 
 func testListPlatformAccountEnvShowsEnabled(t *testing.T) {
-	// An env flagged platformaccount:true surfaces `platform-account: enabled`
-	// in its detail block, so an operator can see the env holds cluster-admin.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -175,7 +145,6 @@ func testListPlatformAccountEnvShowsEnabled(t *testing.T) {
 }
 
 func testListCorruptedEnvConfigErrors(t *testing.T) {
-	// A corrupted env config.yaml must fail list outright, not be silently skipped.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	mustWrite(t, filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml"), "{{{ not yaml")
@@ -198,7 +167,6 @@ func testListCorruptedTenantConfigErrors(t *testing.T) {
 }
 
 func testListTenantAPIURLAndEnvlessTenant(t *testing.T) {
-	// A tenant with a config but no env subdirectories shows "environments: none", not an empty list.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	tenantCfg := filepath.Join(setup.ConfigHome, "erun", "team", "config.yaml")
@@ -220,7 +188,6 @@ func testListTenantAPIURLAndEnvlessTenant(t *testing.T) {
 }
 
 func testListExplicitRuntimeType(t *testing.T) {
-	// An explicit `type:` must win over the legacy fallback in the resolver.
 	setup := env.New(t)
 	seedExplicitTypeEnv(t, setup, "team", "prod", "runtime")
 	result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -231,9 +198,7 @@ func testListExplicitRuntimeType(t *testing.T) {
 }
 
 func testListLegacyRemoteYAMLMigratesToRuntime(t *testing.T) {
-	// A legacy remote=true env with no build-here signal migrates to Type=runtime on
-	// read, preserving the remote-worktree / no-local-build semantics of the retired
-	// remote/snapshot fields.
+	// A legacy remote=true env with no build-here signal migrates to Type=runtime on read.
 	setup := env.New(t)
 	fixture.SeedLegacyRemoteTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -244,7 +209,6 @@ func testListLegacyRemoteYAMLMigratesToRuntime(t *testing.T) {
 }
 
 func testListMultiTenantWithMultipleEnvs(t *testing.T) {
-	// Distinct port ranges are assigned per tenant by tenant index.
 	setup := env.New(t)
 	seedListMultiTenant(t, setup)
 	result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -255,10 +219,9 @@ func testListMultiTenantWithMultipleEnvs(t *testing.T) {
 }
 
 func testListCwdOverridesDefaultTenant(t *testing.T) {
-	// cwd under a non-default tenant's project root marks that tenant `effective`, overriding the configured default.
 	setup := env.New(t)
 	seedListMultiTenant(t, setup)
-	// cwd resolution walks up to a git root, so tenant-b's project root must be a real git repo.
+	// cwd resolution walks up to a git root, so this must be a real git repo.
 	tenantBPath := filepath.Join(setup.Home, "git", "tenant-b")
 	fixture.SeedGitRepo(t, tenantBPath)
 	nested := filepath.Join(tenantBPath, "nested")
@@ -273,8 +236,8 @@ func testListCwdOverridesDefaultTenant(t *testing.T) {
 }
 
 func testListWithCloudProvidersAndRuntimeDetails(t *testing.T) {
-	// The aws stub fails `sts get-caller-identity` deterministically; without it the
-	// developer's real aws CLI would shape the status line and drift the golden between machines.
+	// The aws stub fails deterministically so the developer's real aws CLI cannot
+	// drift the golden.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -339,7 +302,6 @@ func testListWithClaudeConfig(t *testing.T) {
 	golden.Equal(t, "list/with_claude_config", normalize.Apply(result.Combined))
 }
 
-// seedExplicitTypeEnv is shared by list and delete scenarios that assert the resolver honors an explicit `type:`.
 func seedExplicitTypeEnv(t testing.TB, setup env.Setup, tenant, environment, envType string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -437,18 +399,14 @@ type usageHistorySpec struct {
 	peakCPUMilli    int64
 }
 
-// seedUsageHistory writes the retained usage store directly. The on-disk shape
-// is the contract between the in-pod monitor that writes it and every reader, so
-// spelling the JSON out here pins that shape rather than round-tripping through
-// the same structs it is meant to check.
+// seedUsageHistory spells out the JSON to pin the on-disk contract rather than
+// round-tripping through the structs under test.
 func seedUsageHistory(t testing.TB, setup env.Setup, tenant, environment string, spec usageHistorySpec) {
 	t.Helper()
 	dir := filepath.Join(setup.CacheHome, "erun", "activity", tenant, environment)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
-	// Fixed instants, so the observed window is a property of the fixture rather
-	// than of when the suite happened to run.
 	first := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	last := first.Add(time.Duration(spec.windowHours)*time.Hour + 12*time.Minute)
 	sample := fmt.Sprintf(
@@ -477,27 +435,18 @@ type orchestratorSeed struct {
 	id           string
 	name         string
 	environments []orchestratorEnvSeed
-	// directories are the orchestrator's own: paths that belong to no environment.
-	// A seed may carry these and no environment at all, which is a complete
-	// definition.
+	// directories are the orchestrator's own paths, belonging to no environment.
 	directories []string
-	// alias is the erun platform alias the orchestrator declares as its own.
-	// Empty is the default and the common case, and writes no key at all, so
-	// goldens seeded before this field existed are unchanged by it.
+	// alias empty writes no key, so older goldens are unchanged.
 	alias string
-	// useGateway, model and effort are the launch settings. Their zero values
-	// are the defaults and write no key, for the same reason as alias.
+	// Zero values write no key, as for alias.
 	useGateway bool
 	model      string
 	effort     string
 }
 
-// seedOrchestratorsWithEnvRoles appends a persisted orchestrators list,
-// including each linked environment's role, to the isolated root config. It
-// writes every orchestrator in one "orchestrators:" block (unlike
-// whip_test.go's seedOrchestrator, calling it more than once would overwrite
-// rather than append, since YAML only keeps the last of a repeated top-level
-// key).
+// seedOrchestratorsWithEnvRoles writes all orchestrators in one block; calling
+// it again overwrites rather than appends.
 func seedOrchestratorsWithEnvRoles(t testing.TB, setup env.Setup, orchestrators []orchestratorSeed) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -519,8 +468,6 @@ func seedOrchestratorsWithEnvRoles(t testing.TB, setup env.Setup, orchestrators 
 	}
 }
 
-// writeOrchestratorSeed writes one orchestrators entry, omitting every
-// optional key left at its default.
 func writeOrchestratorSeed(sb *strings.Builder, orchestrator orchestratorSeed) {
 	sb.WriteString("  - id: " + orchestrator.id + "\n")
 	sb.WriteString("    name: " + orchestrator.name + "\n")
@@ -539,8 +486,6 @@ func writeOrchestratorSeed(sb *strings.Builder, orchestrator orchestratorSeed) {
 	writeOrchestratorSeedLinks(sb, orchestrator)
 }
 
-// writeOrchestratorSeedLinks writes an orchestrators entry's linked
-// environments and own directories, each block only when it has entries.
 func writeOrchestratorSeedLinks(sb *strings.Builder, orchestrator orchestratorSeed) {
 	if len(orchestrator.environments) > 0 {
 		sb.WriteString("    environments:\n")

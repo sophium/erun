@@ -1,8 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-// The Auto-start prompt appears only for a remote env with a stopped cloud
-// context and no recorded auto-start preference yet. Its title prefix is
-// unique across dialogs, so the anchored role match stays unambiguous.
+// Shown for a remote env with a stopped cloud context and no auto-start preference.
 export class AutoStartPromptDialog {
   constructor(public readonly page: Page) {}
 

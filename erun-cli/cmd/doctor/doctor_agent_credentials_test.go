@@ -32,12 +32,6 @@ func renderAgentCredentials(t *testing.T, ctx core.Context, diagnosis deploy.Dep
 	return out.String()
 }
 
-// TestReportAgentCredentialsNamesTheCauseAndTheFix is the operator-facing half
-// of the defect's reproduction: the state the report described, printed as a
-// finding that names what is actually wrong rather than leaving the next error
-// to be read as a quota problem. Every assertion here is about what an operator
-// can act on — the missing variable, the reason it is missing, and the command
-// that resolves it.
 func TestReportAgentCredentialsNamesTheCauseAndTheFix(t *testing.T) {
 	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(deploy.RuntimeAgentCredentialMissing))
 
@@ -53,9 +47,7 @@ func TestReportAgentCredentialsNamesTheCauseAndTheFix(t *testing.T) {
 			t.Fatalf("report does not contain %q:\n%s", want, rendered)
 		}
 	}
-	// The finding must not read as a deploy failure: the release in this state
-	// is genuinely deployed, and saying otherwise would send the operator after
-	// the wrong recovery.
+	// The release is genuinely deployed; this must not read as a deploy failure.
 	for _, unwanted := range []string{"roll back", "rollback", "clear pending"} {
 		if strings.Contains(strings.ToLower(rendered), unwanted) {
 			t.Fatalf("report suggests %q for an environment whose release is deployed:\n%s", unwanted, rendered)
@@ -63,10 +55,6 @@ func TestReportAgentCredentialsNamesTheCauseAndTheFix(t *testing.T) {
 	}
 }
 
-// TestReportAgentCredentialsStaysSilentWhenTheCheckDoesNotApply locks the
-// behaviour that keeps this from becoming noise, and from becoming a false
-// accusation: an environment no gateway routes can still reach a provider by
-// other means, so there is nothing to print and nothing to infer.
 func TestReportAgentCredentialsStaysSilentWhenTheCheckDoesNotApply(t *testing.T) {
 	ctx := core.Context{}
 	rendered := renderAgentCredentials(t, ctx, agentCredentialDiagnosis(deploy.RuntimeAgentCredentialNotApplicable))
@@ -79,9 +67,6 @@ func TestReportAgentCredentialsStaysSilentWhenTheCheckDoesNotApply(t *testing.T)
 	}
 }
 
-// TestReportAgentCredentialsSaysSoWhenItCouldNotRead is the "no silent success"
-// half: a check that could not run must say that, rather than printing nothing
-// and leaving the operator to read silence as health.
 func TestReportAgentCredentialsSaysSoWhenItCouldNotRead(t *testing.T) {
 	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(deploy.RuntimeAgentCredentialUnknown))
 	if !strings.Contains(rendered, "unknown") || !strings.Contains(rendered, "forbidden") {
@@ -92,10 +77,6 @@ func TestReportAgentCredentialsSaysSoWhenItCouldNotRead(t *testing.T) {
 	}
 }
 
-// TestReportAgentCredentialsSkipsAnUnreachableCluster mirrors the neighbouring
-// pod-backed sections: once the diagnosis has established the cluster is
-// unreachable, this says it skipped rather than paying its own kubectl timeout
-// to rediscover it — and it does not dress the skip up as a missing credential.
 func TestReportAgentCredentialsSkipsAnUnreachableCluster(t *testing.T) {
 	diagnosis := agentCredentialDiagnosis(deploy.RuntimeAgentCredentialUnknown)
 	diagnosis.ClusterUnreachable = true
@@ -105,8 +86,6 @@ func TestReportAgentCredentialsSkipsAnUnreachableCluster(t *testing.T) {
 	}
 }
 
-// TestReportAgentCredentialsIsSilentUnderDryRun locks the section to the same
-// dry-run contract its pod-backed neighbours follow.
 func TestReportAgentCredentialsIsSilentUnderDryRun(t *testing.T) {
 	rendered := renderAgentCredentials(t, core.Context{DryRun: true}, agentCredentialDiagnosis(deploy.RuntimeAgentCredentialMissing))
 	if rendered != "" {
@@ -114,8 +93,6 @@ func TestReportAgentCredentialsIsSilentUnderDryRun(t *testing.T) {
 	}
 }
 
-// TestReportAgentCredentialsConfirmsAHealthyEnvironment pins the positive arm,
-// so the section cannot degenerate into one that only ever prints problems.
 func TestReportAgentCredentialsConfirmsAHealthyEnvironment(t *testing.T) {
 	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(deploy.RuntimeAgentCredentialConfigured))
 	if !strings.Contains(rendered, "available") || !strings.Contains(rendered, deploy.GatewayBaseURLEnv) {

@@ -14,9 +14,6 @@ import (
 	"github.com/sophium/erun/erun-common/command/doctor"
 )
 
-// forceStdinTerminal drives the stdinIsTerminal seam for one test. It is the
-// same seam open.go uses, so a run that cannot reach a terminal is exercised
-// without depending on how the test process's own stdin happens to be wired.
 func forceStdinTerminal(t *testing.T, terminal bool) {
 	t.Helper()
 	previous := shared.StdinIsTerminal
@@ -28,8 +25,6 @@ func doctorActionResult() config.OpenResult {
 	return config.OpenResult{Tenant: "team", Environment: "dev"}
 }
 
-// A real terminal still gets the prompts: the skip is a no-TTY fallback, not a
-// removal of the interactive flow.
 func TestDoctorPromptsForOptionalPrunesOnTerminal(t *testing.T) {
 	forceStdinTerminal(t, true)
 	var asked []string
@@ -52,8 +47,7 @@ func TestDoctorPromptsForOptionalPrunesOnTerminal(t *testing.T) {
 		if actions[i] != action {
 			t.Errorf("action %d = %s, want %s", i, actions[i], action)
 		}
-		// confirmPrompt trims the trailing "?" before handing the label to the
-		// prompt, which supplies its own.
+		// The prompt supplies its own "?".
 		wantLabel := strings.TrimRight(doctor.DoctorActionPromptLabel(action, doctorActionResult()), "?")
 		if !strings.Contains(asked[i], wantLabel) {
 			t.Errorf("prompt %d = %q, want it to offer %q", i, asked[i], wantLabel)
@@ -64,8 +58,6 @@ func TestDoctorPromptsForOptionalPrunesOnTerminal(t *testing.T) {
 	}
 }
 
-// A terminal that closes mid-run (EOF) is still nobody declining an optional
-// action, not a verdict on the environment.
 func TestDoctorTreatsPromptEOFAsSkippedNotFailed(t *testing.T) {
 	forceStdinTerminal(t, true)
 	runner := func(promptui.Prompt) (string, error) { return "", promptui.ErrEOF }
@@ -82,8 +74,6 @@ func TestDoctorTreatsPromptEOFAsSkippedNotFailed(t *testing.T) {
 	if !strings.Contains(out.String(), "skipped: "+string(doctor.DoctorActionPruneImages)) {
 		t.Errorf("EOF was not reported as a skipped optional step:\n%s", out.String())
 	}
-	// The cause differs from a run that never had a terminal, and the report
-	// must name the one that happened instead of prescribing the wrong fix.
 	if !strings.Contains(out.String(), doctorPromptsStdinClosed) {
 		t.Errorf("EOF was reported with the wrong cause:\n%s", out.String())
 	}
@@ -92,8 +82,6 @@ func TestDoctorTreatsPromptEOFAsSkippedNotFailed(t *testing.T) {
 	}
 }
 
-// An error that is not EOF still fails: a genuinely broken prompt runner is a
-// real failure, and must not be laundered into a quiet skip.
 func TestDoctorStillReportsRealPromptErrors(t *testing.T) {
 	forceStdinTerminal(t, true)
 	runner := func(promptui.Prompt) (string, error) { return "", errors.New("prompt runner broke") }

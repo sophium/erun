@@ -60,7 +60,6 @@ func testVersionNoRegistry(t *testing.T) {
 }
 
 func testVersionTimeFlagPrintsElapsed(t *testing.T) {
-	// --time must emit an elapsed line on stderr after a successful run.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"version", "--no-registry", "--time"}, erun.RunOptions{
 		Cwd: setup.Cwd,
@@ -73,10 +72,7 @@ func testVersionTimeFlagPrintsElapsed(t *testing.T) {
 }
 
 func testVersionProjectVersionFileDoesNotShadowTheErunVersion(t *testing.T) {
-	// A VERSION file in the working directory is the project's version, not
-	// erun's: the `erun` line must stay the compiled-in build version (so it
-	// stays comparable with `latest stable:`) and the project version must get
-	// its own labelled line.
+	// A VERSION file is the project's version; the erun line stays the build version.
 	setup := env.New(t)
 	if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("9.9.9\n"), 0o644); err != nil {
 		t.Fatalf("write VERSION: %v", err)
@@ -92,8 +88,6 @@ func testVersionProjectVersionFileDoesNotShadowTheErunVersion(t *testing.T) {
 }
 
 func testVersionJsonOutputSeparatesTheErunAndProjectVersions(t *testing.T) {
-	// The structured result an orchestrator reads must keep the two versions in
-	// distinct fields, so neither can be mistaken for the other.
 	setup := env.New(t)
 	if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("9.9.9\n"), 0o644); err != nil {
 		t.Fatalf("write VERSION: %v", err)
@@ -109,13 +103,11 @@ func testVersionJsonOutputSeparatesTheErunAndProjectVersions(t *testing.T) {
 }
 
 func testVersionRegistryDockerhubStubReturnsLatestStableAndSnapshot(t *testing.T) {
-	// version must surface the latest stable and latest snapshot across paginated Docker Hub tags.
 	page1Path := "/v2/repositories/acme/erun-devops/tags?page_size=100"
 	var page2Path string
 	var stableLatest, snapshotLatest string
 	var server *httptest.Server
-	// Assigned before Start so the handler's reads of server and page2Path
-	// have a happens-before edge to them; see erun-integration/AGENTS.md.
+	// Assigned before Start so the handler's reads happen-after them.
 	page2Path = "/v2/repositories/acme/erun-devops/tags?page=2"
 	server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -143,8 +135,7 @@ func testVersionRegistryDockerhubStubReturnsLatestStableAndSnapshot(t *testing.T
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// Substring-asserted, not golden-locked: normalization collapses these
-	// versions to <VERSION>, which would erase the stub-driven values under test.
+	// Normalization would mask these versions, so assert substrings.
 	if !strings.Contains(result.Stdout, "latest stable: "+stableLatest) {
 		t.Errorf("expected stdout to include latest stable %q, got:\n%s", stableLatest, result.Stdout)
 	}
@@ -154,7 +145,6 @@ func testVersionRegistryDockerhubStubReturnsLatestStableAndSnapshot(t *testing.T
 }
 
 func testVersionRegistryGhcrStubReturnsLatestStable(t *testing.T) {
-	// version must follow the GHCR rel="next" Link header across pages and surface the latest stable.
 	var server *httptest.Server
 	var requested []string
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +179,6 @@ func testVersionRegistryGhcrStubReturnsLatestStable(t *testing.T) {
 	if !strings.Contains(result.Stdout, "latest stable: 1.4.1") {
 		t.Errorf("expected stdout to include latest stable 1.4.1 from paginated GHCR response, got:\n%s", result.Stdout)
 	}
-	// A pagination-parser regression should fail here explicitly, not only via the stdout assertion.
 	assertStubReceived(t, requested,
 		"/token?service=ghcr.io&scope=repository:acme/erun-devops:pull",
 		"/v2/acme/erun-devops/tags/list?",
@@ -214,12 +203,7 @@ func assertStubReceived(t *testing.T, requested []string, paths ...string) {
 }
 
 func testVersionRegistryGhcrAuthenticatesWithDockerConfigInlineAuth(t *testing.T) {
-	// #750: registry version listing authenticates the GHCR token exchange with
-	// the credential docker itself pulls with, so private tenant images list
-	// their tags instead of failing anonymously. Seed an isolated docker config
-	// with an inline ghcr.io auth entry and assert the token request carries HTTP
-	// Basic auth — the credential-resolution logic is otherwise only unit-tested
-	// via package-var seams the integration gate cannot reach.
+	// Private GHCR tags list with docker's own credential (#750).
 	const dockerUser, dockerSecret = "erunbot", "s3cr3t-inline-token"
 	var tokenAuthHeader string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -244,9 +228,7 @@ func testVersionRegistryGhcrAuthenticatesWithDockerConfigInlineAuth(t *testing.T
 		"  baseurl: "+server.URL+"\n"+
 		"  tokenurl: "+server.URL+"\n")
 
-	// An inline auths entry keyed by the bare host is what docker stores for
-	// `docker login ghcr.io`; DOCKER_CONFIG points the resolver at this isolated
-	// dir instead of the developer's ~/.docker.
+	// DOCKER_CONFIG isolates the resolver from the developer's ~/.docker.
 	dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
 	if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
 		t.Fatalf("mkdir docker config dir: %v", err)
@@ -272,14 +254,8 @@ func testVersionRegistryGhcrAuthenticatesWithDockerConfigInlineAuth(t *testing.T
 }
 
 func testVersionRegistryGhcrAuthenticatesViaDockerCredentialHelper(t *testing.T) {
-	// #750, credential-helper arm: docker keeps most registry credentials in a
-	// per-host credential helper (Docker Desktop/OrbStack keychains), not inline.
-	// A credHelpers entry routes ghcr.io to `docker-credential-<helper> get`; the
-	// resolver must run it and Basic-authenticate the token exchange with what it
-	// returns. The helper name is deliberately absent from PATH so the resolution
-	// is deterministic, and the stub is routed via ERUN_DOCKER_CREDENTIAL_ERUNSTUB_BIN
-	// — which on Windows resolves to the fixture's argv-faithful .exe runner,
-	// since Windows will not execute a shebang script by name.
+	// Credential-helper arm (#750). The helper is absent from PATH and routed via
+	// ERUN_DOCKER_CREDENTIAL_ERUNSTUB_BIN, which on Windows resolves to an .exe runner.
 	const dockerUser, dockerSecret = "helperbot", "s3cr3t-helper-token"
 	var tokenAuthHeader string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -312,8 +288,6 @@ func testVersionRegistryGhcrAuthenticatesViaDockerCredentialHelper(t *testing.T)
 		t.Fatalf("write docker config: %v", err)
 	}
 
-	// docker-credential-erunstub get prints the credential docker would hand back
-	// on stdin lookup; the resolver Basic-authenticates the token request with it.
 	stubs := filepath.Join(setup.Cwd, "stubs")
 	fixture.StubBinary(t, stubs, "docker-credential-erunstub", fmt.Sprintf(`{"Username":%q,"Secret":%q}`, dockerUser, dockerSecret))
 	envVars := append(setup.Env(), "DOCKER_CONFIG="+dockerCfgDir)
@@ -332,7 +306,6 @@ func testVersionRegistryGhcrAuthenticatesViaDockerCredentialHelper(t *testing.T)
 }
 
 func testVersionRegistryDefaultsNamespaceAndRepository(t *testing.T) {
-	// A registry config that overrides only the URLs must default to the canonical ghcr.io/sophium/erun-devops image.
 	var server *httptest.Server
 	var requested []string
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -369,8 +342,6 @@ func testVersionRegistryDefaultsNamespaceAndRepository(t *testing.T) {
 }
 
 func testVersionRegistryDockerhubErrorIsDebugLoggedNotFatal(t *testing.T) {
-	// A registry lookup failure must not fail erun version: the error is
-	// debug-logged and the build-info line still prints.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
@@ -389,7 +360,6 @@ func testVersionRegistryDockerhubErrorIsDebugLoggedNotFatal(t *testing.T) {
 }
 
 func testVersionRegistryGhcrTokenErrorIsDebugLoggedNotFatal(t *testing.T) {
-	// A GHCR token-endpoint failure degrades to the same non-fatal, debug-logged behavior as any other registry failure.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "denied", http.StatusForbidden)
 	}))
@@ -409,7 +379,6 @@ func testVersionRegistryGhcrTokenErrorIsDebugLoggedNotFatal(t *testing.T) {
 }
 
 func testVersionRegistryGhcrTagsErrorIsDebugLoggedNotFatal(t *testing.T) {
-	// When the GHCR token resolves but the tags request fails, erun version still exits 0.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/token" {
 			w.Header().Set("Content-Type", "application/json")
@@ -434,13 +403,10 @@ func testVersionRegistryGhcrTagsErrorIsDebugLoggedNotFatal(t *testing.T) {
 }
 
 func testVersionRegistryGhcrAccessTokenFallbackAndLinkEdgeCases(t *testing.T) {
-	// Two GHCR parsing edge cases: the token endpoint may return access_token
-	// instead of token, and malformed or empty rel="next" Link segments must
-	// terminate pagination rather than loop forever.
+	// Malformed or empty rel="next" segments must end pagination, not loop.
 	var server *httptest.Server
 	var pages []string
-	// Assigned before Start so the handler's read of server has a
-	// happens-before edge to it; see erun-integration/AGENTS.md.
+	// Assigned before Start so the handler's read happens-after it.
 	server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -480,11 +446,8 @@ func testVersionRegistryGhcrAccessTokenFallbackAndLinkEdgeCases(t *testing.T) {
 }
 
 func testVersionRegistryDockerhubTagClassificationEdgeCases(t *testing.T) {
-	// Tag classification ignores malformed stable tags and non-digit snapshot
-	// timestamps, dedupes tags across pages, and compares minor versions correctly.
 	var server *httptest.Server
-	// Assigned before Start so the handler's read of server has a
-	// happens-before edge to it; see erun-integration/AGENTS.md.
+	// Assigned before Start so the handler's read happens-after it.
 	server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.RawQuery {
@@ -517,7 +480,6 @@ func testVersionRegistryDockerhubTagClassificationEdgeCases(t *testing.T) {
 }
 
 func testVersionVerboseFlagPrintsAudit(t *testing.T) {
-	// The audit line appears at -vv (trace) but is suppressed at -v (debug).
 	setup := env.New(t)
 	result := erun.Run(t, []string{"version", "--no-registry", "-vv"}, erun.RunOptions{
 		Cwd: setup.Cwd,

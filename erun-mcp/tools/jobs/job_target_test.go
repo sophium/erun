@@ -7,9 +7,6 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// Restating the server's own scope, or omitting it, must keep working -- the
-// arguments are how a caller disambiguates, and refusing those would break every
-// existing caller.
 func TestJobToolsAcceptTheirOwnScope(t *testing.T) {
 	runtime := shared.RuntimeConfig{Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 	ctx := context.Background()

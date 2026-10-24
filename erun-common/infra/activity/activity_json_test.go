@@ -9,12 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// TestAISessionJSONFollowsTheSameNeverSetRule covers the sibling surface that
-// carried the identical tag: an AI session that has recorded nothing is not a
-// session whose last activity was the zero instant either. It is asserted
-// separately because `erun activity ai-session` and the MCP `ai_sessions` tool
-// serialize a different struct; the point of the pairing is that the one rule
-// holds on both, so a consumer does not have to learn which payload it is in.
+// `erun activity ai-session` serializes a different struct but follows the same never-set rule.
 func TestAISessionJSONFollowsTheSameNeverSetRule(t *testing.T) {
 	encoded, err := json.Marshal(model.AISessionStatus{SessionID: "s-1", State: model.AISessionStateIdle, Reason: "recorded"})
 	if err != nil {

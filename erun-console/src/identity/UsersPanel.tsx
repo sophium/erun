@@ -34,11 +34,7 @@ import { EnrollBasicFields, OrgTargetStatus } from './PlatformEnrollFields';
 import { UserRolesDialog } from './UserRolesDialog';
 import { ScopedUsersStatus, UsersScopeBadge } from './usersScope';
 
-// EnrollFeedback tells the operator which of the two enrollment paths the
-// backend actually took: with mail configured, the identity provider emails
-// the invite itself; without it, there is no mail path for that link to
-// travel, so the temporary password shown below is the only way the new
-// person signs in.
+// Without mail configured, the temporary password is the only way the person signs in.
 function EnrollFeedback({ enroll }: { enroll: EnrollState }): React.ReactElement | null {
   if (enroll.status === 'enrolled') {
     if (enroll.result.error !== undefined) {
@@ -75,11 +71,7 @@ function EnrollFeedback({ enroll }: { enroll: EnrollState }): React.ReactElement
   return null;
 }
 
-// TemporaryPasswordDialog shows the one-time credential enrollment returns
-// when mail delivery is not configured. It never leaves a trace once closed:
-// onDismiss (wired to both the "Done" button and clicking outside/the X)
-// strips the password out of the controller's own state, so nothing keeps
-// holding it after the operator has copied or noted it down.
+// Dismissing strips the password from controller state.
 function TemporaryPasswordDialog({
   username,
   password,
@@ -206,13 +198,8 @@ function EnrollForm({
   );
 }
 
-// DeactivateUserDialog gates the access-revoking half of the toggle behind an
-// explicit confirmation (erun-ui/AGENTS.md's design-language record):
-// deactivating blocks the user's next sign-in immediately, and the row it was
-// clicked from looks identical to every other row, so a misclick is easy and
-// its consequence is invisible until the person locked out reports it.
-// Reactivating restores access rather than revoking it, so it stays a single
-// click — only the deactivate half needs this gate.
+// Deactivation is confirmed: it blocks the next sign-in and a misclick is invisible.
+// Reactivation stays one click.
 function DeactivateUserDialog({
   user,
   onCancel,
@@ -260,12 +247,6 @@ function DeactivateUserDialog({
   );
 }
 
-// MembershipBadge tells the operator which of three states a row is in:
-// an enrolled erun user of this tenant, a machine identity (the platform's
-// own service accounts, never a tenant member), or an IdP-only account —
-// someone who exists in the identity provider (most likely via
-// self-registration) but has no erun access at all. Rendering all three
-// identically would hide who actually has erun access.
 function MembershipBadge({ user }: { user: IdentityUser }): React.ReactElement {
   if (user.isMachine) {
     return <span className="text-xs text-muted-foreground">Machine account</span>;
@@ -276,15 +257,8 @@ function MembershipBadge({ user }: { user: IdentityUser }): React.ReactElement {
   return <span className="text-xs text-muted-foreground">IdP only, not enrolled</span>;
 }
 
-// UsernameCell renders the username column. The erun username -- the value
-// that already appears in reviews, roles, audit entries, and the console
-// header (whoami's own `username`) -- is the primary label whenever the row
-// is enrolled, with the IdP's own username shown as a secondary line only
-// when the two actually diverge: an operator seeing a different name here
-// than in the header cannot otherwise tell it is their own row. The OIDC
-// subject (`user.id`) is always shown too, in small monospace text -- the one
-// stable value that joins the erun and IdP directories. isCaller marks the
-// row matching the signed-in operator's own erun user id.
+// The erun username is primary; the IdP username shows only when it differs. The OIDC
+// subject is always shown: it is the value joining the erun and IdP directories.
 function UsernameCell({
   user,
   isCaller,
@@ -323,10 +297,7 @@ function UserRow({
   onManageRoles: (user: IdentityUser) => void;
 }): React.ReactElement {
   const active = user.state === 'USER_STATE_ACTIVE';
-  // The platform's own machine accounts (login-client, admin-sa) are the
-  // IdP's own service identities, not people an operator manages here — a
-  // one-click Deactivate beside them is a footgun on the sign-in path
-  // itself, so they get no toggle at all rather than a confirmation dialog.
+  // Machine accounts sit on the sign-in path, so they get no toggle at all.
   const canToggle = !user.isMachine && (active || user.state === 'USER_STATE_INACTIVE');
   const isCaller =
     callerErunUserId !== undefined && user.enrolled && user.erunUserId === callerErunUserId;
@@ -341,9 +312,7 @@ function UserRow({
         <MembershipBadge user={user} />
       </TableCell>
       <TableCell>
-        {/* Only an enrolled erun user has role assignments to manage — a
-            machine account or an IdP-only, not-yet-enrolled account has no
-            erun user row for a role to attach to. */}
+        {/* Only an enrolled erun user has a row for roles to attach to. */}
         {user.enrolled && user.erunUserId !== undefined && (
           <Button
             type="button"
@@ -461,17 +430,8 @@ function UsersBody({
   );
 }
 
-// UsersPanel is the console's IdP-identity administration surface: enroll a
-// colleague (creates the IdP identity and the erun user mapping in one
-// action), deactivate/reactivate an existing one, and manage which roles an
-// enrolled user holds. Only rendered for an OPERATIONS tenant — see App.tsx.
-// EnrollForm's tenant selector targets another tenant's Zitadel org (its
-// org_field_value, resolved via GET /v1/tenant-issuers) rather than the
-// platform's own — a user's org decides which tenant they resolve to, so
-// this is the only way to put a first user into a tenant other than the
-// caller's own through the IdP-creating path. EnrollUserForm below is the
-// separate, tenant-targetable path that instead writes a user row directly
-// (POST /v1/users) with no IdP identity created at all.
+// Rendered only for an OPERATIONS tenant. EnrollForm's tenant selector targets another
+// tenant's Zitadel org, since a user's org decides which tenant they resolve to.
 export function UsersPanel({
   token,
   ownTenantId,
@@ -482,14 +442,9 @@ export function UsersPanel({
   token: string;
   ownTenantId: string;
   tenantType: string;
-  // The signed-in operator's own erun user id (GET /v1/whoami's `userId`).
-  // Matched against each row's erunUserId to mark the caller's own row
-  // (item 1) -- undefined while whoami hasn't resolved yet, which
-  // simply renders no "You" badge rather than guessing.
+  // Undefined until whoami resolves, which renders no "You" badge.
   callerErunUserId?: string;
-  // Set once shell/ScopeSelector.tsx points this OPERATIONS caller at
-  // another tenant; undefined means "my own tenant", today's unchanged
-  // default.
+  // Undefined means the caller's own tenant.
   scopeTenantId?: string;
 }): React.ReactElement {
   const targetTenantId = scopeTenantId ?? ownTenantId;

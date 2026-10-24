@@ -8,11 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// pacingEnvBusyTestApp builds one orchestrator, alive and stale (its own
-// activity report has not moved since well past the staleness window), linked
-// to a single environment "acme/dev". Callers stage app.envActivity for that
-// environment (or leave it unset for the never-observed case) before driving
-// the reconciler.
+// pacingEnvBusyTestApp builds one alive, stale orchestrator linked to "acme/dev".
 func pacingEnvBusyTestApp(t *testing.T, startedAt time.Time) (*App, *callRecordingSession) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -33,10 +29,6 @@ func pacingEnvBusyTestApp(t *testing.T, startedAt time.Time) (*App, *callRecordi
 	return app, session
 }
 
-// TestOrchestratorPacingSuppressedWhileLinkedEnvBusy is the acceptance case
-// the issue opens with: a linked environment busy on a lease this
-// orchestrator holds means the orchestrator is waiting, not idle. It must not
-// be nudged and must not accrue toward the cap.
 func TestOrchestratorPacingSuppressedWhileLinkedEnvBusy(t *testing.T) {
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
 	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
@@ -63,10 +55,6 @@ func TestOrchestratorPacingSuppressedWhileLinkedEnvBusy(t *testing.T) {
 	}
 }
 
-// TestOrchestratorPacingBusySuppressionOnlyCountsLinkedEnvironments guards the
-// scope: an unrelated environment being busy on this orchestrator's lease
-// must not suppress pacing for an orchestrator that never linked it. An
-// orchestrator is not excused by some other environment's activity.
 func TestOrchestratorPacingBusySuppressionOnlyCountsLinkedEnvironments(t *testing.T) {
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
 	unrelatedKey := selectionKey(uiSelection{Tenant: "other", Environment: "prod"})
@@ -81,11 +69,6 @@ func TestOrchestratorPacingBusySuppressionOnlyCountsLinkedEnvironments(t *testin
 	}
 }
 
-// TestOrchestratorPacingBusySuppressionOnlyCountsThisOrchestratorsLease guards
-// the holder discriminator: a linked environment busy on another
-// orchestrator's job, or an operator's own session, must not suppress this
-// orchestrator's nudge — otherwise a shared environment would silence every
-// orchestrator linked to it.
 func TestOrchestratorPacingBusySuppressionOnlyCountsThisOrchestratorsLease(t *testing.T) {
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
 	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
@@ -100,9 +83,6 @@ func TestOrchestratorPacingBusySuppressionOnlyCountsThisOrchestratorsLease(t *te
 	}
 }
 
-// TestOrchestratorPacingAllLinkedEnvsIdlePacesAsToday is the control: every
-// linked environment observed and none busy behaves exactly like the
-// env-unaware pass did before this change.
 func TestOrchestratorPacingAllLinkedEnvsIdlePacesAsToday(t *testing.T) {
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
 	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
@@ -117,14 +97,6 @@ func TestOrchestratorPacingAllLinkedEnvsIdlePacesAsToday(t *testing.T) {
 	}
 }
 
-// TestOrchestratorPacingUnknownEnvActivityFallsBackToBaseSignal pins the
-// explicit decision for the undetermined case: a linked environment whose
-// activity was never observed (poller has not reached it, env stopped, edge
-// unreachable) must resolve to neither "idle" (which would nudge on a false
-// assertion of no activity) nor "busy" (which would mask a genuinely dark
-// orchestrator). It falls back to the base, env-unaware decision — the same
-// nudge behaviour as if this orchestrator had never linked an environment at
-// all — rather than silently defaulting to one side.
 func TestOrchestratorPacingUnknownEnvActivityFallsBackToBaseSignal(t *testing.T) {
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
 	// app.envActivity is left nil: the poller has never observed "acme/dev".
@@ -142,12 +114,6 @@ func TestOrchestratorPacingUnknownEnvActivityFallsBackToBaseSignal(t *testing.T)
 	}
 }
 
-// TestOrchestratorPacingSurfacesPastTheEnvBusyBound is the second acceptance
-// case: a lane that never finishes must not silence its orchestrator forever.
-// Once the orchestrator has gone unanswered longer than
-// orchestratorPacingEnvBusyBound, the reconciler stops excusing the silence
-// and nudges anyway, describing the linked environment rather than reading as
-// an ordinary quiet pane.
 func TestOrchestratorPacingSurfacesPastTheEnvBusyBound(t *testing.T) {
 	bound := orchestratorPacingEnvBusyBound(getOrchestratorWhipConfig())
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-bound-time.Minute))
@@ -173,11 +139,6 @@ func TestOrchestratorPacingSurfacesPastTheEnvBusyBound(t *testing.T) {
 	}
 }
 
-// TestOrchestratorPacingBusySuppressionDoesNotConsumeTheCap is the cap
-// interaction the issue calls out directly: waiting correctly through a long
-// run must not count toward orchestratorPacingMaxNudges, so an orchestrator
-// that later needs the ordinary nudge/cap contract still gets the full
-// budget rather than one already spent on suppressed ticks.
 func TestOrchestratorPacingBusySuppressionDoesNotConsumeTheCap(t *testing.T) {
 	bound := orchestratorPacingEnvBusyBound(getOrchestratorWhipConfig())
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
@@ -186,8 +147,6 @@ func TestOrchestratorPacingBusySuppressionDoesNotConsumeTheCap(t *testing.T) {
 		key: {observed: true, busy: true, detail: "holding: a long gate run", busyHolderOrchestrators: "agent"},
 	}
 
-	// Many ticks well within the bound: none may nudge or spend the cap,
-	// however long the run drags on.
 	rows := app.orchestratorPacingRows()
 	tick := time.Now()
 	for i := 0; i < orchestratorPacingMaxNudges*3; i++ {
@@ -212,10 +171,6 @@ func TestOrchestratorPacingBusySuppressionDoesNotConsumeTheCap(t *testing.T) {
 	}
 }
 
-// TestOrchestratorLinkedEnvBusyStateForDiscriminatesByHolder is the pure-logic
-// unit test for the aggregation the reconciler drives: busy beats unknown,
-// unknown beats idle, and only this orchestrator's own lease holder counts as
-// busy.
 func TestOrchestratorLinkedEnvBusyStateForDiscriminatesByHolder(t *testing.T) {
 	envs := []config.OrchestratorEnvConfig{
 		{Tenant: "acme", Environment: "dev"},

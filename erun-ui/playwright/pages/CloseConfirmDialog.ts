@@ -1,8 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-// Shown when the operator tries to close the window while a build/deploy/
-// release is still running. Its title is unique across dialogs,
-// so the anchored role match stays unambiguous.
+// Shown when closing the window while a build/deploy/release runs.
 export class CloseConfirmDialog {
   constructor(public readonly page: Page) {}
 

@@ -23,10 +23,6 @@ func doctorInspectConfigScenarios(t *testing.T) {
 }
 
 func testDoctorInspectCleanRootConfig(t *testing.T) {
-	// On a clean install (tenant with no cloud aliases, no
-	// cloud contexts), the host-side root-config inspection
-	// must report ok status, zero orphans, and proceed
-	// silently for callers that did not ask for repair work.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"doctor", "--repair-config", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -37,11 +33,7 @@ func testDoctorInspectCleanRootConfig(t *testing.T) {
 }
 
 func testDoctorInspectOrphanedAlias(t *testing.T) {
-	// Seed a tenant that references a cloud-provider alias the
-	// root config does not list. Doctor must surface the
-	// orphan with its decoded username/account/provider and
-	// the tenant back-reference, then suggest the repair flow
-	// without prompting (dry-run is non-interactive).
+	// Dry-run is non-interactive, so repair is suggested, not prompted.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	tenantPath := filepath.Join(setup.ConfigHome, "erun", "team", "config.yaml")
@@ -62,10 +54,7 @@ func testDoctorInspectOrphanedAlias(t *testing.T) {
 }
 
 func testDoctorInspectCorruptedRootConfig(t *testing.T) {
-	// Truncated root config: doctor must report corrupted
-	// status without crashing and (when --repair-config is set
-	// but no backup exists) tell the user to resolve the file
-	// manually rather than silently overwriting.
+	// With no backup, repair must not silently overwrite the file.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	rootPath := filepath.Join(setup.ConfigHome, "erun", "config.yaml")
@@ -73,18 +62,12 @@ func testDoctorInspectCorruptedRootConfig(t *testing.T) {
 		t.Fatalf("truncate root config: %v", err)
 	}
 	result := erun.Run(t, []string{"doctor", "--repair-config", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-	// Exit can be non-zero when corruption is fatal; the
-	// golden is what we lock, not the code.
+	// The golden is locked, not the exit code.
 	_ = result
 	golden.Equal(t, "doctor/inspect_corrupted_root_config", normalize.Apply(result.Combined))
 }
 
 func testDoctorInspectOrphanedCloudContext(t *testing.T) {
-	// Reproduce the screenshot scenario: an env config names a
-	// cloud-managed kubernetes context that the root config no
-	// longer lists, and the env still carries the cloud provider
-	// alias. Doctor must surface the orphan with decoded account
-	// + region and the back-reference to the env.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "petios", "rihards-review")
 	tenantPath := filepath.Join(setup.ConfigHome, "erun", "petios", "config.yaml")
@@ -105,9 +88,7 @@ func testDoctorInspectOrphanedCloudContext(t *testing.T) {
 		"managedcloud: true\n"), 0o644); err != nil {
 		t.Fatalf("env: %v", err)
 	}
-	// Seed the root config with the provider so the alias side
-	// of the inspection stays clean — we only want the context
-	// orphan to surface here.
+	// Keep the alias side clean so only the context orphan surfaces.
 	rootPath := filepath.Join(setup.ConfigHome, "erun", "config.yaml")
 	if err := os.WriteFile(rootPath, []byte("defaulttenant: petios\n"+
 		"cloudproviders:\n"+
@@ -125,11 +106,6 @@ func testDoctorInspectOrphanedCloudContext(t *testing.T) {
 }
 
 func testDoctorInspectMissingRootConfig(t *testing.T) {
-	// Root config file deleted outright (vs the truncated/corrupted
-	// variant above): InspectRootConfig must take the
-	// ErrNotInitialized arm and report status=missing, and the
-	// repair flow — with no backups to restore — must point at
-	// manual resolution.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	if err := os.Remove(filepath.Join(setup.ConfigHome, "erun", "config.yaml")); err != nil {
@@ -143,13 +119,7 @@ func testDoctorInspectMissingRootConfig(t *testing.T) {
 }
 
 func testDoctorInspectMalformedAndUnsupportedOrphanAliases(t *testing.T) {
-	// Two orphan aliases that the repair flow must refuse to
-	// auto-fix: one that does not parse as <user>+<account>@<provider>
-	// (report renders the "alias is malformed" arm, repair skips with
-	// the recreate-manually hint) and one that parses but names a
-	// provider other than aws (repair skips with the unsupported-
-	// provider reason). Both skip messages print before the dry-run
-	// gate, so this locks orphanRepairBlockedReason end to end.
+	// One malformed alias and one non-aws provider; repair skips both.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	tenantPath := filepath.Join(setup.ConfigHome, "erun", "team", "config.yaml")
@@ -171,12 +141,6 @@ func testDoctorInspectMalformedAndUnsupportedOrphanAliases(t *testing.T) {
 }
 
 func testDoctorInspectOrphanAliasReferencedByCloudContexts(t *testing.T) {
-	// The orphan alias is referenced by cloud contexts in the root
-	// config rather than by a tenant: covers the addOrphanContext
-	// aggregation arm of InspectRootConfig, the cloud-contexts line
-	// of writeOrphanedAliasReport (formatOrphanedContexts with and
-	// without a region), and preferredRegionForOrphan skipping the
-	// region-less ref to seed the dry-run re-init from the second.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	rootPath := filepath.Join(setup.ConfigHome, "erun", "config.yaml")

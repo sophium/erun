@@ -21,8 +21,7 @@ interface RuntimeResourceControlsProps {
   status: UIRuntimeResourceStatus | null;
   loading: boolean;
   disabled?: boolean;
-  // The create dialog blocks on an over-capacity request; the manage dialog,
-  // where Save only persists config, surfaces it as a non-blocking warning.
+  // Blocking in the create dialog; a warning in manage, where Save only persists config.
   capacityBlocks?: boolean;
   onChange: (value: UIRuntimePodConfig) => void;
 }
@@ -41,8 +40,7 @@ export function RuntimeResourceControls({
   const controlsDisabled = disabled === true || loading || !bounds.available;
   const boundedValue = bounds.available ? clampRuntimePodConfig(value, bounds) : value;
 
-  // The parent re-creates value and bounds every render, so the clamp effect
-  // keys on primitive changes rather than the object identities.
+  // value and bounds are re-created each render, so the clamp keys on primitives.
   const onChangeRef = React.useRef(onChange);
   const valueRef = React.useRef(value);
   const boundsRef = React.useRef(bounds);
@@ -82,9 +80,7 @@ export function RuntimeResourceControls({
             {bounds.message}
           </div>
         )}
-        {/* Nielsen #1: a maximum equal to the current value is indistinguishable
-            from a product limit unless the reading says why. role="status" so a
-            screen reader hears the explanation with the figure, not instead of it. */}
+        {/* Explains a maximum equal to the current value; role=status so it is announced with the figure. */}
         {bounds.notice && (
           <div className="text-xs leading-[1.35] text-amber-700 dark:text-amber-400" role="status">
             {bounds.notice}
@@ -127,13 +123,7 @@ export function RuntimeResourceControls({
   );
 }
 
-// RuntimeResourceWorstCase renders the second capacity question: how much of
-// the node is committed if every container on it bursts to its declared limit
-// at once. It is kept visually apart from the scheduling figure above, and
-// unboxed rather than styled like the controls, because it does not bound them
-// -- a limit reserves nothing, so a node whose limits are oversubscribed can
-// still place a pod, and reading this figure as a ceiling is what led an
-// operator to shrink a limit sized for the work.
+// RuntimeResourceWorstCase is the all-limits-burst figure; kept apart because limits reserve nothing and do not bound the controls.
 function RuntimeResourceWorstCase({
   worstCase,
 }: {

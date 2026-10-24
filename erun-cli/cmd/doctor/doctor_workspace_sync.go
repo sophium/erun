@@ -11,14 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// runWorkspaceSyncDoctor diagnoses, and optionally repairs, the host-side SSH
-// provisioning a remote-agent env needs before its worktree can mirror to this
-// machine. The repair is the sshd-init provisioning MINUS the helm redeploy:
-// resolve/persist the SSH key, write the local ssh config alias, install the
-// pod authorized_keys (via kubectl exec, not a redeploy), and ensure the SSH
-// port-forward. When SSH still cannot reach the pod afterwards, the pod likely
-// has no SSHD deployed, so it points at `erun sshd init` for the redeploy the
-// repair deliberately will not run.
+// runWorkspaceSyncDoctor diagnoses and optionally repairs a remote-agent env's host-side
+// SSH provisioning, without the helm redeploy `erun sshd init` would run.
 func runWorkspaceSyncDoctor(ctx core.Context, promptRunner shared.PromptRunner, configStore config.ConfigStore, result config.OpenResult, options doctorOptions) error {
 	if !doctorWorkspaceSyncApplicable(result) {
 		if options.repairWorkspaceSync {
@@ -38,15 +32,10 @@ func runWorkspaceSyncDoctor(ctx core.Context, promptRunner shared.PromptRunner, 
 	return repairWorkspaceSyncProvisioning(ctx, configStore, result)
 }
 
-// doctorWorkspaceSyncApplicable reports whether the env is a remote-agent env
-// with SSHD and workspace sync enabled — the only shape this repair targets.
 func doctorWorkspaceSyncApplicable(result config.OpenResult) bool {
 	return result.RemoteRepo() && result.EnvConfig.SSHD.Enabled && result.EnvConfig.SSHD.WorkspaceSync.Enabled
 }
 
-// doctorOnlyRepairWorkspaceSync reports that --repair-workspace-sync was the
-// only action requested, so doctor stops after it instead of falling through to
-// the deploy diagnosis and prune prompts.
 func doctorOnlyRepairWorkspaceSync(options doctorOptions) bool {
 	return options.repairWorkspaceSync &&
 		strings.TrimSpace(options.restoreConfigFromBackup) == "" &&
@@ -63,9 +52,6 @@ func doctorOnlyRepairWorkspaceSync(options doctorOptions) bool {
 		)
 }
 
-// anyDoctorActionRequested reports whether any of the given doctor action flags
-// is set, letting the "only X requested" guards express their exclusions as a
-// flat list instead of a long boolean chain.
 func anyDoctorActionRequested(flags ...bool) bool {
 	for _, f := range flags {
 		if f {
@@ -75,10 +61,7 @@ func anyDoctorActionRequested(flags ...bool) bool {
 	return false
 }
 
-// diagnoseAndReportWorkspaceSync prints the workspace-sync provisioning state and
-// returns whether SSH already reaches the pod. In dry-run it traces the checks
-// it would run instead of touching the filesystem or the network, so the
-// integration goldens stay deterministic.
+// diagnoseAndReportWorkspaceSync returns whether SSH reaches the pod; dry-run only traces.
 func diagnoseAndReportWorkspaceSync(ctx core.Context, result config.OpenResult) (bool, error) {
 	info := open.SSHConnectionInfoForResult(result)
 	mirror := shared.ValueOrNone(strings.TrimSpace(result.EnvConfig.SSHD.WorkspaceSync.LocalPath))
@@ -106,9 +89,7 @@ func diagnoseAndReportWorkspaceSync(ctx core.Context, result config.OpenResult) 
 	return false, err
 }
 
-// shouldRepairWorkspaceSync resolves whether to run the repair: the explicit
-// flag always wins; otherwise offer it interactively only when the diagnosis
-// found a problem, and never in dry-run or non-interactive contexts.
+// shouldRepairWorkspaceSync: the flag wins; otherwise offer only interactively on a problem.
 func shouldRepairWorkspaceSync(ctx core.Context, promptRunner shared.PromptRunner, result config.OpenResult, options doctorOptions, healthy bool) (bool, error) {
 	if options.repairWorkspaceSync {
 		return true, nil
@@ -122,7 +103,6 @@ func shouldRepairWorkspaceSync(ctx core.Context, promptRunner shared.PromptRunne
 		"Re-run with --repair-workspace-sync to run it without a prompt.")
 }
 
-// repairWorkspaceSyncProvisioning runs the non-destructive provisioning steps.
 func repairWorkspaceSyncProvisioning(ctx core.Context, configStore config.ConfigStore, result config.OpenResult) error {
 	if err := persistWorkspaceSyncKeyPath(ctx, configStore, &result); err != nil {
 		return err
@@ -134,19 +114,12 @@ func repairWorkspaceSyncProvisioning(ctx core.Context, configStore config.Config
 		return err
 	}
 	if _, err := shared.EnsureSSHDPortForward(ctx, result); err != nil {
-		// A port-forward that never serves SSH almost always means the pod has no
-		// SSHD running yet (the env config enables it but no deploy carried it).
-		// The key and ssh config are already in place, so this is not a repair
-		// failure — surface the cause and the redeploy next step instead of a raw
-		// error, matching the not-reachable outcome below.
+		// A port-forward that never serves SSH usually means no SSHD has been deployed yet.
 		return reportWorkspaceSyncSSHDMissing(ctx, result, err)
 	}
 	return reportWorkspaceSyncRepairOutcome(ctx, result)
 }
 
-// reportWorkspaceSyncSSHDMissing explains that the local provisioning is in place
-// but the pod is not serving SSH, and names the one remaining step — a redeploy
-// this repair deliberately will not run.
 func reportWorkspaceSyncSSHDMissing(ctx core.Context, result config.OpenResult, cause error) error {
 	_, err := fmt.Fprintf(ctx.Stdout,
 		"Installed the SSH key and wrote the ssh config, but the SSH port-forward did not come up:\n  %s\nThe runtime pod most likely has no SSHD running; run `erun sshd init %s %s` to redeploy and enable it (this repair does not redeploy).\n",
@@ -154,9 +127,7 @@ func reportWorkspaceSyncSSHDMissing(ctx core.Context, result config.OpenResult, 
 	return err
 }
 
-// persistWorkspaceSyncKeyPath resolves the SSH public key and, when the env
-// config carries none, records the resolved path so later syncs and diffs share
-// one key. The resolved key drives the authorized_keys install below.
+// persistWorkspaceSyncKeyPath records the resolved key when the env config has none.
 func persistWorkspaceSyncKeyPath(ctx core.Context, configStore config.ConfigStore, result *config.OpenResult) error {
 	publicKeyPath, _, err := shared.ResolveSSHDPublicKey(result.EnvConfig.SSHD.PublicKeyPath)
 	if err != nil {
@@ -197,9 +168,6 @@ func writeWorkspaceSyncLocalSSHConfig(ctx core.Context, result config.OpenResult
 	return err
 }
 
-// reportWorkspaceSyncRepairOutcome re-checks reachability and either confirms the
-// mirror can now sync or names the one remaining step the repair will not run —
-// a redeploy to deploy SSHD into the pod.
 func reportWorkspaceSyncRepairOutcome(ctx core.Context, result config.OpenResult) error {
 	info := open.SSHConnectionInfoForResult(result)
 	if ctx.DryRun {
@@ -207,10 +175,7 @@ func reportWorkspaceSyncRepairOutcome(ctx core.Context, result config.OpenResult
 		return nil
 	}
 	if reachable, _ := probeWorkspaceSyncSSH(info.HostAlias); reachable {
-		// The repair fixes SSH provisioning, which is all it can see. Whether a
-		// pass ever runs is a separate question — the desktop polls, and if it
-		// is not running nothing is — so this must not promise one. Naming the
-		// command that runs a pass outright turns "wait and hope" into a step.
+		// The repair cannot tell whether a sync pass will run, so name the command that runs one.
 		_, err := fmt.Fprintf(ctx.Stdout,
 			"Workspace sync SSH is reachable for %s/%s. The desktop mirrors this env while it is running; to fill or refresh the mirror now, run `erun sshd sync %s %s`.\n",
 			result.Tenant, result.Environment, result.Tenant, result.Environment)
@@ -222,8 +187,6 @@ func reportWorkspaceSyncRepairOutcome(ctx core.Context, result config.OpenResult
 	return err
 }
 
-// probeWorkspaceSyncSSH reports whether the host alias reaches the pod's SSHD,
-// returning the failure detail so the diagnosis can explain what is wrong.
 func probeWorkspaceSyncSSH(alias string) (bool, string) {
 	alias = strings.TrimSpace(alias)
 	if alias == "" {

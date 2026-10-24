@@ -15,10 +15,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// HelmReleaseConcurrentDeployError is returned when an erun deploy invocation
-// detects another in-flight deploy against the same release with different
-// parameters. The caller should fail fast: retrying with the same parameters
-// would still race the live deploy because they encode different intent.
+// HelmReleaseConcurrentDeployError reports an in-flight deploy of the same
+// release with different parameters; retrying would still race it.
 type HelmReleaseConcurrentDeployError struct {
 	ReleaseName       string
 	Namespace         string
@@ -58,26 +56,22 @@ func (e *HelmReleaseConcurrentDeployError) Error() string {
 	)
 }
 
-// HelmDeploySingleFlightOutcome describes what the dedup check decided.
+// HelmDeploySingleFlightOutcome is the dedup decision.
 type HelmDeploySingleFlightOutcome int
 
 const (
-	// HelmDeploySingleFlightProceed means the caller owns the in-flight
-	// marker and should run the deploy, then Release the returned handle.
+	// HelmDeploySingleFlightProceed means the caller owns the marker and must Release it.
 	HelmDeploySingleFlightProceed HelmDeploySingleFlightOutcome = iota
-	// HelmDeploySingleFlightSkipDuplicate means an identical deploy is
-	// already in flight; the caller should treat its invocation as a no-op
-	// success.
+	// HelmDeploySingleFlightSkipDuplicate means an identical deploy is in flight.
 	HelmDeploySingleFlightSkipDuplicate
 )
 
-// HelmDeploySingleFlightHandle owns the on-disk in-flight marker for a deploy.
-// Release deletes the marker; it is safe to call on a nil or empty handle.
+// HelmDeploySingleFlightHandle owns the on-disk in-flight marker.
 type HelmDeploySingleFlightHandle struct {
 	path string
 }
 
-// Release removes the in-flight marker so subsequent deploys can proceed.
+// Release removes the marker; safe on a nil handle.
 func (h *HelmDeploySingleFlightHandle) Release() {
 	if h == nil || h.path == "" {
 		return
@@ -117,8 +111,6 @@ func (d helmDeploySingleFlightDeps) resolved() helmDeploySingleFlightDeps {
 	return d
 }
 
-// usableConfigDir returns the erun config dir; ok is false when it cannot be
-// resolved or is empty.
 func (d helmDeploySingleFlightDeps) usableConfigDir() (string, bool) {
 	configDir, err := d.configDir()
 	return configDir, err == nil && strings.TrimSpace(configDir) != ""
@@ -126,29 +118,12 @@ func (d helmDeploySingleFlightDeps) usableConfigDir() (string, bool) {
 
 const deployInflightDirName = "deploys"
 
-// helmDeploySingleFlightMaxAge is the upper bound on how long a marker can
-// reasonably represent a real in-flight deploy. Helm's default rollout
-// timeout is 5 minutes; chains with multiple charts and large rollouts can
-// stretch to ~10 minutes; anything beyond that is almost certainly a stale
-// marker left behind by a CLI that died (commonly: a deploy CLI inside a
-// runtime pod that was killed when the pod restarted, leaving a marker
-// whose recorded PID is coincidentally alive in the new pod's PID
-// namespace). Reclaiming on age covers that hole.
+// helmDeploySingleFlightMaxAge reclaims markers whose recorded PID happens to be
+// alive in a restarted pod's PID namespace.
 const helmDeploySingleFlightMaxAge = 15 * time.Minute
 
-// AcquireHelmDeploySingleFlight tries to claim exclusive ownership of the
-// helm release for the duration of a deploy. Behavior:
-//
-//   - Proceed + handle: caller should run the deploy and Release the handle
-//     when finished (success or failure).
-//   - SkipDuplicate: an identical deploy is already running; caller should
-//     return success without invoking helm.
-//   - HelmReleaseConcurrentDeployError: a different deploy is running for the
-//     same release; caller should fail fast.
-//
-// In dry-run mode the function never touches the filesystem; it traces the
-// would-be claim and returns Proceed with a nil handle so dry-run output
-// remains a faithful preview of mutating intent without acquiring real state.
+// AcquireHelmDeploySingleFlight claims the release for a deploy. Dry-run never
+// touches the filesystem and returns a nil handle.
 func AcquireHelmDeploySingleFlight(ctx core.Context, deploy HelmDeploySpec) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
 	return acquireHelmDeploySingleFlight(ctx, deploy, helmDeploySingleFlightDeps{})
 }
@@ -206,9 +181,7 @@ func acquireHelmDeploySingleFlight(ctx core.Context, deploy HelmDeploySpec, deps
 	return HelmDeploySingleFlightProceed, nil, fmt.Errorf("could not acquire deploy in-flight marker after retries")
 }
 
-// writeFreshInflightMarker cleans up the marker if writing or closing fails.
-// A leftover marker carries our own still-alive PID, so it would block later
-// deploys until the max-age reclaim rather than being seen as stale.
+// A leftover marker carries our live PID and would block deploys until max age.
 func writeFreshInflightMarker(ctx core.Context, f *os.File, path string, record deployInflightRecord, releaseKey, paramsHash string) (*HelmDeploySingleFlightHandle, error) {
 	if writeErr := writeInflightRecord(f, record); writeErr != nil {
 		_ = f.Close()
@@ -223,8 +196,6 @@ func writeFreshInflightMarker(ctx core.Context, f *os.File, path string, record 
 	return &HelmDeploySingleFlightHandle{path: path}, nil
 }
 
-// removeInflightMarker tolerates an already-absent marker so a concurrent reclaim
-// does not surface as an error.
 func removeInflightMarker(path string) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -232,9 +203,8 @@ func removeInflightMarker(path string) error {
 	return nil
 }
 
-// inflightMarkerFate is the dedup decision for a marker that blocked a claim,
-// expressed once so the mutating and dry-run paths cannot drift apart the way
-// the max-age reclaim arm once did on this path alone.
+// inflightMarkerFate is shared by the mutating and dry-run paths so they cannot
+// drift.
 type inflightMarkerFate int
 
 const (
@@ -244,9 +214,6 @@ const (
 	inflightMarkerFateConcurrent
 )
 
-// decideInflightMarkerFate is a pure function of the existing marker, the
-// candidate params hash, and deps.now/deps.isAlive; it holds no side effects
-// so both the mutating reconcile path and the dry-run preview can share it.
 func decideInflightMarkerFate(deps helmDeploySingleFlightDeps, existing deployInflightRecord, paramsHash string) inflightMarkerFate {
 	if !deps.isAlive(existing.PID) {
 		return inflightMarkerFateReclaimDead
@@ -273,9 +240,8 @@ func concurrentDeployError(deploy HelmDeploySpec, existing deployInflightRecord)
 	}
 }
 
-// reconcileExistingInflightMarker decides how to handle the marker that blocked
-// our claim. A true first return means it reclaimed the marker and the caller
-// should retry the exclusive create.
+// reconcileExistingInflightMarker returns true when it reclaimed the marker and
+// the create should be retried.
 func reconcileExistingInflightMarker(ctx core.Context, deps helmDeploySingleFlightDeps, deploy HelmDeploySpec, path, releaseKey, paramsHash string) (bool, HelmDeploySingleFlightOutcome, error) {
 	existing, readErr := readInflightRecord(path)
 	if readErr != nil {
@@ -306,8 +272,6 @@ func reconcileExistingInflightMarker(ctx core.Context, deps helmDeploySingleFlig
 	return false, HelmDeploySingleFlightProceed, concurrentDeployError(deploy, existing)
 }
 
-// reportHelmDeploySingleFlightDryRun mirrors the dedup decision a real run would
-// make but never mutates the on-disk marker, so dry-run stays side-effect free.
 func reportHelmDeploySingleFlightDryRun(ctx core.Context, deploy HelmDeploySpec, deps helmDeploySingleFlightDeps, releaseKey, paramsHash, path string) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
 	existing, readErr := readInflightRecord(path)
 	if errors.Is(readErr, os.ErrNotExist) {

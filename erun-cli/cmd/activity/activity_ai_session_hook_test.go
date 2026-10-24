@@ -15,9 +15,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// isolateAISessionCache points the activity cache at a throwaway directory, so
-// a test reads back the record its own run wrote rather than whatever the
-// machine running it has accumulated.
 func isolateAISessionCache(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -25,24 +22,17 @@ func isolateAISessionCache(t *testing.T) {
 	t.Cleanup(xdg.Reload)
 }
 
-// activityCommandTree builds the real command tree the settings address, so a
-// test that resolves a path finds the verb the binary actually registers
-// rather than one a test constructed beside it.
 func activityCommandTree() *cobra.Command {
 	root := &cobra.Command{Use: "erun"}
 	root.AddCommand(NewActivityCmd(nil, nil))
 	return root
 }
 
-// TestAISessionHookVerbIsWhatTheInstalledSettingsAddress is the half of the
-// wiring that lives in the command tree: the pod's Claude settings install a
-// literal command string, and if that path does not resolve to a real verb with
-// these flags, every hook fails on every turn boundary and the model resolves
-// nothing -- the exact inertness this work exists to end.
+// TestAISessionHookVerbIsWhatTheInstalledSettingsAddress: an unresolvable installed path would fail
+// every hook on every turn boundary.
 func TestAISessionHookVerbIsWhatTheInstalledSettingsAddress(t *testing.T) {
 	root := activityCommandTree()
-	// Find takes the args after the root's own name, so the leading "erun" is
-	// the one part of the installed path the tree does not resolve.
+	// Find takes args after the root's own name.
 	verb, _, err := root.Find(strings.Fields(podruntime.AISessionHookVerbPath)[1:])
 	if err != nil {
 		t.Fatalf("resolve %q in the command tree: %v", podruntime.AISessionHookVerbPath, err)
@@ -57,16 +47,8 @@ func TestAISessionHookVerbIsWhatTheInstalledSettingsAddress(t *testing.T) {
 	}
 }
 
-// TestAISessionHookCommandReportsTheStateTheModelClaims runs the installed
-// command for every binding the settings carry, with the payload that tool
-// event actually sends, and reads the state back out of the model. This is the
-// writer the status model was missing: before it, `ResolveAISessionStatus`
-// always had nothing to resolve and `awaiting-input` -- the state the whole
-// model exists to surface -- could not be reached by anything.
-//
-// The environment is taken from the ambient ERUN_* pair rather than from flags,
-// because that is how an installed hook runs: one settings file is shared by
-// every environment, so nothing about one can be baked into the command.
+// TestAISessionHookCommandReportsTheStateTheModelClaims: the environment comes from ambient ERUN_*
+// vars, as an installed hook runs.
 func TestAISessionHookCommandReportsTheStateTheModelClaims(t *testing.T) {
 	isolateAISessionCache(t)
 	t.Setenv("ERUN_TENANT", "team")
@@ -105,9 +87,6 @@ func TestAISessionHookCommandReportsTheStateTheModelClaims(t *testing.T) {
 	}
 }
 
-// TestAISessionHookRefusesWhatItCannotAttribute covers the three ways an
-// invocation is not something to record, each of which must say why rather than
-// filing the event against an environment or a session that did not send it.
 func TestAISessionHookRefusesWhatItCannotAttribute(t *testing.T) {
 	isolateAISessionCache(t)
 	t.Setenv("ERUN_TENANT", "team")
@@ -151,11 +130,6 @@ func TestAISessionHookRefusesWhatItCannotAttribute(t *testing.T) {
 	}
 }
 
-// TestAISessionHookWithoutAnEnvironmentNamesTheNextAction pins the refusal a
-// hook cannot make silently: one that resolves no environment would otherwise
-// write the event against a guess. It names both the flags and the variables,
-// because the two callers -- a settings entry in a pod, and an operator at a
-// prompt -- reach it differently.
 func TestAISessionHookWithoutAnEnvironmentNamesTheNextAction(t *testing.T) {
 	isolateAISessionCache(t)
 	t.Setenv("ERUN_TENANT", "")
@@ -175,8 +149,6 @@ func TestAISessionHookWithoutAnEnvironmentNamesTheNextAction(t *testing.T) {
 	}
 }
 
-// runAISessionHook invokes the verb with the payload the given tool event sends,
-// asserting it reports no failure.
 func runAISessionHook(t *testing.T, sessionID string, modelEvent model.AISessionEventKind) error {
 	t.Helper()
 	payload := fmt.Sprintf(`{"session_id":%q,"transcript_path":"/home/erun/.claude/projects/-home-erun-git-erun/%s.jsonl","cwd":"/home/erun/git/erun","hook_event_name":"%s"}`, sessionID, sessionID, modelEvent)
@@ -187,8 +159,6 @@ func runAISessionHook(t *testing.T, sessionID string, modelEvent model.AISession
 	return nil
 }
 
-// executeAISessionHook runs the hook verb off the same command tree the binary
-// registers, with the payload arriving on stdin exactly as a tool delivers it.
 func executeAISessionHook(t *testing.T, args []string, payload string) error {
 	t.Helper()
 	cmd := newActivityAISessionCmd()

@@ -3,21 +3,9 @@ import type { Request, Route } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// Only a handful of errors have a named remedy ('wait-longer', 'deploy',
-// restart-orchestrator), so "Report a bug" is a standing action on every
-// error message centre row, ordered after a known remedy (never ahead of
-// it), and clicking it hands the failure to an agent rather than opening a
-// form. Notification actions live in the dialog a class icon opens, so the
-// assertions below target that dialog.
-//
-// The agent-drafting path itself (ReportBugFailure admitting and spawning a
-// real orchestrator) is not driven here for the same reason
-// investigate-spawn-bounds.spec.ts stays on the refusing side only: the
-// harness stubs kubectl/helm/docker/aws but not the AI tool, so admitting a
-// real session here would leave an agent behind on every run. That side is
-// covered against a stubbed terminal in erun-ui/report_bug_test.go. This spec
-// mocks ReportBugFailure's *response* to drive the desktop's reaction to each
-// outcome shape without ever touching a real backend admission.
+// "Report a bug" is on every error row, after any known remedy. Admission is
+// covered in report_bug_test.go (a real admission would leave an agent
+// running), so ReportBugFailure's response is mocked here.
 
 function emitErrorNotification(
   page: import('@playwright/test').Page,
@@ -51,8 +39,7 @@ async function mockReportBugFailure(
 }
 
 test.describe('titlebar "Report a bug" action', () => {
-  // An error with no known remedy must still offer an action. A test that
-  // only checked an error *with* a remedy would pass with that dead end.
+  // An error with no known remedy must still offer an action.
   test('an error with no known remedy still offers a reporting action', async ({ app, page }) => {
     const message = 'Could not reach the runtime.';
     await emitErrorNotification(page, { message });
@@ -60,7 +47,6 @@ test.describe('titlebar "Report a bug" action', () => {
     const row = app.titlebar.messageCenterRow(message);
     await expect(row).toBeVisible();
     await expect(row.getByRole('button', { name: /^Report a bug/ })).toBeVisible();
-    // No remedy was named, so nothing else in the row's action group precedes it.
     await expect(row.getByRole('button', { name: 'Deploy', exact: true })).toHaveCount(0);
   });
 
@@ -120,10 +106,7 @@ test.describe('titlebar "Report a bug" action', () => {
     const row = app.titlebar.messageCenterRow(message);
     await expect(row.getByRole('button', { name: /^Report a bug/ })).toBeVisible();
 
-    // This sandbox can reach the real github.com, which would otherwise
-    // redirect the popup to a sign-in page before the URL is read (and
-    // aborting the request instead navigates to chrome-error://, which is no
-    // more stable) — fulfill it locally so the popup's URL never changes.
+    // Fulfill github.com locally so a sign-in redirect cannot change the popup URL.
     await page
       .context()
       .route('https://github.com/**', (route) =>
@@ -136,12 +119,7 @@ test.describe('titlebar "Report a bug" action', () => {
     await expect.poll(() => popup.url()).toContain('github.com/sophium/erun/issues/new');
     await popup.close();
 
-    // openFallbackReportURL (orchestratorThunks.ts) posts its own warning
-    // notification naming both the refusal and that the browser path opened
-    // instead — never a silent downgrade. It carries the same tenant/env
-    // tag as the original error, so it lands in the same warning icon. The
-    // dialog is modal, so the warning icon behind it is unreachable until the
-    // error dialog closes -- exactly what a real operator would have to do too.
+    // The fallback posts a warning naming the refusal; close the modal to reach it.
     await app.titlebar.closeMessageCenter();
     await app.titlebar.openMessageCenter('warning');
     const fallbackRow = app.titlebar.messageCenterRow('no diagnostic content');
@@ -153,9 +131,7 @@ test.describe('titlebar "Report a bug" action', () => {
     app,
     page,
   }) => {
-    // The refusal lands as an info notification (see below), which
-    // auto-dismisses after TRANSIENT_DISMISS_MS -- freeze the clock so the
-    // assertion can never race that timer in a slow CI run.
+    // The refusal is an auto-dismissing info notification; freeze the clock.
     await page.clock.install();
     await mockReportBugFailure(page, {
       admitted: false,
@@ -171,10 +147,7 @@ test.describe('titlebar "Report a bug" action', () => {
       .getByRole('button', { name: /^Report a bug/ })
       .click();
 
-    // orchestratorThunks.reportFailure posts the "already-investigating"
-    // refusal as an info notification, not an error -- it names a draft that
-    // already exists, not a fresh failure. The dialog is modal, so the info
-    // icon behind it is unreachable until the error dialog closes.
+    // An existing draft is reported as info, not an error.
     await app.titlebar.closeMessageCenter();
     await app.titlebar.openMessageCenter('info');
     await expect(app.titlebar.messageCenterRow('already under investigation')).toBeVisible();

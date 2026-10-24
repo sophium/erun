@@ -23,16 +23,10 @@ type TenantIssuerRoutes struct {
 type updateTenantIssuerRequest struct {
 	Issuer string `json:"issuer"`
 	Name   string `json:"name"`
-	// OrgFieldKey and OrgFieldValue convert a single-tenant issuer to an
-	// org-scoped one. Both are required together: the key names the token
-	// claim that selects a tenant, the value is this mapping's own org, and
-	// setting either alone breaks resolution for the issuer's first tenant.
+	// OrgFieldKey and OrgFieldValue must be set together; either alone breaks resolution for the issuer's first tenant.
 	OrgFieldKey   string `json:"orgFieldKey"`
 	OrgFieldValue string `json:"orgFieldValue"`
-	// TenantID targets another tenant's mapping instead of the caller's own,
-	// honored only alongside OrgFieldKey/OrgFieldValue and only for an
-	// operations-scoped caller — the repair path for a tenant already stuck
-	// with a dead (issuer, org) mapping (see resolveTargetTenant).
+	// TenantID targets another tenant's mapping, honored only for an operations-scoped caller.
 	TenantID string `json:"tenantId,omitempty"`
 }
 
@@ -42,11 +36,6 @@ func RegisterTenantIssuerRoutes(register ProtectedRouteRegistrar, issuers Tenant
 	register(http.MethodPatch, "/v1/tenant-issuers", http.HandlerFunc(routes.updateTenantIssuerName))
 }
 
-// listTenantIssuers defaults to the caller's own tenant, mirroring
-// resolveTargetTenant's use in users.go/invites.go: an operations-scoped
-// caller may pass tenantId to read another tenant's issuer mappings (the
-// console uses this to resolve a target tenant's org before enrolling into
-// it), and any other caller naming a different tenant is refused.
 func (r TenantIssuerRoutes) listTenantIssuers(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
@@ -84,16 +73,8 @@ func (r TenantIssuerRoutes) updateTenantIssuerName(w http.ResponseWriter, req *h
 	writeJSON(w, http.StatusOK, issuer)
 }
 
-// updateTenantIssuerOrgScope converts an issuer to org-scoped and backfills
-// the target mapping's own org value — the repair path for a tenant already
-// stuck with an unresolvable mapping (assertResolvableIssuerMapping refuses
-// producing a new one, but cannot undo one written before that refusal
-// existed). The org-scoping mode lives on the shared issuers row and
-// therefore changes how every tenant's tokens on that issuer resolve — so
-// this is operations-only, the same gate POST /v1/tenants applies for writing
-// these root resolution tables — and tenantId (via resolveTargetTenant) lets
-// that operations caller repair a tenant other than its own, not just the
-// bootstrap-mode case of fixing its own single-tenant-to-org-scoped issuer.
+// updateTenantIssuerOrgScope is operations-only: org scoping lives on the shared issuers row and
+// changes how every tenant on that issuer resolves.
 func (r TenantIssuerRoutes) updateTenantIssuerOrgScope(w http.ResponseWriter, req *http.Request, input updateTenantIssuerRequest) {
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {

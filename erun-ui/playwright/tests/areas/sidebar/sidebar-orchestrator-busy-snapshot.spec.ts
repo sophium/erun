@@ -3,21 +3,9 @@ import type { Locator, Page } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
 
-// An orchestrator's sidebar spinner must not depend only on the ai-activity
-// Wails event's single false→true transition: anything that loses that one
-// event (a fresh mount, a window reopen, a listener that attached a beat late)
-// would leave the row reading idle, so orchestratorInfo's list snapshot
-// carries the busy flag too.
-//
-// This spec stubs ListOrchestrators over /__erun_invoke to answer busy without
-// ever emitting the ai-activity event, then reboots the app (a real fresh
-// mount, not a simulated one) and asserts the row still spins. The event path itself
-// (ai-activity flipping the spinner while the app is already running) is
-// already covered by sidebar-ai-activity.spec.ts; the backend's own re-emit
-// timing is covered by the Go tests in erun-ui/session_heartbeat_test.go
-// (TestReconcileOrchestratorActivityReEmitsEveryTick,
-// TestOrchestratorSnapshotRendersBusyWithoutTheEvent) since the headless
-// harness cannot wait out a real 15s poll deterministically.
+// The orchestrator list snapshot carries the busy flag, so the spinner survives a missed
+// ai-activity event.
+// Re-emit timing is covered by erun-ui/session_heartbeat_test.go.
 
 const RUNNING_SESSION_ID = 4242;
 
@@ -67,9 +55,6 @@ test.describe('orchestrator busy renders from the list snapshot (#1087)', () => 
     await expect(app.sidebar.orchestratorBusySpinner(SEED_ORCHESTRATOR)).toHaveCount(0);
   });
 
-  // Hovering the busy spinner reveals a tooltip, like every other spinner in
-  // the sidebar (the shell indicator three lines below it, and every
-  // environment row's own activity popover).
   test('hovering the busy spinner reveals a tooltip naming the orchestrator', async ({
     app,
     page,
@@ -82,15 +67,8 @@ test.describe('orchestrator busy renders from the list snapshot (#1087)', () => 
     await expect(app.sidebar.orchestratorBusyTooltip(SEED_ORCHESTRATOR)).toBeVisible();
   });
 
-  // hoverOrchestratorBusySpinner freezes `.animate-spin` before it reaches for
-  // the spinner, because Playwright's hover "stable" check can never be
-  // satisfied by a continuously-resizing box. That freeze is the helper's
-  // whole reason to exist, and a helper that quietly stopped performing it
-  // would leave the hover above flaking rather than failing with a cause.
-  //
-  // The direction is what gives the assertion meaning: the spinner really is
-  // animating beforehand, so this cannot pass vacuously against a spinner that
-  // never animated.
+  // Playwright's hover stability check can't settle on a spinning box, so the helper must freeze
+  // it; asserts it was animating first.
   test('hovering the busy spinner freezes its spin before the hover', async ({ app, page }) => {
     await stubOrchestratorList(page, true);
     await app.reboot();

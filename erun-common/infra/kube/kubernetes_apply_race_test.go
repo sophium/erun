@@ -9,15 +9,7 @@ import (
 	"testing"
 )
 
-// Deploy runs the components of one step in parallel, and a Secret the
-// components share -- the gateway credential, the Cloudflare token, the
-// image-pull credential -- is applied by each of them into the same namespace.
-// On first apply two components therefore both read "absent" and both take the
-// create path, and the API server refuses the loser with AlreadyExists. That
-// refusal used to fail the losing component, and with it the environment's
-// upgrade, leaving the environment half-rolled -- one component at the new
-// version and its sibling not. These tests stand a kubectl in for the API
-// server so the overlap is forced rather than hoped for.
+// Parallel deploy components apply one shared Secret; a kubectl stub forces the create race.
 const sharedSecretManifest = `apiVersion: v1
 kind: Secret
 metadata:
@@ -30,32 +22,9 @@ stringData:
   token: "shared-token"
 `
 
-// kubectlStubScript is a kubectl stand-in that models the apply behaviour this
-// file needs: read the manifest from stdin, GET (the object file), take the
-// create path when it is absent, and report the API server's AlreadyExists
-// refusal when a sibling invocation claimed the create first. The update path
-// is modelled too, so a re-apply of an existing object still lands its content
-// -- which is what distinguishes a retry from treating the refusal as success.
-//
-// participants is how many invocations must have reached the create before any
-// of them may create. The rendezvous makes the overlap deterministic instead of
-// timing-dependent: every invocation announces itself, then waits for the
-// others, so no invocation can win the create before its sibling has also read
-// "absent". The wait is bounded so a broken test cannot hang.
-//
-// The create is one exclusive operation, and the manifest it publishes is the
-// invocation's own file. Both are what keep the state this stub leaves behind
-// from depending on scheduling, because a stub that can reach a state the API
-// server cannot turns the assertions reading that state into coin flips:
-//
-//   - `set -C` (noclobber) is the shell's O_EXCL create, so the object is
-//     visible at the instant exactly one invocation's create succeeds. A
-//     refused create is therefore only ever refused for an object that is
-//     already there -- the API server's own guarantee, and the thing the
-//     loser's retry relies on when it re-reads and takes the update path.
-//   - Two invocations writing one shared manifest file can truncate it under
-//     each other, and a reader then publishes a manifest neither meant to
-//     apply.
+// kubectlStubScript models get/create/update with an AlreadyExists refusal. All
+// participants rendezvous before creating so the overlap is deterministic; `set -C`
+// gives an O_EXCL create and each invocation publishes its own manifest file.
 func kubectlStubScript(dir string, participants int) string {
 	return `#!/bin/sh
 set -u
@@ -89,8 +58,7 @@ exit 1
 `
 }
 
-// writeStatefulKubectlStub points the ERUN_KUBECTL_BIN seam at the script script
-// renders for the directory its state lives in, and returns that directory.
+// writeStatefulKubectlStub points ERUN_KUBECTL_BIN at the rendered script and returns its state dir.
 func writeStatefulKubectlStub(t *testing.T, script func(dir string) string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -102,20 +70,14 @@ func writeStatefulKubectlStub(t *testing.T, script func(dir string) string) stri
 	return dir
 }
 
-// isolateKubectlSecretApplyMode keeps the apply on the subprocess path these
-// tests stand a kubectl in for, whatever the machine running them has in its
-// own erun config.
+// isolateKubectlSecretApplyMode forces the subprocess path regardless of local config.
 func isolateKubectlSecretApplyMode(t *testing.T) {
 	t.Helper()
 	restore := setConfigHomeForModeTest(t)
 	t.Cleanup(restore)
 }
 
-// kubectlStubRefusals is how many creates the stub refused, which is how a
-// test proves the overlap it meant to force really happened rather than
-// passing because the two applies never met. A missing file is zero, not a
-// read failure: it is the no-overlap case this counter exists to report, and
-// the caller's own message is the one that explains it.
+// kubectlStubRefusals counts refused creates; a missing file means zero.
 func kubectlStubRefusals(t *testing.T, dir string) int {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(dir, "refusals"))
@@ -128,10 +90,6 @@ func kubectlStubRefusals(t *testing.T, dir string) int {
 	return len(strings.Fields(string(raw)))
 }
 
-// applySharedSecretFromTwoComponents runs the reported scenario: two
-// components of one parallel deploy step apply the same shared secret at the
-// same time, against the rendezvousing stub. It returns the stub's state
-// directory so the caller can assert on what the overlap produced.
 func applySharedSecretFromTwoComponents(t *testing.T) string {
 	t.Helper()
 	isolateKubectlSecretApplyMode(t)
@@ -157,15 +115,10 @@ func applySharedSecretFromTwoComponents(t *testing.T) string {
 	return dir
 }
 
-// assertSharedSecretApplied checks what the two applies were there to produce:
-// the secret holds the manifest, and exactly one create lost the race. Exactly
-// one is the property itself, not a tolerance widened to fit: a create the stub
-// refused has already been told the object is there, so the loser's retry reads
-// it and takes the update path instead of being refused again.
+// assertSharedSecretApplied expects exactly one refusal: the loser's retry takes the update path.
 func assertSharedSecretApplied(t *testing.T, dir string) {
 	t.Helper()
-	// Without this the test could pass by never racing at all, which is the
-	// one way a test for a race can quietly stop testing anything.
+	// Guards against passing without ever racing.
 	if got := kubectlStubRefusals(t, dir); got != 1 {
 		t.Fatalf("the stub refused %d creates, want exactly 1: the two applies did not overlap", got)
 	}
@@ -178,20 +131,11 @@ func assertSharedSecretApplied(t *testing.T, dir string) {
 	}
 }
 
-// TestConcurrentAppliesOfOneSharedSecretBothSucceed is the reported failure:
-// two components of one parallel deploy step apply the same shared secret, the
-// loser of the create race is refused with AlreadyExists, and the component --
-// and with it the environment's upgrade -- fails while its sibling succeeds.
-//
-// The overlap is forced by the stub's rendezvous, so the loser is guaranteed
-// to lose before the fix and to be retried into the update path after it.
 func TestConcurrentAppliesOfOneSharedSecretBothSucceed(t *testing.T) {
 	assertSharedSecretApplied(t, applySharedSecretFromTwoComponents(t))
 }
 
-// An apply of a Secret that already exists must still land this manifest's
-// content. "Already exists" is not success on its own: when the credential has
-// changed, the object has to change with it.
+// AlreadyExists is not success on its own: a changed credential must still land.
 func TestSecretApplyUpdatesAnExistingSharedSecret(t *testing.T) {
 	isolateKubectlSecretApplyMode(t)
 	dir := writeStatefulKubectlStub(t, func(dir string) string { return kubectlStubScript(dir, 1) })

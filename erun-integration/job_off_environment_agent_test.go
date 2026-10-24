@@ -16,35 +16,10 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
-// TestJobOffEnvironmentAgentReinvocation drives the bounded-reinvocation
-// mechanism (job_supervisor.go's considerEnvironmentJobReinvocation) through
-// the one dispatch path the existing coverage never exercised: `erun exec job
-// start --agent` run from
-// OUTSIDE any environment (a host caller), which reaches the target's
-// exec_agent MCP tool instead of calling StartEnvironmentJob directly the way
-// job_agent_finish_test.go's self-dispatch scenarios do (both run inside the
-// environment, via inEnvironment's ERUN_REPO_REMOTE=true).
-//
-// The two dispatch paths converge on the identical jobs.StartEnvironmentJob
-// call and the identical `exec job supervise` re-exec, so nothing in the
-// session-capture/reinvocation code itself reads how the start request
-// arrived -- but that convergence had never been proven end-to-end for the
-// off-environment half, only reasoned about. This scenario runs the real
-// `emcp` binary (erun-mcp/cmd/emcp) as a genuine subprocess standing in for
-// the target environment's own edge, with MCP auth left unconfigured -- the
-// documented "legacy loopback-only" mode (erun-mcp/tools/shared/auth.go's
-// mcpAuthConfigFromEnv), not a test-only bypass.
-//
-// emcp runs as a real subprocess rather than in-process (erunmcp.RunHTTP
-// called directly from the test goroutine) because erun-common resolves the
-// XDG cache/config dirs through adrg/xdg's package-level vars, computed once
-// at that package's init and never re-read: a first attempt at this scenario
-// ran the server in-process and t.Setenv on XDG_CACHE_HOME never reached it,
-// so the in-process StartEnvironmentJob call polled the developer's real
-// cache dir for a record the spawned supervisor (a fresh process, which
-// resolves xdg fresh) was correctly writing to the isolated sandbox --
-// production is unaffected (emcp is always its own fresh process there too),
-// but an in-process test double would have been proving the wrong thing.
+// TestJobOffEnvironmentAgentReinvocation drives bounded reinvocation through a
+// host `erun exec job start --agent` reaching a real emcp edge (auth unset,
+// loopback-only mode). emcp runs as a subprocess because adrg/xdg resolves XDG
+// dirs once at init, so an in-process server would ignore the sandbox.
 func TestJobOffEnvironmentAgentReinvocation(t *testing.T) {
 	const mcpPort = 26500
 	const metricsPort = 26501
@@ -74,20 +49,9 @@ esac
 `, bin, bin)
 	fixture.StubBinaryWithScript(t, stubs, "claude", claudeScript)
 
-	// The environment side: everything emcp spawns (the detached `exec job
-	// supervise` subprocess, the stubbed claude, the nested gate jobs claude
-	// starts through its own re-exec of erun) inherits emcp's own explicit
-	// env, so it needs the isolated sandbox, the stub routing, the erun
-	// binary to supervise with, the gate wait-cap overrides, and
-	// ERUN_REPO_REMOTE=true (the *nested* gate job start is genuinely
-	// running inside the environment, unlike the outer host call below).
-	// Auth left unset is mcpAuthConfigFromEnv's documented loopback-only mode.
-	// emcp itself never sets GOCOVERDIR through erun.Run (it isn't spawned
-	// that way), so without a private coverage directory of its own it would
-	// have none at all -- and everything it re-execs (the supervisor, the
-	// nested gate jobs) inherits whatever it has. PrivateCoverDir gives this
-	// whole chain the same exclusive-directory treatment Run gives its own
-	// subprocesses.
+	// Everything emcp spawns inherits this env. ERUN_REPO_REMOTE=true because the
+	// nested gate jobs run in-environment; PrivateCoverDir because emcp is not
+	// started through erun.Run.
 	emcpEnv := append(append([]string{}, setup.Env()...), fixture.StubEnv(stubs, "claude", "gatefail", "gateok")...)
 	emcpEnv = append(emcpEnv,
 		"ERUN_ERUN_BIN="+bin,
@@ -108,22 +72,15 @@ esac
 	if err := emcpCmd.Start(); err != nil {
 		t.Fatalf("start emcp: %v", err)
 	}
-	// Registered before the job teardown below, so t.Cleanup's LIFO order runs
-	// it after that teardown: stopOffEnvironmentJob reads each job's supervisor
-	// back through this edge, so an edge killed first would leave the wait
-	// unable to read anything. That ordering is a requirement of this
-	// registration, not a convenience -- moving this cleanup below the job
-	// teardown turns that teardown into a loud failure naming the channel
-	// rather than a silent pass (awaitJobSupervisorExitVia).
+	// Registered before the job teardown so LIFO runs it after: that teardown
+	// reads supervisors back through this edge.
 	t.Cleanup(func() {
 		_ = emcpCmd.Process.Kill()
 		_ = emcpCmd.Wait()
 	})
 	waitForLocalPort(t, mcpPort)
 
-	// The host half: a caller outside any environment, exactly `erun exec job
-	// start --agent claude` typed on an operator's own machine. No
-	// ERUN_REPO_REMOTE here -- that is the whole point of this scenario.
+	// The host caller: no ERUN_REPO_REMOTE.
 	hostEnv := setup.Env()
 
 	start := erun.Run(t, []string{"exec", "job", "start", "--tenant", "team", "--environment", "dev", "--name", "outer", "--agent", "claude", "--", "fix the failing tests"},
@@ -165,9 +122,7 @@ var (
 	errEmcpBuild  error
 )
 
-// emcpBinaryPath builds the real erun-mcp/cmd/emcp binary once per test run --
-// the same pattern erun.BinaryPath uses for the erun CLI -- so this scenario
-// exercises the real MCP transport rather than a hand-rolled stand-in.
+// emcpBinaryPath builds erun-mcp/cmd/emcp once per test run.
 func emcpBinaryPath(t *testing.T) string {
 	t.Helper()
 	emcpBuildOnce.Do(func() {
@@ -197,8 +152,7 @@ func emcpBinaryPath(t *testing.T) string {
 	return emcpBuildPath
 }
 
-// waitForLocalPort blocks until something accepts a TCP connection on port, so
-// the host-side erun.Run calls below never race emcp's own listener startup.
+// waitForLocalPort blocks until something accepts on port.
 func waitForLocalPort(t *testing.T, port int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

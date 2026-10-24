@@ -11,17 +11,10 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// parallelRaceTestSpecCount is deliberately > 1 so runDeployStep takes its
-// real-parallel branch (len(specs) > 1 && !ctx.DryRun), and large enough that
-// the fanned-out goroutines are very likely to be writing to the shared
-// Context concurrently rather than by scheduling accident.
+// Greater than 1 so runDeployStep takes its parallel branch.
 const parallelRaceTestSpecCount = 8
 
-// parallelRaceTestSpecs builds specs whose KubernetesContext/Namespace are
-// unique per component -- fake names not present in any kubeconfig, so the
-// real (but fast-failing) kubectl invocation TraceEnsureKubernetesNamespace
-// makes before it hits the stubbed ensureDeployNamespace resolves in
-// milliseconds instead of touching a real cluster.
+// Fake contexts make the real kubectl call fail fast without a cluster.
 func parallelRaceTestSpecs() []DeploySpec {
 	specs := make([]DeploySpec, parallelRaceTestSpecCount)
 	for i := range specs {
@@ -39,14 +32,7 @@ func parallelRaceTestSpecs() []DeploySpec {
 	return specs
 }
 
-// TestRunDeployStepParallelSpecsShareNoWriter runs runDeployStep's real
-// (non-dry-run) parallel branch against a Context shaped like the MCP edge's
-// (erun-mcp/runtime.go builds Logger and Stdout/Stderr from plain
-// bytes.Buffer values) and proves the fan-out never writes one buffer from
-// more than one goroutine: a RunDeploySpec tracing through the shared Context
-// would race ctx.Trace/ctx.Info on those buffers. ensureDeployNamespace is stubbed to fail fast
-// so the test never reaches the real helm invocation or the on-disk
-// single-flight marker.
+// Run with -race: the Context mirrors the MCP edge's plain bytes.Buffer writers.
 func TestRunDeployStepParallelSpecsShareNoWriter(t *testing.T) {
 	sentinel := errors.New("namespace-ensure-refused")
 	original := ensureDeployNamespace
@@ -70,11 +56,6 @@ func TestRunDeployStepParallelSpecsShareNoWriter(t *testing.T) {
 	}
 }
 
-// TestRunDeployStepParallelOutputAttributableToComponent proves the merged
-// trace stays attributable per component instead of interleaving mid-line: each
-// component's own kubectl trace lines (naming its own namespace) must appear as
-// one contiguous block, in spec order, rather than mixed with another
-// component's lines.
 func TestRunDeployStepParallelOutputAttributableToComponent(t *testing.T) {
 	sentinel := errors.New("namespace-ensure-refused")
 	original := ensureDeployNamespace
@@ -112,9 +93,6 @@ func TestRunDeployStepParallelOutputAttributableToComponent(t *testing.T) {
 				continue
 			}
 			otherMarker := "namespace " + other.Deploy.Namespace
-			// Only the immediate neighbourhood after this component's own
-			// marker should be scanned for foreign markers -- bound it to
-			// this component's own block by cutting at the next marker.
 			end := len(block)
 			if next := strings.Index(block[len(marker):], "namespace ns-"); next != -1 {
 				end = len(marker) + next

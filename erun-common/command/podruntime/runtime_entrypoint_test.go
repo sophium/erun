@@ -13,8 +13,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// newTestRuntimeBoot is a container whose home and every fixed image/chart path
-// live under the test's own temp dir, with exactly the given environment.
 func newTestRuntimeBoot(t *testing.T, env map[string]string) runtimeBoot {
 	t.Helper()
 	root := t.TempDir()
@@ -109,10 +107,7 @@ func TestRuntimeMCPEnabled(t *testing.T) {
 	}
 }
 
-// emcp parses its flags with Go's flag package; a space-separated bool value
-// would stop parsing at the bare "true" and silently drop every later flag,
-// including the tenant and environment. Parsing the argv the way emcp does is
-// the check, rather than looking for substrings.
+// Parse the argv the way emcp does: a separate bool value would drop every later flag.
 func TestRuntimeMCPArgsParseThroughEveryFlag(t *testing.T) {
 	boot := newTestRuntimeBoot(t, map[string]string{"ERUN_TENANT": "team", "ERUN_ENVIRONMENT": "dev", "ERUN_MCP_PORT": "17000", "ERUN_NAMESPACE": "team-dev"})
 	flags := flag.NewFlagSet("emcp", flag.ContinueOnError)
@@ -162,8 +157,6 @@ func TestRuntimeCacheTrimSettings(t *testing.T) {
 			t.Errorf("max=%q interval=%q: got %s %d %s", tc.max, tc.interval, dir, maxBytes, interval)
 		}
 	}
-	// A cap of zero is how a deployment asks for no bound; read as a bound of
-	// zero it would clear the cache, so the boot starts no trim at all.
 	boot := newTestRuntimeBoot(t, map[string]string{"ERUN_GO_BUILD_CACHE_MAX_BYTES": "0"})
 	if describeRuntimeCacheTrim(boot) != "" {
 		t.Fatal("a cap of zero must start no cache bound")
@@ -348,7 +341,6 @@ func TestRuntimePIDFileRunningChecksTheCommandLine(t *testing.T) {
 	if runtimePIDFileRunning(root, pidFile, "sshd") {
 		t.Fatal("a pid with no live process is not running")
 	}
-	// A recycled pid: a previous pod's pid now names another program.
 	writeAssetFile(t, filepath.Join(root, "42", "cmdline"), "erun\x00activity\x00ssh-proxy\x00")
 	if runtimePIDFileRunning(root, pidFile, "sshd") {
 		t.Fatal("a recycled pid running another program must not count")
@@ -358,11 +350,8 @@ func TestRuntimePIDFileRunningChecksTheCommandLine(t *testing.T) {
 	}
 }
 
-// The runtime image baked /etc/erun/agents with --chmod=0644, which COPY applies
-// to the directory as well: a directory without its execute bit cannot be
-// entered, so every agent file in it failed to open and the boot installed no
-// agent at all. Both baked trees must stay enterable. Reads a sibling module, so
-// it runs uncached (go test -count=1) in the image's cli-test stage.
+// COPY --chmod=0644 also strips the directory's execute bit. Reads a sibling module, so
+// it runs uncached in the image's cli-test stage.
 func TestRuntimeImageBakesAgentAssetsIntoEnterableDirectories(t *testing.T) {
 	path := filepath.Join(repoRootForDockerignoreTest(t), "erun-devops", "docker", "erun-devops", "Dockerfile")
 	data, err := os.ReadFile(path)

@@ -45,8 +45,7 @@ func EnsureSSHDPortForward(ctx core.Context, result config.OpenResult) (open.SSH
 
 	matches := stateMatchesSSHDTarget(state, expectedState)
 	if matches && !stateHasDeprecatedLocalProxy(state) && canReachLocalSSHEndpoint(info.Port) {
-		// A reachable forward is reused as-is and keeps writing to the log it
-		// opened when it started, so this touch is the chance to re-apply the cap.
+		// A reused forward keeps its original log, so re-apply the cap here.
 		RotatePortForwardLogIfOversized(ctx, "sshd", sshdPortForwardLogPath(statePath))
 		return info, nil
 	}
@@ -77,8 +76,7 @@ func EnsureSSHDPortForward(ctx core.Context, result config.OpenResult) (open.SSH
 	return startSSHDPortForward(ctx, statePath, expectedState, args, info)
 }
 
-// adoptForeignSSHDPortForward mirrors adoptForeignMCPPortForward for the
-// SSHD forward. See that function for the contract.
+// adoptForeignSSHDPortForward is the SSHD counterpart of adoptForeignMCPPortForward.
 func adoptForeignSSHDPortForward(ctx core.Context, statePath string, expected sshdPortForwardState, expectedArgs []string, info open.SSHConnectionInfo) (bool, error) {
 	pid, argv, ok := FindLocalPortHolder(info.Port)
 	if !ok {
@@ -104,14 +102,8 @@ func adoptForeignSSHDPortForward(ctx core.Context, statePath string, expected ss
 	return true, nil
 }
 
-// stopStaleSSHDPortForward stops the process behind this env's own recorded
-// forward before a fresh one replaces it — whether that forward is
-// bound-but-dead or was never reached far enough to bind at all, since bound
-// state alone cannot tell a corpse that exited cleanly from one still
-// running with nobody left to reap it. deprecated (a legacy local-proxy
-// record) forces replacement regardless of reachability, so it is excluded
-// from the "holds the port but doesn't answer" trace, which would otherwise
-// misdescribe a forward that actually answers fine.
+// stopStaleSSHDPortForward stops this env's recorded forward before replacement. A deprecated
+// legacy record is replaced regardless, so it skips the "doesn't answer" trace.
 func stopStaleSSHDPortForward(ctx core.Context, matches bool, state sshdPortForwardState, localPort int) {
 	if !matches || state.ProcessID <= 0 {
 		return
@@ -178,18 +170,14 @@ func launchSSHDPortForwardProcess(logPath string, args []string) (*os.Process, e
 	return cmd.Process, nil
 }
 
-// logStart is where this attempt's own output begins in logPath; see
-// portForwardLogReportsListenConflict for why the caller takes it before
-// launching rather than here.
+// logStart must be taken by the caller before launching kubectl.
 func waitForSSHDPortForward(port int, logPath string, logStart int64) error {
 	deadline := time.Now().Add(sshdPortForwardStartupTimeout)
 	for time.Now().Before(deadline) {
 		if canReachLocalSSHEndpoint(port) {
 			return nil
 		}
-		// See waitForMCPPortForward: kubectl exits on a failed listen, so the
-		// conflict is readable from the log long before the startup timeout,
-		// and the bind retry depends on being told promptly.
+		// kubectl exits on a failed listen, so report the conflict promptly for the bind retry.
 		if PortForwardLogReportsListenConflict(logPath, logStart) {
 			return ListenConflictError(port, logPath)
 		}

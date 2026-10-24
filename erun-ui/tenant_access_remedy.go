@@ -8,10 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// loadAccessRemedy resolves the copyable grant for a single restricted route,
-// for the surfaces that record one refusal rather than a panel's set. nil
-// means there is no command to hand over, which every caller renders as the
-// plain sentence it already had.
+// loadAccessRemedy returns nil when there is no grant command to offer.
 func loadAccessRemedy(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, userID string, read string) *platformclient.PlatformAccessRemedy {
 	remedies := loadAccessRemedies(ctx, client, capabilities, userID, read)
 	if len(remedies) == 0 {
@@ -21,30 +18,13 @@ func loadAccessRemedy(ctx context.Context, client *platformclient.PlatformClient
 	return &remedy
 }
 
-// canReadTenantRoles reports whether the caller may read the role list the
-// remedy resolves against. An unknown capability set answers yes: a client
-// that could not learn its permissions attempts the read and reports what the
-// server says, rather than withholding a remedy it may in fact be able to
-// build.
+// An unknown capability set answers yes, so the read is attempted.
 func canReadTenantRoles(capabilities model.PlatformCapabilities) bool {
 	return !capabilities.Known() || capabilities.Allows(http.MethodGet, "/v1/roles")
 }
 
-// The remedy values are platformclient.PlatformAccessRemedy, the one type both
-// this and a denial's own sentence name the role from — a second local shape
-// would be a copy that can drift from the command it describes.
-//
-// loadAccessRemedies resolves the copyable grant for each restricted route in
-// reads. It reads the tenant's roles once, and only when at least one read was
-// actually refused and the caller may read the role list at all: a caller who
-// needs no remedy, and a caller refused even the role list, both pay nothing
-// for a call that could only fail.
-//
-// Every failure degrades to no remedy rather than a wrong one. The denial
-// still renders (with its existing sentence) when the roles could not be read,
-// the caller's own user id is unknown, or no role covers the missing access —
-// in that last case there is genuinely no command to hand over, since a role
-// has to exist before anyone can be granted it.
+// loadAccessRemedies reads the role list once, only when something was refused.
+// Every failure degrades to no remedy rather than a wrong one.
 func loadAccessRemedies(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, userID string, reads ...string) map[string]platformclient.PlatformAccessRemedy {
 	missing := make([]string, 0, len(reads))
 	for _, read := range reads {

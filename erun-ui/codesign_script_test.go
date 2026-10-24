@@ -12,17 +12,13 @@ import (
 	codesignpkg "github.com/sophium/erun/erun-common/infra/codesign"
 )
 
-// securityStubFailure makes one `security` subcommand fail the way the real one
-// does, so the script's reporting can be read against a tool that says why.
 type securityStubFailure struct {
 	subcommand string
 	stderr     string
 }
 
-// securityStub builds the stubbed `security`. It materialises and removes the
-// keychain file for real and answers the search-list read, because
-// "is there already an identity" and "can codesign resolve it by name" are the
-// two branches the whole behaviour turns on.
+// securityStub really creates and removes the keychain file and answers the
+// search-list read, the two branches the script's behaviour turns on.
 func securityStub(searchList []string, failures []securityStubFailure) string {
 	var body strings.Builder
 	body.WriteString("case \"$1\" in\n")
@@ -31,8 +27,7 @@ func securityStub(searchList []string, failures []securityStubFailure) string {
 	}
 	body.WriteString("  create-keychain) : > \"$4\" ;;\n")
 	body.WriteString("  delete-keychain) rm -f \"$2\" ;;\n")
-	// Three arguments is the read (`-d user`); the write adds `-s` and the paths,
-	// and a stub that answered it too would report a list nobody asked for.
+	// Three arguments is the read (`-d user`); the write adds `-s` and paths.
 	body.WriteString("  list-keychains)\n    if [ \"$#\" -eq 3 ]; then\n      :\n")
 	for _, keychain := range searchList {
 		body.WriteString("      printf '    \"%s\"\\n' '" + keychain + "'\n")
@@ -42,8 +37,7 @@ func securityStub(searchList []string, failures []securityStubFailure) string {
 	return body.String()
 }
 
-// codesignScriptHarness stubs codesign, security, and openssl so the script's
-// decisions can be observed from a host that is not macOS.
+// codesignScriptHarness stubs codesign, security, and openssl so non-macOS hosts can run the script.
 type codesignScriptHarness struct {
 	home             string
 	stubs            string
@@ -54,8 +48,6 @@ type codesignScriptHarness struct {
 	hostOS           string
 }
 
-// codesignScriptRun is one invocation: what it told the operator, and every call
-// it made to each stubbed tool.
 type codesignScriptRun struct {
 	exitCode int
 	output   string
@@ -79,12 +71,9 @@ func newCodesignScriptHarness(t *testing.T) *codesignScriptHarness {
 		codesignExitCode: "0",
 		hostOS:           "darwin",
 	}
-	// Every macOS home has this; the temp one standing in for it must too, or the
-	// stub is answering a question the real host never asks.
 	if err := os.MkdirAll(filepath.Dir(harness.keychain()), 0o755); err != nil {
 		t.Fatalf("stage the keychain directory: %v", err)
 	}
-	// What a developer's search list already holds before erun touches it.
 	harness.searchList = []string{harness.loginKeychain(), "/Library/Keychains/System.keychain"}
 	return harness
 }
@@ -93,8 +82,6 @@ func (h *codesignScriptHarness) keychain() string {
 	return filepath.Join(h.home, "Library", "Keychains", codesignpkg.LocalCodesignKeychainFile)
 }
 
-// loginKeychain stands in for what a developer's search list already holds, so
-// an addition that dropped it would be visible.
 func (h *codesignScriptHarness) loginKeychain() string {
 	return filepath.Join(h.home, "Library", "Keychains", "login.keychain-db")
 }
@@ -123,7 +110,6 @@ func (h *codesignScriptHarness) readLog(t *testing.T, tool string) string {
 	return string(body)
 }
 
-// artifact writes a file for the script to sign and returns its path.
 func (h *codesignScriptHarness) artifact(t *testing.T, name string) string {
 	t.Helper()
 	path := filepath.Join(h.home, name)
@@ -138,8 +124,7 @@ func (h *codesignScriptHarness) run(t *testing.T, artifacts ...string) codesignS
 	h.writeStub(t, "security", securityStub(h.searchList, h.securityFailures))
 	h.writeStub(t, "openssl", "exit 0\n")
 	h.writeStub(t, "codesign", "exit "+h.codesignExitCode+"\n")
-	// Each run answers for itself: a log carrying the previous build's calls
-	// would read as a rebuild re-creating an identity it actually reused.
+	// Reset logs so a reused identity does not read as re-created.
 	for _, tool := range []string{"security", "openssl", "codesign"} {
 		if err := os.Remove(h.logPath(tool)); err != nil && !os.IsNotExist(err) {
 			t.Fatalf("clear %s call log: %v", tool, err)
@@ -173,10 +158,7 @@ func (h *codesignScriptHarness) run(t *testing.T, artifacts ...string) codesignS
 	return run
 }
 
-// build.sh runs on Linux too — that is where its gates run — so the signing step
-// has to be a no-op there rather than a failure, and it has to say which it was:
-// a build that printed nothing about signing is a build nobody can attribute a
-// vanished privacy grant to.
+// build.sh runs on Linux too, so signing must be a reported no-op there.
 func TestCodesignScriptIsANoOpOffMacOS(t *testing.T) {
 	harness := newCodesignScriptHarness(t)
 	harness.hostOS = "linux"
@@ -194,8 +176,6 @@ func TestCodesignScriptIsANoOpOffMacOS(t *testing.T) {
 	}
 }
 
-// The whole point of the identity is that it outlives a rebuild, so the first
-// build mints it and every build after that reuses the one already there.
 func TestCodesignScriptCreatesTheLocalIdentityOnce(t *testing.T) {
 	harness := newCodesignScriptHarness(t)
 	artifact := harness.artifact(t, "erun-app")
@@ -224,10 +204,7 @@ func TestCodesignScriptCreatesTheLocalIdentityOnce(t *testing.T) {
 	}
 }
 
-// `openssl pkcs12 -passout pass:` and a `security import -P` given an empty
-// argument disagree about how an empty PKCS#12 password is encoded, so the
-// import fails MAC verification on a container openssl wrote seconds earlier and
-// the identity never lands. Both ends have to name the same non-empty password.
+// openssl and `security import -P ""` disagree on empty PKCS#12 passwords, so both need the same non-empty one.
 func TestCodesignScriptGivesThePKCS12APasswordBothToolsAgreeOn(t *testing.T) {
 	harness := newCodesignScriptHarness(t)
 
@@ -249,10 +226,8 @@ func TestCodesignScriptGivesThePKCS12APasswordBothToolsAgreeOn(t *testing.T) {
 	}
 }
 
-// `codesign --keychain` does not resolve an identity by name: off the search
-// list, signing fails with "no identity found" against a keychain that
-// demonstrably holds the identity. Adding erun's is additive — a search list
-// that came back missing the developer's own keychains would be the real damage.
+// `codesign --keychain` does not resolve identities off the search list; adding
+// erun's keychain must keep the existing entries.
 func TestCodesignScriptAddsItsKeychainToTheSearchList(t *testing.T) {
 	harness := newCodesignScriptHarness(t)
 
@@ -275,8 +250,6 @@ func TestCodesignScriptAddsItsKeychainToTheSearchList(t *testing.T) {
 	}
 }
 
-// The search list is the developer's, and erun leaves its entry there rather
-// than restoring it, so the addition has to be a no-op once it has happened.
 func TestCodesignScriptLeavesASearchListThatAlreadyHasItAlone(t *testing.T) {
 	harness := newCodesignScriptHarness(t)
 	harness.searchList = append(harness.searchList, harness.keychain())
@@ -294,8 +267,7 @@ func TestCodesignScriptLeavesASearchListThatAlreadyHasItAlone(t *testing.T) {
 	}
 }
 
-// searchListWrite returns the `security list-keychains -s ...` call the script
-// made, or "" when it made none. The read (`-d user`) is not a write.
+// searchListWrite returns the `security list-keychains -s ...` call, or "" when none.
 func searchListWrite(t *testing.T, securityCalls string) string {
 	t.Helper()
 	for _, call := range strings.Split(securityCalls, "\n") {
@@ -306,9 +278,6 @@ func searchListWrite(t *testing.T, securityCalls string) string {
 	return ""
 }
 
-// Every step of the creation chain used to be silenced, so a first build that
-// could not mint the identity could say only that it had failed — locating the
-// step that broke meant replaying seven commands by hand.
 func TestCodesignScriptNamesTheCreationStepThatFailed(t *testing.T) {
 	harness := newCodesignScriptHarness(t)
 	const rejection = "security: SecKeychainItemImport: MAC verification failed during PKCS12 import"
@@ -327,11 +296,7 @@ func TestCodesignScriptNamesTheCreationStepThatFailed(t *testing.T) {
 	}
 }
 
-// `security find-identity -v` filters to identities valid by policy, and a
-// self-signed one never is: it reports zero even for an identity that is present
-// and signs fine. A presence check written against it would re-mint the identity
-// on every build — a new signer each time, which is the grant loss this exists
-// to end. Keychain-file presence is the reuse test instead.
+// `find-identity -v` never reports a self-signed identity, so keychain-file presence is the reuse test.
 func TestCodesignScriptNeverDecidesOnTheValidIdentityFilter(t *testing.T) {
 	for _, line := range strings.Split(readBuildScript(t, "codesign.sh"), "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "#") {
@@ -343,8 +308,7 @@ func TestCodesignScriptNeverDecidesOnTheValidIdentityFilter(t *testing.T) {
 	}
 }
 
-// An identity already on the developer's machine is never replaced: a new
-// certificate is a new signer, which is the grant loss this exists to end.
+// A new certificate is a new signer, which loses privacy grants.
 func TestCodesignScriptReusesAnIdentityThatAlreadyExists(t *testing.T) {
 	harness := newCodesignScriptHarness(t)
 	artifact := harness.artifact(t, "erun-app")
@@ -366,12 +330,10 @@ func TestCodesignScriptReusesAnIdentityThatAlreadyExists(t *testing.T) {
 	}
 }
 
-// A keychain left behind by a half-finished creation would be read as holding
-// the identity forever after, so every later build would sign against a
-// certificate that is not there.
+// A half-created keychain would read as holding the identity forever after.
 func TestCodesignScriptRemovesAKeychainItCouldNotFinish(t *testing.T) {
 	harness := newCodesignScriptHarness(t)
-	// Fail at the import, after create-keychain has already made the file.
+	// Fail at the import, after create-keychain has made the file.
 	harness.securityFailures = []securityStubFailure{{subcommand: "import"}}
 
 	run := harness.run(t, harness.artifact(t, "erun-app"))
@@ -390,8 +352,7 @@ func TestCodesignScriptRemovesAKeychainItCouldNotFinish(t *testing.T) {
 	}
 }
 
-// Signing trouble is not a build failure — the artifact runs either way — but it
-// is a privacy grant that will vanish, so the cost and the recovery are printed.
+// Signing trouble does not fail the build, but the cost and recovery are printed.
 func TestCodesignScriptReportsAFailedSignatureWithItsRecovery(t *testing.T) {
 	harness := newCodesignScriptHarness(t)
 	harness.codesignExitCode = "1"
@@ -409,8 +370,6 @@ func TestCodesignScriptReportsAFailedSignatureWithItsRecovery(t *testing.T) {
 	}
 }
 
-// A real Developer ID belongs to the operator, not to erun: it is already in a
-// keychain the search list reaches, and erun neither creates nor replaces it.
 func TestCodesignScriptDefersToAnOperatorSuppliedIdentity(t *testing.T) {
 	harness := newCodesignScriptHarness(t)
 	harness.identity = "Developer ID Application: Someone (TEAMID)"
@@ -431,9 +390,7 @@ func TestCodesignScriptDefersToAnOperatorSuppliedIdentity(t *testing.T) {
 	}
 }
 
-// The script and erun-common's host-side signing have to name the same identity,
-// keychain, and password, or a desktop build and an artifact landing beside it
-// would carry different signers — the same silent grant loss by another route.
+// The script and erun-common's host-side signing must name the same identity, keychain, and password.
 func TestLocalSigningIdentityMatchesTheSharedContract(t *testing.T) {
 	script := readBuildScript(t, "codesign.sh")
 	for _, value := range []string{
@@ -447,8 +404,6 @@ func TestLocalSigningIdentityMatchesTheSharedContract(t *testing.T) {
 	}
 }
 
-// A signing step build.sh never calls leaves every build ad-hoc signed, which is
-// the state this exists to end.
 func TestDesktopBuildScriptSignsWhatItProduces(t *testing.T) {
 	if !strings.Contains(readBuildScript(t, "build.sh"), "codesign.sh") {
 		t.Fatal("build.sh does not run codesign.sh; its artifacts keep the linker's ad-hoc signature")

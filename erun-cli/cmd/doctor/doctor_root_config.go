@@ -12,8 +12,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// Keeps erun doctor silent about the root config on the common path
-// where the user ran it for runtime cleanup rather than config repair.
 func rootConfigSkipsInspection(inspection config.RootConfigInspection, options doctorOptions) bool {
 	if !inspection.Complete() {
 		return false
@@ -135,10 +133,7 @@ func writeRootConfigInspectionBackups(w *lineWriter, inspection config.RootConfi
 	}
 	w.Linef("  available backups (newest first):")
 	for _, backup := range inspection.Backups {
-		// Path is emitted as a separate field rather than wrapped
-		// in parens so the integration normalizer's <TMP> rule
-		// (which matches /tmp/... up to whitespace) does not eat
-		// a trailing closing paren into the placeholder.
+		// A separate path= field keeps the integration <TMP> normalizer from eating a paren.
 		w.Linef("    - %s path=%s", backup.Date.Format("2006-01-02"), backup.Path)
 	}
 }
@@ -170,10 +165,7 @@ func formatOrphanedContexts(refs []config.OrphanedAliasContextRef) string {
 	return strings.Join(names, ", ")
 }
 
-// On an interactive terminal we auto-enter repair whenever there is
-// something to fix, even without --repair-config: the per-alias prompt
-// is the only confirmation the user answers, so the flow is "inspect,
-// see the problem, confirm the fix" in one step.
+// On a terminal, enter repair whenever something needs fixing; the per-alias prompt confirms.
 func shouldOfferRootConfigRepair(ctx core.Context, promptRunner shared.PromptRunner, inspection config.RootConfigInspection, options doctorOptions) (bool, error) {
 	if inspection.Complete() {
 		return false, nil
@@ -410,9 +402,7 @@ func orphanRepairBlockedReason(orphan config.OrphanedAlias) (string, bool) {
 	return "", false
 }
 
-// Under --dry-run we only trace the intent instead of entering the real
-// cloud-init flow, which prompts for the SSO start URL / region and would
-// otherwise block on stdin or emit non-deterministic prompt UI in the trace.
+// Dry-run traces intent only; the real flow prompts on stdin.
 func runOrphanRepairDryRun(ctx core.Context, orphan config.OrphanedAlias) (bool, error) {
 	region := preferredRegionForOrphan(orphan)
 	ctx.Trace(fmt.Sprintf("doctor repair-config: would re-init aws cloud provider alias=%s account=%s user=%s region=%s", orphan.Alias, orphan.AccountID, orphan.Username, region))
@@ -434,11 +424,7 @@ func runOrphanRepair(ctx core.Context, configStore config.ConfigStore, cloudDeps
 	return true, nil
 }
 
-// Pre-fills the AWS re-init from an existing SSO profile for the same
-// account when one exists: that profile carries the SSO start URL + SSO
-// region erun cannot derive from the alias string alone. On a miss we
-// point the user at the canonical lookup steps so they can find the
-// start URL without leaving the prompt.
+// An existing SSO profile for the account supplies the start URL and region the alias lacks.
 func buildOrphanRepairParams(ctx core.Context, orphan config.OrphanedAlias) (cloud.InitAWSCloudProviderParams, error) {
 	w := newLineWriter(ctx.Stdout)
 	params := cloud.InitAWSCloudProviderParams{
@@ -484,8 +470,6 @@ func applyOrphanRepairProfile(w *lineWriter, params *cloud.InitAWSCloudProviderP
 	}
 }
 
-// A copy-pasteable cheat sheet so a user who does not know their SSO
-// portal URL can recover it without abandoning the repair prompt.
 func writeSSOLookupHelp(w *lineWriter, orphan config.OrphanedAlias) {
 	w.Linef("Where to find your AWS SSO start URL:")
 	w.Linef("  1. `grep -E 'sso_start_url|sso_region' ~/.aws/config` — fastest if you have ever run `aws sso login`.")
@@ -515,9 +499,7 @@ func emptyIfBlank(value string) string {
 	return value
 }
 
-// lineWriter makes the first write error sticky — later Linef calls are
-// no-ops once one fails — so call sites can emit a sequence of lines
-// without checking each write.
+// lineWriter makes the first write error sticky.
 type lineWriter struct {
 	out io.Writer
 	err error

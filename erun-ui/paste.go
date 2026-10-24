@@ -13,8 +13,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// pastedFileDir reuses the generic Codex attachments dir; it predates this
-// feature accepting non-image files.
 const pastedFileDir = "/home/erun/.codex/attachments"
 
 // maxPastedFileBytes caps a paste because the copy buffers the entire base64
@@ -84,8 +82,7 @@ func pastedFileRemoteDir() string {
 	return pastedFileDir
 }
 
-// pastedFileFilename preserves the sanitized clipboard name so an agent sees the
-// real name, not paste-….bin; the timestamp prefix keeps names collision-proof.
+// pastedFileFilename keeps the sanitized clipboard name behind a collision-proof timestamp.
 func pastedFileFilename(now time.Time, mimeType, name string) string {
 	stamp := now.Format("20060102-150405.000000000")
 	if sanitized := sanitizePastedFileName(name); sanitized != "" {

@@ -11,9 +11,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// startupIdentityDatabase reuses the same migrated-PostgreSQL resource
-// internal/repository's identity bootstrap e2e tests use: this instance's
-// startup status reads the same tenants table their bootstrap writes.
+// startupIdentityDatabase reuses internal/repository's migrated-PostgreSQL resource.
 func startupIdentityDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -40,9 +38,6 @@ func seedOperationsTenant(t *testing.T, db *sql.DB, name string) string {
 	return tenantID
 }
 
-// TestIdentityBootstrapStatusReportsPlatformTenantNameMismatch checks that a
-// platform whose declared ERUN_TENANT disagrees with the name its OPERATIONS
-// tenant bootstrapped under says so in the identity status line.
 func TestIdentityBootstrapStatusReportsPlatformTenantNameMismatch(t *testing.T) {
 	db := startupIdentityDatabase(t)
 	seedOperationsTenant(t, db, "operations-legacy-test")
@@ -54,8 +49,6 @@ func TestIdentityBootstrapStatusReportsPlatformTenantNameMismatch(t *testing.T) 
 	}
 }
 
-// TestIdentityBootstrapStatusSilentWhenNamesAgree proves the report fires on
-// a real disagreement, not on ERUN_TENANT simply being set.
 func TestIdentityBootstrapStatusSilentWhenNamesAgree(t *testing.T) {
 	db := startupIdentityDatabase(t)
 	seedOperationsTenant(t, db, "frs-agree-test")
@@ -66,9 +59,6 @@ func TestIdentityBootstrapStatusSilentWhenNamesAgree(t *testing.T) {
 	}
 }
 
-// TestIdentityBootstrapStatusSilentWithNoDeclaredTenant proves the report
-// never fires with ERUN_TENANT unset, matching every platform before this
-// existed.
 func TestIdentityBootstrapStatusSilentWithNoDeclaredTenant(t *testing.T) {
 	db := startupIdentityDatabase(t)
 	seedOperationsTenant(t, db, "operations-no-declared-test")

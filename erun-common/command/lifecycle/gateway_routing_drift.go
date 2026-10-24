@@ -10,31 +10,21 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// GatewayRouting is where an environment's running pod sends Claude Code
-// compared with where its saved configuration says it should.
-//
-// The gateway is rendered into the runtime Deployment at deploy time, so
-// changing the erun-level catalog or an environment's opt-out only edits
-// config: the pod keeps routing where it was deployed to until it is
-// redeployed. This is what lets a caller say so instead of leaving the switch
-// looking like it did nothing.
+// GatewayRouting compares where the running pod sends Claude Code with where config says it
+// should; the gateway is rendered at deploy time, so config changes apply only on redeploy.
 type GatewayRouting struct {
-	// Deployed is the base URL the running Deployment hands Claude Code, "" when
-	// it routes to Anthropic directly.
+	// Deployed is "" when the pod routes to Anthropic directly.
 	Deployed string
-	// Wanted is the base URL the saved configuration resolves to, "" when the
-	// environment should not use a gateway.
+	// Wanted is "" when the environment should not use a gateway.
 	Wanted string
 }
 
-// Drifted reports whether the running pod routes somewhere the saved
-// configuration no longer asks for, which only a redeploy applies.
+// Drifted reports whether the running pod routes somewhere config no longer asks for.
 func (r GatewayRouting) Drifted() bool {
 	return normalizeGatewayEndpoint(r.Deployed) != normalizeGatewayEndpoint(r.Wanted)
 }
 
-// WantedGatewayEndpoint is the base URL deploy renders for an environment, the
-// same resolution the chart values use.
+// WantedGatewayEndpoint is the base URL deploy renders for an environment.
 func WantedGatewayEndpoint(claude config.EnvironmentClaudeConfig, catalog *config.OpenRouterConfig) string {
 	return config.EffectiveGateway(claude, catalog).Endpoint()
 }
@@ -43,8 +33,6 @@ func normalizeGatewayEndpoint(endpoint string) string {
 	return strings.TrimRight(strings.TrimSpace(endpoint), "/")
 }
 
-// deploymentGatewayEndpoint reads ANTHROPIC_BASE_URL from a Deployment's pod
-// template. A template that sets none routes to Anthropic directly.
 func deploymentGatewayEndpoint(deploymentJSON []byte) (string, error) {
 	var deployment struct {
 		Spec struct {
@@ -73,8 +61,7 @@ func deploymentGatewayEndpoint(deploymentJSON []byte) (string, error) {
 	return "", nil
 }
 
-// loadRuntimeDeploymentJSON fetches the runtime Deployment. found is false when
-// the environment has no runtime deployed, which leaves nothing to drift.
+// found is false when no runtime is deployed.
 var loadRuntimeDeploymentJSON = func(ctx context.Context, kubernetesContext, namespace, deployment string) ([]byte, bool, error) {
 	args := []string{}
 	if c := strings.TrimSpace(kubernetesContext); c != "" {
@@ -92,8 +79,7 @@ var loadRuntimeDeploymentJSON = func(ctx context.Context, kubernetesContext, nam
 	return output, true, nil
 }
 
-// ReadGatewayRouting compares the running runtime pod of tenant/environment
-// with its saved configuration. found is false when no runtime is deployed.
+// ReadGatewayRouting compares the running runtime pod with its saved configuration.
 func ReadGatewayRouting(ctx context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (routing GatewayRouting, found bool, err error) {
 	routing.Wanted = WantedGatewayEndpoint(env.Claude, catalog)
 	namespace := config.KubernetesNamespaceName(tenant, env.Name)

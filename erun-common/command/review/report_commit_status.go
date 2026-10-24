@@ -13,18 +13,9 @@ import (
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// A required GitHub status check has nothing to require until something
-// reports a status under its context. The merge queue (`erun exec
-// gate-merge`, `erun build`, `erun review record-build`) already knows
-// whether the prospective merge is green or red; this is the missing last
-// step that turns that knowledge into a GitHub commit status, so branch
-// protection on the target branch can finally require it.
-//
-// The status always targets the review's source-branch tip commit, never the
-// local prospective squash-merge commit gate-merge produces: GitHub only
-// evaluates a required check against a commit reachable from the open pull
-// request, and the squash commit never exists there until after its build
-// has passed and it was pushed.
+// The status targets the source-branch tip, not the squash-merge commit:
+// GitHub evaluates required checks only on commits reachable from the open
+// pull request.
 
 // ReportCommitStatusState is a state GitHub's Statuses API accepts.
 type ReportCommitStatusState string
@@ -36,28 +27,18 @@ const (
 	CommitStatusPending ReportCommitStatusState = "pending"
 )
 
-// DefaultCommitStatusContext is the check name a required-status-checks rule
-// points at when the caller does not name a more specific one.
+// DefaultCommitStatusContext is the default required-check name.
 const DefaultCommitStatusContext = "erun/merge-gate"
 
 // ReportCommitStatusParams is the `erun exec report-commit-status` input.
 type ReportCommitStatusParams struct {
-	// RemoteURL is the github.com remote the status is reported against, in
-	// any form git accepts (ssh, https, with or without a .git suffix).
 	RemoteURL string
-	// Commit is the full commit SHA the status attaches to.
-	Commit string
-	// State is the outcome to report.
-	State ReportCommitStatusState
-	// Context is the check name a required-status-checks rule names. Empty
-	// defaults to DefaultCommitStatusContext.
-	Context string
-	// Description is a short, human-readable summary, naming which gate step
-	// failed when State is not success.
+	Commit    string
+	State     ReportCommitStatusState
+	// Context defaults to DefaultCommitStatusContext.
+	Context     string
 	Description string
-	// TargetURL is an optional link a reader clicks through to from the
-	// status (e.g. a build log).
-	TargetURL string
+	TargetURL   string
 }
 
 // ReportCommitStatusResult is what was actually reported.
@@ -69,8 +50,7 @@ type ReportCommitStatusResult struct {
 	Context string `json:"context"`
 }
 
-// ReportCommitStatusDependencies lets tests replace the HTTP call and gh
-// token resolution without a real network or a real gh CLI.
+// ReportCommitStatusDependencies are the HTTP and gh token seams.
 type ReportCommitStatusDependencies struct {
 	Client       *http.Client
 	ResolveToken func(owner string) (string, bool)
@@ -93,8 +73,7 @@ var validCommitStatusStates = map[ReportCommitStatusState]bool{
 	CommitStatusPending: true,
 }
 
-// ReportCommitStatus reports a commit status on GitHub for params.Commit, the
-// SHA a required status check on the remote's branch protection can point at.
+// ReportCommitStatus reports a GitHub commit status for params.Commit.
 func ReportCommitStatus(ctx core.Context, params ReportCommitStatusParams, deps ReportCommitStatusDependencies) (ReportCommitStatusResult, error) {
 	ctx.Trace("report-commit-status: resolving commit")
 	commit := strings.TrimSpace(params.Commit)
@@ -196,9 +175,7 @@ func postGitHubCommitStatus(ctx context.Context, client *http.Client, token, own
 	return nil
 }
 
-// resolveGitHubAPIToken resolves a gh-issued token for the general GitHub
-// REST API, mirroring resolveGHCRBasicAuth's gh-then-env-var precedence
-// without the ghcr-specific basic-auth wrapping.
+// resolveGitHubAPIToken uses resolveGHCRBasicAuth's gh-then-env precedence.
 func resolveGitHubAPIToken(owner string) (string, bool) {
 	if token, ok := registry.ResolveGHCRTokenViaGH(owner); ok {
 		return token, true
@@ -206,9 +183,6 @@ func resolveGitHubAPIToken(owner string) (string, bool) {
 	return registry.GhcrTokenFromEnv()
 }
 
-// parseGitHubOwnerRepo extracts owner/repo from a github.com remote URL in
-// any form git accepts: git@github.com:owner/repo(.git), https://github.com/
-// owner/repo(.git), ssh://git@github.com/owner/repo(.git).
 func parseGitHubOwnerRepo(remoteURL string) (owner, repo string, err error) {
 	trimmed := strings.TrimSuffix(strings.TrimSpace(remoteURL), ".git")
 	if trimmed == "" {

@@ -24,9 +24,7 @@ func TestFileCloudSecretStoreRoundTrip(t *testing.T) {
 		t.Fatalf("load = %q, want tok-value", got)
 	}
 
-	// The secret file is created 0600 so other users on the host cannot read it.
-	// Windows has no POSIX mode bits — os.Chmod only toggles the read-only flag —
-	// so a writable file reports 0666 there; assert the best the OS represents.
+	// Windows has no POSIX mode bits, so a 0600 file reports 0666 there.
 	entries, err := os.ReadDir(filepath.Join(dir, "cloud-secrets"))
 	mustNoErr(t, err, "readdir")
 	if len(entries) != 1 {
@@ -43,7 +41,6 @@ func TestFileCloudSecretStoreRoundTrip(t *testing.T) {
 	}
 
 	mustNoErr(t, store.DeleteCloudSecret(ref), "delete")
-	// Deleting a missing secret is a no-op, not an error.
 	mustNoErr(t, store.DeleteCloudSecret(ref), "delete missing")
 	if _, err := store.LoadCloudSecret(ref); err == nil {
 		t.Fatal("expected load after delete to fail")
@@ -145,7 +142,6 @@ func TestListCloudflareAccountsAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	// Blank-id entries are dropped.
 	if len(accounts) != 2 || accounts[0].ID != "a1" || accounts[1].Name != "Beta" {
 		t.Fatalf("accounts = %+v", accounts)
 	}
@@ -174,7 +170,6 @@ func TestResolveCloudflareAccountsViaZones(t *testing.T) {
 		defer srv.Close()
 		accounts, err := resolveCloudflareAccountsViaZones(srv.URL, "tok")
 		mustNoErr(t, err, "resolve")
-		// One distinct account (a1), blank-account zone dropped.
 		assertCloudflareAccounts(t, accounts, []CloudflareAccount{{ID: "a1", Name: "Acme"}})
 	})
 

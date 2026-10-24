@@ -11,13 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// DetachBackgroundProcess puts a port-forward in its own session, mirroring
-// core.DetachEnvironmentJobSupervisor: a session leader has no controlling
-// terminal to be hung up with and is not in the caller's process group, which
-// is what lets it survive `erun open` exiting (a doomed non-interactive shell,
-// or a normal --no-shell return) without the caller wrapping anything in setsid
-// itself. Setpgid alone still shares that session and does not give the same
-// guarantee.
+// DetachBackgroundProcess starts a port-forward in its own session so it survives
+// `erun open` exiting; Setpgid alone would not.
 func DetachBackgroundProcess(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }
@@ -40,12 +35,8 @@ func isSSHDActivityProxyProcess(pid int) bool {
 	return strings.Contains(command, "activity") && strings.Contains(command, "ssh-proxy")
 }
 
-// kubectlPortForwardProcessIDs enumerates every live kubectl port-forward
-// process on the host, for the argv-identity sweep that catches a forward
-// whose state-file entry was overwritten by a losing race between two
-// overlapping opens (see sweepDeadPortForwardsMatching). A single ps call,
-// filtered here rather than by a shell pattern, so nothing but an exact PID
-// ever reaches a kill call.
+// kubectlPortForwardProcessIDs lists live kubectl port-forward PIDs from one ps call,
+// so only exact PIDs ever reach kill.
 func kubectlPortForwardProcessIDs() []int {
 	output, err := core.Command("ps", "-e", "-ww", "-o", "pid=", "-o", "command=").Output()
 	if err != nil {

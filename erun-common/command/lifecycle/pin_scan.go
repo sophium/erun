@@ -8,14 +8,10 @@ import (
 	"strings"
 )
 
-// scanPinFiles walks the repo once and recognises each erun reference it finds.
-// Vendored trees are skipped: a chart pulled into charts/ is a build artifact of
-// a pin, not a pin, and rewriting it would edit something the next
-// `helm dependency update` regenerates anyway.
+// Vendored charts/ trees are skipped: `helm dependency update` regenerates them.
 func scanPinFiles(projectRoot, target string) ([]PinSite, error) {
 	var sites []PinSite
 	walkErr := filepath.WalkDir(projectRoot, func(path string, entry fs.DirEntry, err error) error {
-		// An entry the walk cannot read is skipped, not fatal to the scan.
 		if err == nil && entry.IsDir() && skipPinScanDir(entry.Name()) {
 			return filepath.SkipDir
 		}
@@ -36,8 +32,6 @@ func scanPinFiles(projectRoot, target string) ([]PinSite, error) {
 	return sites, nil
 }
 
-// readablePinSites is pinSitesInFile for a walked file, skipping one it cannot
-// read.
 func readablePinSites(projectRoot, path, name, target string) []PinSite {
 	relative, err := filepath.Rel(projectRoot, path)
 	if err != nil {
@@ -101,9 +95,6 @@ func pinScannableFile(name string) bool {
 	return false
 }
 
-// pinTerraformFile reports whether name is a Terraform configuration or
-// variables file — the two places a tenant's own terraform can carry an erun
-// image reference directly, alongside a module ref.
 func pinTerraformFile(name string) bool {
 	return strings.HasSuffix(name, ".tf") || strings.HasSuffix(name, ".tfvars")
 }

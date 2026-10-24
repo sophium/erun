@@ -28,8 +28,6 @@ func testPlatformAliasProvider() configpkg.CloudProviderConfig {
 	}
 }
 
-// staticCloudStore is a CloudReadStore holding one already-resolved root config,
-// so alias resolution is exercised without touching the operator's own config.
 type staticCloudStore struct {
 	config configpkg.ERunConfig
 }
@@ -42,13 +40,8 @@ func signedInHostStore() staticCloudStore {
 	return staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{testPlatformAliasProvider()}}}
 }
 
-// TestRenderPlatformAliasEntryCoexistsWithAnInfrastructureProvider is the
-// regression this file exists for. The pod's root config already renders a
-// `cloudproviders:` key for the infrastructure provider the chart injected.
-// Emitting a second key for the platform alias makes the document a duplicate
-// mapping key, which the config reader refuses outright -- so the alias has to
-// arrive as another *item*, indented to match, and the pair must parse back as
-// two aliases rather than fail or silently drop one.
+// A second `cloudproviders:` key is a duplicate mapping the reader refuses, so the
+// alias must arrive as another item and parse back as two aliases.
 func TestRenderPlatformAliasEntryCoexistsWithAnInfrastructureProvider(t *testing.T) {
 	entry, err := RenderPlatformAliasEntry(testPlatformAliasProvider())
 	if err != nil {
@@ -57,8 +50,6 @@ func TestRenderPlatformAliasEntryCoexistsWithAnInfrastructureProvider(t *testing
 	if strings.Contains(entry, "cloudproviders:") {
 		t.Fatalf("entry must not carry its own cloudproviders key:\n%s", entry)
 	}
-	// The shape the pod's root config carries for the infrastructure
-	// provider, reproduced here so the two items are proven to share one block.
 	infrastructure := "cloudproviders:\n" +
 		"  - alias: dev-aws\n" +
 		"    provider: aws\n" +
@@ -84,11 +75,8 @@ func TestRenderPlatformAliasEntryCoexistsWithAnInfrastructureProvider(t *testing
 	}
 }
 
-// TestRenderPlatformAliasEntryResolvesToTheSecretStorePath proves the shipped
-// filename is the one the file store will later look for: the pod's entrypoint
-// writes the token to whatever basename init shipped, and the store resolves the
-// alias's ref through its own hash. Two independent implementations of that hash
-// would mean a pod that looks provisioned and can never mint a token.
+// A second implementation of the store's hash would yield a pod that looks
+// provisioned but can never mint a token.
 func TestRenderPlatformAliasEntryResolvesToTheSecretStorePath(t *testing.T) {
 	provider := testPlatformAliasProvider()
 	ref := provider.ERun.RefreshTokenRef
@@ -147,12 +135,7 @@ func TestResolveHostPlatformAliasNeedsASession(t *testing.T) {
 	})
 }
 
-// assertNoAliasToGive asserts a resolve that declined for a reason no operator
-// can act on: nothing to hand the environment, and nothing to tell them either.
-// Every caller of resolveHostPlatformAlias treats that as a no-op, and the
-// ambiguity is the only unnamed decline that is not one -- so a decline that
-// quietly acquired a reason here is how the silence those callers rely on would
-// turn into a line a routine deploy carries.
+// assertNoAliasToGive asserts a decline that carries no reason, keeping routine deploys silent.
 func assertNoAliasToGive(t *testing.T, store configpkg.CloudReadStore, deps cloud.CloudDependencies, what string) {
 	t.Helper()
 	_, _, ok, cause := ResolveHostPlatformAlias(store, deps, "")
@@ -164,9 +147,6 @@ func assertNoAliasToGive(t *testing.T, store configpkg.CloudReadStore, deps clou
 	}
 }
 
-// TestResolveHostPlatformAliasIgnoresNonERunProviders proves the resolver is
-// not satisfied by "some alias exists": an AWS alias is not a platform
-// credential, and provisioning one would leave the pod exactly as blocked.
 func TestResolveHostPlatformAliasIgnoresNonERunProviders(t *testing.T) {
 	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
 	store := staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{
@@ -177,12 +157,6 @@ func TestResolveHostPlatformAliasIgnoresNonERunProviders(t *testing.T) {
 	}
 }
 
-// TestProvisionPlatformAliasSecretReportsTheAmbiguityWithoutFailing is the init
-// half of the same decline. A host with two aliases has nothing to hand the
-// environment, which is no reason to fail init -- but it is a reason to say
-// which of the two silences it is: the line a host with no alias at all gets
-// names a cause that is not this one, and init is where the operator is
-// watching.
 func TestProvisionPlatformAliasSecretReportsTheAmbiguityWithoutFailing(t *testing.T) {
 	store := ambiguousHostStore(t)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
@@ -201,10 +175,6 @@ func TestProvisionPlatformAliasSecretReportsTheAmbiguityWithoutFailing(t *testin
 	}
 }
 
-// TestProvisionPlatformAliasSecretCarriesEntryFileNameAndToken applies the real
-// manifest through a stub kubectl and reads back what the pod's entrypoint would
-// consume: the alias entry, the hashed secret filename the store will look for,
-// and the token itself.
 func TestProvisionPlatformAliasSecretCarriesEntryFileNameAndToken(t *testing.T) {
 	captured := installCapturingKubectl(t)
 	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
@@ -240,8 +210,7 @@ func TestProvisionPlatformAliasSecretCarriesEntryFileNameAndToken(t *testing.T) 
 	}
 }
 
-// installCapturingKubectl points ERUN_KUBECTL_BIN at a stub that records its
-// stdin, so the applied manifest can be asserted on rather than mocked away.
+// installCapturingKubectl points ERUN_KUBECTL_BIN at a stub that records its stdin.
 func installCapturingKubectl(t *testing.T) *capturedManifest {
 	t.Helper()
 	dir := t.TempDir()

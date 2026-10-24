@@ -11,47 +11,34 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// platform_client_builds.go extends PlatformClient with the tenant-wide
-// build history: GET/POST /v1/builds, the same resource
-// platform_client_reviews.go's review-nested ListBuilds/CreateBuild cover,
-// but for a build with no review attached.
-
-// PlatformCreateUnattachedBuildParams is the input for a build with no
-// review -- an ordinary `erun build` self-reporting. EnvironmentID is
-// required; the platform records it as RECORDED.
+// PlatformCreateUnattachedBuildParams records a build with no review; EnvironmentID is required.
 type PlatformCreateUnattachedBuildParams struct {
-	EnvironmentID string `json:"environmentId"`
-	CommitID      string `json:"commitId"`
-	Version       string `json:"version"`
-	Successful    bool   `json:"successful"`
-	FailureDetail string `json:"failureDetail,omitempty"`
-	// Profile is the bounded per-step profile this build collected, when the
-	// caller has one.
-	Profile *core.BuildProfileSummary `json:"profile,omitempty"`
+	EnvironmentID string                    `json:"environmentId"`
+	CommitID      string                    `json:"commitId"`
+	Version       string                    `json:"version"`
+	Successful    bool                      `json:"successful"`
+	FailureDetail string                    `json:"failureDetail,omitempty"`
+	Profile       *core.BuildProfileSummary `json:"profile,omitempty"`
 }
 
-// CreateUnattachedBuild records a build against an environment with no
-// review. See PlatformClient.CreateBuild for the review-linked counterpart.
+// CreateUnattachedBuild records a build against an environment with no review.
 func (c *PlatformClient) CreateUnattachedBuild(ctx context.Context, params PlatformCreateUnattachedBuildParams) (PlatformBuild, error) {
 	var build PlatformBuild
 	err := c.do(ctx, http.MethodPost, "/v1/builds", params, true, &build)
 	return build, err
 }
 
-// PlatformBuildListFilter narrows a page of GET /v1/builds -- the tenant-wide
-// build history, review-linked and unattached alike.
+// PlatformBuildListFilter narrows GET /v1/builds, the tenant-wide history.
 type PlatformBuildListFilter struct {
 	EnvironmentID string
 	Kind          string
-	// CommitID narrows the page to builds of exactly that commit.
-	CommitID string
+	CommitID      string
 	// Successful is nil for "either".
 	Successful *bool
 	Since      time.Time
 	Until      time.Time
 	Cursor     string
-	// Limit caps the page size; the server applies its own default/max when
-	// zero or out of range.
+	// Limit zero or out of range uses the server's default.
 	Limit int
 }
 
@@ -84,16 +71,13 @@ func (f PlatformBuildListFilter) queryString() string {
 	return values.Encode()
 }
 
-// PlatformBuildPage is one newest-first page of a tenant's build history.
-// NextCursor is empty when the page reached the end of the history.
+// PlatformBuildPage is one newest-first page; NextCursor is empty at the end.
 type PlatformBuildPage struct {
 	Builds     []PlatformBuild `json:"builds"`
 	NextCursor string          `json:"nextCursor,omitempty"`
 }
 
-// ListAllBuilds lists the caller's tenant's whole build history, newest
-// first, narrowed by filter -- unlike ListBuilds, which is scoped to one
-// review.
+// ListAllBuilds lists the tenant's builds, newest first, across all reviews.
 func (c *PlatformClient) ListAllBuilds(ctx context.Context, filter PlatformBuildListFilter) (PlatformBuildPage, error) {
 	path := "/v1/builds"
 	if query := filter.queryString(); query != "" {

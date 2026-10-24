@@ -164,8 +164,6 @@ func TestCloudInjectAWSCredentialsRequiresKeyAndSecret(t *testing.T) {
 	}
 }
 
-// assertFileContainsAll reads path and fails unless every wanted substring is
-// present, reporting the missing substring and full content on failure.
 func assertFileContainsAll(t *testing.T, path string, wants ...string) {
 	t.Helper()
 	data, err := os.ReadFile(path)

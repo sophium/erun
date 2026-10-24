@@ -93,10 +93,8 @@ func testJobHelp(t *testing.T) {
 }
 
 func testJobStartRefusesADirThatDoesNotExistByName(t *testing.T) {
-	// An unusable working directory used to reach exec, where Go reports it
-	// as an ENOENT naming the *binary* — so a dir the supervisor could not
-	// resolve surfaced as a missing shell and sent the reader after a broken
-	// image instead of a bad path.
+	// Go's exec reports a missing working dir as ENOENT naming the binary, so the
+	// dir must be checked and named first.
 	setup := env.New(t)
 	envVars := jobStubEnv(t, setup, "printf '"+jobStubSignal+"'")
 	result := startJob(t, setup, envVars, "baddir", "--dir", "no-such-subdir", "--", "work")
@@ -113,8 +111,7 @@ func testJobStartRefusesADirThatDoesNotExistByName(t *testing.T) {
 
 func testJobStartRunsTheWorkInARelativeDir(t *testing.T) {
 	// The supervisor is detached with no inherited working directory, so a
-	// relative dir has to be anchored before it is handed over, the same way
-	// every other repo-facing surface reads a path.
+	// relative dir must be anchored first.
 	setup := env.New(t)
 	workdir := filepath.Join(setup.Cwd, "workdir-sub")
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
@@ -132,8 +129,7 @@ func testJobStartRunsTheWorkInARelativeDir(t *testing.T) {
 }
 
 func testJobAwaitHelp(t *testing.T) {
-	// The await exit codes are the contract an orchestrator branches on, so the
-	// help that states them is locked here.
+	// The await exit codes are a contract orchestrators branch on.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"job", "await", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 	if result.ExitCode != 0 {
@@ -143,9 +139,6 @@ func testJobAwaitHelp(t *testing.T) {
 }
 
 func testJobStatusHelp(t *testing.T) {
-	// The job states -- including abandoned/gate-incomplete, and that an
-	// agent job's own process exiting is not the verdict -- are the
-	// contract an orchestrator reads this help for, so it is locked here.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"job", "status", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 	if result.ExitCode != 0 {
@@ -155,8 +148,6 @@ func testJobStatusHelp(t *testing.T) {
 }
 
 func testJobStartDryRunPlansTheDetach(t *testing.T) {
-	// The plan must show the supervisor argv, where output will land, and that
-	// a lease is taken, without starting anything.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := jobStubEnv(t, setup, "exit 0")
@@ -171,8 +162,7 @@ func testJobStartDryRunPlansTheDetach(t *testing.T) {
 }
 
 func testJobStartEnvDryRunPlansTheSupervisorArgv(t *testing.T) {
-	// --env must show up in the supervisor argv the plan traces, sorted
-	// so the plan is deterministic regardless of flag order.
+	// Sorted, so the plan is deterministic regardless of flag order.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := jobStubEnv(t, setup, "exit 0")
@@ -188,10 +178,6 @@ func testJobStartEnvDryRunPlansTheSupervisorArgv(t *testing.T) {
 }
 
 func testJobStartHandoffDryRunPlansTheSupervisorArgv(t *testing.T) {
-	// --handoff must reach the supervisor argv, the same way --env does above,
-	// so the deliberate-handoff record actually lands: without --handoff on
-	// the supervisor's own invocation, the started job would default into its
-	// parent's finish check like any other.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := jobStubEnv(t, setup, "exit 0")
@@ -206,9 +192,7 @@ func testJobStartHandoffDryRunPlansTheSupervisorArgv(t *testing.T) {
 }
 
 func testJobStartEnvRefusesANameThatCouldRedirectTheJob(t *testing.T) {
-	// PATH/LD_PRELOAD/etc. are refused up front: letting a caller
-	// override them would let it redirect what the job's own process executes
-	// or loads, which is a hijack rather than a tuning knob.
+	// Overriding these would let a caller hijack what the job executes or loads.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := jobStubEnv(t, setup, "exit 0")
@@ -225,8 +209,6 @@ func testJobStartEnvRefusesANameThatCouldRedirectTheJob(t *testing.T) {
 }
 
 func testJobStartEnvReachesTheJobsOwnProcess(t *testing.T) {
-	// The real point of --env: the value is not just traced, it is set
-	// on the job's actual process, on top of what it inherits.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := jobStubEnv(t, setup, `printf '%s' "$SOME_JOB_VAR" > seen.txt`)
@@ -241,8 +223,6 @@ func testJobStartEnvReachesTheJobsOwnProcess(t *testing.T) {
 }
 
 func testJobStartHelp(t *testing.T) {
-	// The agent switch and what it does to the invocation are only discoverable
-	// here, so the help that states them is locked.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"job", "start", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 	if result.ExitCode != 0 {
@@ -252,8 +232,6 @@ func testJobStartHelp(t *testing.T) {
 }
 
 func testJobStartRefusesToReuseARunningId(t *testing.T) {
-	// Two supervisors writing one record would make every later answer
-	// ambiguous, so the collision is refused rather than resolved.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	release := filepath.Join(setup.Cwd, "release")
@@ -293,10 +271,8 @@ func testJobStartRequiresTargetAndName(t *testing.T) {
 }
 
 func testJobStartExclusiveDryRunPlansTheEnvironmentClaim(t *testing.T) {
-	// --exclusive is a decision the plan has to show, not only an effect at
-	// run time: the claim it takes is what will refuse every other job start
-	// here, and --exclusive must reach the supervisor argv or the supervisor
-	// would neither renew the claim nor release it on the way out.
+	// --exclusive must reach the supervisor argv or it would neither renew nor
+	// release the claim.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := jobStubEnv(t, setup, "exit 0")
@@ -314,15 +290,8 @@ func testJobStartExclusiveDryRunPlansTheEnvironmentClaim(t *testing.T) {
 }
 
 func testJobStartExclusiveOffEnvironmentDryRunForwardsTheClaimToTheEdge(t *testing.T) {
-	// The scenario above proves the claim once job start reaches
-	// StartEnvironmentJob directly, which only happens in-environment.
-	// Off-environment -- an operator's own machine, or any other pod,
-	// targeting this one through its MCP edge -- job start never calls
-	// that function directly: it calls the edge's exec_raw tool instead,
-	// and --exclusive never reached that call's arguments at all until
-	// this fix, so the edge enforced nothing while the caller was told
-	// the job started. No `inEnvironment` here is the point: this is the
-	// host-caller path.
+	// Off-environment job start goes through the edge's exec_raw tool, which must
+	// carry --exclusive.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{
@@ -336,9 +305,6 @@ func testJobStartExclusiveOffEnvironmentDryRunForwardsTheClaimToTheEdge(t *testi
 }
 
 func testJobAgentStartExclusiveOffEnvironmentDryRunForwardsTheClaimToTheEdge(t *testing.T) {
-	// Same gap, the other off-environment dispatch tool: an agent job
-	// started off-environment goes through exec_agent rather than
-	// exec_raw, and it had the identical missing forward.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{
@@ -352,11 +318,7 @@ func testJobAgentStartExclusiveOffEnvironmentDryRunForwardsTheClaimToTheEdge(t *
 }
 
 func testJobAnExclusiveJobRefusesEveryOtherJobStartAndNamesTheHolder(t *testing.T) {
-	// The whole point of the claim, and the asymmetry that makes it worth
-	// more than a mutex between exclusive jobs: while a gate holds the
-	// environment, an ordinary job start is refused too. Scheduling probe
-	// jobs beside a running gate is exactly what turned a 7-minute green
-	// run into a 17-minute one and two reds on tests that pass standalone.
+	// While a gate holds the environment, ordinary job starts are refused too.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	release := filepath.Join(setup.Cwd, "release")
@@ -391,8 +353,6 @@ func testJobAnExclusiveJobRefusesEveryOtherJobStartAndNamesTheHolder(t *testing.
 	if await.ExitCode != 0 {
 		t.Fatalf("await: exit %d: %s", await.ExitCode, await.Combined)
 	}
-	// Released on the way out rather than left to lapse, so the next gate
-	// starts immediately instead of waiting out a TTL.
 	after := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "probe", "--", "work"},
 		erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if after.ExitCode != 0 {
@@ -406,10 +366,8 @@ func testJobAnExclusiveJobRefusesEveryOtherJobStartAndNamesTheHolder(t *testing.
 }
 
 func testJobAnExpiredExclusiveClaimIsReclaimedRatherThanPinningTheEnvironment(t *testing.T) {
-	// The requirement that keeps this from being a lock that can strand an
-	// environment: a claim nobody renews stops holding anything. Taken with
-	// a TTL that has already elapsed by the time the next read happens, so
-	// the reclaim is observable without waiting for one.
+	// A claim nobody renews stops holding; the elapsed TTL makes the reclaim
+	// observable without waiting.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	envVars := jobStubEnv(t, setup, "exit 0")
@@ -431,12 +389,8 @@ func testJobAnExpiredExclusiveClaimIsReclaimedRatherThanPinningTheEnvironment(t 
 }
 
 func testJobAJobStartedByTheHolderRunsUnderItsClaimInsteadOfBeingRefused(t *testing.T) {
-	// Lineage is the one exemption, and it has to exist: a gate job that
-	// detaches its own nested work (a gate started from inside an agent job)
-	// would otherwise be refused by its own ancestor's claim, which would
-	// make the mechanism unusable exactly where it is needed. The nested job
-	// takes no second claim -- releasing one on its way out would drop the
-	// ancestor's.
+	// A nested job under the claiming job is exempt and takes no second claim, so
+	// its release cannot drop the ancestor's.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	release := filepath.Join(setup.Cwd, "release")
@@ -446,9 +400,6 @@ func testJobAJobStartedByTheHolderRunsUnderItsClaimInsteadOfBeingRefused(t *test
 	if start.ExitCode != 0 {
 		t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
 	}
-	// ERUN_JOB_ID is what the gate's own work inherits, so a start made from
-	// inside it names the gate as its parent exactly as a real nested start
-	// would.
 	nested := erun.Run(t, []string{
 		"job", "start", "--tenant", "team", "--environment", "dev", "--name", "nested", "--dry-run", "--", "work",
 	}, erun.RunOptions{Cwd: setup.Cwd, Env: append(envVars, "ERUN_JOB_ID=gate")})

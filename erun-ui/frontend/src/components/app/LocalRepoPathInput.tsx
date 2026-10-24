@@ -6,10 +6,7 @@ import { readError } from '@/app/errors';
 import { useAppDispatch } from '@/app/hooks';
 import { showTerminalError } from '@/app/notificationThunks';
 
-// LocalRepoPathInput is the shared host-worktree-path field for the init dialog
-// and the env-settings General tab, so both edit the path identically. Free-text
-// is deliberate: a repo path is a value the user genuinely authors, not a fixed
-// option set.
+// LocalRepoPathInput is the host-worktree-path field shared by the init dialog and the General tab.
 export function LocalRepoPathInput({
   id,
   label,

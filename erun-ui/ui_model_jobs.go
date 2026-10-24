@@ -1,8 +1,6 @@
 package main
 
-// The job surface's models. Times cross the boundary as unix seconds because
-// the frontend renders a duration, not a formatted instant, and a zero means
-// "not yet" rather than the epoch.
+// Job times are unix seconds; zero means "not yet".
 
 type uiEnvironmentJob struct {
 	ID        string   `json:"id"`
@@ -12,16 +10,14 @@ type uiEnvironmentJob struct {
 	AgentTool string   `json:"agentTool,omitempty"`
 	Command   []string `json:"command,omitempty"`
 	Dir       string   `json:"dir,omitempty"`
-	// ExitCode is nil unless the job reached exited, so a missing outcome can
-	// never be read as a successful zero.
+	// ExitCode is nil unless exited, so a missing outcome never reads as success.
 	ExitCode      *int                      `json:"exitCode"`
 	StartedAtUnix int64                     `json:"startedAtUnix,omitempty"`
 	EndedAtUnix   int64                     `json:"endedAtUnix,omitempty"`
 	Progress      *uiEnvironmentJobProgress `json:"progress,omitempty"`
 }
 
-// uiEnvironmentJobProgress is the agent-run view, nil for a command job and for
-// an agent that has not emitted yet -- never a made-up zero state.
+// uiEnvironmentJobProgress is nil for command jobs and agents that have not emitted.
 type uiEnvironmentJobProgress struct {
 	Activity    string `json:"activity,omitempty"`
 	LastMessage string `json:"lastMessage,omitempty"`

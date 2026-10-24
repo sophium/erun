@@ -12,41 +12,11 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// cli_help_flag_drift_test.go extends the doc-drift gate (see AGENTS.md
-// "Doc-drift gate") to the CLI's own help text -- the surface an operator
-// reads at the moment they run a destructive command. A misremembered
-// `erun release --version` drifted from real command/flag registration this
-// way, found only by someone hitting it.
-//
-// What is mechanically comparable here: a flag's *name* and a command's
-// *existence*. A flag's prose description (what it does, its effective
-// default when the registered zero value is a sentinel) generally is not --
-// see the "documented defaults" note below for why that class is left out
-// rather than faked with a check that would false-positive on this
-// codebase's own pervasive "empty/zero sentinel, resolved default described
-// in prose" convention (e.g. `erun expose --port` registers 0 and describes
-// "(default 80)"; the two are supposed to differ).
-//
-// So this file checks exactly one claim class, fully mechanically: every
-// literal `erun ...` invocation quoted in a command's own Example field, or
-// backtick-quoted in any command's Short/Long prose, resolves to a real
-// subcommand path, and every `--flag`/`-f` token in it is actually registered
-// on that resolved command (TestCLIExample..., TestCLIProse...). This is the
-// exact shape of the "release --version" class: a flag reachable for in prose
-// or an example, but never wired.
-//
-// What this file does NOT check, so a green run is never read as "the help
-// is all true": flag *prose* (what a flag's usage string says it does or
-// defaults to), whether help is *useful* (erun-cli/AGENTS.md's CLI Help quality
-// bar is still a human review job), and any value vocabulary. "Every
-// registered flag appears in help" is not a separate check here either -- Cobra generates the flags section of `--help` directly from
-// the registered FlagSet, so it holds by construction for every command
-// except the one that opts out of Cobra's flag parsing (`erun exec raw`,
-// DisableFlagParsing: true), which documents its one real flag (--dry-run)
-// in its own Long text instead.
+// Every literal `erun ...` invocation in a command's Example or backticked
+// Short/Long text must resolve to a real command and use only registered
+// flags. Flag prose is not checked: zero-value sentinels with a prose default
+// (e.g. `expose --port`) are intentional.
 
-// walkCLICommands calls visit for every command in the tree rooted at root,
-// including root itself.
 func walkCLICommands(root *cobra.Command, visit func(*cobra.Command)) {
 	visit(root)
 	for _, child := range root.Commands() {
@@ -54,9 +24,7 @@ func walkCLICommands(root *cobra.Command, visit func(*cobra.Command)) {
 	}
 }
 
-// commandChild finds the direct child of parent whose Use's first word, or
-// an Alias, equals name -- the same resolution Cobra itself performs when
-// walking a typed command line.
+// commandChild resolves name against Use's first word or an alias, as Cobra does.
 func commandChild(parent *cobra.Command, name string) *cobra.Command {
 	for _, child := range parent.Commands() {
 		if fields := strings.Fields(child.Use); len(fields) > 0 && fields[0] == name {
@@ -71,22 +39,14 @@ func commandChild(parent *cobra.Command, name string) *cobra.Command {
 	return nil
 }
 
-// cliFlagVocabulary is the set of flag names and shorthands a resolved
-// command actually recognizes: its own local and persistent flags, plus
-// every ancestor's persistent flags, plus the "help"/"h" pair every Cobra
-// command carries regardless of whether InitDefaultHelpFlag has run yet.
+// cliFlagVocabulary also includes help/h, which Cobra adds lazily.
 type cliFlagVocabulary struct {
 	long  map[string]bool
 	short map[string]bool
 }
 
 func commandFlagVocabulary(c *cobra.Command) cliFlagVocabulary {
-	// InheritedFlags() has the side effect of merging this command's own
-	// persistent flags and every ancestor's persistent flags into c.Flags()
-	// (cobra's mergePersistentFlags) -- calling it first, then reading
-	// c.Flags(), is the same sequence cobra's own Execute()/HelpFunc use to
-	// get "every flag that applies here", so this reads exactly what
-	// `erun <path> --help` would actually print.
+	// InheritedFlags merges persistent flags into c.Flags(), as cobra's help does.
 	c.InheritedFlags()
 	v := cliFlagVocabulary{long: map[string]bool{"help": true}, short: map[string]bool{"h": true}}
 	c.Flags().VisitAll(func(f *pflag.Flag) {
@@ -98,16 +58,8 @@ func commandFlagVocabulary(c *cobra.Command) cliFlagVocabulary {
 	return v
 }
 
-// resolveInvocationPath walks tokens[1:] (tokens[0] must be the literal
-// "erun") down the real command tree as far as subcommand names go. A
-// flag-looking token seen before any subcommand has matched is collected
-// into preFlags (global flags like "-v"/"-vv" placed ahead of the
-// subcommand name, e.g. "erun -v deploy") rather than stopping resolution --
-// once at least one subcommand has matched, a flag-looking token ends path
-// resolution, since a value-taking flag placed between two subcommand names
-// does not occur anywhere in this codebase's help text today. Everything
-// from that point on is returned as remaining, unresolved into further
-// path segments, for flag-token scanning against the resolved command.
+// resolveInvocationPath collects flags before the first subcommand as
+// preFlags (e.g. "erun -v deploy"); after one, a flag ends path resolution.
 func resolveInvocationPath(root *cobra.Command, tokens []string) (resolved *cobra.Command, preFlags, remaining []string) {
 	node := root
 	matched := false
@@ -133,19 +85,11 @@ func resolveInvocationPath(root *cobra.Command, tokens []string) (resolved *cobr
 	return node, preFlags, tokens[i:]
 }
 
-// invocationTokenTrim strips shell/quote wrapping punctuation that a token
-// extracted by whitespace-splitting can pick up from surrounding shell
-// syntax the tokenizer does not otherwise understand (an alias definition,
-// a `trap '...'`, a `$(...)` substitution boundary).
 func invocationTokenTrim(tok string) string {
 	return strings.Trim(tok, "\"'`();,")
 }
 
-// unknownFlagTokens scans remaining for flag-looking tokens not present in
-// vocab, stopping at a bare "--" -- Cobra's own end-of-flags marker, after
-// which every following token (however it looks) belongs to a wrapped
-// external command (`erun exec raw -- kubectl get pods --all-namespaces`,
-// `erun exec job start ... -- ./gradlew test`), never to erun itself.
+// unknownFlagTokens stops at "--": what follows belongs to a wrapped command.
 func unknownFlagTokens(vocab cliFlagVocabulary, remaining []string) []string {
 	var unknown []string
 	for _, raw := range remaining {
@@ -163,8 +107,6 @@ func unknownFlagTokens(vocab cliFlagVocabulary, remaining []string) []string {
 	return unknown
 }
 
-// flagTokenUnknown reports whether a "--long" token, or any letter of a
-// "-short" cluster, is missing from vocab; an "=value" suffix is ignored.
 func flagTokenUnknown(vocab cliFlagVocabulary, tok string) bool {
 	if strings.HasPrefix(tok, "--") {
 		name := strings.TrimPrefix(tok, "--")
@@ -185,18 +127,8 @@ func flagTokenUnknown(vocab cliFlagVocabulary, tok string) bool {
 	return false
 }
 
-// erunInvocationCandidates finds the first occurrence of the exact token
-// "erun" in a whitespace-tokenized line and returns the token sequence from
-// that point to the end of the line, as a single candidate invocation (or
-// none, if "erun" never appears as its own token). Requiring an exact token
-// match (not a substring or prefix match) is what keeps this from firing on
-// "erun-cli", "erun-common", "erunpaas.com", or "erun's": none of those
-// tokenize to the bare word "erun". Taking only the *first* occurrence,
-// rather than one candidate per occurrence, is what keeps this from
-// misreading a later literal "erun" used as an example *value* -- a cloud
-// provider type actually named "erun" (`erun cloud init erun --api-url
-// ...`), or a tenant literally named "erun" (`erun list --tenant erun`) --
-// as a second, nested re-invocation of the command itself.
+// erunInvocationCandidates takes only the first exact "erun" token, so
+// "erun-cli" and a later value literally named "erun" are not invocations.
 func erunInvocationCandidates(line string) [][]string {
 	fields := strings.Fields(line)
 	for i, f := range fields {
@@ -209,10 +141,6 @@ func erunInvocationCandidates(line string) [][]string {
 
 var exampleContinuationPattern = regexp.MustCompile(`\\\n\s*`)
 
-// exampleInvocationCandidates joins backslash-newline continuations (the
-// shape every multi-line Example in this codebase uses) into one logical
-// line, then extracts every candidate invocation from every non-comment
-// line.
 func exampleInvocationCandidates(example string) [][]string {
 	joined := exampleContinuationPattern.ReplaceAllString(example, " ")
 	var all [][]string
@@ -228,12 +156,6 @@ func exampleInvocationCandidates(example string) [][]string {
 
 var backtickSpanPattern = regexp.MustCompile("`([^`\n]*)`")
 
-// proseInvocationCandidates extracts every candidate invocation from
-// backtick-quoted spans in prose text (a command's Short/Long fields). A
-// span that is not itself a full "erun ..." invocation (a flag mentioned
-// alone, a file path, an identifier) yields no candidates, which is
-// intentional: bare flag mentions with no command context are exactly the
-// "prose description" class this file's own header says it does not check.
 func proseInvocationCandidates(text string) [][]string {
 	var all [][]string
 	for _, match := range backtickSpanPattern.FindAllStringSubmatch(text, -1) {
@@ -242,16 +164,8 @@ func proseInvocationCandidates(text string) [][]string {
 	return all
 }
 
-// auditCommandTree returns CommandTreeForAudit's tree with "build" and
-// "push" patched in from cmd.ContextSensitiveTopLevelCommands whenever this
-// test binary's own process context (its package directory as cwd, not
-// necessarily a directory with a docker build context) caused
-// optionalBuildCommand/optionalPushCommand to omit them -- see
-// ContextSensitiveTopLevelCommands' doc comment in erun-cli/cmd for why
-// their presence, unlike every other command's, depends on that context.
-// Patching them back in with their real flag vocabulary is what makes
-// resolution below deterministic regardless of the cwd this test happens to
-// run from.
+// auditCommandTree patches in build/push, which are omitted when cwd lacks a
+// docker build context, so resolution does not depend on where tests run.
 func auditCommandTree() *cobra.Command {
 	root := cmd.CommandTreeForAudit()
 	for name, fallback := range cmd.ContextSensitiveTopLevelCommands() {
@@ -262,11 +176,6 @@ func auditCommandTree() *cobra.Command {
 	return root
 }
 
-// invocationProblem renders one flag-drift finding in a form that names the
-// exact source (the command whose help text carries the bad reference), the
-// literal text a reader would have copied, the bad token, and where
-// resolution landed -- everything needed to fix it without re-deriving any
-// of this test's own reasoning.
 func invocationProblem(sourceCmd *cobra.Command, field string, tokens []string, resolved *cobra.Command, bad string) string {
 	return fmt.Sprintf("%s: %s %q references %s, which is not a registered flag on %q (or any of its parents)",
 		sourceCmd.CommandPath(), field, strings.Join(tokens, " "), bad, resolved.CommandPath())
@@ -282,11 +191,6 @@ func checkInvocation(root *cobra.Command, sourceCmd *cobra.Command, field string
 	}
 }
 
-// TestCLIExampleInvocationsUseRegisteredFlags catches the exact "erun
-// release --version" class of drift: a flag copy-pasted into a command's
-// own Example block (the literal text `erun <cmd> --help` prints) that was
-// never actually registered on the command the example invokes, or on any
-// command it passes through on the way there.
 func TestCLIExampleInvocationsUseRegisteredFlags(t *testing.T) {
 	root := auditCommandTree()
 	var problems []string
@@ -306,12 +210,6 @@ func TestCLIExampleInvocationsUseRegisteredFlags(t *testing.T) {
 	}
 }
 
-// TestCLIProseInvocationsUseRegisteredFlags applies the same check to
-// backtick-quoted invocations inside Short/Long prose (e.g. "`erun deploy
-// --version <version>`" in another command's Long text) -- the second place
-// a stale or wrong flag reference reaches a reader, distinct from Example
-// because these are cross-references between commands rather than a
-// command's own worked example.
 func TestCLIProseInvocationsUseRegisteredFlags(t *testing.T) {
 	root := auditCommandTree()
 	var problems []string

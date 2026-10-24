@@ -11,12 +11,9 @@ import (
 	"time"
 )
 
-// runtimeIMDSEndpoint is the EC2 instance metadata service as a pod on an EC2
-// node reaches it.
 const runtimeIMDSEndpoint = "http://169.254.169.254"
 
-// runtimeIMDSTimeout bounds each metadata request. Where nothing answers the
-// link-local address the request drains it, so it stays short.
+// Where nothing answers the link-local address a request waits out the timeout, so keep it short.
 const runtimeIMDSTimeout = 2 * time.Second
 
 type runtimeCloudMetadata struct {
@@ -24,14 +21,8 @@ type runtimeCloudMetadata struct {
 	instanceID string
 }
 
-// runtimeEnvWithCloudMetadata fills ERUN_CLOUD_REGION and ERUN_CLOUD_INSTANCE_ID
-// from the instance metadata service when the chart injected them empty on an
-// AWS environment. The chart renders them from the deploying host's cloud
-// context, and a deploy from a host that has none for the environment's kube
-// context leaves them empty; without this the boot config would record no
-// instance id, idle stop could never stop the host, and the Bedrock relay would
-// be skipped. The lookup runs at most once, on first use; an injected value
-// always wins and is never probed for.
+// runtimeEnvWithCloudMetadata fills an empty ERUN_CLOUD_REGION/ERUN_CLOUD_INSTANCE_ID from
+// IMDS on AWS so idle stop and the Bedrock relay still work. Injected values always win.
 func runtimeEnvWithCloudMetadata(env func(string) string, lookup func() runtimeCloudMetadata) func(string) string {
 	var once sync.Once
 	var metadata runtimeCloudMetadata
@@ -48,8 +39,7 @@ func runtimeEnvWithCloudMetadata(env func(string) string, lookup func() runtimeC
 	}
 }
 
-// runtimeCloudProviderIsAWS reads the injected provider the way the Claude
-// settings relay does: ERUN_CLOUD_PROVIDER, or an @aws provider alias.
+// runtimeCloudProviderIsAWS must agree with the Claude settings relay's provider check.
 func runtimeCloudProviderIsAWS(env func(string) string) bool {
 	provider := strings.TrimSpace(env("ERUN_CLOUD_PROVIDER"))
 	if provider == "" && strings.HasSuffix(strings.TrimSpace(env("ERUN_CLOUD_PROVIDER_ALIAS")), "@aws") {
@@ -58,11 +48,8 @@ func runtimeCloudProviderIsAWS(env func(string) string) bool {
 	return provider == "aws"
 }
 
-// lookupRuntimeIMDS reads the region and instance id with IMDSv2. An instance
-// that rejects the token request is IMDSv1-only and answers plain reads; a
-// token request that timed out means nothing is listening, so the plain read
-// is not tried and the boot does not pay a second timeout for an answer that
-// cannot come. Every failure yields empty values.
+// A rejected token request means IMDSv1, so plain reads follow; a timed-out one means
+// nothing is listening, so no second timeout is paid.
 func lookupRuntimeIMDS(endpoint string, timeout time.Duration) runtimeCloudMetadata {
 	client := &http.Client{
 		Timeout: timeout,

@@ -3,17 +3,12 @@ import type { UIAppLog, UIBuildDetails, UIEnvironment, UIEnvTrace } from '@/type
 import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 import { formatUITrace, type UITraceEntry } from './uiTraceBuffer';
 
-// The Diagnostics console's one-click, paste-ready bug report. It carries
-// whatever evidence the current DiagnosticsContext resolves to, rather than a
-// single environment-shaped report, so an orchestrator session never reads
-// "environment: none selected" with no trace at all. An unavailable
-// trace/log keeps its reason line — "unreachable" is itself evidence.
-// Mirrors the Activities drawer's "Copy failure report".
+// Diagnostics report inputs. Unavailable traces keep their reason line, which
+// is itself evidence.
 export interface DiagnosticsLinkedEnv {
   tenant: string;
   environment: string;
-  // The env's real-status label ('failed' | 'stopped' | 'runtime-stopped'),
-  // or '' when nothing is known to be wrong.
+  // '' when nothing is known to be wrong.
   status: string;
 }
 
@@ -116,9 +111,7 @@ function orchestratorContextLines(
       lines.push(`  - ${env.tenant} / ${env.environment}${env.status ? ` (${env.status})` : ''}`);
     }
   }
-  // The orchestrator's own directories belong to no environment, so they are not
-  // in the list above. Naming them here keeps a definition that works only in
-  // directories from reporting as a scope-less orchestrator, which it is not.
+  // Directories belong to no environment, so they are listed separately.
   if (orchestrator.directories.length > 0) {
     lines.push('', 'directories:');
     for (const directory of orchestrator.directories) {

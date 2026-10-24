@@ -12,14 +12,9 @@ import type { DiagnosticsContext } from '@/app/selectors';
 
 import { BrowserOpenURL, ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 
-// The Diagnostics console's two report actions: copy the context's evidence
-// as text, or open it as a prefilled github.com/sophium/erun issue. Both
-// share useDiagnosticsReportAssembly so they can never carry different
-// evidence for the same context.
+// Both report actions share useDiagnosticsReportAssembly so their evidence matches.
 
-// CopyReportButton produces the one-click bug report. It re-reads the
-// context's evidence fresh rather than reusing a polled copy, so the report
-// stays current even between poll ticks.
+// CopyReportButton re-reads the evidence rather than reusing a polled copy.
 export function CopyReportButton({ context }: { context: DiagnosticsContext }): React.ReactElement {
   const { assemble } = useDiagnosticsReportAssembly(context);
   const [status, setStatus] = React.useState('');
@@ -56,12 +51,8 @@ export function CopyReportButton({ context }: { context: DiagnosticsContext }): 
   );
 }
 
-// ReportIssueButton opens a prefilled github.com/sophium/erun issue in the
-// browser rather than shelling out to `gh`: the desktop holds no GitHub
-// token, and the operator reviewing and clicking Submit on github.com is the
-// consent step this needs, not a silent file-on-click. The full,
-// untruncated report is always copied to the clipboard too, so a body
-// trimmed to fit the URL length cap never silently drops evidence.
+// ReportIssueButton opens a prefilled issue in the browser (the desktop has no
+// GitHub token) and also copies the untruncated report, since the URL may trim it.
 export function ReportIssueButton({
   context,
 }: {

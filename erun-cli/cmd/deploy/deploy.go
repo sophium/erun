@@ -57,15 +57,11 @@ func NewDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver,
 				return err
 			}
 			deployTarget.Components = components
-			// deploy consumes a version by reference and never mints one, so it
-			// must be told which to install.
+			// deploy never mints a version.
 			if strings.TrimSpace(deployTarget.VersionOverride) == "" && !useCurrent {
 				return fmt.Errorf("deploy requires a version: pass --version <version> produced by `erun build`/`erun push`, or --current to redeploy the version this environment already runs")
 			}
-			// A scope-defaulted deploy carries no tenant/environment on the
-			// target, so name them up front: the per-env trace log and every
-			// `==> ...` line must identify the env even when the deploy fails
-			// before spec resolution names it.
+			// Resolve the scope up front so failure traces name the env.
 			tenant, environment := deploy.ResolveDeployTargetScope(store, findProjectRoot, deployTarget)
 			var closeEnvTrace func()
 			ctx, closeEnvTrace = e2e.ActivateEnvTrace(ctx, tenant, environment)
@@ -74,9 +70,7 @@ func NewDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver,
 				tenant, environment, deployTarget.VersionOverride,
 				components, deployTarget.Force, useCurrent))
 			if err := runDeploy(ctx, store, saveEnvConfig, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployHelmChart, deployTarget); err != nil {
-				// Transports that react only to `==> ...` trace lines (the desktop
-				// activity queue) need one for a deploy that fails before rollout,
-				// or they surface nothing.
+				// The desktop activity queue reacts only to `==> ...` lines.
 				ctx.Trace(deployFailedTrace(tenant, environment, err))
 				return err
 			}
@@ -93,9 +87,7 @@ func NewDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver,
 	return cmd
 }
 
-// deployFailedTrace renders the failure header transports parse for the failed
-// env. When the scope never resolved there is no env to name, so the pair is
-// dropped rather than rendered as a bare separator no reader or parser can use.
+// deployFailedTrace omits the env when the scope never resolved.
 func deployFailedTrace(tenant, environment string, err error) string {
 	if tenant != "" && environment != "" {
 		return fmt.Sprintf("==> Deploy failed %s/%s: %s", tenant, environment, err.Error())

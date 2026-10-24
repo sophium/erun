@@ -77,9 +77,6 @@ func testSSHDSyncHelp(t *testing.T) {
 	golden.Equal(t, "sshd/sync_help", normalize.Apply(result.Combined))
 }
 
-// The mirror exists only for an environment whose worktree is in a pod, so
-// asking a local-agent env to fill one is refused by name rather than by a
-// pass that quietly changes nothing.
 func testSSHDSyncRefusesAnEnvWithNoPodWorktree(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -92,8 +89,6 @@ func testSSHDSyncRefusesAnEnvWithNoPodWorktree(t *testing.T) {
 	}
 }
 
-// SSHD reaches the pod but nothing is configured to mirror, which is a
-// different fix from the one above and so a different message.
 func testSSHDSyncRefusesWhenWorkspaceSyncIsOff(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHD(t, setup, "team", "dev")
@@ -106,14 +101,10 @@ func testSSHDSyncRefusesWhenWorkspaceSyncIsOff(t *testing.T) {
 	}
 }
 
-// A dry run resolves the real pass — which pod path mirrors into which host
-// path — and stops before touching the mirror.
 func testSSHDSyncDryRunTracesTheResolvedPass(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithWorkspaceSync(t, setup, "team", "dev", 47000)
-	// An ssh that answers every remote listing with nothing keeps the pass
-	// deterministic: an empty pod worktree and an empty mirror agree, so the
-	// counts are fixed and the scenario measures the resolution, not the host.
+	// An empty ssh listing keeps the counts deterministic.
 	stubs := setup.Cwd + "/stubs"
 	fixture.StubBinary(t, stubs, "ssh", "")
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "ssh")...)
@@ -132,11 +123,7 @@ func testSSHDSyncDryRunTracesTheResolvedPass(t *testing.T) {
 	}
 }
 
-// A real pass, not just its resolution. The pod reports an empty worktree, so
-// the mirror must empty to match: the mirror is a copy of the pod, and a file
-// the pod no longer has is a file the mirror must drop. This is the lane that
-// silently did nothing for months before the delete step was decoupled from
-// the fetch.
+// The mirror must drop what the pod no longer has.
 func testSSHDSyncRealRunDropsWhatThePodNoLongerHas(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithWorkspaceSync(t, setup, "team", "dev", 47100)
@@ -152,8 +139,6 @@ func testSSHDSyncRealRunDropsWhatThePodNoLongerHas(t *testing.T) {
 		}
 	}
 
-	// An ssh that answers every remote listing with nothing: the pod's
-	// worktree is empty, which is a real state and a deterministic one.
 	stubs := setup.Cwd + "/stubs"
 	fixture.StubBinary(t, stubs, "ssh", "")
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "ssh")...)
@@ -170,17 +155,13 @@ func testSSHDSyncRealRunDropsWhatThePodNoLongerHas(t *testing.T) {
 	if !strings.Contains(result.Combined, "deleted 2") {
 		t.Fatalf("the pass must report what it removed:\n%s", result.Combined)
 	}
-	// An emptied directory is pruned rather than left as a husk.
 	if _, err := os.Stat(filepath.Join(mirror, "pkg")); !os.IsNotExist(err) {
 		t.Fatalf("expected the emptied directory to be pruned, stat err = %v", err)
 	}
 }
 
-// The mirror is the other way a darwin artifact reaches a macOS host, and the
-// pod that produced it has no codesign, so the pass that materialises it is
-// where the signature has to come from. ERUN_HOST_OS_OVERRIDE pins the darwin
-// branch; ssh answers only the outputs listing, and tar is stubbed because the
-// artifact is seeded in the mirror rather than streamed into it.
+// The pod has no codesign, so the mirror pass must sign darwin artifacts.
+// ssh answers only the outputs listing; tar is stubbed because the artifact is seeded.
 func testSSHDSyncRealRunSignsAMirroredDarwinArtifact(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithWorkspaceSync(t, setup, "team", "dev", 47300)
@@ -210,8 +191,7 @@ func testSSHDSyncRealRunSignsAMirroredDarwinArtifact(t *testing.T) {
 	if calls := readCodesignCalls(t, codesignLog); !strings.Contains(calls, "-s - -f") {
 		t.Fatalf("expected the mirrored artifact to be ad-hoc signed, got codesign calls:\n%s", calls)
 	}
-	// Read-only is about who may edit the mirror; it must not be what stops the
-	// operator running what the mirror delivered.
+	// Read-only must not stop the operator running the artifact.
 	info, err := os.Stat(artifact)
 	if err != nil {
 		t.Fatalf("stat mirrored artifact: %v", err)
@@ -224,8 +204,6 @@ func testSSHDSyncRealRunSignsAMirroredDarwinArtifact(t *testing.T) {
 	}
 }
 
-// A second pass over an already-matching mirror changes nothing, which is
-// what makes the desktop's two-second poller cheap.
 func testSSHDSyncRealRunIsANoOpOnceTheMirrorMatches(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithWorkspaceSync(t, setup, "team", "dev", 47200)
@@ -242,13 +220,8 @@ func testSSHDSyncRealRunIsANoOpOnceTheMirrorMatches(t *testing.T) {
 	}
 }
 
-// The fetch lane, which the listing-only scenarios above never reach. A pass
-// used to extract straight into the mirror, so a reader could open a file that
-// was still arriving and get a prefix of it with no error from any step. What
-// lands must be the whole file, and nothing half-written may be left behind.
-// The second pass is the other half of the contract: the publish has to
-// preserve the pod's mtime, or the fingerprint misses and every pass re-fetches
-// the whole tree.
+// A reader must never see a partially fetched file, and the publish must keep the
+// pod's mtime or every pass re-fetches the tree.
 func testSSHDSyncRealRunPublishesCompleteFilesAndRefetchesNothing(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithWorkspaceSync(t, setup, "team", "dev", 47300)
@@ -281,8 +254,6 @@ func testSSHDSyncRealRunPublishesCompleteFilesAndRefetchesNothing(t *testing.T) 
 	if !bytes.Equal(got, body) {
 		t.Fatalf("mirrored file is %d bytes, want the complete %d", len(got), len(body))
 	}
-	// Nothing half-written survives the pass: the mirror holds the published
-	// file and nothing else.
 	if files := mirrorFiles(t, mirror); len(files) != 1 || files[0] != "app/main.go" {
 		t.Fatalf("mirror holds %v, want exactly [app/main.go]", files)
 	}
@@ -378,9 +349,7 @@ func testSSHDInitDryRunWorkspaceSyncResolvesProjectRoot(t *testing.T) {
 }
 
 func testSSHDInitRealRunRemoteExecFailureSurfacesStderr(t *testing.T) {
-	// Non-retryable failure arm: the exec stderr is deliberately not one
-	// of the pod-churn tokens that trigger a retry, so init must fail
-	// immediately and surface the remote stderr.
+	// The exec stderr is not a pod-churn token, so init must not retry.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	publicKey := filepath.Join(setup.Home, "id_ed25519.pub")
@@ -399,9 +368,7 @@ func testSSHDInitRealRunRemoteExecFailureSurfacesStderr(t *testing.T) {
 	}, "\n"))
 	fixture.StubBinary(t, stubs, "helm", "")
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
-	// The exec failure must be what fails this run, not an unconfirmed runtime
-	// chart; the seam confirms erun-devops published so the deploy the init
-	// flow drives succeeds and the exec stub's Forbidden is what surfaces.
+	// Confirm erun-devops published so the exec failure is what surfaces.
 	envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 	args := []string{"sshd", "init", "team", "dev", "--public-key", publicKey, "--local-port", "64022"}
 	result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -412,10 +379,7 @@ func testSSHDInitRealRunRemoteExecFailureSurfacesStderr(t *testing.T) {
 }
 
 func testSSHDInitRealRunRetriesAfterPodNotFound(t *testing.T) {
-	// Retry loop: the first exec fails with a retryable pod-churn token,
-	// so init waits for the deployment and the second exec succeeds.
-	// Limited to a single failing attempt because each retry costs a real
-	// 5-second delay.
+	// One retryable failure only: each retry costs a real 5-second delay.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	publicKey := filepath.Join(setup.Home, "id_ed25519.pub")
@@ -448,9 +412,6 @@ func testSSHDInitRealRunRetriesAfterPodNotFound(t *testing.T) {
 	golden.Equal(t, "sshd/init_real_run_retries_after_pod_not_found", normalize.Apply(result.Combined))
 }
 
-// mirrorFiles lists every regular file under the host mirror, relative and
-// slash-normalized, so a scenario can assert the mirror holds exactly what the
-// pass published and no leftovers.
 func mirrorFiles(t *testing.T, root string) []string {
 	t.Helper()
 	var files []string

@@ -12,10 +12,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// The line has to name the image and how long it has been going, because those
-// are the two facts a reader watching a silent log has no other way to get: the
-// elapsed time is what distinguishes a build that is working from one that is
-// wedged.
 func TestFormatBuildHeartbeatNamesTheImageAndItsElapsedTime(t *testing.T) {
 	got := core.FormatBuildHeartbeat([]core.BuildHeartbeatSnapshot{{Label: "erun-devops", Elapsed: 2*time.Minute + 30*time.Second}})
 	if got != "still building erun-devops, 2m30s elapsed" {
@@ -23,8 +19,6 @@ func TestFormatBuildHeartbeatNamesTheImageAndItsElapsedTime(t *testing.T) {
 	}
 }
 
-// A concurrent build can have several images in flight, and the heartbeat must
-// still say which one is the long one rather than only how many there are.
 func TestFormatBuildHeartbeatNamesEveryImageStillBuilding(t *testing.T) {
 	got := core.FormatBuildHeartbeat([]core.BuildHeartbeatSnapshot{
 		{Label: "erun-devops", Elapsed: 9 * time.Minute},
@@ -39,9 +33,6 @@ func TestFormatBuildHeartbeatNamesEveryImageStillBuilding(t *testing.T) {
 	}
 }
 
-// The emission seam itself: a registered build is named on every beat, and a
-// build that has finished is not. This is the state the report described — for
-// the whole of a long rebuild the log said nothing about what was building.
 func TestBuildHeartbeatBeatsOnlyWhileABuildIsStillRunning(t *testing.T) {
 	clock := time.Unix(0, 0)
 	heartbeat := &core.BuildHeartbeat{Now: func() time.Time { return clock }, Emit: func(string) {}, Ticks: make(chan time.Time)}
@@ -64,8 +55,6 @@ func TestBuildHeartbeatBeatsOnlyWhileABuildIsStillRunning(t *testing.T) {
 	done() // idempotent: a second clear must not drop another image's registration
 }
 
-// Two images building at once are tracked independently, so the one that finishes
-// first stops being named while the other keeps its own elapsed time.
 func TestBuildHeartbeatTracksConcurrentBuildsIndependently(t *testing.T) {
 	clock := time.Unix(0, 0)
 	heartbeat := &core.BuildHeartbeat{Now: func() time.Time { return clock }, Emit: func(string) {}, Ticks: make(chan time.Time)}
@@ -90,8 +79,6 @@ func TestBuildHeartbeatTracksConcurrentBuildsIndependently(t *testing.T) {
 	}
 }
 
-// The loop emits on its own ticks, and finish waits for it to be gone: a
-// heartbeat that outlived its run would report a build that already finished.
 // Ticks are driven by hand so the test does not wait on wall-clock time.
 func TestBuildHeartbeatEmitsOnEveryTickUntilItIsFinished(t *testing.T) {
 	ticks := make(chan time.Time)
@@ -112,8 +99,6 @@ func TestBuildHeartbeatEmitsOnEveryTickUntilItIsFinished(t *testing.T) {
 	}
 
 	heartbeat.Finish()
-	// The loop is gone, so nothing is left to receive a tick: sends used to be
-	// accepted by it, and now nothing but this goroutine can.
 	select {
 	case ticks <- time.Now():
 		t.Fatal("the heartbeat loop outlived finish and is still ticking")
@@ -122,9 +107,6 @@ func TestBuildHeartbeatEmitsOnEveryTickUntilItIsFinished(t *testing.T) {
 	done()
 }
 
-// Dry-run does no work and must keep the goldens stable; at debug verbosity the
-// build's own BuildKit output streams live, so a heartbeat would be a second,
-// redundant signal. Neither installs one.
 func TestWithBuildProgressInstallsOneHeartbeatPerRun(t *testing.T) {
 	if ctx, _ := withBuildProgress(core.Context{DryRun: true}); ctx.Progress != nil {
 		t.Fatal("dry-run must not install a heartbeat")
@@ -139,16 +121,12 @@ func TestWithBuildProgressInstallsOneHeartbeatPerRun(t *testing.T) {
 	if ctx.Progress == nil {
 		t.Fatal("a real build run must install a heartbeat")
 	}
-	// The installed heartbeat writes to the run's own log stream, which is where
-	// the reader watching for the build's next line is looking.
 	cleared := ctx.Progress.Begin("erun-devops")
 	ctx.Progress.Beat()
 	cleared()
 	if got := log.String(); !strings.Contains(got, "still building erun-devops, 0s elapsed") {
 		t.Fatalf("heartbeat must reach the run's log stream, got %q", got)
 	}
-	// The sequential path calls this once per image; a second emitter would
-	// restart the clock every image's elapsed time is measured from.
 	again, secondStop := withBuildProgress(ctx)
 	defer secondStop()
 	if again.Progress != ctx.Progress {
@@ -156,9 +134,6 @@ func TestWithBuildProgressInstallsOneHeartbeatPerRun(t *testing.T) {
 	}
 }
 
-// The reproduction of the reported failure: through the whole of a long image
-// build, nothing in the log named the image that was building or how long it had
-// been going, so a working rebuild was indistinguishable from a wedged one.
 func TestExecuteDockerBuildNamesTheImageItIsBuildingWhileItRuns(t *testing.T) {
 	clock := time.Unix(0, 0)
 	heartbeat := &core.BuildHeartbeat{Now: func() time.Time { return clock }, Emit: func(string) {}, Ticks: make(chan time.Time)}

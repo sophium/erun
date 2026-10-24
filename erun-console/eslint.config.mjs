@@ -5,18 +5,11 @@ import simpleImportSort from 'eslint-plugin-simple-import-sort';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
-// Lint config for erun-console. Mirrors erun-ui/frontend/eslint.config.mjs so the
-// hosted SPA and the desktop frontend share one rigor bar: type-aware
-// typescript-eslint (strictTypeChecked + stylisticTypeChecked), complexity:10,
-// max-lines-per-function:100, max-lines:500, React hooks/refresh rules, and
-// jsx-a11y. Every rule is `error`; inline disables and rule downgrades are not
-// allowed (see root AGENTS.md: fix lint findings by correcting the code).
+// Mirrors erun-ui/frontend/eslint.config.mjs; inline disables and rule downgrades are not allowed.
 
 export default tseslint.config(
   {
-    // `playwright/` is a separate yarn package (the OIDC sign-in e2e) with its
-    // own eslint/tsconfig — like erun-ui/frontend vs erun-ui/playwright — so the
-    // app's type-aware lint must not parse it against the app tsconfig.
+    // `playwright/` is a separate package with its own tsconfig.
     ignores: ['dist', 'node_modules', 'playwright', '*.config.{js,mjs,ts}'],
   },
   ...tseslint.configs.strictTypeChecked,
@@ -78,8 +71,7 @@ export default tseslint.config(
     },
   },
   {
-    // Test/spec + setup files: relax the complexity + length budgets and the
-    // type-aware rules that fire on Testing Library / mocking patterns.
+    // Testing Library and mocking patterns trip the budgets and type-aware rules.
     files: ['**/*.{test,spec}.{ts,tsx}', 'src/test/**'],
     rules: {
       complexity: 'off',

@@ -127,9 +127,6 @@ func TestProvisionRegistryCredentialSecretNoRegistries(t *testing.T) {
 	}
 }
 
-// TestProvisionRegistryCredentialSecretNoHostCredential proves the function
-// never touches kubectl when the host has nothing to provision: it points
-// ERUN_KUBECTL_BIN at a script that fails the test if invoked at all.
 func TestProvisionRegistryCredentialSecretNoHostCredential(t *testing.T) {
 	useDockerConfigDir(t, t.TempDir())
 	useGHToken(t, func(string) (string, bool) { return "", false })
@@ -146,9 +143,7 @@ func TestProvisionRegistryCredentialSecretNoHostCredential(t *testing.T) {
 	}
 }
 
-// failingBinaryPath writes a script that fails the test if ever executed, so a
-// test asserting "kubectl must not run" catches a regression as a hard
-// failure rather than a silently-passed apply.
+// failingBinaryPath writes a script that fails the test if executed.
 func failingBinaryPath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

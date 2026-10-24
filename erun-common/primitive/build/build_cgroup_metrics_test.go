@@ -190,8 +190,7 @@ func TestBuildCgroupMetricsFromSnapshotsComputesIOAndPeakDeltas(t *testing.T) {
 }
 
 func TestBuildCgroupMetricsFromSnapshotsClampsNegativeDeltaToZero(t *testing.T) {
-	// Simulates the cgroup being recreated between samples (e.g. a pod
-	// restart mid-build): counters go backwards rather than forwards.
+	// A cgroup recreated between samples makes counters go backwards.
 	before := core.BuildCgroupSnapshot{Applicable: true, Ok: true, Counters: core.BuildCgroupCounters{UsageUsec: 5_000_000, Periods: 50}}
 	after := core.BuildCgroupSnapshot{Applicable: true, Ok: true, Counters: core.BuildCgroupCounters{UsageUsec: 1_000_000, Periods: 10}}
 	metrics := core.BuildCgroupMetricsFromSnapshots(before, after, time.Second)

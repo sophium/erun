@@ -9,101 +9,48 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// An environment's ability to run an in-pod agent is a property of its deployed
-// pod template, not of anything erun records about the environment. The runtime
-// chart renders the model-credential wiring into the container's environment
-// only from a template new enough to consume the gateway values erun already
-// passes it (erun-devops/k8s/erun-devops/templates/service.yaml, whose gateway
-// block is gated on claude.openRouterBaseURL). A template that predates that
-// block drops those values silently: the deploy succeeds, the release reports
-// deployed, the pod is Running and Ready, and the environment can start no
-// agent at all -- a state an operator then meets as whatever error the model
-// client emits with no provider configured, which is a statement about the
-// client's guess rather than about this environment.
-//
-// Nothing in the deploy diagnosis read a container's environment, so no surface
-// could tell that state apart from a healthy one. This file is that read. It is
-// deliberately a *disagreement* test rather than a presence test: an environment
-// with no gateway catalog is not broken -- it may run on Bedrock, on injected
-// host credentials, or on a sign-in stored in its own home volume -- and erun
-// has no business asserting such an environment cannot run an agent. What erun
-// does know is the gateway it configured for this environment, so the honest
-// finding is the disagreement between that intent and the deployed template.
-// The intent is resolved through EffectiveGateway, the same resolver deploy
-// itself uses, so the diagnosis cannot drift from what a deploy would do.
+// A pod template predating the chart's gateway block drops the gateway values
+// silently yet deploys healthy. This read flags only a disagreement with the
+// gateway erun configured (via EffectiveGateway); an env without one is not broken.
 
-// GatewayBaseURLEnv is the container environment variable the runtime chart
-// renders once a gateway is configured for the environment. Its presence is the
-// pod-side signal that the deployed template consumed the gateway values; the
-// runtime boot's settings relay keys off the same variable
-// (newClaudeSettingsRelay), so there is no separate flag to add here.
+// GatewayBaseURLEnv is rendered once a gateway is configured; the runtime settings relay keys off it too.
 const GatewayBaseURLEnv = "ANTHROPIC_BASE_URL"
 
-// RuntimeAgentCredentialState is the resolved verdict on whether an
-// environment's runtime pod carries the model-provider wiring erun configured
-// for it.
+// RuntimeAgentCredentialState is the verdict on the pod's model-provider wiring.
 type RuntimeAgentCredentialState string
 
 const (
-	// RuntimeAgentCredentialNotApplicable is the answer for an environment no
-	// gateway routes. It asserts nothing about agent capability: an environment
-	// outside the catalog may reach a provider by other means, and a diagnosis
-	// has no standing to call that broken.
+	// RuntimeAgentCredentialNotApplicable asserts nothing: an env no gateway routes may reach a provider otherwise.
 	RuntimeAgentCredentialNotApplicable RuntimeAgentCredentialState = "not-applicable"
-	// RuntimeAgentCredentialConfigured is the healthy answer for a
-	// gateway-routed environment: the deployed pod template carries the routing
-	// variable.
-	RuntimeAgentCredentialConfigured RuntimeAgentCredentialState = "configured"
-	// RuntimeAgentCredentialMissing is the defect this read exists for: a
-	// gateway routes this environment, and the deployed pod template carries no
-	// routing variable. The container has no provider and no credential, so no
-	// agent job in it can serve a turn.
+	RuntimeAgentCredentialConfigured    RuntimeAgentCredentialState = "configured"
+	// RuntimeAgentCredentialMissing: a gateway routes the env but the template lacks the routing variable.
 	RuntimeAgentCredentialMissing RuntimeAgentCredentialState = "missing"
-	// RuntimeAgentCredentialUnknown is "could not tell" -- the template could
-	// not be read, or was not the shape this read recognises. It is never
-	// reported as Missing: an unread template is not evidence of absence.
+	// RuntimeAgentCredentialUnknown is never reported as Missing: an unread template is not evidence of absence.
 	RuntimeAgentCredentialUnknown RuntimeAgentCredentialState = "unknown"
 )
 
-// RuntimeAgentCredentialStatus is the read-only answer to "can this
-// environment's runtime pod reach the model provider erun configured for it?".
+// RuntimeAgentCredentialStatus answers whether the runtime pod can reach the configured provider.
 type RuntimeAgentCredentialStatus struct {
 	State RuntimeAgentCredentialState `json:"state"`
-	// GatewayBaseURL is the gateway this environment is routed through, empty
-	// when none applies. It is a routing address, never a credential.
+	// GatewayBaseURL is a routing address, never a credential.
 	GatewayBaseURL string `json:"gatewayBaseURL,omitempty"`
-	// Container is the pod-template container the environment was read from,
-	// empty when no read was needed.
-	Container string `json:"container,omitempty"`
-	// ReadError is non-empty when the template's environment could not be
-	// observed at all -- a failed read, or a pod template with no such
-	// container. It is never set for a template that was read and genuinely
-	// carries nothing; that is Missing.
+	Container      string `json:"container,omitempty"`
+	// ReadError is set only when the template could not be observed, never for a genuinely empty one.
 	ReadError string `json:"readError,omitempty"`
 }
 
-// RuntimeAgentCredentialParams is the already-resolved input set
-// ResolveRuntimeAgentCredentialStatus composes. ContainerEnvObserved carries its
-// own bit so a caller that could not read the template says so, instead of
-// leaving an empty name list indistinguishable from a template that really
-// carries nothing.
+// RuntimeAgentCredentialParams carries ContainerEnvObserved so an unread template
+// is distinguishable from an empty one.
 type RuntimeAgentCredentialParams struct {
-	Claude  config.EnvironmentClaudeConfig
-	Gateway *config.OpenRouterConfig
-	// Container names the container whose environment was read.
-	Container string
-	// ContainerEnvObserved is true only when the deployed pod template's
-	// container environment was actually read.
+	Claude               config.EnvironmentClaudeConfig
+	Gateway              *config.OpenRouterConfig
+	Container            string
 	ContainerEnvObserved bool
-	// ContainerEnvNames holds the variable names that environment sets. Names
-	// only: a name is what decides routing, and no value is read, kept, or
-	// reported anywhere along this path.
+	// ContainerEnvNames holds names only; no value is read or reported.
 	ContainerEnvNames []string
 }
 
-// ResolveRuntimeAgentCredentialStatus is pure: it reaches for nothing it was
-// not given, and in particular never infers a missing credential from an unread
-// template.
+// ResolveRuntimeAgentCredentialStatus is pure and never infers Missing from an unread template.
 func ResolveRuntimeAgentCredentialStatus(params RuntimeAgentCredentialParams) RuntimeAgentCredentialStatus {
 	status := RuntimeAgentCredentialStatus{Container: strings.TrimSpace(params.Container)}
 	gateway := config.EffectiveGateway(params.Claude, params.Gateway)
@@ -126,19 +73,13 @@ func ResolveRuntimeAgentCredentialStatus(params RuntimeAgentCredentialParams) Ru
 	return status
 }
 
-// runtimeDeploymentEnvArgs builds the read-only `kubectl get deployment` that
-// returns the deployed pod template. The Deployment is the right subject rather
-// than a running pod: the template is what the chart rendered, so it is the
-// artifact whose age is the whole question, and it does not depend on which
-// ReplicaSet a rollout happens to have reached.
+// runtimeDeploymentEnvArgs reads the Deployment, not a pod: its template is what
+// the chart rendered, independent of rollout progress.
 func runtimeDeploymentEnvArgs(req config.ShellLaunchParams) []string {
 	args := config.KubectlTargetArgs(req)
 	return append(args, "get", "deployment", config.RuntimeReleaseName(req.Tenant), "-o", "json")
 }
 
-// runtimeDeploymentDoc is the deliberately partial parse of that read: the only
-// thing wanted from a Deployment here is its containers' environment variable
-// names.
 type runtimeDeploymentDoc struct {
 	Spec struct {
 		Template struct {
@@ -156,15 +97,9 @@ type runtimeDeploymentContainer struct {
 	} `json:"env"`
 }
 
-// RuntimeDeploymentContainerEnvNames returns the environment variable names the
-// named container's template declares. found is false when the template carries
-// no such container, which is a shape this read does not recognise rather than
-// an environment that carries nothing.
-//
-// It reads explicit `env` entries only. That is the whole contract the chart
-// has with this read: the credential itself arrives as a secretKeyRef, so the
-// container's environment is the one place erun can check for the routing
-// variable without ever handling the secret's value.
+// RuntimeDeploymentContainerEnvNames returns the container's explicit env names;
+// found is false when no such container exists. The credential is a secretKeyRef,
+// so names suffice without touching its value.
 func RuntimeDeploymentContainerEnvNames(raw []byte, container string) (names []string, found bool) {
 	var doc runtimeDeploymentDoc
 	if json.Unmarshal(raw, &doc) != nil {
@@ -185,12 +120,8 @@ func RuntimeDeploymentContainerEnvNames(raw []byte, container string) (names []s
 	return nil, false
 }
 
-// runtimeAgentCredentialApplicability answers whether the check applies to this
-// environment at all, without reading anything: an environment no gateway
-// routes resolves NotApplicable, and a routed one is left Unknown -- "not
-// observed" -- for the read to resolve. It is what a diagnosis that never got
-// to read (an unreachable cluster) still reports, so a caller can tell a check
-// that does not apply from one that could not run.
+// runtimeAgentCredentialApplicability resolves NotApplicable or Unknown without
+// reading, so an unreachable cluster still distinguishes the two.
 func runtimeAgentCredentialApplicability(req config.ShellLaunchParams) RuntimeAgentCredentialStatus {
 	return ResolveRuntimeAgentCredentialStatus(RuntimeAgentCredentialParams{
 		Claude:    req.Claude,
@@ -199,11 +130,7 @@ func runtimeAgentCredentialApplicability(req config.ShellLaunchParams) RuntimeAg
 	})
 }
 
-// inspectRuntimeAgentCredentials reads the deployed pod template's container
-// environment and resolves the verdict.
-//
-// An install with no gateway configured pays nothing: the read is skipped
-// outright rather than resolved from an environment that was never fetched.
+// inspectRuntimeAgentCredentials skips the read entirely when no gateway is configured.
 func inspectRuntimeAgentCredentials(ctx core.Context, req config.ShellLaunchParams) RuntimeAgentCredentialStatus {
 	params := RuntimeAgentCredentialParams{
 		Claude:    req.Claude,

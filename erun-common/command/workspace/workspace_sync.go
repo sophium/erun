@@ -15,30 +15,23 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// Workspace sync mirrors a remote-agent environment's pod worktree onto the
-// host as plain files, one way. It lives here rather than in the desktop because
-// every transport an operator or orchestrator reaches erun through — the CLI,
-// the environment MCP, the desktop poller — needs the same pass, and a mirror
-// that only the GUI can fill is a mirror an orchestrator cannot repair.
+// Workspace sync mirrors a pod worktree onto the host, one way. It lives here so every
+// transport (CLI, MCP, desktop) runs the same pass.
 
-// WorkspaceSyncParams addresses one pass: the SSH host alias that reaches the
-// pod, the worktree inside it, and the host directory that mirrors it.
+// WorkspaceSyncParams addresses one sync pass.
 type WorkspaceSyncParams struct {
 	HostAlias  string
 	RemotePath string
 	LocalPath  string
 }
 
-// WorkspaceSyncResult is what one pass changed, and is what every transport
-// reports back so the counts an operator sees are the same everywhere.
+// WorkspaceSyncResult is what one pass changed.
 type WorkspaceSyncResult struct {
 	FilesCopied     int
 	FilesDeleted    int
 	ArtifactsCopied int
 }
 
-// validateWorkspaceSyncParams trims the params in place and rejects a sync that
-// is missing the host alias, remote path, or local path.
 func validateWorkspaceSyncParams(params *WorkspaceSyncParams) error {
 	params.HostAlias = strings.TrimSpace(params.HostAlias)
 	params.RemotePath = strings.TrimSpace(params.RemotePath)
@@ -68,17 +61,11 @@ func SyncWorkspaceOnce(ctx context.Context, params WorkspaceSyncParams) (Workspa
 	if resolved.notGitRepo {
 		return WorkspaceSyncResult{}, nil
 	}
-	// Fetch only files whose size or mtime differs from the mirror, so a steady
-	// state costs one metadata listing instead of re-transferring the whole tree
-	// every pass; tar preserves mtime, so an unchanged file matches next pass.
+	// Fetch only files whose size or mtime differs; tar preserves mtime.
 	remoteMeta := remoteWorkspaceFileMeta(ctx, params.HostAlias, params.RemotePath)
 	toFetch := changedWorkspaceSyncPaths(resolved.remote, remoteMeta, resolved.localMeta)
 	pass.fetch = len(toFetch)
-	// A fetch failure must NOT strand deletions: deletion correctness depends only
-	// on the remote file listing, not on whether every changed file transferred.
-	// Returning here on error let one un-fetchable file block every deletion, so
-	// files removed in the pod lingered in the mirror forever. Record the error
-	// and still run the delete + outputs steps.
+	// A fetch failure must not block deletions, which depend only on the remote listing.
 	var fetchErr error
 	if len(toFetch) > 0 {
 		fetchErr = extractRemoteWorkspaceFiles(ctx, params.HostAlias, params.RemotePath, params.LocalPath, toFetch)
@@ -104,32 +91,22 @@ func SyncWorkspaceOnce(ctx context.Context, params WorkspaceSyncParams) (Workspa
 	return result, nil
 }
 
-// workspaceSyncStagingSubdir is where a pass lands bytes that are still
-// arriving. tar extracts in place, so extracting straight into the mirror let a
-// reader open a file mid-write and get a prefix that looks complete — a
-// truncated Mach-O reads as "not signed at all" rather than as truncated, which
-// is evidence for the wrong conclusion. Staging then renaming publishes each
-// file atomically, and keeps the only partial state in a directory that says so
-// by name. It sits inside the lane it serves so the rename never crosses a
-// filesystem, and both lanes skip it so staged bytes are never mistaken for
-// mirror content.
+// workspaceSyncStagingSubdir holds bytes still arriving; files are renamed into the
+// mirror so readers never see a partial file. It lives inside the lane so rename stays
+// on one filesystem, and both lanes skip it.
 const workspaceSyncStagingSubdir = ".erun-sync-staging"
 
-// workspaceSyncPaths is one pass's view of both sides of the mirror.
 type workspaceSyncPaths struct {
 	remote     []string
 	localMeta  map[string]workspaceFileMeta
 	notGitRepo bool
-	// stale counts index entries the pod's worktree no longer has — the
-	// deletions a pass exists to propagate, and the number that stayed
-	// invisible while the mirror kept them. staleUnknown says the listing
-	// itself failed, which reads the same as "none" without being told.
+	// stale counts index entries the worktree no longer has; staleUnknown means the listing failed.
 	stale        int
 	staleUnknown bool
 }
 
-// resolveWorkspaceSyncPaths reports notGitRepo=true (with a nil error) when the
-// remote is not a Git repository; callers treat that as a no-op sync pass.
+// resolveWorkspaceSyncPaths reports notGitRepo=true with a nil error when the remote
+// is not a Git repository.
 func resolveWorkspaceSyncPaths(ctx context.Context, params WorkspaceSyncParams) (workspaceSyncPaths, error) {
 	remotePaths, err := remoteWorkspaceGitVisibleFiles(ctx, params.HostAlias, params.RemotePath)
 	if errors.Is(err, errRemoteNotGitRepo) {
@@ -138,23 +115,13 @@ func resolveWorkspaceSyncPaths(ctx context.Context, params WorkspaceSyncParams) 
 	if err != nil {
 		return workspaceSyncPaths{}, err
 	}
-	// `git ls-files -c` reports the index, not the worktree, so a file the agent
-	// removed without staging the removal keeps appearing as a remote file — and
-	// the mirror, which deletes exactly what the remote listing omits, keeps it
-	// forever. Subtracting the index entries whose file is gone is what makes a
-	// deletion in the pod reach the host at all.
+	// `git ls-files -c` lists the index, so subtract entries whose file is gone or an
+	// unstaged deletion never reaches the mirror.
 	missing, missingKnown := remoteWorkspaceMissingFiles(ctx, params.HostAlias, params.RemotePath)
 	remotePaths = excludeWorkspaceSyncPaths(remotePaths, missing)
-	// Symlinks (e.g. the per-module CLAUDE.md -> AGENTS.md pointers) cannot
-	// round-trip to a plain-directory host mirror on Windows: their fingerprint
-	// never matches, so they re-fetch every pass, and extracting them can fail —
-	// which (before the delete step was decoupled from fetch) stranded every
-	// deletion. Drop them from the synced set; AGENTS.md itself still syncs as a
-	// regular file, so the mirror loses only the redundant pointer.
+	// Symlinks cannot round-trip to a Windows plain-directory mirror; their targets still sync.
 	remotePaths = excludeWorkspaceSyncPaths(remotePaths, remoteWorkspaceSymlinkSet(ctx, params.HostAlias, params.RemotePath))
-	// The mirror is a one-way copy, so its file set comes from a plain directory
-	// walk — the pod already applied the repo's ignore rules via
-	// `git ls-files --exclude-standard`, so the host needs no git of its own.
+	// The pod already applied ignore rules, so the host needs no git.
 	localMeta, err := localWorkspaceSourceFileMeta(params.LocalPath)
 	if err != nil {
 		return workspaceSyncPaths{}, err
@@ -181,10 +148,7 @@ func WorkspaceSyncSSHReady(ctx context.Context, hostAlias string) error {
 	return nil
 }
 
-// EnsureLocalWorkspaceSyncTarget makes the mirror path usable as a sync target:
-// it must be a directory, created if missing. The mirror is a one-way,
-// read-only copy the sync owns, so it deliberately does NOT need to be a git
-// worktree — sync reconciles files by listing the directory, not by local git.
+// EnsureLocalWorkspaceSyncTarget ensures the mirror path is a directory; it need not be a git worktree.
 func EnsureLocalWorkspaceSyncTarget(localPath string) error {
 	if err := os.MkdirAll(localPath, 0o755); err != nil {
 		return fmt.Errorf("create local workspace path %s: %w", localPath, err)
@@ -219,11 +183,8 @@ func remoteWorkspaceGitVisibleFiles(ctx context.Context, hostAlias, remotePath s
 	return parseWorkspaceSyncPathList(output), nil
 }
 
-// remoteWorkspaceMissingFiles returns the index entries whose file is no longer
-// in the pod's worktree — what `git ls-files -c` keeps reporting after a plain
-// `rm`. Best-effort: a listing failure degrades the pass to keeping those files
-// rather than failing outright, and reports false so the per-pass diagnostic can
-// say "unknown" instead of the "none missing" it would otherwise look like.
+// remoteWorkspaceMissingFiles returns index entries missing from the worktree. Best-effort:
+// false means the listing failed.
 func remoteWorkspaceMissingFiles(ctx context.Context, hostAlias, remotePath string) (map[string]struct{}, bool) {
 	script := fmt.Sprintf("cd %s && git ls-files -dz", core.ShellQuote(remotePath))
 	cmd := core.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
@@ -235,11 +196,7 @@ func remoteWorkspaceMissingFiles(ctx context.Context, hostAlias, remotePath stri
 	return pathSet(parseWorkspaceSyncPathList(output)), true
 }
 
-// remoteWorkspaceSymlinkSet returns the git-tracked symlink paths (mode 120000)
-// in the remote worktree. Symlinks cannot round-trip to a plain-directory host
-// mirror on Windows, so the sync excludes them (see resolveWorkspaceSyncPaths).
-// Best-effort: a listing failure yields nil, so the sync degrades to keeping the
-// symlinks rather than failing the pass.
+// remoteWorkspaceSymlinkSet returns tracked symlink paths; nil on failure.
 func remoteWorkspaceSymlinkSet(ctx context.Context, hostAlias, remotePath string) map[string]struct{} {
 	script := fmt.Sprintf("cd %s && git ls-files -sz --exclude-standard", core.ShellQuote(remotePath))
 	cmd := core.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
@@ -251,9 +208,6 @@ func remoteWorkspaceSymlinkSet(ctx context.Context, hostAlias, remotePath string
 	return parseGitLsFilesSymlinkPaths(output)
 }
 
-// parseGitLsFilesSymlinkPaths reads `git ls-files -sz` NUL-delimited records
-// (`<mode> <object> <stage>\t<path>`) and returns the paths whose mode is the
-// symlink mode 120000.
 func parseGitLsFilesSymlinkPaths(output []byte) map[string]struct{} {
 	set := make(map[string]struct{})
 	for _, record := range bytes.Split(output, []byte{0}) {
@@ -269,8 +223,6 @@ func parseGitLsFilesSymlinkPaths(output []byte) map[string]struct{} {
 	return set
 }
 
-// excludeWorkspaceSyncPaths drops a set of paths from the git-visible list,
-// preserving order. An empty set returns the input unchanged.
 func excludeWorkspaceSyncPaths(paths []string, excluded map[string]struct{}) []string {
 	if len(excluded) == 0 {
 		return paths
@@ -285,20 +237,13 @@ func excludeWorkspaceSyncPaths(paths []string, excluded map[string]struct{}) []s
 	return kept
 }
 
-// workspaceFileMeta is the change-detection fingerprint for one mirrored file:
-// its size and mtime (unix seconds). tar preserves mtime on extract, so a file
-// left unchanged in the pod keeps the same fingerprint on the host and is
-// skipped on the next pass.
+// workspaceFileMeta is a file's size and mtime fingerprint.
 type workspaceFileMeta struct {
 	Size  int64
 	MTime int64
 }
 
-// localWorkspaceSourceFileMeta fingerprints the mirror's source-lane files with
-// a plain filesystem walk, so the host copy needs no local git. It skips the
-// operator's own .git (never synced or pruned) and the outputs lane's
-// .erun-outputs subdir, keeping only the paths the source lane owns
-// (SafeWorkspaceSyncPath). A missing mirror yields an empty set.
+// localWorkspaceSourceFileMeta walks the mirror's source lane, skipping .git and .erun-outputs.
 func localWorkspaceSourceFileMeta(root string) (map[string]workspaceFileMeta, error) {
 	meta := make(map[string]workspaceFileMeta)
 	err := filepath.Walk(root, func(p string, info os.FileInfo, walkErr error) error {
@@ -330,11 +275,7 @@ func localWorkspaceSourceFileMeta(root string) (map[string]workspaceFileMeta, er
 	return meta, nil
 }
 
-// remoteWorkspaceFileMeta fingerprints the pod's Git-visible files (size + mtime)
-// so a pass can fetch only what changed. It is best-effort: any listing or parse
-// failure yields no fingerprint for a path, and changedWorkspaceSyncPaths then
-// fetches that path — so correctness never depends on the metadata, only the
-// transfer volume does.
+// remoteWorkspaceFileMeta is best-effort: a path with no fingerprint is simply fetched.
 func remoteWorkspaceFileMeta(ctx context.Context, hostAlias, remotePath string) map[string]workspaceFileMeta {
 	script := fmt.Sprintf("cd %s && git ls-files -coz --exclude-standard | xargs -0 -r stat -c '%%s %%Y %%n'", core.ShellQuote(remotePath))
 	cmd := core.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
@@ -346,9 +287,7 @@ func remoteWorkspaceFileMeta(ctx context.Context, hostAlias, remotePath string) 
 	return parseWorkspaceFileMeta(string(output))
 }
 
-// parseWorkspaceFileMeta reads `stat -c '%s %Y %n'` lines (size, mtime, path).
-// The path is the remainder after the first two spaces, so paths with spaces
-// parse correctly; an unparseable line is skipped (its path is then fetched).
+// parseWorkspaceFileMeta takes the path as the remainder after two spaces, so paths may contain spaces.
 func parseWorkspaceFileMeta(output string) map[string]workspaceFileMeta {
 	meta := make(map[string]workspaceFileMeta)
 	for _, line := range strings.Split(output, "\n") {
@@ -373,9 +312,7 @@ func parseWorkspaceFileMeta(output string) map[string]workspaceFileMeta {
 	return meta
 }
 
-// changedWorkspaceSyncPaths returns, in remotePaths order, the paths a pass must
-// fetch: those missing locally, changed (size or mtime differ), or whose
-// fingerprint is unknown on either side (fetch when unsure).
+// changedWorkspaceSyncPaths fetches anything missing, changed, or of unknown fingerprint.
 func changedWorkspaceSyncPaths(remotePaths []string, remoteMeta, localMeta map[string]workspaceFileMeta) []string {
 	changed := make([]string, 0, len(remotePaths))
 	for _, path := range remotePaths {
@@ -397,10 +334,8 @@ func sortedWorkspaceFileMetaKeys(meta map[string]workspaceFileMeta) []string {
 	return keys
 }
 
-// extractRemoteWorkspaceFiles fetches paths from the pod into localPath. The
-// archive lands in a staging dir and each file is renamed into place afterwards,
-// so nothing reading the mirror can observe a half-written file; a pass that
-// fails, is cancelled, or is killed leaves the mirror on its previous content.
+// extractRemoteWorkspaceFiles stages the archive then renames each file, so a failed
+// pass leaves the mirror on its previous content.
 func extractRemoteWorkspaceFiles(ctx context.Context, hostAlias, remotePath, localPath string, paths []string) error {
 	staging, err := prepareWorkspaceSyncStaging(localPath)
 	if err != nil {
@@ -413,25 +348,11 @@ func extractRemoteWorkspaceFiles(ctx context.Context, hostAlias, remotePath, loc
 	return publishStagedWorkspaceFiles(staging, localPath)
 }
 
-// workspaceSyncStagingStaleAge is how old an orphaned staging directory must be
-// before a pass treats it as debris from a killed process rather than a
-// concurrent pass still extracting into it. Even a first, whole-tree populate
-// finishes in minutes, so an hour leaves a wide margin against ever mistaking a
-// slow-but-alive pass for a crash.
+// workspaceSyncStagingStaleAge separates a killed pass's debris from a slow live one.
 const workspaceSyncStagingStaleAge = time.Hour
 
-// prepareWorkspaceSyncStaging gives this pass its own staging directory, unique
-// so a concurrent pass against the same LocalPath -- the desktop's own 2-second
-// sync poller and a manually invoked `erun sshd sync` can both reach the same
-// mirror -- never shares, and never destroys, another pass's in-flight
-// extraction. Before this, every pass wiped and recreated one fixed-name
-// staging dir at the start of its own run; a concurrent pass mid-extraction
-// into that same directory saw it vanish out from under its still-running tar,
-// which then failed to create the child directories it needed and exited
-// non-zero even though most files had already extracted cleanly.
-// Debris a killed pass leaves behind -- the one case a fixed name used to clean
-// up immediately -- is swept once it is unambiguously stale rather than on
-// every pass, since a fresh directory might belong to a pass still running.
+// prepareWorkspaceSyncStaging uses a unique dir per pass so concurrent passes on one
+// mirror (desktop poller and `erun sshd sync`) never destroy each other's extraction.
 func prepareWorkspaceSyncStaging(localPath string) (string, error) {
 	sweepStaleWorkspaceSyncStagingDirs(localPath)
 	staging, err := os.MkdirTemp(localPath, workspaceSyncStagingSubdir+"-")
@@ -441,12 +362,7 @@ func prepareWorkspaceSyncStaging(localPath string) (string, error) {
 	return staging, nil
 }
 
-// sweepStaleWorkspaceSyncStagingDirs removes staging directories left behind by
-// a pass that was killed before its own deferred cleanup could run. It is
-// best-effort: a listing failure or a per-entry removal failure is not
-// reported, since a stale directory left in place costs disk space, not
-// correctness (workspaceSyncStagingSubdir-prefixed paths are already excluded
-// from every mirror read).
+// sweepStaleWorkspaceSyncStagingDirs is best-effort: leftover staging dirs cost disk, not correctness.
 func sweepStaleWorkspaceSyncStagingDirs(localPath string) {
 	entries, err := os.ReadDir(localPath)
 	if err != nil {
@@ -464,10 +380,8 @@ func sweepStaleWorkspaceSyncStagingDirs(localPath string) {
 	}
 }
 
-// publishStagedWorkspaceFiles moves each staged entry onto its final path with
-// rename(2), so a reader sees either the previous file or the complete new one.
-// Symlinks publish the same way — filepath.Walk lstats, so a link moves as a
-// link rather than being followed.
+// publishStagedWorkspaceFiles renames each entry so readers see the old or complete new file;
+// Walk lstats, so symlinks move as links.
 func publishStagedWorkspaceFiles(staging, localPath string) error {
 	return filepath.Walk(staging, func(p string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
@@ -491,8 +405,6 @@ func publishStagedWorkspaceFiles(staging, localPath string) error {
 	})
 }
 
-// streamRemoteWorkspaceArchive pipes the pod's tar of paths into an extract
-// rooted at destination.
 func streamRemoteWorkspaceArchive(ctx context.Context, hostAlias, remotePath, destination string, paths []string) error {
 	script := fmt.Sprintf("cd %s && tar --null --ignore-failed-read -T - -cf -", core.ShellQuote(remotePath))
 	sshCmd := core.CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
@@ -618,12 +530,8 @@ func SafeWorkspaceSyncPath(value string) bool {
 	return !isReservedWorkspaceSyncPath(cleaned)
 }
 
-// isReservedWorkspaceSyncPath reports whether cleaned falls under one of the
-// three subtrees a lane must never claim: the operator's own .git, the
-// artifact mirror the outputs lane owns, and any staging subdir, whose
-// contents are bytes still arriving rather than mirror content. A staging dir
-// carries a random suffix (prepareWorkspaceSyncStaging), so it is matched by
-// prefix rather than an exact name.
+// isReservedWorkspaceSyncPath matches .git, the outputs mirror, and staging dirs (by prefix,
+// since they carry a random suffix).
 func isReservedWorkspaceSyncPath(cleaned string) bool {
 	if isWorkspaceSyncStagingPath(cleaned) {
 		return true
@@ -636,8 +544,6 @@ func isReservedWorkspaceSyncPath(cleaned string) bool {
 	return false
 }
 
-// isWorkspaceSyncStagingPath reports whether cleaned's first path segment is a
-// workspace-sync staging directory.
 func isWorkspaceSyncStagingPath(cleaned string) bool {
 	first := cleaned
 	if idx := strings.IndexByte(cleaned, '/'); idx >= 0 {

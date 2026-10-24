@@ -1,14 +1,6 @@
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 
-// restartNoticeText picks the accurate reason for the amber notice below.
-// restartRequired (an environment link added or removed) always takes the
-// tools-specific wording, since it is the one guaranteed true; a role-only
-// edit (roleChanged) gets its own honest wording instead of being folded into
-// the same sentence — a role never changes which MCP tools the session holds,
-// so claiming "tools are missing" for it would be a false diagnosis (root
-// AGENTS.md § "Smooth, Seamless, No Dead Ends": distinguish causes before
-// writing copy). Changed launch settings get their own wording for the same
-// reason: a session fixes its gateway, model and effort when it launches.
+// restartNoticeText: only link changes claim missing tools; role and launch-setting changes get their own wording.
 export function restartNoticeText(editing: OrchestratorInfo): string | null {
   if (editing.restartRequired) {
     return 'Its environments changed while it was running. The session still holds tools for what it was linked to before and none for what was added since.';

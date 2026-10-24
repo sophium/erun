@@ -19,14 +19,8 @@ func describeRuntimeBootConfig(boot runtimeBoot) string {
 	return "write the erun config for " + boot.tenant() + "/" + boot.environment() + " under " + filepath.Join(boot.configHome(), configpkg.ConfigRoot)
 }
 
-// writeRuntimeBootConfig writes the pod's erun config from the environment the
-// chart injects: the root config's default tenant and infrastructure cloud
-// provider/context, the tenant's default environment, and the environment's
-// projection (type, contexts, registries, idle policy) plus its repository path.
-// The projection is ResolveInjectedRuntimeConfig, the same one `erun doctor
-// --sync-config` reconciles against, so a freshly booted pod is in sync by
-// construction. Keys the injection does not carry are preserved, as every
-// config writer preserves them.
+// writeRuntimeBootConfig writes ResolveInjectedRuntimeConfig's projection, the one
+// `erun doctor --sync-config` checks, so a booted pod is in sync by construction.
 func writeRuntimeBootConfig(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	injected, ok := shared.ResolveInjectedRuntimeConfig(boot.env)
 	if !ok {
@@ -76,9 +70,7 @@ func writeRuntimeBootTenantConfig(configHome string, injected shared.InjectedRun
 	return writeRuntimeBootYAML(path, tenant)
 }
 
-// writeRuntimeBootYAML writes a config file, keeping keys this binary's types do
-// not declare. A file that does not parse is replaced: the boot is where a pod's
-// config is rebuilt from what the chart says it is.
+// writeRuntimeBootYAML keeps undeclared keys and replaces a file that does not parse.
 func writeRuntimeBootYAML(path string, config any) error {
 	existing, _ := os.ReadFile(path)
 	var probe yaml.Node

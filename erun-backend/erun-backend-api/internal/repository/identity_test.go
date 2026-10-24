@@ -67,14 +67,8 @@ func TestDefaultTenantIssuerNameFallsBackForEmptyIssuer(t *testing.T) {
 	}
 }
 
-// TestSanitizeResolutionErrorReplacesRawPostgresErrors proves that a raw
-// PostgreSQL error (a constraint name and SQLSTATE) must never
-// escape ResolveIdentity, since the auth middleware logs and returns an
-// identity error's message verbatim as both the auth-rejected reason and the
-// client-facing response. The step label distinguishes which internal branch
-// produced it (item 2) in the repository's own log line -- not by repeating
-// the raw driver detail, which stays server-side only as a fixed, safe
-// phrase.
+// The auth middleware returns identity error messages verbatim, so raw
+// PostgreSQL detail must never escape.
 func TestSanitizeResolutionErrorReplacesRawPostgresErrors(t *testing.T) {
 	var logBuf bytes.Buffer
 	log.SetOutput(&logBuf)
@@ -101,11 +95,6 @@ func TestSanitizeResolutionErrorReplacesRawPostgresErrors(t *testing.T) {
 	}
 }
 
-// TestSanitizeResolutionErrorLeavesSafeOutcomesUnchanged proves the two
-// expected, already-classified outcomes (ErrNotFound and
-// security.ErrTenantUnresolved) pass through untouched -- sanitization must
-// only ever intercept a raw database error, never override the not-enrolled
-// or tenant-unresolved decisions the rest of ResolveIdentity already made.
 func TestSanitizeResolutionErrorLeavesSafeOutcomesUnchanged(t *testing.T) {
 	claims := security.Claims{Issuer: "https://issuer.example", Subject: "user-1"}
 
@@ -121,10 +110,6 @@ func TestSanitizeResolutionErrorLeavesSafeOutcomesUnchanged(t *testing.T) {
 	}
 }
 
-// A platform's own IdP serves every tenant from one issuer, so bootstrap has
-// to record the claim that discriminates them. Registering it single-tenant
-// permanently refuses every later tenant on that issuer, and no API can undo
-// it.
 func TestBootstrapOrgScopeReadsTheShippedIdPOrgClaim(t *testing.T) {
 	claims := security.Claims{Issuer: "https://auth.example.com", Raw: map[string]any{
 		"urn:zitadel:iam:user:resourceowner:id":   " 386994597030592700 ",
@@ -139,8 +124,6 @@ func TestBootstrapOrgScopeReadsTheShippedIdPOrgClaim(t *testing.T) {
 	}
 }
 
-// An issuer erun does not ship keeps the single-tenant registration: that is
-// correct for a dedicated per-tenant IdP.
 func TestBootstrapOrgScopeStaysSingleTenantWithoutAKnownClaim(t *testing.T) {
 	for _, raw := range []map[string]any{
 		nil,

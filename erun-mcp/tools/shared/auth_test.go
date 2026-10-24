@@ -16,8 +16,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
-// tenantEchoHandler is reached only after the middleware authorizes; it echoes
-// the resolved tenant so tests can assert which tenant a request resolved to.
+// tenantEchoHandler echoes the resolved tenant.
 func tenantEchoHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -30,10 +29,7 @@ func identityWithToken(t *testing.T) (issuer, token string) {
 	return identityWithScopedToken(t, "")
 }
 
-// identityWithScopedToken mints a token from a fresh desktop identity carrying
-// scope (a space-delimited MCPCapability list, e.g. "erun:attach"). An empty
-// scope is the desktop's own single-admin case (MCPCapabilitiesFromClaims
-// resolves no claims to admin).
+// identityWithScopedToken mints a token with scope; an empty scope resolves to admin.
 func identityWithScopedToken(t *testing.T, scope string) (issuer, token string) {
 	t.Helper()
 	priv, pub, err := mcpauth.GenerateDesktopIdentity()
@@ -59,8 +55,7 @@ func identityWithScopedToken(t *testing.T, scope string) (issuer, token string) 
 
 func TestAuthMiddleware(t *testing.T) {
 	issuer, token := identityWithToken(t)
-	// A second, untrusted identity: validly signed by its own key, but its issuer
-	// is not in the trusted map, so it must still be rejected.
+	// Validly signed, but by an untrusted issuer.
 	_, otherToken := identityWithToken(t)
 	authed := McpAuthConfig{trustedIssuers: map[string]string{issuer: "acme"}, audience: "erun-mcp"}
 
@@ -96,8 +91,6 @@ func TestAuthMiddleware(t *testing.T) {
 	}
 }
 
-// TestAuthMiddlewareMultiTenant locks the invariant that each trusted issuer
-// resolves to its own tenant.
 func TestAuthMiddlewareMultiTenant(t *testing.T) {
 	issuerA, tokenA := identityWithToken(t)
 	issuerB, tokenB := identityWithToken(t)
@@ -151,9 +144,7 @@ func TestMCPAuthConfigFromEnv(t *testing.T) {
 	})
 }
 
-// mockOIDCProvider stands in for a real OIDC issuer so the dispatch test can
-// verify https:// issuer routing through the shared OIDC verifier without a
-// network dependency.
+// mockOIDCProvider is an in-process OIDC issuer.
 type mockOIDCProvider struct {
 	server *httptest.Server
 	key    *rsa.PrivateKey
@@ -229,8 +220,6 @@ func oidcClaims(issuer, audience string) map[string]any {
 	}
 }
 
-// TestAuthMiddlewareOIDCDispatch proves the middleware routes https:// OIDC
-// issuers through the shared OIDC verifier end-to-end.
 func TestAuthMiddlewareOIDCDispatch(t *testing.T) {
 	provider := newMockOIDCProvider(t)
 	const audience = "erun-mcp:acme/prod"
@@ -262,8 +251,7 @@ func TestAuthMiddlewareOIDCDispatch(t *testing.T) {
 		if err != nil {
 			t.Fatalf("generate other key: %v", err)
 		}
-		// Signed by a key not in provider's JWKS, but iss points at the trusted
-		// provider so the middleware routes it there and the signature check fails.
+		// Signed by a key outside the provider's JWKS.
 		token := signOIDCToken(t, otherKey, provider.keyID, oidcClaims(provider.issuer(), audience))
 		rec := serveAuth(t, cfg, "Bearer "+token)
 		if rec.Code != http.StatusUnauthorized {
@@ -291,13 +279,7 @@ func serveAuth(t *testing.T, cfg McpAuthConfig, authHeader string) *httptest.Res
 	return rec
 }
 
-// TestWSAttachAuthAcceptsSubprotocolToken proves the attach route's own
-// resolver authenticates a request carrying no Authorization header at all --
-// only the Sec-WebSocket-Protocol offer a browser's WebSocket constructor
-// actually lets a caller set -- while an equivalent request through the
-// ordinary JSON-RPC resolver (authHTTPMiddleware) still rejects it, so this
-// wider acceptance never leaks into the route every other MCP call goes
-// through.
+// The header-only resolver must still reject a subprotocol-only token.
 func TestWSAttachAuthAcceptsSubprotocolToken(t *testing.T) {
 	issuer, token := identityWithToken(t)
 	cfg := McpAuthConfig{trustedIssuers: map[string]string{issuer: "acme"}, audience: "erun-mcp"}
@@ -319,9 +301,7 @@ func TestWSAttachAuthAcceptsSubprotocolToken(t *testing.T) {
 	}
 }
 
-// TestAttachSubprotocolBearerTokenMalformedOffers locks the exact shapes that
-// must NOT resolve to a token: a caller offering the auth scheme name with no
-// token is refused the ordinary way, not treated as an empty-but-valid token.
+// The scheme name without a token must not resolve to an empty token.
 func TestAttachSubprotocolBearerTokenMalformedOffers(t *testing.T) {
 	cases := []struct {
 		name   string

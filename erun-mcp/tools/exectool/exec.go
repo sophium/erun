@@ -14,22 +14,14 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// RawInput carries dir, env, and a background job in addition to the plain
-// foreground run. Agent runs are the separate exec_agent tool, since a
-// streaming AI-tool run shares nothing with exec_raw's
-// argv-and-captured-output shape beyond both starting a job.
+// RawInput is exec_raw's input; agent runs use exec_agent.
 type RawInput struct {
 	Command []string          `json:"command" jsonschema:"command and arguments to execute from the runtime repo root"`
 	Stdin   string            `json:"stdin,omitempty" jsonschema:"optional stdin to pass to the command; only used in the foreground (wait true)"`
 	Dir     string            `json:"dir,omitempty" jsonschema:"working directory to run from, absolute or relative to the runtime repo root; defaults to the runtime repo root"`
 	Env     map[string]string `json:"env,omitempty" jsonschema:"additional KEY=VALUE environment for the command, on top of what it inherits from the runtime pod; only valid with wait false, since a foreground call already runs in this process's own environment with nothing to extend it with. Values land in the job supervisor's argv, visible to anything that can list processes in this environment, so this is not where secrets belong; PATH, LD_PRELOAD, and a few other names that could redirect what the job executes are refused, as is any ERUN_ name"`
-	// Tenant/Environment must match this server's own scope in both modes (see
-	// resolveLocalTarget/scopedTenantEnv): in the foreground there is no handle
-	// to address, so a value here is validated but otherwise unused, this
-	// server's own context already applies; a mismatch is refused rather than
-	// silently run locally anyway, which is what let a caller believe a
-	// foreground exec_raw had reached a different environment when it had not.
-	// Name/ID address a backgrounded command the way job_start's did.
+	// Tenant/Environment must match this server's scope; a mismatch is refused
+	// rather than silently run locally. Name/ID address a background job.
 	Tenant          string `json:"tenant,omitempty" jsonschema:"tenant whose environment runs the command; defaults to the server tenant context, and must match it: this server only acts on its own environment. In the foreground (wait true) this is validated but otherwise unused, since the command always runs in this process"`
 	Environment     string `json:"environment,omitempty" jsonschema:"environment to run the command in; defaults to the server environment context, and must match it: this server only acts on its own environment. In the foreground (wait true) this is validated but otherwise unused, since the command always runs in this process"`
 	Name            string `json:"name,omitempty" jsonschema:"what the backgrounded command is, shown wherever the environment reports as busy; only used with wait false. Defaults to exec_raw"`
@@ -80,10 +72,7 @@ func execRawForeground(runtime shared.RuntimeConfig, input RawInput) (shared.Job
 	return shared.JobEnvelopeOutput{CommandOutput: output, Wait: true}, err
 }
 
-// execRawBackground detaches the command as a job exactly the way job_start's
-// command mode did, since exec_raw already runs a subprocess -- this reuses
-// that engine rather than the in-process task job the rest of the
-// job-envelope surface uses, which has no subprocess to detach.
+// execRawBackground detaches the subprocess as a job.
 func execRawBackground(runtime shared.RuntimeConfig, input RawInput) (shared.JobEnvelopeOutput, error) {
 	tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {

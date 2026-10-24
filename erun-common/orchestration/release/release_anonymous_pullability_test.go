@@ -17,11 +17,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// writeModuleFixture lays down a single Terraform file referencing imageName
-// the way terraform-erun-cluster-edge/main.tf references
-// ghcr.io/sophium/erun-dns01-webhook: through an interpolation, not a
-// literal version, so the fixture also proves the pattern does not depend on
-// a literal tag being present.
+// writeModuleFixture references imageName through an interpolation, as the real module does.
 func writeModuleFixture(t *testing.T, root, imageName string) {
 	t.Helper()
 	dir := filepath.Join(root, "erun-devops", "terraform-erun", "modules", "terraform-erun-fixture")
@@ -49,11 +45,7 @@ func TestDiscoverModuleReferencedImageNames(t *testing.T) {
 	})
 }
 
-// anonymousManifestStub answers the two requests a manifest pull makes: the
-// GHCR token exchange and the manifest GET. It records whether the token
-// request carried any credential at all, and what Authorization header the
-// manifest request actually sent, so a test can assert the probe is
-// genuinely credential-free rather than inferring it from a passing status.
+// anonymousManifestStub records what credentials the token and manifest requests carried.
 type anonymousManifestStub struct {
 	ManifestStatus int
 	TokenStatus    int
@@ -92,9 +84,6 @@ func (s *anonymousManifestStub) start(t *testing.T) *httptest.Server {
 	return server
 }
 
-// probeStatusCase is one status-handling scenario for probeAnonymousManifestPullAt:
-// a token-endpoint status, a manifest-endpoint status, and the answer the
-// probe must resolve to.
 type probeStatusCase struct {
 	name           string
 	tokenStatus    int
@@ -106,15 +95,9 @@ type probeStatusCase struct {
 var probeStatusCases = []probeStatusCase{
 	{name: "pullable manifest reports true", manifestStatus: http.StatusOK, wantPullable: true},
 	{name: "denied manifest reports false, not an error", manifestStatus: http.StatusForbidden},
-	// A private ghcr package refuses the anonymous token request itself with
-	// 401, before a manifest request is even made. That refusal is a
-	// conclusive "a stranger cannot pull this", not a failure to reach the
-	// registry, so it resolves like any other denial: false, no error.
+	// ghcr refuses a private package's anonymous token request with 401: a conclusive denial.
 	{name: "401 on the token request reports false, not an error", tokenStatus: http.StatusUnauthorized},
 	{name: "403 on the token request reports false, not an error", tokenStatus: http.StatusForbidden},
-	// A non-auth manifest status is not a conclusive answer about
-	// pullability, so it must keep erroring rather than being folded into
-	// "not pullable".
 	{name: "a non-auth manifest failure is an error, not a conclusive denial", manifestStatus: http.StatusInternalServerError, wantErr: true},
 }
 
@@ -141,9 +124,6 @@ func TestProbeAnonymousManifestPullAtStatusHandling(t *testing.T) {
 	}
 }
 
-// A registry that cannot even be reached is genuinely inconclusive -- it must
-// keep erroring rather than being folded into "not pullable", or a network
-// blip during release would silently pass this check.
 func TestProbeAnonymousManifestPullAtTokenRequestUnreachable(t *testing.T) {
 	unreachable := "http://127.0.0.1:1"
 	_, err := shared.ProbeAnonymousManifestPullAt(context.Background(), &http.Client{Timeout: time.Second}, "sophium/erun-example", "1.0.0", unreachable, unreachable)
@@ -152,11 +132,7 @@ func TestProbeAnonymousManifestPullAtTokenRequestUnreachable(t *testing.T) {
 	}
 }
 
-// verifyPublishedReleaseArtifacts re-resolves a manifest through `docker
-// manifest inspect`, which authenticates with whatever the local daemon has
-// stored, so it cannot observe whether a stranger could pull the image. This
-// probe must never send a credential: not on the token exchange, and not in
-// the manifest request's own Authorization header.
+// `docker manifest inspect` uses local credentials, so this probe must send none.
 func TestProbeAnonymousManifestPullAtSendsNoCredentials(t *testing.T) {
 	dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, b64Auth("sophium:tok")))
 	useDockerConfigDir(t, dir)
@@ -219,13 +195,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenNotBaselined(t 
 	}
 }
 
-// withAnonymousPullabilityBaseline overrides the package-level baseline for
-// the duration of a test, restoring the original afterward. The real baseline
-// is expected to be empty most of the time (erun-common/AGENTS.md's
-// dependency-injection-over-globals preference doesn't apply cleanly to a
-// shrink-only map that production code also reads by name), so tests that
-// need a baselined entry inject their own fixture name instead of depending
-// on whatever the real map currently holds.
+// withAnonymousPullabilityBaseline overrides the package-level baseline for one test.
 func withAnonymousPullabilityBaseline(t *testing.T, baseline map[string]bool) {
 	t.Helper()
 	original := AnonymousPullabilityBaseline
@@ -250,10 +220,6 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselined(t *t
 	}
 }
 
-// A baselined image records that the package is *currently* private, not a
-// promise it will stay that way. Once it probes as anonymously pullable, the
-// entry would let this check silently no-op forever, so the release must fail
-// and name the stale entry to remove.
 func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenBaselinedButNowPullable(t *testing.T) {
 	withAnonymousPullabilityBaseline(t, map[string]bool{"erun-baselined-webhook": true})
 	root := t.TempDir()
@@ -274,21 +240,12 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenBaselinedButNow
 	}
 }
 
-// realProbeAt closes over a stub server's URL so verifyModuleReferencedImagesAnonymouslyPullable
-// can be exercised through the real anonymousPullProbeFunc chain -- token
-// exchange, then manifest GET -- rather than a fake bool/error stand-in, so
-// these tests reproduce the 1.0.219 failure end to end instead of just at the
-// unit level.
 func realProbeAt(server *httptest.Server) shared.AnonymousPullProbeFunc {
 	return func(ctx context.Context, client *http.Client, repoPath, tag string) (bool, error) {
 		return shared.ProbeAnonymousManifestPullAt(ctx, server.Client(), repoPath, tag, server.URL, server.URL)
 	}
 }
 
-// ghcr refuses the anonymous token request for a known-private package with
-// 401. That refusal must be
-// reported and the release must proceed, because the baseline already
-// records this image as known not anonymously pullable.
 func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselinedTokenRequestRefused(t *testing.T) {
 	withAnonymousPullabilityBaseline(t, map[string]bool{"erun-baselined-webhook": true})
 	root := t.TempDir()
@@ -308,10 +265,6 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselinedToken
 	}
 }
 
-// A 401 on the token request for an image that is NOT baselined is a
-// conclusive "this is private", and a fresh, unrecorded private image must
-// still fail the release -- the baseline is an explicit opt-in, never
-// inferred from a single probe result.
 func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenNotBaselinedTokenRequestRefused(t *testing.T) {
 	root := t.TempDir()
 	writeModuleFixture(t, root, "erun-example-webhook")
@@ -336,11 +289,6 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenNotBaselinedTok
 	}
 }
 
-// A probe that cannot reach the registry at all is genuinely inconclusive.
-// For an image with no recorded baseline entry, that must still fail the
-// release, and the message must say the probe could not run -- not repeat
-// the "this image is private" wording a conclusive refusal gets, since
-// nothing here established that.
 func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenNotBaselinedProbeUnreachable(t *testing.T) {
 	root := t.TempDir()
 	writeModuleFixture(t, root, "erun-example-webhook")
@@ -364,9 +312,6 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenNotBaselinedPro
 	}
 }
 
-// An unreachable probe for an already-baselined image adds no information --
-// the image's status is already recorded as known-not-anonymously-pullable --
-// so it must not fail the release either.
 func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselinedAndProbeUnreachable(t *testing.T) {
 	withAnonymousPullabilityBaseline(t, map[string]bool{"erun-baselined-webhook": true})
 	root := t.TempDir()

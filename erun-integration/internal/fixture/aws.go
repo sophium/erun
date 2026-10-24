@@ -10,45 +10,32 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/env"
 )
 
-// AWSStubError injects a deterministic AWS CLI failure for one argv family.
-// Stderr must read like the real AWS CLI's, because the classifiers in
-// erun-common/infra/cloud/cloud_context_*.go substring-match against it; ExitCode defaults
-// to 254, the AWS CLI's client-error code. Once fires the failure only on the
-// family's first invocation, so production retry/recovery loops can be driven
-// to their success arm.
+// AWSStubError injects an AWS CLI failure for one argv family. Stderr must read like the real CLI's,
+// since production classifiers substring-match it; ExitCode defaults to 254; Once fails only the first call.
 type AWSStubError struct {
 	Stderr   string
 	ExitCode int
 	Once     bool
 }
 
-// AWSCloudContextStubSpec configures the argv-branching `aws` stub for the
-// real-run `erun context ...` scenarios. Success-output fields feed the
-// decision inputs production parses from AWS CLI stdout; the *Error fields
-// make the error classifiers and recovery branches in
-// erun-common/infra/cloud/cloud_context_*.go reachable. Zero values fall back to defaults
-// chosen so the happy path completes.
+// AWSCloudContextStubSpec configures the `aws` stub; zero values default to the happy path.
 type AWSCloudContextStubSpec struct {
-	// RoleName's value is ignored by production; only the call's exit code matters.
+	// RoleName's value is ignored by production; only the exit code matters.
 	RoleName           string
 	InstanceProfileARN string
-	// ProfileRoleName of "None" (the AWS text-output null) means the profile
-	// carries no role yet.
-	ProfileRoleName string
-	// ActiveAssociationID / ActiveAssociationARN of "None" mean no active
-	// association.
+	// "None" (the AWS text-output null) in ProfileRoleName and ActiveAssociationID/ARN means unset.
+	ProfileRoleName      string
 	ActiveAssociationID  string
 	ActiveAssociationARN string
 	PendingAssociationID string
 	PublicIP             string
-	// InstanceStates is multi-line "id<TAB>state" text as the AWS CLI prints
-	// it; empty makes every instance read as "not found in AWS".
+	// InstanceStates is "id<TAB>state" lines; empty reads as "not found in AWS".
 	InstanceStates  string
 	SecurityGroupID string
 	ImageID         string
 	InstanceID      string
 
-	// Per-argv-family error injection. Nil means the call succeeds.
+	// Nil error fields mean the call succeeds.
 	GetRoleError                  *AWSStubError
 	GetInstanceProfileError       *AWSStubError
 	AddRoleToInstanceProfileError *AWSStubError
@@ -62,15 +49,8 @@ type AWSCloudContextStubSpec struct {
 	DescribeInstanceStatesError   *AWSStubError
 }
 
-// StubAWSCloudContext writes an argv-branching `aws` stub covering every AWS
-// CLI call the cloud-context start/stop/init flows issue, and returns the env
-// vars that route production `aws` invocations through it.
-//
-// Arm order matters: the `Roles[0].RoleName` query must match before the
-// generic `iam get-instance-profile` arm, and the association queries are
-// distinguished by their state filter + --query selector so the three
-// describe-iam-instance-profile-associations callers each get their own
-// answer.
+// StubAWSCloudContext writes an argv-branching `aws` stub and returns the env routing to it.
+// Arm order matters: specific --query arms must precede the generic ones.
 func StubAWSCloudContext(t testing.TB, stubsDir string, spec AWSCloudContextStubSpec) []string {
 	t.Helper()
 	spec = withAWSCloudContextDefaults(spec)
@@ -179,10 +159,7 @@ func renderStubArmLines(lines []string) string {
 	return b.String()
 }
 
-// SeedAWSSharedConfig writes <home>/.aws/config with one SSO profile, using
-// the modern sso_session indirection so the parser's session-index path
-// (erun-common/base/config/aws_sso_config.go) is exercised. Returns the SSO start URL it
-// wrote so tests can assert it flowed through.
+// SeedAWSSharedConfig writes an SSO profile using sso_session indirection and returns its start URL.
 func SeedAWSSharedConfig(t testing.TB, setup env.Setup, accountID, profileName string) string {
 	t.Helper()
 	startURL := "https://corp.awsapps.com/start"

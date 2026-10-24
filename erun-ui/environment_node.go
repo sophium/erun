@@ -6,21 +6,11 @@ import (
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
-// The node an environment's cluster runs on is already measured and cached by
-// the cloud-context poller (cloud_context_cache.go), and reading it costs one
-// in-memory map lookup. This file is the fan-out from that per-context cache to
-// the per-environment read model the sidebar renders, so a row whose own state
-// cannot be determined can still say the one thing that is known about it.
-//
-// Two states this must never collapse into each other: a node that is stopped
-// (start it) and a node whose reading is missing or stale (nothing has been
-// established). The cache reports the first as "stopped" and the second as ""
-// or "unknown"; both survive to the frontend verbatim.
+// A stopped node and a missing or stale reading ("" or "unknown") must never
+// collapse into each other; both reach the frontend verbatim.
 
-// environmentNodeSnapshot resolves the node backing one environment. A nil
-// result is the definite "no node erun manages", not a failed read: an env with
-// no kubernetes context, or one whose context is not a managed cloud context,
-// has nothing to say about a node and must render nothing rather than "stopped".
+// environmentNodeSnapshot returns nil when no erun-managed node backs the env,
+// which must render nothing rather than "stopped".
 func (a *App) environmentNodeSnapshot(cloudProviderAlias, kubernetesContext string) *uiEnvironmentNodeSnapshot {
 	context, ok, err := a.linkedCloudContextFor(cloudProviderAlias, kubernetesContext)
 	if err != nil || !ok {
@@ -37,11 +27,7 @@ func (a *App) environmentNodeSnapshot(cloudProviderAlias, kubernetesContext stri
 	}
 }
 
-// seedEnvironmentNodeSnapshots attaches each environment's node reading to the
-// initial-state read model, for the same reason seedEnvironmentActivitySnapshots
-// exists: the env-node event only fires on a transition, so a boot from a clean
-// store has nothing to replay and would render every row as if no node had ever
-// been observed.
+// seedEnvironmentNodeSnapshots lets a reload see readings that only emit on transition.
 func (a *App) seedEnvironmentNodeSnapshots(state *uiState, result lifecycle.ListResult) {
 	links := cloudContextLinksByEnvironment(result)
 	for ti := range state.Tenants {
@@ -79,12 +65,8 @@ func cloudContextLinksByEnvironment(result lifecycle.ListResult) map[string]clou
 	return links
 }
 
-// refreshEnvironmentNodeStatuses republishes every environment whose node
-// reading changed since the last pass. Called after the cloud-context cache is
-// written — by the poller's own tick and by the handlers that start or stop a
-// node, so an operator's action is reflected without waiting out a poll
-// interval. Every read here is a store or in-memory read; nothing reaches the
-// cloud.
+// refreshEnvironmentNodeStatuses republishes changed node readings; it reads only
+// local state, never the cloud.
 func (a *App) refreshEnvironmentNodeStatuses() {
 	if a.deps.store == nil {
 		return
@@ -108,9 +90,6 @@ func (a *App) refreshEnvironmentNodeStatuses() {
 	}
 }
 
-// emitEnvNodeIfChanged keeps an unchanged reading off the event bridge, the
-// same discipline emitEnvActivityIfChanged applies: this sweep runs on every
-// poll tick and most ticks observe nothing new.
 func (a *App) emitEnvNodeIfChanged(selection uiSelection, node *uiEnvironmentNodeSnapshot) {
 	key := selectionKey(selection)
 	var current uiEnvironmentNodeSnapshot

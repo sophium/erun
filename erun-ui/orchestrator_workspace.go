@@ -9,10 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
-// orchestratorsRoot is the single host workspace every orchestrator shares
-// ($HOME/orchestrators): it holds the one shared CLAUDE.md and, as
-// `<tenant>-<env>` subdirectories, the synced mirrors. Orchestrators launch here
-// directly — there is no per-orchestrator subfolder.
+// orchestratorsRoot is the workspace all orchestrators share; mirrors are its `<tenant>-<env>` subdirectories.
 func orchestratorsRoot() string {
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
@@ -21,32 +18,13 @@ func orchestratorsRoot() string {
 	return filepath.Join(home, "orchestrators")
 }
 
-// defaultOrchestratorDirectory is the host mirror an env defaults to:
-// $HOME/orchestrators/<tenant>-<env>. Mirrors sit beside the shared CLAUDE.md,
-// keyed by env so every orchestrator linking the same env reviews one synced copy.
+// defaultOrchestratorDirectory is the env's mirror, shared by every orchestrator linking it.
 func defaultOrchestratorDirectory(tenant, environment string) string {
 	return filepath.Join(orchestratorsRoot(), strings.TrimSpace(tenant)+"-"+strings.TrimSpace(environment))
 }
 
-// orchestratorReviewDirectory resolves where an orchestrator reviews an env on
-// this machine, and whether that directory is a synced mirror. Three kinds, one
-// per the answer it gives:
-//
-//   - A remote-agent env gets the mirror its workspace sync fills — the default
-//     path below, which is what Mirrored=true reports.
-//   - A local-agent env's worktree is already here, because the pod
-//     hostPath-mounts it, so it is reviewed in place. The pod's in-pod agent
-//     owns that tree (see orchestratorClaudeMd), not the orchestrator.
-//   - A host env has no pod and no cluster at all, so there is nothing to
-//     mount, sync, or delegate to: the review directory and the environment are
-//     the very same path, and the orchestrator authors and builds in it. Same
-//     derivation as a local-agent env, entirely different relationship to it.
-//
-// It yields the mirror path a remote-agent env would be wired to rather than ""
-// when its sync is not on yet, and answers explicitly for a runtime env: it has
-// no worktree and no mirror, so there is no review directory at all, rather than
-// falling through to the mirror default meant for an env that does have a pod to
-// sync from.
+// orchestratorReviewDirectory returns an env's review directory and whether it is a synced mirror.
+// Local-agent and host envs are reviewed in place; a runtime env has none.
 func orchestratorReviewDirectory(tenant string, env configpkg.EnvConfig) (string, bool) {
 	switch env.ResolvedType() {
 	case configpkg.EnvironmentTypeLocalAgent, configpkg.EnvironmentTypeHost:
@@ -60,11 +38,7 @@ func orchestratorReviewDirectory(tenant string, env configpkg.EnvConfig) (string
 	}
 }
 
-// orchestratorClaudeMd is the single CLAUDE.md every orchestrator shares in the
-// orchestrators root. It mirrors the erun-orchestrate skill (the source of truth
-// for the full workflow) and is generic on purpose: mirrors are discovered as the
-// `<tenant>-<env>` subdirectories present, so there is no per-orchestrator
-// environment list and no per-orchestrator folder.
+// orchestratorClaudeMd mirrors the erun-orchestrate skill and is deliberately env-agnostic.
 const orchestratorClaudeMd = `# Orchestrator working directory
 
 You are a **host-side erun orchestrator**. You coordinate work across the erun
@@ -203,9 +177,7 @@ here happen to have files — read the config every time.
   target repository's AGENTS.md; orchestration is not required for those users.
 `
 
-// ensureOrchestratorWorkspace makes sure the shared orchestrators root exists and
-// carries the one CLAUDE.md, returning the directory every orchestrator launches
-// in. There is no per-orchestrator subfolder.
+// ensureOrchestratorWorkspace provisions the shared root and its CLAUDE.md.
 func (a *App) ensureOrchestratorWorkspace() (string, error) {
 	dir := orchestratorsRoot()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -214,48 +186,27 @@ func (a *App) ensureOrchestratorWorkspace() (string, error) {
 	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte(orchestratorClaudeMd), 0o644); err != nil {
 		return "", fmt.Errorf("write orchestrator CLAUDE.md: %w", err)
 	}
-	// Make every erun skill available to the orchestrator by default — the
-	// operator must never have to install them by hand. Best-effort: a missing
-	// skills source (e.g. a distributed binary with no repo checkout) must not
-	// block the orchestrator from launching, but it is reported rather than
-	// passed over in silence.
+	// Skills, agents and the hook are best-effort: a missing source must not block launch.
 	if err := ensureOrchestratorSkills(); err != nil {
 		a.reportSkillsNotInstalled(err)
 	}
-	// Same contract for the reusable agents (erun-builder/erun-reviewer):
-	// installed into ~/.claude/agents so a host orchestrator can delegate to
-	// them, best-effort and reported the same way skills are.
 	if err := ensureOrchestratorAgents(); err != nil {
 		a.reportAgentsNotInstalled(err)
 	}
-	// Inject the operating contract on every session start and reopen via a
-	// SessionStart hook, so an orchestrator always operates under its current
-	// contract instead of relying on the model to invoke a skill it can skip.
-	// Best-effort for the same reason as the skills install; a SessionStart hook
-	// is non-blocking, so a stale or missing one never prevents a launch.
+	// The SessionStart hook injects the contract so it never depends on the model invoking a skill.
 	if err := ensureOrchestratorSessionStartHook(dir); err != nil {
 		fmt.Fprintf(os.Stderr, "erun: could not write orchestrator SessionStart hook: %v\n", err)
 	}
 	return dir, nil
 }
 
-// ensureOrchestratorWorkspaceFor is ensureOrchestratorWorkspace plus the two
-// things that belong to a particular orchestrator rather than to the shared
-// root: its own role file, and the claim label its claim protocol addresses
-// issues by. Separate from ensureOrchestratorWorkspace rather than an extra
-// parameter on it: the workspace itself is id-independent, and the shared root
-// is ensured from a dozen places that have no id to give.
-//
-// Seeding here rather than at creation means an orchestrator that already
-// existed gets both on its next launch too, not only newly created ones.
+// ensureOrchestratorWorkspaceFor also seeds per-orchestrator state; it runs on every launch,
+// so existing orchestrators get it too.
 func (a *App) ensureOrchestratorWorkspaceFor(id string) (string, error) {
 	dir, err := a.ensureOrchestratorWorkspace()
 	if err != nil {
 		return "", err
 	}
-	// Best-effort, like the skills install and the SessionStart hook: neither
-	// of these must stop the orchestrator launching, but they are reported
-	// rather than passed over in silence.
 	if roleErr := ensureOrchestratorRoleFile(dir, id); roleErr != nil {
 		fmt.Fprintf(os.Stderr, "erun: could not seed orchestrator role file for %s: %v\n", id, roleErr)
 	}

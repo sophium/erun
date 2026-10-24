@@ -7,20 +7,13 @@ test.describe('sidebar', () => {
   test('tenant toggle flips aria-expanded', async ({ app }) => {
     const before = await app.sidebar.isTenantExpanded(SEED_TENANT);
     await app.sidebar.toggleTenant(SEED_TENANT);
-    // isTenantExpanded is a bare attribute read, not an auto-retrying
-    // assertion, so it must not run right after the click: the toggle's
-    // re-render is a separate step under React, and a read that lands before
-    // it lands would report the pre-click value under contention.
+    // isTenantExpanded is a bare read, so poll it past the re-render.
     await expect.poll(() => app.sidebar.isTenantExpanded(SEED_TENANT)).toBe(!before);
-    // Restore state so subsequent assertions in the suite don't drift --
-    // converge on the restore too, so a slow one can't leak into the next
-    // test in this worker.
+    // Restore so the state does not leak into the next test in this worker.
     await app.sidebar.toggleTenant(SEED_TENANT);
     await expect.poll(() => app.sidebar.isTenantExpanded(SEED_TENANT)).toBe(before);
   });
 
-  // The tenant row carries a visible icon alongside the name, so the name
-  // itself reads as opening a dashboard, not only as the folder-group header.
   test('tenant row carries a visible affordance for opening the dashboard', async ({ app }) => {
     const icon = app.sidebar.tenantDashboardButton(SEED_TENANT).locator('svg');
     await expect(icon).toBeVisible();
@@ -28,36 +21,18 @@ test.describe('sidebar', () => {
   });
 
   test('opening an environment surfaces status feedback', async ({ app, page }) => {
-    // The opening status is inherently transient — it lives only for the open
-    // itself (a few hundred ms): the "Opening …" message clears the instant the
-    // session's first output lands, and the sidebar row's busy spinner
-    // (role=status, its aria-label naming the env) clears when the open settles.
-    // Match either surface, and match the spinner by the env name because its
-    // wording varies ("Opening …" before the open action starts running,
-    // "Working on …" once it is).
-    //
-    // Asserting it with a locator races that window and loses on a fast open.
-    // Recording it from inside the page — with the observer installed BEFORE
-    // the click — closes the window without adding a wall-clock wait.
+    // The opening status lasts a few hundred ms, so a locator would race it;
+    // an observer installed before the click records it instead.
     const target = `${SEED_TENANT} / ${SEED_ENV_ALPHA}`;
     const openingStatus = await recordOpeningStatus(page, target);
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
-    // `expect.poll` does not resolve to the enclosing test's deadline the way
-    // waitFor/toPass do -- with no timeout it lands on `expect.timeout`'s
-    // separate 10s clock -- so it carries this test's declared budget instead
-    // of a cap picked here (fixtures/erunApp.ts withTestBudget).
+    // expect.poll defaults to expect.timeout, not the test deadline.
     await expect.poll(openingStatus, withTestBudget()).not.toBeNull();
   });
 });
 
-// recordOpeningStatus installs an in-page recorder for the transient status an
-// environment shows while it opens, and returns a reader for whatever it saw.
-//
-// It exists because that status is short-lived by design: a locator
-// assertion has to catch it inside its own render window, and on a fast open
-// that window can close between two polls. A MutationObserver installed before
-// the click cannot miss it, so the assertion still reads real rendered DOM
-// without racing it.
+// recordOpeningStatus records the transient opening status from a
+// MutationObserver installed before the click.
 async function recordOpeningStatus(
   page: Page,
   target: string,
@@ -73,9 +48,8 @@ async function recordOpeningStatus(
     const matches = (el: Element): boolean =>
       (el.getAttribute('role') === 'status' && label(el).includes(wanted)) ||
       (el.textContent ?? '').includes(`Opening ${wanted}`);
-    // Only the first match is kept, and only bounded text: a match found on an
-    // ancestor reports that ancestor's whole text, which for the terminal pane
-    // would be the entire scrollback.
+    // Keep only the first, bounded match: an ancestor match would include the
+    // whole terminal scrollback.
     const record = (el: Element): void => {
       if (scope.__erunOpeningStatus === null && matches(el)) {
         scope.__erunOpeningStatus = label(el).slice(0, 200);

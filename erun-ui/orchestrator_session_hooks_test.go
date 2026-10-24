@@ -11,8 +11,6 @@ import (
 	"testing"
 )
 
-// sessionStartHookEntry and sessionStartGroup decode one SessionStart hook
-// block from settings.json, shared by the tests below.
 type sessionStartHookEntry struct {
 	Type    string `json:"type"`
 	Command string `json:"command"`
@@ -23,9 +21,7 @@ type sessionStartGroup struct {
 	Hooks   []sessionStartHookEntry `json:"hooks"`
 }
 
-// readSessionStartGroups decodes the SessionStart hook blocks currently
-// written to settings.json at path, returning the raw bytes too so callers can
-// include them in failure messages.
+// readSessionStartGroups also returns the raw bytes for failure messages.
 func readSessionStartGroups(t *testing.T, path string) ([]sessionStartGroup, []byte) {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -43,8 +39,6 @@ func readSessionStartGroups(t *testing.T, path string) ([]sessionStartGroup, []b
 	return settings.Hooks.SessionStart, data
 }
 
-// sessionStartCommandCounts flattens every command across the given groups
-// into a command -> occurrence-count map.
 func sessionStartCommandCounts(groups []sessionStartGroup) map[string]int {
 	seen := map[string]int{}
 	for _, group := range groups {
@@ -55,11 +49,7 @@ func sessionStartCommandCounts(groups []sessionStartGroup) map[string]int {
 	return seen
 }
 
-// assertSessionStartCommandsUnique fails if any SessionStart command appears
-// more than once across all groups: two matcher blocks ("startup", "resume")
-// carrying the same three commands would mean every SessionStart command,
-// including the ~5.5KB contract injection, is installed (and so read into
-// every session's context) twice.
+// assertSessionStartCommandsUnique guards against the ~5.5KB contract being injected twice.
 func assertSessionStartCommandsUnique(t *testing.T, groups []sessionStartGroup, data []byte) {
 	t.Helper()
 	for cmd, count := range sessionStartCommandCounts(groups) {
@@ -69,9 +59,7 @@ func assertSessionStartCommandsUnique(t *testing.T, groups []sessionStartGroup, 
 	}
 }
 
-// assertSessionStartMatchersCover fails unless every source is matched by
-// some group's matcher, tested the same way Claude Code itself resolves a
-// SessionStart matcher: as a regex against the event's source.
+// assertSessionStartMatchersCover matches each source as a regex, as Claude Code does.
 func assertSessionStartMatchersCover(t *testing.T, groups []sessionStartGroup, data []byte, sources ...string) {
 	t.Helper()
 	for _, source := range sources {
@@ -116,14 +104,8 @@ func TestOrchestratorSessionStartHookInjectsContract(t *testing.T) {
 	assertSessionStartMatchersCover(t, contractGroups, data, "startup", "resume", "clear", "compact")
 }
 
-// TestOrchestratorSessionStartHookPrunesEarlierDuplicatesAndPreservesForeignHooks
-// seeds settings.json with the shape an earlier release left on disk -- two
-// matcher blocks, each carrying the full three-command SessionStart payload --
-// alongside an operator-owned SessionStart hook the installer has never seen.
-// Installing on top of that must collapse the
-// duplicate blocks down to one clean copy, leave the operator's own hook alone,
-// and stay exactly that size across a second install (simulating a further
-// desktop restart), never growing.
+// An earlier release left two matcher blocks with the full payload; installing
+// must collapse them, keep the operator's hook, and never grow on reinstall.
 func TestOrchestratorSessionStartHookPrunesEarlierDuplicatesAndPreservesForeignHooks(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -168,8 +150,6 @@ func TestOrchestratorSessionStartHookPrunesEarlierDuplicatesAndPreservesForeignH
 		t.Fatalf("expected the operator's own SessionStart hook preserved:\n%s", data)
 	}
 
-	// A further install (another desktop restart) against the now-clean file
-	// must not grow the count.
 	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
 		t.Fatalf("ensureOrchestratorWorkspace (second run): %v", err)
 	}
@@ -179,7 +159,6 @@ func TestOrchestratorSessionStartHookPrunesEarlierDuplicatesAndPreservesForeignH
 	}
 }
 
-// sessionStartTotalCommands counts every hook entry across all groups.
 func sessionStartTotalCommands(groups []sessionStartGroup) int {
 	n := 0
 	for _, group := range groups {
@@ -188,8 +167,6 @@ func sessionStartTotalCommands(groups []sessionStartGroup) int {
 	return n
 }
 
-// assertSessionStartContractCommandPrunedToOne fails if the contract-injection
-// command (identified by its fallback text) appears more than once.
 func assertSessionStartContractCommandPrunedToOne(t *testing.T, groups []sessionStartGroup, data []byte) {
 	t.Helper()
 	for cmd, count := range sessionStartCommandCounts(groups) {
@@ -199,10 +176,7 @@ func assertSessionStartContractCommandPrunedToOne(t *testing.T, groups []session
 	}
 }
 
-// runOrchestratorSessionStartGroup runs every command in the SessionStart
-// group whose matcher regex matches source, the same way Claude Code itself
-// dispatches a SessionStart event, and returns their combined stdout. Fails
-// the test if no group's matcher covers source at all.
+// runOrchestratorSessionStartGroup dispatches source as Claude Code does and returns stdout.
 func runOrchestratorSessionStartGroup(t *testing.T, shell string, groups []sessionStartGroup, data []byte, orchestratorID, source string) string {
 	t.Helper()
 	var out strings.Builder
@@ -233,8 +207,6 @@ func runOrchestratorSessionStartGroup(t *testing.T, shell string, groups []sessi
 	return out.String()
 }
 
-// assertRoleFilePreservedOnDisk fails unless rolePath still contains marker --
-// the operator's own content must never be rewritten.
 func assertRoleFilePreservedOnDisk(t *testing.T, rolePath, marker string) {
 	t.Helper()
 	got, err := os.ReadFile(rolePath)
@@ -246,10 +218,6 @@ func assertRoleFilePreservedOnDisk(t *testing.T, rolePath, marker string) {
 	}
 }
 
-// assertSessionStartReinjectsRoleAndContract runs the installed SessionStart
-// hooks for each of sources against a real shell, the way Claude Code would
-// dispatch them, and fails unless every one re-injects both the role marker
-// and the shared contract into stdout.
 func assertSessionStartReinjectsRoleAndContract(t *testing.T, shell, orchestratorID, roleMarker string, groups []sessionStartGroup, data []byte, sources ...string) {
 	t.Helper()
 	for _, source := range sources {
@@ -263,10 +231,7 @@ func assertSessionStartReinjectsRoleAndContract(t *testing.T, shell, orchestrato
 	}
 }
 
-// TestOrchestratorSessionStartHookReinjectsRoleFileOnClearAndCompact runs the
-// installed hook commands for each SessionStart source, including "clear" and
-// "compact", and checks the role file (CLAUDE.<id>.md) is really printed to
-// stdout rather than merely asserting the matcher string covers the source.
+// Runs the hooks rather than only checking that the matcher covers the source.
 func TestOrchestratorSessionStartHookReinjectsRoleFileOnClearAndCompact(t *testing.T) {
 	shell, err := exec.LookPath("sh")
 	if err != nil {
@@ -282,10 +247,7 @@ func TestOrchestratorSessionStartHookReinjectsRoleFileOnClearAndCompact(t *testi
 	if err != nil {
 		t.Fatalf("ensureOrchestratorWorkspace: %v", err)
 	}
-	// Seed a non-empty, operator-authored role file BEFORE the per-id ensure
-	// call, matching the real sequence (the file is written once and never
-	// rewritten): the operator's own content, not the placeholder seed, is
-	// what must survive and be re-injected.
+	// Seed operator content before the ensure call, as in the real sequence.
 	rolePath := filepath.Join(dir, "CLAUDE."+orchestratorID+".md")
 	if err := os.WriteFile(rolePath, []byte(roleMarker+"\n"), 0o644); err != nil {
 		t.Fatalf("seed role file: %v", err)
@@ -307,7 +269,6 @@ func TestOrchestratorSessionStartHookPreservesExistingSettings(t *testing.T) {
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// A pre-existing project settings file with an unrelated key and hook event.
 	pre := `{"model":"opus","hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo keep"}]}]}}`
 	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(pre), 0o644); err != nil {
 		t.Fatal(err)
@@ -326,8 +287,7 @@ func TestOrchestratorSessionStartHookPreservesExistingSettings(t *testing.T) {
 		t.Fatalf("expected unrelated key preserved, got %v\n%s", settings["model"], data)
 	}
 	hooks, _ := settings["hooks"].(map[string]any)
-	// PreToolUse is an event erun writes to as well now, so "preserved" has to
-	// mean the operator's own hook is still there — not merely that the key is.
+	// erun writes PreToolUse too, so check the operator's own hook survives.
 	preToolUse, _ := hooks["PreToolUse"].([]any)
 	if !strings.Contains(string(data), "echo keep") {
 		t.Fatalf("expected the operator's own PreToolUse hook preserved:\n%s", data)

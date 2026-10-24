@@ -65,21 +65,15 @@ import {
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
 
-// Every Wails event the controller subscribes to is handled here as a
-// state-side thunk — except terminal-output, which stays imperative on the
-// controller because both the registry buffers and the live xterm instance
-// live there.
+// Wails events are handled as thunks, except terminal-output, which stays on
+// the controller with the buffers and xterm.
 
-// handleAIActivity surfaces that an AI tab is working in one env while the
-// user is looking at another (Nielsen #1, visibility of system status).
 export const handleAIActivity =
   (payload: AIActivityPayload): AppThunk =>
   (dispatch) => {
     const tenant = payload.tenant.trim();
     const environment = payload.environment.trim();
     if (!tenant || !environment) {
-      // An orchestrator session carries no env to key by. Dropping the event
-      // here is why the orchestrator row never spun while it was working.
       if (payload.sessionId > 0) {
         dispatch(setAIBusyForSession({ sessionId: payload.sessionId, busy: payload.busy }));
       }
@@ -89,10 +83,8 @@ export const handleAIActivity =
     dispatch(setAIBusyForEnv({ key, busy: payload.busy }));
   };
 
-// handleOrchestratorShellActivity surfaces that an orchestrator has a
-// background shell running even after its own turn has gone idle — the case a
-// plain busy spinner cannot show, since backgrounding a shell is what lets the
-// turn end without waiting for it.
+// handleOrchestratorShellActivity reports a background shell still running
+// after the orchestrator's turn went idle.
 export const handleOrchestratorShellActivity =
   (payload: OrchestratorShellActivityPayload): AppThunk =>
   (dispatch) => {
@@ -111,9 +103,6 @@ export const handleOrchestratorShellActivity =
     );
   };
 
-// handleEnvStatus keeps the sidebar's open dot reflecting the env's real
-// condition, not mere tab presence (Nielsen #2, match between system and
-// real state).
 export const handleEnvStatus =
   (payload: EnvStatusPayload): AppThunk =>
   (dispatch) => {
@@ -126,17 +115,8 @@ export const handleEnvStatus =
     dispatch(setEnvStatusForEnv({ key, status: payload.status.trim() }));
   };
 
-// handleEnvActivity records what the environment itself reports — its edge
-// answering, and whether work is in flight — so a row driven from the CLI or by
-// an in-pod agent shows its condition instead of rendering blank (Nielsen #1,
-// visibility of system status).
-//
-// It also patches every orchestrator env ref for this tenant/environment, not
-// just the sidebar row's own copy: an orchestrator card joins the same
-// activity onto its linked envs at read-model build time, and nothing kept
-// that joined copy current between builds — so a card could keep reporting an
-// outage the row had already recovered from. Driving both off this one event
-// is what keeps the two surfaces from disagreeing about one environment.
+// handleEnvActivity also patches the orchestrator env refs for this environment,
+// so cards and sidebar rows agree.
 export const handleEnvActivity =
   (payload: EnvActivityPayload): AppThunk =>
   (dispatch) => {
@@ -158,11 +138,7 @@ export const handleEnvActivity =
     dispatch(setEnvActivityForOrchestratorEnvs({ tenant, environment, activity }));
   };
 
-// handleEnvUsage records the usage sweep's cached reading for one environment
-// (environment_usage.go), driving both the sidebar hover card and every
-// orchestrator card that links this environment off the one event — the same
-// join handleEnvActivity performs, so the two surfaces can never disagree
-// about what this environment is using or how stale that reading is.
+// handleEnvUsage updates the sidebar and orchestrator cards from the same event.
 export const handleEnvUsage =
   (payload: EnvUsagePayload): AppThunk =>
   (dispatch) => {
@@ -181,10 +157,6 @@ export const handleEnvUsage =
     dispatch(setEnvUsageForOrchestratorEnvs({ tenant, environment, usage }));
   };
 
-// handleEnvNode records which cloud node backs one environment and what power
-// state it was last observed in (environment_node.go). It is what lets a row
-// whose own state cannot be determined still name the node behind it, instead
-// of rendering the blank that reads as "nothing to say".
 export const handleEnvNode =
   (payload: EnvNodePayload): AppThunk =>
   (dispatch) => {
@@ -197,7 +169,6 @@ export const handleEnvNode =
     dispatch(setEnvNodeForEnv({ key, node: payload.node }));
   };
 
-// handleAppStatus surfaces a backend status line to the user.
 export const handleAppStatus =
   (payload: AppStatusPayload): AppThunk =>
   (dispatch) => {
@@ -208,8 +179,6 @@ export const handleAppStatus =
     dispatch(showTerminalMessage(message, payload.busy === true));
   };
 
-// handleAppNotification shows one-shot info/success events as a transient
-// toast; they would go stale if left on the persistent titlebar pill.
 export const handleAppNotification =
   (payload: AppNotificationPayload): AppThunk =>
   (dispatch) => {
@@ -229,14 +198,7 @@ export const handleAppNotification =
     );
   };
 
-// erun:events-dropped is the headless HTTP+SSE bridge's reserved gap marker
-// (headlessserver.eventsDroppedName): a full per-tab event buffer replaces
-// its oldest queued event with this one instead of discarding a real event
-// silently, so the tab can tell "I missed something" apart from "nothing
-// happened". Reacting to it is what makes that distinction worth drawing —
-// warn visibly (this can mean any of the events this tab reacts to went
-// missing) and resync the sidebar/env baseline from the backend rather than
-// continuing to render whatever the last-received event left behind.
+// handleEventsDropped warns and resyncs, since the dropped events cannot be known.
 export const handleEventsDropped =
   (missed: number): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -252,12 +214,7 @@ export const handleEventsDropped =
     await dispatch(reloadStateAfterEnvironmentChange());
   };
 
-// Bounded retry budget for surfacing a just-initialized env. A single reload
-// can miss it — a best-effort getInitialState failure, or a reload that
-// coalesced with the fsnotify watcher's refresh — leaving the sidebar stale
-// with no other recovery. Retrying self-heals the missed refresh instead of
-// silently dropping the new environment (erun-ui/AGENTS.md § "Command
-// Completion And State-Refresh Wiring").
+// A single reload can miss a just-initialized env, so retry a bounded number of times.
 const ENVIRONMENT_INIT_RELOAD_ATTEMPTS = 8;
 const ENVIRONMENT_INIT_RELOAD_DELAY_MS = 400;
 
@@ -281,21 +238,9 @@ const reloadUntilEnvironmentVisible =
     return false;
   };
 
-// Fires when the backend observes `==> Initialized <tenant>/<env>` (or the
-// config watcher detects a new env). What happens next depends on whether
-// `erun init` already deployed the runtime:
-//   - remote-worktree envs (remote-agent / runtime): init deploys the runtime
-//     itself — carrying MCP-auth + the resolved registry — and waits for it to
-//     become Available before emitting this, so we OPEN directly. Composing a
-//     second deploy here re-rendered the chart (MCP-auth + cluster registry) and
-//     rolled the pod init had just created.
-//   - host envs: the env IS a directory on this machine, with no pod and no
-//     cluster, so there is nothing to deploy and `erun deploy` refuses it. We
-//     OPEN directly — opening a host env is a shell in that directory.
-//   - local-agent (builds-here) envs: init does NOT deploy (no in-pod build), so
-//     the desktop composes the single build→push→deploy and opens the env's tabs
-//     on the matching `environment-deployed` signal (handleEnvironmentDeployed).
-// See erun-ui/AGENTS.md § "Command Completion And State-Refresh Wiring".
+// Remote-worktree envs are deployed by init (a second deploy would roll the
+// fresh pod) and host envs need no deploy, so both open directly; local-agent
+// envs compose a deploy and open on environment-deployed.
 export const handleEnvironmentInitialized =
   (payload: EnvironmentInitializedPayload): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -317,13 +262,7 @@ export const handleEnvironmentInitialized =
     dispatch(showNotification('success', `Created ${tenant} / ${environment}.`));
     const envType = selectEnvironmentType(getState(), tenant, environment);
     if (environmentTypeIsHost(envType)) {
-      // A host env is a directory on this machine: no pod and no cluster, so
-      // init had nothing to stand up and there is no deploy to compose. Running
-      // the local-agent arm here made `erun deploy` refuse it ("is a host
-      // environment — it has no pod and no cluster to deploy against") and left
-      // pendingOpenAfterDeploy set, so the env showed a failed deploy and never
-      // opened. Opening a host env is a shell in its own directory, which needs
-      // no deploy to have happened first.
+      // `erun deploy` refuses a host env; opening is just a shell in its directory.
       try {
         await dispatch(openSelection({ tenant, environment }));
       } catch (error) {
@@ -332,7 +271,6 @@ export const handleEnvironmentInitialized =
       return;
     }
     if (environmentTypeIsRemoteWorktree(envType)) {
-      // init already deployed + waited; open directly.
       try {
         await dispatch(openSelection({ tenant, environment }));
       } catch (error) {
@@ -340,8 +278,6 @@ export const handleEnvironmentInitialized =
       }
       return;
     }
-    // local-agent: init did not deploy, so compose the single deploy and gate the
-    // open on environment-deployed.
     dispatch(setPendingOpenAfterDeploy({ tenant, environment }));
     try {
       await dispatch(startInitialDeploySelection({ tenant, environment }));
@@ -351,10 +287,7 @@ export const handleEnvironmentInitialized =
     }
   };
 
-// Fires on a successful or skipped deploy. Gates the create→deploy→open flow:
-// opens the env's tabs only if it was queued pending-open at create time; any
-// other deploy (the Deploy button, a manual redeploy) has no pending entry and
-// is a no-op, so an env auto-opens only when the user created it.
+// handleEnvironmentDeployed opens tabs only for an env queued pending-open at create.
 export const handleEnvironmentDeployed =
   (payload: EnvironmentInitializedPayload): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -375,8 +308,6 @@ export const handleEnvironmentDeployed =
     }
   };
 
-// Fires on an init failure. Surfaces an error toast and reverts the optimistic
-// state.selected so the sidebar's "creating ..." placeholder row disappears.
 export const handleEnvironmentInitFailed =
   (payload: EnvironmentInitializedPayload): AppThunk =>
   (dispatch, getState) => {
@@ -396,8 +327,6 @@ export const handleEnvironmentInitFailed =
     }
   };
 
-// handleReconnectLine buffers a reconnect PTY status line while the reconnect
-// is running.
 export const handleReconnectLine =
   (line: string): AppThunk =>
   (dispatch, getState) => {
@@ -411,8 +340,6 @@ export const handleReconnectLine =
     dispatch(appendReconnectLine(trimmed));
   };
 
-// updateOpenStatusFromOutput promotes a recognised status fragment from an
-// opening env's terminal output into the busy-state message.
 export const updateOpenStatusFromOutput =
   (sessionId: number, output: string): AppThunk =>
   (dispatch, getState) => {
@@ -430,8 +357,6 @@ export const updateOpenStatusFromOutput =
     dispatch(showTerminalMessage(status, true));
   };
 
-// hideTerminalMessageIfActive clears the busy message once real output
-// resumes on the active session.
 export const hideTerminalMessageIfActive =
   (sessionId: number): AppThunk =>
   (dispatch, getState) => {
@@ -444,13 +369,8 @@ export const hideTerminalMessageIfActive =
     }
   };
 
-// handleDoctorCompleted records `erun doctor`'s last-run outcome for the
-// Manage dialog's SSH tab. This is doctor's only completion signal — it runs
-// piped into the shared Local shell, which never produces a PTY exit (see
-// erun-ui/AGENTS.md § "Command Completion And State-Refresh Wiring") — so a
-// handler keyed on terminal exit can never fire; the `doctor-completed` Wails
-// event fires from the CLI's `==> Doctor done` / `==> Doctor failed` trace
-// lines instead (see handleDoctorTraceLine in erun-ui/activity_queue_app.go).
+// handleDoctorCompleted relies on the `doctor-completed` event, since doctor runs
+// in the shared Local shell and never produces a PTY exit.
 export const handleDoctorCompleted =
   (payload: DoctorCompletedPayload): AppThunk =>
   (dispatch) => {
@@ -466,12 +386,7 @@ export const handleDoctorCompleted =
     );
   };
 
-// handleSSHDInitCompleted records `erun sshd init`'s last-run outcome for the
-// Manage dialog's SSH access section. Like doctor, sshd init runs piped into
-// the shared Local shell and never produces a PTY exit, so the
-// `sshd-init-completed` Wails event — fired from the CLI's `==> SSHD init
-// done` / `==> SSHD init failed` trace lines (see handleSSHDInitTraceLine in
-// erun-ui/activity_queue_app.go) — is its only completion signal.
+// handleSSHDInitCompleted relies on `sshd-init-completed` for the same reason.
 export const handleSSHDInitCompleted =
   (payload: SSHDInitCompletedPayload): AppThunk =>
   (dispatch) => {
@@ -499,10 +414,7 @@ const dropExitedSessionFromTabs =
       return;
     }
     if (envClosing(getState().sessions, key)) {
-      // closeEnvironment is tearing this env's tabs down; its own default
-      // tabs exit asynchronously and race clearTabsForEnv, so a sibling tab
-      // (e.g. the AI tab) can still look "exiting" here. Auto-selecting it
-      // would respawn a tab the user just deliberately closed.
+      // The env is closing; auto-selecting a sibling would respawn a closed tab.
       return;
     }
     const next = remaining[remaining.length - 1];
@@ -525,8 +437,7 @@ export const handleTerminalExit =
   (payload: TerminalExitPayload): AppThunk =>
   (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    // takeExitSelections both reads the per-session metadata AND clears it
-    // in one atomic dispatch — pull the values out first.
+    // takeExitSelections reads and clears the metadata in one dispatch.
     const selections = controller.sessions.takeExitSelections(payload.sessionId);
     const reason = computeTerminalExitReason(payload, selections);
     const failedOutput = recordTerminalExit(dispatch, controller, payload, selections, reason);
@@ -534,13 +445,7 @@ export const handleTerminalExit =
     dispatch(dropExitedSessionFromTabs(payload.sessionId, selections.openSelection));
     dispatch(releaseExitedSession(payload.sessionId));
 
-    // Nothing to report either way: this exit is not the pane's, or the
-    // desktop caused it. A deliberate teardown — an env close, a tab close, an
-    // AI-session end — kills the PTY on purpose, so the reader parked in Read
-    // wakes with a reason ("signal: killed") for the kill the operator asked
-    // for. The exit says which it is itself (@see
-    // TerminalExitPayload.deliberate); neither the env's close hold nor the tab
-    // strip can, a close being able to kill and still come back an error.
+    // Not this pane's session, or a deliberate teardown the operator asked for.
     if (payload.deliberate === true || payload.sessionId !== getState().terminal.sessionId) {
       return;
     }

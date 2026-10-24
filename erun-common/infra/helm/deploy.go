@@ -15,9 +15,8 @@ func FindComponentHelmChartPath(projectRoot, componentName string) (string, erro
 		return "", fmt.Errorf("component name is required")
 	}
 
-	// A declared components: entry scopes the walk to that component's own k8s
-	// root instead of the whole project, so a monorepo's chart resolves
-	// deterministically rather than by a same-named directory found elsewhere.
+	// A declared component scopes the search to its own k8s root, so same-named
+	// charts elsewhere cannot match.
 	searchRoot := projectRoot
 	declared, ok, err := configpkg.DeclaredComponentPaths(projectRoot, componentName)
 	if err != nil {

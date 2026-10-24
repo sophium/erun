@@ -18,8 +18,6 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// decodedAuthError reads the {code, message} envelope every auth-layer error
-// response carries, failing the test if the body isn't that shape.
 func decodedAuthError(t *testing.T, rec *httptest.ResponseRecorder) authErrorEnvelope {
 	t.Helper()
 	var envelope authErrorEnvelope
@@ -29,8 +27,6 @@ func decodedAuthError(t *testing.T, rec *httptest.ResponseRecorder) authErrorEnv
 	return envelope
 }
 
-// mustEqual fails when a value the middleware passed through differs from the one
-// it resolved from.
 func mustEqual(t *testing.T, field, got, want string) {
 	t.Helper()
 	if got != want {
@@ -306,12 +302,6 @@ func TestAuthMiddlewareRejectsUnknownExternalUser(t *testing.T) {
 	}
 }
 
-// TestAuthMiddlewareReportsTenantUnresolvedForOrgClaimMissing checks at the
-// middleware boundary that a combined IdentityResolver
-// (the production wiring) reporting security.ErrTenantUnresolved -- an
-// org-scoped issuer whose token carries no matching org claim -- must render
-// as TENANT_UNRESOLVED, never the generic "not enrolled" message that sends
-// an already-enrolled operator to ask for an enrolment that already exists.
 func TestAuthMiddlewareReportsTenantUnresolvedForOrgClaimMissing(t *testing.T) {
 	underlying := fmt.Errorf("%w: issuer %q is org-scoped but the token carries no matching claim", security.ErrTenantUnresolved, "https://auth.example/shared")
 	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{
@@ -341,11 +331,6 @@ func TestAuthMiddlewareReportsTenantUnresolvedForOrgClaimMissing(t *testing.T) {
 	}
 }
 
-// TestAuthMiddlewareReportsNotEnrolledForCombinedResolverNotFound mirrors the
-// same distinction through the combined IdentityResolver wiring: a tenant
-// that resolved fine but reports a plain repository.ErrNotFound (this
-// external identity is not one of its users) must render as NOT_ENROLLED,
-// not TENANT_UNRESOLVED.
 func TestAuthMiddlewareReportsNotEnrolledForCombinedResolverNotFound(t *testing.T) {
 	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
@@ -374,12 +359,6 @@ func TestAuthMiddlewareReportsNotEnrolledForCombinedResolverNotFound(t *testing.
 	}
 }
 
-// TestAuthMiddlewareReportsResolutionFailedWithoutLeakingRawDatabaseError
-// checks at the middleware boundary that a repository.ErrIdentityResolutionFailed
-// renders as its own RESOLUTION_FAILED code, distinct from NOT_ENROLLED and
-// TENANT_UNRESOLVED, and that the client-facing message and the auth-rejected
-// log line carry only the sanitized sentinel's text, never a raw constraint
-// name or SQLSTATE.
 func TestAuthMiddlewareReportsResolutionFailedWithoutLeakingRawDatabaseError(t *testing.T) {
 	var logBuf bytes.Buffer
 	log.SetOutput(&logBuf)
@@ -483,11 +462,6 @@ func TestClassifyIdentityErrorPassesThroughUnexpectedErrors(t *testing.T) {
 	}
 }
 
-// TestAuthErrorCodeDistinguishesResolutionFailedFromNotEnrolledAndUnresolved
-// locks in that all three 401-shaped outcomes get their own code: a real
-// "you need enrolling" (NOT_ENROLLED), a real "your tenant could not be
-// determined" (TENANT_UNRESOLVED), and a sanitized internal error
-// (RESOLUTION_FAILED) that is neither.
 func TestAuthErrorCodeDistinguishesResolutionFailedFromNotEnrolledAndUnresolved(t *testing.T) {
 	if code := authErrorCode(repository.ErrIdentityResolutionFailed); code != "RESOLUTION_FAILED" {
 		t.Fatalf("code = %q, want RESOLUTION_FAILED", code)

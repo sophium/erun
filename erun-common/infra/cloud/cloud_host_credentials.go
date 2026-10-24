@@ -11,22 +11,16 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-// HostAWSCredentialsProfile is the profile the runtime chart wires into the
-// pod's AWS_PROFILE. Every writer and reader of the pod's copy of the operator's
-// identity must agree on it, or the pod authenticates as nobody.
+// HostAWSCredentialsProfile is the AWS_PROFILE the runtime chart wires into the pod.
 const HostAWSCredentialsProfile = "erun-host"
 
-// hostAWSCredentialsExpirationKey records when the injected credentials lapse.
-// AWS ignores the key; erun reads it back so an expired session is reported as
-// such instead of surfacing later as an unrelated registry pull failure.
+// hostAWSCredentialsExpirationKey is ignored by AWS; erun reads it to report an expired session.
 const hostAWSCredentialsExpirationKey = "x_erun_expiration"
 
-// hostAWSCredentialsPath is the pod-side file, displayed to the operator. It
-// lives on the home PVC and therefore outlives pod replacement.
+// hostAWSCredentialsPath lives on the home PVC, so it outlives pod replacement.
 const hostAWSCredentialsPath = "~/.aws/credentials"
 
-// HostCredentialsRefresh reports what a refresh wrote, so a transport can tell
-// the operator which profile now carries their identity and when it lapses.
+// HostCredentialsRefresh reports the profile written and when it lapses.
 type HostCredentialsRefresh struct {
 	Alias      string    `json:"alias"`
 	Profile    string    `json:"profile"`
@@ -35,9 +29,7 @@ type HostCredentialsRefresh struct {
 	Expiration time.Time `json:"expiration,omitzero"`
 }
 
-// HostCredentialsStatus is the pod's erun-host profile as read back from the
-// environment. Region is the region the env resolves to; empty means none could
-// be resolved, which leaves every AWS call in the pod without a default region.
+// HostCredentialsStatus is the pod's erun-host profile; an empty Region means none resolved.
 type HostCredentialsStatus struct {
 	Alias      string    `json:"alias"`
 	Profile    string    `json:"profile"`
@@ -47,10 +39,8 @@ type HostCredentialsStatus struct {
 	Region     string    `json:"region,omitempty"`
 }
 
-// RefreshHostAWSCredentials mints short-lived credentials from the operator's
-// own AWS profile and writes them into the env's runtime pod under the erun-host
-// profile. The secret is read here and streamed to the pod on stdin, so it never
-// appears in an argument, a trace line, or a golden.
+// RefreshHostAWSCredentials writes short-lived credentials into the pod's erun-host profile.
+// The secret goes over stdin, never into args, traces, or goldens.
 func RefreshHostAWSCredentials(ctx core.Context, store config.CloudReadStore, result config.OpenResult, deps CloudDependencies) (HostCredentialsRefresh, error) {
 	alias := strings.TrimSpace(result.EnvConfig.CloudProviderAlias)
 	if alias == "" {
@@ -96,9 +86,7 @@ func RefreshHostAWSCredentials(ctx core.Context, store config.CloudReadStore, re
 	return refresh, nil
 }
 
-// InspectHostAWSCredentials reads back the pod's erun-host profile so staleness
-// is diagnosable at the erun layer. It reports presence and expiry only — the
-// script it runs never prints credential material.
+// InspectHostAWSCredentials reports the pod profile's presence and expiry, never credential material.
 func InspectHostAWSCredentials(ctx core.Context, runner kube.RemoteCommandRunnerFunc, store config.CloudReadStore, result config.OpenResult) (HostCredentialsStatus, error) {
 	status := HostCredentialsStatus{
 		Alias:   strings.TrimSpace(result.EnvConfig.CloudProviderAlias),
@@ -136,9 +124,7 @@ func traceRuntimeExecCommand(ctx core.Context, args []string, label, script stri
 	ctx.TraceBlock(label, script)
 }
 
-// hostAWSCredentialsWriteArgs streams the profile to the pod on stdin: -i (not
-// -it) keeps stdin a pipe for the credential bytes, and no credential value is
-// ever one of these args.
+// hostAWSCredentialsWriteArgs uses -i (not -it) so stdin stays a pipe for the credential bytes.
 func hostAWSCredentialsWriteArgs(req config.ShellLaunchParams, script string) []string {
 	args := config.KubectlTargetArgs(req)
 	args = append(args, "exec", "-i")
@@ -160,9 +146,7 @@ func writeHostAWSCredentials(req config.ShellLaunchParams, script, payload strin
 	return nil
 }
 
-// renderHostAWSCredentialsProfile builds the profile block the pod receives. The
-// region rides along so the pod still resolves one from its own profile when the
-// chart legitimately threads no AWS_REGION.
+// renderHostAWSCredentialsProfile includes the region for pods whose chart sets no AWS_REGION.
 func renderHostAWSCredentialsProfile(credentials CloudProviderCredentials, region string) string {
 	lines := []string{
 		"[" + HostAWSCredentialsProfile + "]",
@@ -181,15 +165,8 @@ func renderHostAWSCredentialsProfile(credentials CloudProviderCredentials, regio
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// hostAWSCredentialsWriteScript replaces the erun-host section of the pod's
-// shared credentials file with the block arriving on stdin. Dropping the old
-// section first is what keeps a repeated refresh an overwrite rather than a
-// second copy of the profile, and every other profile in the file survives. The
-// temp file is unique per invocation (mktemp, not a fixed name) so two
-// refreshes racing against the same pod — `erun open` firing one while an
-// explicit `erun cloud refresh` is still in flight, say — never share the
-// intermediate file: each writes its own copy of the new section exactly once,
-// and whichever atomic mv lands last is the profile that survives.
+// hostAWSCredentialsWriteScript replaces only the erun-host section. The mktemp file
+// and atomic mv keep concurrent refreshes from duplicating the profile.
 func hostAWSCredentialsWriteScript() string {
 	return strings.Join([]string{
 		"set -eu",
@@ -214,8 +191,7 @@ func hostAWSCredentialsWriteScript() string {
 	}, "\n")
 }
 
-// hostAWSCredentialsReadScript reports only whether the erun-host profile exists
-// and when it expires. It must never print a key, a secret, or a session token.
+// hostAWSCredentialsReadScript must never print a key, secret, or session token.
 func hostAWSCredentialsReadScript() string {
 	return strings.Join([]string{
 		"set -eu",
@@ -252,12 +228,8 @@ func parseHostAWSCredentialsReport(stdout string) (bool, time.Time) {
 	return present, expiration
 }
 
-// ResolveEnvironmentAWSRegion resolves the AWS region an env should operate in
-// when it names an AWS provider alias: the kubernetes context name, then the
-// alias' Identity Center region, then the region encoded in an ECR registry
-// host. Empty means nothing resolved — callers must then omit the region rather
-// than pass an empty one, because an empty AWS_REGION overrides (instead of
-// falling back to) whatever the pod's own profile carries.
+// ResolveEnvironmentAWSRegion returns "" when nothing resolves; callers must then omit
+// AWS_REGION, since an empty value overrides the pod profile's region.
 func ResolveEnvironmentAWSRegion(store config.CloudReadStore, env config.EnvConfig) string {
 	if region := cloudContextRegionFromName(env.KubernetesContext); region != "" {
 		return region
@@ -273,8 +245,6 @@ func ResolveEnvironmentAWSRegion(store config.CloudReadStore, env config.EnvConf
 	return awsRegionFromContainerRegistries(env.ContainerRegistries)
 }
 
-// awsRegionFromContainerRegistries reads the region out of an ECR host: a tenant
-// whose images live in ECR is already operating in that region.
 func awsRegionFromContainerRegistries(registries config.ContainerRegistries) string {
 	for _, registry := range registries.DistinctRegistries() {
 		if region := awsRegionFromECRHost(registry); region != "" {

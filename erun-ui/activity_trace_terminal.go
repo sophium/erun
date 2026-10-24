@@ -8,10 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// feedActivityTraceFromTerminal drives the activity queue from any tab that
-// hosts a running erun process (Local from the Deploy button, ERun from a
-// manual `erun deploy`, AI from Claude deploying inside the pod), dispatching
-// each complete line through the trace handler that owns deploy lifecycle.
+// feedActivityTraceFromTerminal feeds each complete PTY line to the trace handler.
 func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []byte) {
 	if managed == nil || a.activityQueue == nil || !terminalFeedsActivityTrace(managed) {
 		return
@@ -25,23 +22,16 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 	}
 	handler := newActivityTraceLineHandler(a, managed.selection, managed.kind)
 	for _, line := range lines {
-		// newActivityTraceLineHandler itself buffers the line into entry.Detail
-		// before dispatching, so every caller (this PTY reader and the
-		// subprocess-captured orchestration path) gets the same Detail capture.
 		handler(line)
 		signalSessionReadyOnLine(managed, line)
-		// The CLI's taken-over notice is a public contract line (see
-		// open.ShellSessionTakenOverNotice): another ERun window
-		// re-attached this persistent session, so the upcoming PTY exit
-		// must not trigger a reconnect that would steal it back.
+		// Another window re-attached this session, so its PTY exit must not reconnect.
 		if strings.TrimSpace(line) == open.ShellSessionTakenOverNotice {
 			a.markSessionTakenOver(managed)
 		}
 	}
 }
 
-// terminalFeedsActivityTrace reports whether a tab is one that can run erun
-// against a selected environment; an orchestrator pane is not.
+// terminalFeedsActivityTrace excludes orchestrator panes.
 func terminalFeedsActivityTrace(managed *managedTerminal) bool {
 	if managed.selection.Tenant == "" || managed.selection.Environment == "" {
 		return false
@@ -57,9 +47,7 @@ func terminalFeedsActivityTrace(managed *managedTerminal) bool {
 	}
 }
 
-// drainActivityTraceLines returns every complete `\n`-terminated line, leaving
-// any trailing partial line buffered for the next chunk. The caller must hold
-// a.mu.
+// drainActivityTraceLines keeps the trailing partial line buffered; caller holds a.mu.
 func drainActivityTraceLines(managed *managedTerminal) []string {
 	lines := []string{}
 	for {
@@ -68,11 +56,8 @@ func drainActivityTraceLines(managed *managedTerminal) []string {
 			break
 		}
 		raw := managed.activityTraceBuffer[:idx]
-		// Strip the trailing `\r` of the PTY's `\r\n`, then on a spinner-style
-		// overwrite (`\rprogress\rprogress\rfinal`) keep only the content after
-		// the LAST `\r` so the text matches what the user sees. Taking the first
-		// `\r` instead would blank the common `text\r\n` case and break every
-		// downstream matcher.
+		// Keep the text after the last `\r` (spinner overwrites) once the trailing
+		// `\r` of `\r\n` is trimmed, matching what the user sees.
 		line := strings.TrimRight(raw, "\r")
 		if r := strings.LastIndexByte(line, '\r'); r >= 0 {
 			line = line[r+1:]
@@ -83,11 +68,7 @@ func drainActivityTraceLines(managed *managedTerminal) []string {
 	return lines
 }
 
-// sessionReady*Re match lines that indicate the session's setup phase
-// is done. signalSessionReadyOnLine uses them to release the desktop
-// action runner's gate so the next queued action can start. The
-// matchers are intentionally broad — any of them firing means the user
-// is past the setup phase and a parallel queued action can safely run.
+// sessionReady*Re release the action runner's gate; any match means setup is done.
 var (
 	sessionReadyDeployedRe    = regexp.MustCompile(`^==> Deployed `)
 	sessionReadyFailedRe      = regexp.MustCompile(`^==> Deploy (?:of \S+ )?failed`)
@@ -112,10 +93,7 @@ func signalSessionReadyOnLine(managed *managedTerminal, line string) {
 	}
 }
 
-// stripActivityTraceANSI removes the most common ANSI control sequences erun
-// emits via spinner/colors so trace-line matching survives terminal noise.
-// The patterns are intentionally narrow (CSI-style escape sequences) to
-// avoid clobbering meaningful output.
+// stripActivityTraceANSI strips only CSI sequences.
 func stripActivityTraceANSI(s string) string {
 	if !strings.Contains(s, "\x1b") {
 		return s

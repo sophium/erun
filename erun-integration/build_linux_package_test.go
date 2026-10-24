@@ -24,11 +24,7 @@ func buildLinuxPackageScenarios(t *testing.T) {
 }
 
 func testBuildDryRunLinuxPackageFromComponentDir(t *testing.T) {
-	// A linux package is a Dockerfile under <tenant>-devops/linux/<name>/,
-	// never an image: from its directory `erun build` resolves no image and
-	// runs only the package's test stage to a cache-only output, from the
-	// project root it takes as its context. Nothing about the host matters,
-	// because the package builds inside docker.
+	// A linux package runs only its test stage to a cache-only output.
 	setup := env.New(t)
 	pkgDir := filepath.Join(setup.Cwd, "team-devops", "linux", "erun-ui")
 	mustWriteFile(t, filepath.Join(pkgDir, "Dockerfile"), testedLinuxPackageDockerfile)
@@ -40,10 +36,7 @@ func testBuildDryRunLinuxPackageFromComponentDir(t *testing.T) {
 }
 
 func testBuildDryRunLinuxPackageCgroupParentAppliesInsideInjectedRuntimePod(t *testing.T) {
-	// A package's test stage is as heavy as any image's (erun-ui runs its
-	// whole suite there), so inside an injected runtime pod it nests its RUN
-	// containers under the same CPU cap cgroup every image build uses,
-	// rather than escaping the dind sidecar's limit.
+	// In-pod package builds nest under the same CPU-cap cgroup as images.
 	setup := env.New(t)
 	pkgDir := filepath.Join(setup.Cwd, "team-devops", "linux", "erun-ui")
 	mustWriteFile(t, filepath.Join(pkgDir, "Dockerfile"), testedLinuxPackageDockerfile)
@@ -60,11 +53,7 @@ func testBuildDryRunLinuxPackageCgroupParentAppliesInsideInjectedRuntimePod(t *t
 }
 
 func testBuildRealRunLinuxPackagesFromLinuxDir(t *testing.T) {
-	// From the linux/ parent dir every package builds for real: one with a
-	// test stage runs it and reports `passed`, one without runs its build
-	// stage and reports `none declared`. The docker stub records its argv
-	// (a side effect outside the captured streams) to prove each build
-	// exports nothing: no tag, no image, no push.
+	// The stub records argv to prove no build exports a tag, image, or push.
 	setup := env.New(t)
 	linuxDir := filepath.Join(setup.Cwd, "team-devops", "linux")
 	mustWriteFile(t, filepath.Join(linuxDir, "erun-cli", "Dockerfile"), untestedLinuxPackageDockerfile)
@@ -98,11 +87,8 @@ func testBuildRealRunLinuxPackagesFromLinuxDir(t *testing.T) {
 }
 
 func testBuildRealRunLinuxPackagesReuseARecordedPass(t *testing.T) {
-	// A package's pass is recorded locally against its fingerprint, so the
-	// next plain build with the same inputs reports `test: reused` and runs
-	// no docker build at all, rather than relying on BuildKit's layer cache
-	// (which GC evicts). Changing a source its test stage copies runs it
-	// again. The docker stub records its argv to count the builds.
+	// A recorded pass is reused by fingerprint rather than BuildKit's evictable
+	// layer cache; changing a copied source reruns it.
 	setup := env.New(t)
 	linuxDir := filepath.Join(setup.Cwd, "team-devops", "linux")
 	mustWriteFile(t, filepath.Join(linuxDir, "erun-ui", "Dockerfile"), "FROM golang:1.26.0 AS build\nCOPY app /src/app\n\nFROM build AS test\nRUN go test ./...\n")
@@ -138,9 +124,7 @@ func testBuildRealRunLinuxPackagesReuseARecordedPass(t *testing.T) {
 }
 
 func testBuildRealRunLinuxPackageWithoutTestStageReportsNoneDeclaredWhenReused(t *testing.T) {
-	// A package with only a `build` stage has no tests, so a build that
-	// reuses its recorded pass still reports `none declared`, never
-	// `reused`, which would claim an earlier run's tests passed.
+	// `reused` would falsely claim an earlier run's tests passed.
 	setup := env.New(t)
 	linuxDir := filepath.Join(setup.Cwd, "team-devops", "linux")
 	mustWriteFile(t, filepath.Join(linuxDir, "erun-cli", "Dockerfile"), untestedLinuxPackageDockerfile)
@@ -164,8 +148,6 @@ func testBuildRealRunLinuxPackageWithoutTestStageReportsNoneDeclaredWhenReused(t
 }
 
 func testBuildDryRunProjectRootWalksDevopsLinuxDir(t *testing.T) {
-	// From the project root every build tests the linux packages beside the
-	// images, so a merge gate's plain `erun build` runs them too.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -181,8 +163,7 @@ func testBuildDryRunProjectRootWalksDevopsLinuxDir(t *testing.T) {
 }
 
 func testBuildDryRunLinuxPackageWithoutTestOrBuildStageIsRefused(t *testing.T) {
-	// A package a build cannot run anything of is refused by name rather
-	// than skipped, which would read as a tested package.
+	// Skipping would read as a tested package.
 	setup := env.New(t)
 	pkgDir := filepath.Join(setup.Cwd, "team-devops", "linux", "erun-ui")
 	mustWriteFile(t, filepath.Join(pkgDir, "Dockerfile"), "FROM debian:bookworm-slim AS dist\nRUN true\n")

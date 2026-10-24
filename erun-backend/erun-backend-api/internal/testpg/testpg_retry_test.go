@@ -7,13 +7,9 @@ import (
 	"testing"
 )
 
-// errReaperStartup is the error a loaded Docker daemon produced when
-// Testcontainers' reaper never left status "created".
 var errReaperStartup = dockerStartupError{errors.New(`create a Docker network (the database suites need a Docker daemon): ` +
 	`reaper: new reaper: wait for reaper 1a2b3c4d: unexpected container status "created": failed to create network`)}
 
-// scriptedAttempts returns an attempt func that hands out results in order and
-// counts how often it was called.
 func scriptedAttempts(results ...error) (func(context.Context) (string, error), *int) {
 	calls := 0
 	return func(context.Context) (string, error) {

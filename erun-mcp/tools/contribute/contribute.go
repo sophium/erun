@@ -10,8 +10,7 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// ContributeCloneInput is the MCP tool input for `contribute_clone`.
-// preview maps to the CLI's --dry-run flag.
+// ContributeCloneInput's Preview maps to the CLI's --dry-run flag.
 type ContributeCloneInput struct {
 	Verbosity int  `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 	Preview   bool `json:"preview,omitempty" jsonschema:"when true, only resolve and trace the plan without cloning"`

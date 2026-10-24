@@ -10,9 +10,6 @@ import (
 	"time"
 )
 
-// orchestratorPacingMarkerTexts decodes every terminalOutputEvent payload the
-// captured emitter saw into its raw string, in emission order, so a test can
-// assert on the exact marker text a nudge rendered.
 func orchestratorPacingMarkerTexts(emits *capturedEmits) []string {
 	var texts []string
 	for _, evt := range emits.events(terminalOutputEvent) {
@@ -29,10 +26,7 @@ func orchestratorPacingMarkerTexts(emits *capturedEmits) []string {
 	return texts
 }
 
-// callRecordingSession wraps a stub session but also records each Write call
-// separately, so a test can assert the pacing text and its submitting CR
-// arrived as two distinct writes rather than one combined one — a combined
-// write risks the harness reading the CR as part of the pasted text.
+// callRecordingSession records each Write separately.
 type callRecordingSession struct {
 	*stubTerminalSession
 	mu    sync.Mutex
@@ -92,9 +86,6 @@ func TestDecideOrchestratorPacing(t *testing.T) {
 	}
 }
 
-// TestReconcileOrchestratorPacingNudgesAQuietSession is the read-decide-write
-// path end to end: a session whose activity report has not moved in over ten
-// minutes gets the pacing text, then a separate carriage return to submit it.
 func TestReconcileOrchestratorPacingNudgesAQuietSession(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -135,9 +126,6 @@ func TestReconcileOrchestratorPacingNudgesAQuietSession(t *testing.T) {
 	}
 }
 
-// TestReconcileOrchestratorPacingSkipsFreshAndTransient locks the two bounds a
-// nudge must never cross: a session with fresh activity, and a transient
-// (Investigate) session, neither of which has any pacing state to nudge from.
 func TestReconcileOrchestratorPacingSkipsFreshAndTransient(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -167,9 +155,6 @@ func TestReconcileOrchestratorPacingSkipsFreshAndTransient(t *testing.T) {
 	}
 }
 
-// TestReconcileOrchestratorPacingNudgesThroughABackgroundShell: a stale
-// orchestrator with a background shell recorded running must still be nudged,
-// since a long build is the likely thing in flight when a turn dies.
 func TestReconcileOrchestratorPacingNudgesThroughABackgroundShell(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -192,10 +177,6 @@ func TestReconcileOrchestratorPacingNudgesThroughABackgroundShell(t *testing.T) 
 	}
 }
 
-// TestOrchestratorPacingCapsAfterRepeatedSilenceAndRearmsOnFreshBusy pins the
-// bound: after the max un-answered nudges, erun stops nudging and posts a
-// notice exactly once, and a fresh busy report re-arms it so nudging resumes
-// against a session that later goes quiet again.
 func TestOrchestratorPacingCapsAfterRepeatedSilenceAndRearmsOnFreshBusy(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -223,7 +204,6 @@ func TestOrchestratorPacingCapsAfterRepeatedSilenceAndRearmsOnFreshBusy(t *testi
 	}
 	writesBeforeCap := len(session.Calls())
 
-	// One more stale tick crosses the cap: no further write, one notice.
 	app.reconcileOrchestratorPacing()
 	app.mu.Lock()
 	capped = app.orchestrators["agent"].pacingCapped
@@ -239,16 +219,13 @@ func TestOrchestratorPacingCapsAfterRepeatedSilenceAndRearmsOnFreshBusy(t *testi
 		t.Fatalf("expected exactly one capped notification, got %d", len(notices))
 	}
 
-	// Another stale tick while still capped must not repeat the notice.
 	app.reconcileOrchestratorPacing()
 	if len(emits.events(appNotificationEvent)) != 1 {
 		t.Fatal("the capped notice must not repeat every tick")
 	}
 
-	// A fresh busy report rearms it. AtUnix is derived from the last recorded
-	// nudge rather than time.Now(): both are whole-second unix timestamps, and
-	// a real-clock comparison here would be flaky whenever the test runs fast
-	// enough to land in the same second as the last nudge.
+	// Derive AtUnix from the last nudge: both are whole seconds, and the real
+	// clock could land in the same second.
 	app.mu.Lock()
 	lastNudgeAtUnix := app.orchestrators["agent"].pacingLastNudgeAtUnix
 	app.mu.Unlock()
@@ -263,13 +240,7 @@ func TestOrchestratorPacingCapsAfterRepeatedSilenceAndRearmsOnFreshBusy(t *testi
 	}
 }
 
-// TestOrchestratorPacingRearmsOnIdleReplyAcrossManyStaleCycles pins the bug: a
-// session that answers every pacing nudge with a short reply — one that ends
-// back at idle before the next reconciler tick samples it — must never accrue
-// toward the cap. Driving reconcileOrchestratorPacingOne directly with a
-// synthetic, always-advancing clock lets the test push the session through
-// many more stale-then-reply cycles than orchestratorPacingMaxNudges without
-// waiting on the real 10-minute staleness window between them.
+// A synthetic clock drives many more stale-then-reply cycles than the cap allows.
 func TestOrchestratorPacingRearmsOnIdleReplyAcrossManyStaleCycles(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -288,9 +259,6 @@ func TestOrchestratorPacingRearmsOnIdleReplyAcrossManyStaleCycles(t *testing.T) 
 	cycles := orchestratorPacingMaxNudges + 2
 	tick := base
 	for i := 0; i < cycles; i++ {
-		// Advance well past the staleness window so this cycle's first tick
-		// is due a nudge, exactly as an orchestrator that replies and then
-		// falls quiet again for the next stretch would look.
 		tick = tick.Add(orchestratorPacingStaleAfter + time.Minute)
 
 		rows := app.orchestratorPacingRows()
@@ -306,13 +274,9 @@ func TestOrchestratorPacingRearmsOnIdleReplyAcrossManyStaleCycles(t *testing.T) 
 		lastNudgeAtUnix := app.orchestrators["agent"].pacingLastNudgeAtUnix
 		app.mu.Unlock()
 
-		// The session answers in one line and returns to idle well before
-		// the next tick — the compliant case the bug missed.
 		replyAt := time.Unix(lastNudgeAtUnix, 0).Add(time.Second)
 		writeOrchestratorActivity(t, "agent", orchestratorActivity{Busy: false, AtUnix: replyAt.Unix()})
 
-		// The next tick, shortly after the reply, must observe the fresh
-		// report and rearm rather than letting the count carry forward.
 		tick = replyAt.Add(10 * time.Second)
 		rows = app.orchestratorPacingRows()
 		app.reconcileOrchestratorPacingOne(rows[0], tick, false)
@@ -328,9 +292,7 @@ func TestOrchestratorPacingRearmsOnIdleReplyAcrossManyStaleCycles(t *testing.T) 
 		if count != 0 {
 			t.Fatalf("cycle %d: expected the reply to rearm the nudge count, got count=%d", i, count)
 		}
-		// The cap's own gauge rearms every cycle, but the cumulative history
-		// keeps climbing past orchestratorPacingMaxNudges without ever
-		// capping -- the bound and the record are two different questions.
+		// The gauge rearms every cycle; the cumulative history keeps climbing.
 		if want := i + 1; autoCount != want {
 			t.Fatalf("cycle %d: expected the cumulative auto-nudge history to reach %d, got %d", i, want, autoCount)
 		}
@@ -341,11 +303,6 @@ func TestOrchestratorPacingRearmsOnIdleReplyAcrossManyStaleCycles(t *testing.T) 
 	}
 }
 
-// TestOrchestratorPacingStillCapsWithoutAFreshReply is the control for
-// TestOrchestratorPacingRearmsOnIdleReplyAcrossManyStaleCycles: a session that
-// never writes an activity report newer than its last nudge still caps, so
-// the rearm fix does not turn the cap into a no-op for a genuinely silent
-// session.
 func TestOrchestratorPacingStillCapsWithoutAFreshReply(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -376,10 +333,6 @@ func TestOrchestratorPacingStillCapsWithoutAFreshReply(t *testing.T) {
 	}
 }
 
-// TestSendOrchestratorPacingNudgeSkipsWhilePaneBeingTypedInto: firing the
-// nudge (text, then a bare carriage return) into a pane mid-sentence would glue
-// it onto whatever the operator is typing. The skip is deferred, not counted
-// against the cap, so the reconciler retries once the operator pauses.
 func TestSendOrchestratorPacingNudgeSkipsWhilePaneBeingTypedInto(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
@@ -400,7 +353,6 @@ func TestSendOrchestratorPacingNudgeSkipsWhilePaneBeingTypedInto(t *testing.T) {
 		startedAt: time.Now().Add(-orchestratorPacingStaleAfter - time.Minute),
 	}
 
-	// First stale tick: no recent input, so the reconciler nudges normally.
 	app.reconcileOrchestratorPacing()
 	firstCalls := session.Calls()
 	if len(firstCalls) != 2 {
@@ -413,13 +365,10 @@ func TestSendOrchestratorPacingNudgeSkipsWhilePaneBeingTypedInto(t *testing.T) {
 		t.Fatalf("expected one recorded nudge, got %d", count)
 	}
 
-	// The operator starts typing into the pane between ticks.
 	app.mu.Lock()
 	managed.lastInputAt = time.Now()
 	app.mu.Unlock()
 
-	// A later stale tick must stand down rather than glue the nudge text onto
-	// the half-typed line, and must not consume a nudge against the cap.
 	app.reconcileOrchestratorPacing()
 	if got := session.Calls(); len(got) != len(firstCalls) {
 		t.Fatalf("a pane being typed into must not receive a pacing nudge, got extra writes %v", got[len(firstCalls):])
@@ -435,9 +384,6 @@ func TestSendOrchestratorPacingNudgeSkipsWhilePaneBeingTypedInto(t *testing.T) {
 	}
 }
 
-// TestSendSessionInputRearmsOrchestratorPacing locks the other rearm path: real
-// operator input into the pane clears the cap and the count immediately,
-// without waiting for a fresh busy report.
 func TestSendSessionInputRearmsOrchestratorPacing(t *testing.T) {
 	app := NewApp(erunUIDeps{})
 	session := newStubTerminalSession()
@@ -467,9 +413,7 @@ func TestSendSessionInputRearmsOrchestratorPacing(t *testing.T) {
 	}
 }
 
-// createOrchestratorNamed persists one configured orchestrator without starting
-// it: the definition is what the pacer has to decide for even when this desktop
-// holds no session of its own, which is the population under test here.
+// createOrchestratorNamed persists a definition without starting a session.
 func createOrchestratorNamed(t *testing.T, app *App, name string) string {
 	t.Helper()
 	created, err := app.CreateOrchestrator(name, []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
@@ -479,8 +423,6 @@ func createOrchestratorNamed(t *testing.T, app *App, name string) string {
 	return created.ID
 }
 
-// requireOrchestratorInfo is the listed info for one orchestrator, failing
-// rather than returning a zero value when the list does not carry it at all.
 func requireOrchestratorInfo(t *testing.T, app *App, id string) orchestratorInfo {
 	t.Helper()
 	for _, info := range app.ListOrchestrators() {

@@ -9,10 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
-// writeHelmObserveStub points ERUN_HELM_BIN at a script that dispatches on
-// the subcommand (status vs list), so a test can drive
-// fetchObservedHelmRelease against the real, distinct shapes `helm status
-// -o json` and `helm list -o json` return without a live cluster.
+// writeHelmObserveStub points ERUN_HELM_BIN at a script that dispatches on status vs list.
 func writeHelmObserveStub(t *testing.T, statusStdout, listStdout string, exitCode int, stderr string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -36,12 +33,6 @@ func writeHelmObserveStub(t *testing.T, statusStdout, listStdout string, exitCod
 	t.Setenv("ERUN_HELM_BIN", path)
 }
 
-// TestFetchObservedHelmReleaseChartUnreadableReportsError is the bug this
-// test file exists to prevent regressing: when helm list cannot resolve
-// chart/appVersion (here, it returns no matching entry even though helm
-// status found the release), Chart/ChartVersion/AppVersion must stay empty
-// and Error must say so — never render the empty string as if it were a
-// real "no chart" reading.
 func TestFetchObservedHelmReleaseChartUnreadableReportsError(t *testing.T) {
 	statusStdout := `{"name":"erun-devops","namespace":"erun-ux","version":675,"info":{"status":"deployed"},"config":{}}`
 	writeHelmObserveStub(t, statusStdout, "[]", 0, "")

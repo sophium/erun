@@ -32,9 +32,7 @@ func NewAppCmd(launchApp AppLauncher) *cobra.Command {
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := shared.CommandContext(cmd)
-			// The copy this launch settled on is resolved once and carried into
-			// the launch, so the line the operator reads names the executable
-			// that actually starts rather than a second, later lookup of it.
+			// Resolve once so the reported path is the executable that actually starts.
 			executable, chosen := resolveAppExecutable()
 			if chosen != "" {
 				ctx.Trace(chosen)
@@ -92,11 +90,7 @@ func newAppRestartCmd() *cobra.Command {
 	return cmd
 }
 
-// runAppRestartCommand resolves the orchestrator asking for the restart (the
-// flag, else the environment an orchestrator session already carries), then
-// defers entirely to core.RestartDesktopApp: the running desktop is the
-// only thing that holds the open orchestrators, so this command never
-// re-implements the restart.
+// runAppRestartCommand defers to core.RestartDesktopApp: only the running desktop holds the open orchestrators.
 func runAppRestartCommand(ctx core.Context, orchestratorID string) error {
 	id := strings.TrimSpace(orchestratorID)
 	if id == "" {
@@ -121,23 +115,12 @@ func runAppRestartCommand(ctx core.Context, orchestratorID string) error {
 	return ctx.WriteResult(outcome)
 }
 
-// appRestartSummary renders the two non-error outcomes; RestartDesktopApp
-// never returns would-restart for a real (non-dry-run) call, so this only
-// ever prints for a successful restart.
 func appRestartSummary(outcome core.DesktopRestartOutcome) string {
 	return fmt.Sprintf("restarted the running desktop app (pid %d)", outcome.PID)
 }
 
-// appRestartDryRunReport renders what a restart would reopen. Every
-// orchestrator's background agent keeps running through the restart, so the
-// only thing worth saying beforehand is an orchestrator the next launch would
-// refuse to reopen -- while it can still be fixed.
-//
-// Its counterweight is the case where the plan could not be read at all. That is
-// reported as itself and never rendered as an empty plan: "nothing would be
-// refused" is precisely what an answer nobody received must not be mistaken
-// for, and the outcome is still would-restart either way, because the marker and
-// the liveness probe already established that a real target is there.
+// appRestartDryRunReport reports orchestrators the next launch would refuse to reopen.
+// An unreadable plan is reported as such, never rendered as an empty one.
 func appRestartDryRunReport(ctx core.Context, outcome core.DesktopRestartOutcome) {
 	if ctx.Stdout == nil {
 		return
@@ -169,8 +152,6 @@ func appRestartDryRunReport(ctx core.Context, outcome core.DesktopRestartOutcome
 	}
 }
 
-// describeOrchestratorCount renders a reopened-orchestrator count for an
-// operator-facing line.
 func describeOrchestratorCount(count int) string {
 	if count == 1 {
 		return "1 orchestrator"
@@ -178,8 +159,7 @@ func describeOrchestratorCount(count int) string {
 	return fmt.Sprintf("%d orchestrators", count)
 }
 
-// buildAppLaunchArgs returns the argv tail passed to erun-app. Only the
-// headless flags are forwarded today; everything else stays on the CLI side.
+// buildAppLaunchArgs forwards only the headless flags to erun-app.
 func buildAppLaunchArgs(headless bool, port int) []string {
 	if !headless {
 		return nil
@@ -196,10 +176,7 @@ func LaunchAppProcess(stdout, stderr io.Writer, executable string, args []string
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
-		// The build-or-install hint is for the default lookup finding nothing. When
-		// the operator set an explicit override, surface the raw error so the bad
-		// path stays visible — on Windows a missing extensionless path is itself
-		// ErrNotFound, which the hint would otherwise mask.
+		// An explicit override surfaces the raw error; on Windows a missing path is also ErrNotFound.
 		if errors.Is(err, exec.ErrNotFound) && strings.TrimSpace(os.Getenv("ERUN_ERUN_APP_BIN")) == "" {
 			return fmt.Errorf("erun-app executable not found; build or install it first")
 		}
@@ -208,15 +185,12 @@ func LaunchAppProcess(stdout, stderr io.Writer, executable string, args []string
 	return cmd.Process.Release()
 }
 
-// newAppProcessCommand delegates to the shared core.DesktopAppCommand so
-// the CLI and the desktop app's self-restart build the launch identically.
+// newAppProcessCommand shares core.DesktopAppCommand with the desktop's self-restart.
 func newAppProcessCommand(goos string, executable string, args []string) *exec.Cmd {
 	return core.DesktopAppCommand(goos, executable, args)
 }
 
-// resolveAppExecutable resolves which desktop app to launch and the line
-// reporting that choice, falling back to the bare program name — found on PATH
-// — when this CLI sits beside no copy at all.
+// resolveAppExecutable returns the desktop app to launch and the line reporting it.
 func resolveAppExecutable() (string, string) {
 	hostOS := core.DetectHost().OS
 	executableName := core.DesktopAppName

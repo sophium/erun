@@ -28,8 +28,6 @@ func TestFetchHelpersReturnErrorOnNon2xx(t *testing.T) {
 }
 
 func TestDryRunFetchersPerformNoRequest(t *testing.T) {
-	// A dry run must never depend on the platform being reachable, so both
-	// fetchers must short-circuit before making any HTTP call.
 	if _, err := defaultFetchPlatformInfo(core.Context{DryRun: true}, "http://127.0.0.1:1"); err != nil {
 		t.Fatalf("dry run fetch platform info: %v", err)
 	}
@@ -75,8 +73,7 @@ func TestDefaultStartERunDeviceAuthorizationRequiresEndpoint(t *testing.T) {
 	}
 }
 
-// deviceTokenServer simulates a token endpoint that answers
-// authorization_pending N times, then optionally slow_down once, then success.
+// deviceTokenServer answers authorization_pending N times, optionally slow_down once, then success.
 type deviceTokenServer struct {
 	pendingCount int
 	slowDownOnce bool
@@ -205,12 +202,7 @@ func TestDefaultRefreshERunTokensPropagatesServerError(t *testing.T) {
 	}
 }
 
-// TestDefaultClientCredentialsERunTokensSendsBasicAuthAndTheOrgClaimScope pins
-// the two properties that decide whether a machine token is usable at all: the
-// credential form the provisioned application is configured for, and the scope
-// that makes an org-scoped issuer's token carry the claim erun resolves the
-// tenant from. A request omitting either still authenticates and then resolves
-// to no tenant, which is the failure this test exists to keep from returning.
+// Without Basic auth and the org-claim scope a machine token authenticates but resolves to no tenant.
 func TestDefaultClientCredentialsERunTokensSendsBasicAuthAndTheOrgClaimScope(t *testing.T) {
 	var gotUser, gotSecret string
 	var gotBasic bool
@@ -233,9 +225,6 @@ func TestDefaultClientCredentialsERunTokensSendsBasicAuthAndTheOrgClaimScope(t *
 	}
 }
 
-// assertClientCredentialsRequest checks the two properties of the request
-// itself: the grant, the org-claim scope, and that the secret is in the header
-// rather than the body.
 func assertClientCredentialsRequest(t *testing.T, r *http.Request) {
 	t.Helper()
 	if err := r.ParseForm(); err != nil {
@@ -247,16 +236,11 @@ func assertClientCredentialsRequest(t *testing.T, r *http.Request) {
 	if r.FormValue("scope") != erunOrgClaimScope {
 		t.Fatalf("scope = %q, want %q", r.FormValue("scope"), erunOrgClaimScope)
 	}
-	// The secret belongs in the header, not the body: one is a credential
-	// transport, the other is a payload a proxy or an access log may keep.
 	if r.FormValue("client_secret") != "" {
 		t.Fatal("client secret travelled in the request body")
 	}
 }
 
-// TestDefaultClientCredentialsERunTokensRetriesAnUnknownScope: an issuer that
-// has never heard of the org claim — a tenant's own BYO IdP — must not turn a
-// working identity into a failing one.
 func TestDefaultClientCredentialsERunTokensRetriesAnUnknownScope(t *testing.T) {
 	scopes := []string{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -283,9 +267,6 @@ func TestDefaultClientCredentialsERunTokensRetriesAnUnknownScope(t *testing.T) {
 	}
 }
 
-// TestDefaultClientCredentialsERunTokensDryRunPerformsNoRequest: provisioning
-// runs under --dry-run too, and a preview must not depend on the issuer being
-// reachable.
 func TestDefaultClientCredentialsERunTokensDryRunPerformsNoRequest(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("dry run reached the issuer")

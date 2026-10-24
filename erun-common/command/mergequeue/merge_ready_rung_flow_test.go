@@ -8,53 +8,26 @@ import (
 	"testing"
 )
 
-// The READY rung's build-and-record step is a shell block inside the erun-merge
-// skill, and a driver running that skill executes that block and nothing else:
-// the prose around it is read by a person, not by the shell. So whatever the
-// block does on a build failure is what the review's status actually becomes --
-// a remedy written only as a sentence below the block is a remedy a
-// non-interactive driver never reaches.
-//
-// The block builds once and records that one result: the version the build
-// minted on success, or --failed on failure. A failure is a verdict about the
-// change, so the block must not retry it into a green record.
-//
-// These tests exercise the block rather than reading it, because the property
-// under test is control flow: which failure routes to which record call. A
-// structural assertion on the block's text cannot tell "records the failure"
-// from "retries until green" without becoming a parser for the
-// shell it is trying to check.
-//
-// The block is run verbatim, with `erun`, `jq` and `git` stubbed ahead of it on
-// PATH, so the harness owes nothing to a live platform, a docker daemon, or a
-// git checkout -- it runs the same way in the erun-devops image test stage,
-// which has no .git.
+// The READY rung's shell block is run verbatim with erun, jq and git stubbed on PATH:
+// control flow on failure is what the review's status becomes, and must not retry into green.
 
 const (
 	readyRungBuildJSON = "/tmp/erun-merge-build.json"
 	readyRungBuildErr  = "/tmp/erun-merge-build.err"
 
-	// The commit the stubbed `git rev-parse HEAD` reports. Only 40 lowercase
-	// hex characters matter here; nothing resolves it.
 	readyRungCommit = "4f3c1a9d2b8e5f6a7c0d1e2f3a4b5c6d7e8f9012"
 
-	// What the failure path's `--dry-run` version mint returns. Distinct from
-	// every scripted build outcome so a test can tell which one was recorded.
+	// Distinct from every scripted build outcome so a test can tell which was recorded.
 	readyRungDryRunVersion = "9.9.9-dry"
 )
 
-// The two things a stubbed `erun build` can do. `ok:` mints the version that
-// follows it; `red` prints the shape of an ordinary build red -- a docker
-// failure and a failing check target -- and fails.
+// `ok:` mints the version that follows; `red` prints a build failure and fails.
 const (
 	readyRungOutcomeOK         = "ok:"
 	readyRungOutcomeRealRed    = "red"
 	readyRungNoScriptedOutcome = "stub erun: no outcome scripted for this build"
 )
 
-// readyRungStubErun decides what each `erun build` does from the order it is
-// called in. The block's builds are sequential by construction, so the call
-// count is the whole of the state it needs.
 const readyRungStubErun = `#!/bin/sh
 printf '%s\n' "$*" >> "${ERUN_STUB_LOG}"
 case "$1" in
@@ -75,9 +48,7 @@ case "${outcome}" in
 esac
 `
 
-// readyRungStubJQ is `jq -r .version <file>` for the compact JSON the stubbed
-// erun writes. It reads a file argument when the block supplies one (the JSON
-// the build wrote) and stdin when it does not (the piped --dry-run result).
+// readyRungStubJQ reads a file argument if given, else stdin.
 const readyRungStubJQ = `#!/bin/sh
 extract='s/.*"version":"\([^"]*\)".*/\1/p'
 if [ -n "$3" ]; then
@@ -87,17 +58,11 @@ else
 fi
 `
 
-// readyRungStubGit answers the block's only git call.
 const readyRungStubGit = `#!/bin/sh
 printf '%s\n' "` + readyRungCommit + `"
 `
 
-// readyRungRecordBlock returns the rung's build-and-record block: the fenced
-// shell block that actually invokes `erun review record-build` against the
-// review id rung 4 resolved, as opposed to the pre-flight handoff text, which
-// only names the command inside its heredoc. Keyed on the invocation rather
-// than on the block's position so that a reordering of the skill cannot point
-// this harness at prose.
+// readyRungRecordBlock finds the block by its record-build invocation, not its position.
 func readyRungRecordBlock(t *testing.T) string {
 	t.Helper()
 	var matched []string
@@ -112,18 +77,11 @@ func readyRungRecordBlock(t *testing.T) string {
 	return matched[0]
 }
 
-// readyRungRun is what the rung block did: the argv of every `erun` invocation
-// it made, in order, and what it wrote to its own stderr. The block sends each
-// build's own stdout to the JSON file it reads a version from, so its stderr is
-// the operator's only view of the builds and is worth asserting on.
 type readyRungRun struct {
 	calls  []string
 	stderr string
 }
 
-// readyRungFixture is everything the stubbed block reads: the bin directory
-// that goes ahead of PATH, the log its `erun` calls are appended to, and the
-// files the stubbed erun takes its scripted outcomes from.
 type readyRungFixture struct {
 	binDir       string
 	logPath      string
@@ -131,8 +89,6 @@ type readyRungFixture struct {
 	outcomesPath string
 }
 
-// newReadyRungFixture lays the stubs down in a fresh temp dir, with each
-// `erun build` in turn behaving as the given outcome says.
 func newReadyRungFixture(t *testing.T, outcomes ...string) readyRungFixture {
 	t.Helper()
 	dir := t.TempDir()
@@ -159,11 +115,7 @@ func newReadyRungFixture(t *testing.T, outcomes ...string) readyRungFixture {
 	return fixture
 }
 
-// clearReadyRungBuildFiles clears the two paths the block writes for itself and
-// schedules their removal. The block names them as absolute /tmp paths, so the
-// harness cannot redirect them into its temp dir without editing the text it
-// means to run; a stale file from an earlier case must not decide this one's
-// outcome, and neither may be left behind.
+// The block writes absolute /tmp paths the harness cannot redirect, so clear them per case.
 func clearReadyRungBuildFiles(t *testing.T) {
 	t.Helper()
 	for _, path := range []string{readyRungBuildJSON, readyRungBuildErr} {
@@ -178,9 +130,6 @@ func clearReadyRungBuildFiles(t *testing.T) {
 	})
 }
 
-// runReadyRungFlow runs the skill's READY-rung shell block -- the one that
-// records the build against the review -- under the stubs, and reports what it
-// did.
 func runReadyRungFlow(t *testing.T, outcomes ...string) readyRungRun {
 	t.Helper()
 
@@ -201,7 +150,6 @@ func runReadyRungFlow(t *testing.T, outcomes ...string) readyRungRun {
 		"ERUN_STUB_COUNTER="+fixture.counterPath,
 		"ERUN_STUB_OUTCOMES="+fixture.outcomesPath,
 		"ERUN_STUB_NO_OUTCOME="+readyRungNoScriptedOutcome,
-		// The block's only input from its caller: rungs 1-4 established it.
 		"review_id=01J0READYRUNGREVIEW0000000",
 	)
 	if err := cmd.Run(); err != nil {
@@ -225,8 +173,6 @@ func writeReadyRungStub(t *testing.T, dir, name, body string) {
 	}
 }
 
-// erunCallsWithPrefix returns the logged invocations whose argv starts with
-// prefix, so an assertion can read as "which builds ran, in order".
 func erunCallsWithPrefix(calls []string, prefix string) []string {
 	var out []string
 	for _, call := range calls {
@@ -237,10 +183,7 @@ func erunCallsWithPrefix(calls []string, prefix string) []string {
 	return out
 }
 
-// realBuildCalls returns the logged `erun build` invocations that actually
-// build. `--dry-run` mints a version without building anything, so it is the
-// failure path's fallback for a version to record rather than a build attempt,
-// and counting it as one would read a single failed build as two tries.
+// realBuildCalls excludes `--dry-run`, which mints a version without building.
 func realBuildCalls(calls []string) []string {
 	var out []string
 	for _, call := range erunCallsWithPrefix(calls, "build ") {
@@ -251,10 +194,7 @@ func realBuildCalls(calls []string) []string {
 	return out
 }
 
-// recordedBuild returns the block's single `erun review record-build` call.
-// Failing on zero or several is the point: every case below is a claim about
-// which one record call the flow reached, and a block that recorded nothing, or
-// twice, would satisfy the rest of the assertions vacuously.
+// recordedBuild fails on zero or several calls, which would satisfy the rest vacuously.
 func recordedBuild(t *testing.T, calls []string) string {
 	t.Helper()
 	records := erunCallsWithPrefix(calls, "review record-build ")
@@ -264,8 +204,6 @@ func recordedBuild(t *testing.T, calls []string) string {
 	return records[0]
 }
 
-// TestMergeSkillReadyRungRecordsTheVersionTheBuildMinted holds the success
-// path: one plain build, recorded with the version it minted.
 func TestMergeSkillReadyRungRecordsTheVersionTheBuildMinted(t *testing.T) {
 	calls := runReadyRungFlow(t, readyRungOutcomeOK+"1.0.0-ready").calls
 
@@ -289,10 +227,6 @@ func TestMergeSkillReadyRungRecordsTheVersionTheBuildMinted(t *testing.T) {
 	}
 }
 
-// TestMergeSkillReadyRungRecordsAFailedBuildFailedWithoutRetrying holds the
-// failure path: a compile error or a red test stage is a verdict about the
-// change, recorded FAILED with a version, and never retried into a green
-// record.
 func TestMergeSkillReadyRungRecordsAFailedBuildFailedWithoutRetrying(t *testing.T) {
 	calls := runReadyRungFlow(t, readyRungOutcomeRealRed).calls
 

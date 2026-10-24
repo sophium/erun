@@ -32,53 +32,25 @@ const (
 	RemoteShellTakenOverExitCode      = 76
 )
 
-// ShellSessionTakenOverNotice is the stable line `erun open` prints when its
-// persistent session is re-attached from another ERun window (dtach takeover
-// semantics: the session keeps running, this viewer is detached). The desktop
-// matches this exact line to stop its reconnect loop instead of stealing the
-// session back, so treat the wording as a public contract.
+// ShellSessionTakenOverNotice is matched verbatim by the desktop to stop its
+// reconnect loop; the wording is a public contract.
 const ShellSessionTakenOverNotice = "open: session re-attached in another ERun window"
 
-// AISessionAttachOutcome is why an attach to a persistent session ended, from
-// the attaching client's point of view — not merely that the underlying
-// process exited, but which of the reattach contract's outcomes
-// (RemoteAppSessionAttachLines) it exited for, or that no exit signal could be
-// read at all. A WSS gateway bridging this contract to a remote client must
-// report one of these explicitly rather than letting every non-success case
-// read as a plain disconnect.
+// AISessionAttachOutcome is why an attach to a persistent session ended.
 type AISessionAttachOutcome string
 
 const (
-	// AISessionAttachOutcomeTakenOver: a different attach claimed session
-	// ownership while this one was connected (the owner-id check
-	// RemoteAppSessionAttachLines writes). The session itself is still
-	// running; only this viewer was evicted, and it must be told so plainly
-	// — see ShellSessionTakenOverNotice — rather than reading as a network
-	// drop.
+	// AISessionAttachOutcomeTakenOver: another attach evicted this viewer; the
+	// session keeps running.
 	AISessionAttachOutcomeTakenOver AISessionAttachOutcome = "taken-over"
-	// AISessionAttachOutcomeDeployReattach: the shell asked for a deploy
-	// handoff (ErrShellReattachDeploy's exit code); the caller should
-	// reattach once the new pod is ready.
+	// AISessionAttachOutcomeDeployReattach: reattach once the new pod is ready.
 	AISessionAttachOutcomeDeployReattach AISessionAttachOutcome = "deploy-reattach"
-	// AISessionAttachOutcomeEnded: the session's own program exited on its
-	// own (any exit code other than the two above) — there is nothing left
-	// to reattach to.
-	AISessionAttachOutcomeEnded AISessionAttachOutcome = "ended"
-	// AISessionAttachOutcomeUnknown: the connection closed with no
-	// interpretable exit status — a network drop, a proxy timeout, a killed
-	// pod. Never collapse this into Ended or TakenOver: the caller genuinely
-	// does not know which happened, and reporting a guess as fact is the
-	// exact failure root AGENTS.md's "an unknown must not render as a
-	// definite value" forbids.
+	AISessionAttachOutcomeEnded          AISessionAttachOutcome = "ended"
+	// AISessionAttachOutcomeUnknown: no exit status; never collapse it into a guess.
 	AISessionAttachOutcomeUnknown AISessionAttachOutcome = "unknown"
 )
 
-// ResolveAISessionAttachOutcome classifies an attach's own exit status — the
-// underlying dtach-wrapping shell script's exit code, however the caller ran
-// it (ssh, kubectl exec, or client-go's remotecommand) — into the outcome a
-// client must show. exitCodeKnown distinguishes "the process exited with code
-// 0" from "no exit status was observed at all"; a false exitCodeKnown always
-// resolves to Unknown, never Ended, regardless of exitCode's value.
+// ResolveAISessionAttachOutcome classifies the attach script's exit status.
 func ResolveAISessionAttachOutcome(exitCode int, exitCodeKnown bool) AISessionAttachOutcome {
 	if !exitCodeKnown {
 		return AISessionAttachOutcomeUnknown
@@ -93,9 +65,7 @@ func ResolveAISessionAttachOutcome(exitCode int, exitCodeKnown bool) AISessionAt
 	}
 }
 
-// ParseRemoteAppSessionIDs extracts this tenant+env's persistent desktop
-// session ids so the desktop can rebuild tabs for sessions another ERun
-// window created.
+// ParseRemoteAppSessionIDs extracts this tenant+env's persistent desktop session ids.
 func ParseRemoteAppSessionIDs(tenant, environment, lsOutput string) []string {
 	prefix := core.SanitizeForFilename(tenant) + "-" + core.SanitizeForFilename(environment) + "-"
 	var ids []string
@@ -112,9 +82,7 @@ func ParseRemoteAppSessionIDs(tenant, environment, lsOutput string) []string {
 }
 
 type ShellLaunchPreview struct {
-	// SeedArgs is the kubectl exec that streams the SSH private key to the pod
-	// on stdin — the key is never in these args. Empty when the env has no key
-	// to seed.
+	// SeedArgs streams the SSH key on stdin; the key is never in these args.
 	SeedArgs []string
 	WaitArgs []string
 	ExecArgs []string
@@ -218,9 +186,8 @@ func ResolveOpen(store configpkg.OpenStore, params shared.OpenParams) (configpkg
 	return shared.ResolveOpenWithFinder(store, configpkg.FindProjectRoot, params)
 }
 
-// EnsureLocalPortRangePersisted freezes the resolver's port choice into the
-// env config so future opens stay stable against alphabetical reshuffles of
-// unrelated tenants/envs.
+// EnsureLocalPortRangePersisted freezes the port choice so unrelated tenants
+// cannot reshuffle it.
 func EnsureLocalPortRangePersisted(ctx core.Context, saveEnvConfig func(string, configpkg.EnvConfig) error, result configpkg.OpenResult) (configpkg.OpenResult, error) {
 	if result.EnvConfig.LocalPortRangeStart > 0 {
 		return result, nil
@@ -270,9 +237,7 @@ func WaitForShellDeployment(req configpkg.ShellLaunchParams) error {
 }
 
 func ExecShell(req configpkg.ShellLaunchParams) error {
-	// Stream the SSH private key to the pod on stdin before the interactive
-	// shell so it never appears in any kubectl exec argv (laptop `ps`, the
-	// pod's /proc/<pid>/cmdline, or cluster exec audit logs).
+	// Stdin keeps the key out of every argv and exec audit log.
 	if err := seedRemoteSSHKey(req); err != nil {
 		return err
 	}
@@ -282,15 +247,8 @@ func ExecShell(req configpkg.ShellLaunchParams) error {
 		return err
 	}
 
-	// The interactive shell needs kubectl's `exec -it` to allocate a TTY, which
-	// requires inheriting this process's console. Command() applies
-	// CREATE_NO_WINDOW (to stop background children of the windowless desktop app
-	// flashing a console) — but that detaches the child from the console, so
-	// kubectl reports "Unable to use a TTY", falls back to non-interactive, and
-	// the pod shell never renders a prompt (the env looks like it won't open).
-	// erun open already runs inside the ERun tab's ConPTY, so inheriting that
-	// console flashes nothing. Use newExecCommand to keep the ERUN_KUBECTL_BIN
-	// test seam without the console-detaching flag.
+	// Not Command(): its CREATE_NO_WINDOW detaches the console, so `exec -it`
+	// gets no TTY.
 	cmd := core.NewExecCommand("kubectl", kubectlExecArgs(req, script)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -345,12 +303,7 @@ func RemoteWorktreePathForRepoName(repoName string) string {
 	return path.Join("/home", "erun", "git", repoName)
 }
 
-// APIDeploymentName is the erun-backend-api chart's Deployment/Service resource
-// name (<prefix>-api, per TenantResourcePrefix). It is templated from
-// `.Values.tenant`, not from the chart's Helm release name
-// (publishedComponentReleaseName's `<tenant>-backend-api`), so callers that
-// need to address the running pod or service must derive it from here rather
-// than from the release name.
+// APIDeploymentName is templated from `.Values.tenant`, not the Helm release name.
 func APIDeploymentName(tenant string) string {
 	return shared.TenantResourcePrefix(tenant) + "-api"
 }
@@ -423,13 +376,8 @@ func remoteShellConfigForRequest(req configpkg.ShellLaunchParams) (remoteShellCo
 	}, nil
 }
 
-// seedRemoteConfigLines writes a config file in the pod only when it is not
-// already there. The runtime pod builds its own config from the chart-injected
-// ERUN_* values, which carry fields this host-side snapshot has no source for —
-// the marked registries, the runtime registry, and the build-script policy the
-// in-pod build reads. Overwriting it would silently narrow the pod's config to
-// the host's subset, so opening a shell seeds only what is missing, which is
-// what a pod whose chart injected nothing still needs.
+// seedRemoteConfigLines never overwrites the pod's own config, which carries
+// chart-injected fields the host snapshot lacks.
 func seedRemoteConfigLines(quotedPath, content string) string {
 	return fmt.Sprintf("if [ ! -f %s ]; then\n  mkdir -p \"$(dirname %s)\"\n  cat > %s <<'EOF'\n%s\nEOF\nfi", quotedPath, quotedPath, quotedPath, content)
 }
@@ -464,10 +412,8 @@ func remoteShellBaseScriptLines(req configpkg.ShellLaunchParams, config remoteSh
 	)
 }
 
-// remoteShellLaunchLines runs the interactive shell. The bare CLI path (no
-// AppSession) must stay the original single bash invocation byte for byte;
-// with AppSession it wraps the shell in a reattachable dtach session so a
-// disconnect detaches instead of spawning a parallel chain.
+// remoteShellLaunchLines keeps the bare CLI path a single bash invocation, byte
+// for byte; AppSession wraps it in dtach.
 func remoteShellLaunchLines(req configpkg.ShellLaunchParams, bashrcPath, markerDir string) []string {
 	if strings.TrimSpace(req.AppSession) == "" {
 		return []string{fmt.Sprintf("/bin/bash --rcfile \"%s\" -i || shell_status=$?", bashrcPath)}
@@ -487,32 +433,14 @@ func remoteShellLaunchLines(req configpkg.ShellLaunchParams, bashrcPath, markerD
 	return append(lines, RemoteAppSessionAttachLines(socket, redraw, fmt.Sprintf("/bin/bash \"%s\"", launchScript))...)
 }
 
-// RemoteAppSessionAttachLines returns the sh lines that attach-or-create
-// (dtach -A) a persistent session at socket and take ownership of it from any
-// other viewer, evicting them rather than sharing the pty. This is the
-// takeover half of the reattach contract erun-cli's own shell tabs already
-// run under (the session keeps running, an evicted viewer only loses its own
-// view, and dtach keeps no scrollback for one to recover it from) — exported so a caller outside
-// erun-cli/erun-common (the WSS session-attach gateway) can reuse it instead
-// of reimplementing the owner-id handoff. launchCommand runs
-// only the first time the session is created; a reattach connects to
-// whatever it is already running.
-//
-// redraw selects dtach's -r repaint trigger: "winch" forces a full repaint on
-// attach (needed for a main-screen TUI like Claude that ignores a bare ^L),
-// "ctrl_l" is quieter and right for an ordinary shell — see
-// remoteShellLaunchLines's own comment for why the two tab kinds need
-// different triggers.
+// RemoteAppSessionAttachLines attaches or creates a dtach session and evicts
+// other viewers; launchCommand runs only on create. redraw "winch" is needed
+// for a TUI like Claude that ignores ^L.
 func RemoteAppSessionAttachLines(socket, redraw, launchCommand string) []string {
 	owner := strings.TrimSuffix(socket, ".dtach") + ".owner"
 	lines := []string{
-		// Take over the session from any other ERun window (detach-elsewhere-
-		// and-reattach-here): claim ownership, then detach
-		// other viewers by killing their dtach clients. The master — which
-		// owns the running shell/claude — is never touched, and when it
-		// cannot be identified no one is kicked. Kicked wrappers find a
-		// foreign owner id below and exit 76 so their window reports the
-		// handover instead of reconnecting into a tug-of-war.
+		// Kill other dtach clients, never the master (none if it is unknown);
+		// evicted wrappers exit 76 instead of reconnecting.
 		"attach_id=\"$$-$(date +%s)\"",
 		fmt.Sprintf("printf '%%s' \"$attach_id\" > \"%s\"", owner),
 	}
@@ -524,19 +452,13 @@ func RemoteAppSessionAttachLines(socket, redraw, launchCommand string) []string 
 	)
 }
 
-// RemoteAppSessionSocketPath returns the dtach socket path for a given
-// tenant/environment/session id -- exported so a caller running inside the
-// pod (the erun-mcp WSS attach edge) can address the same socket
-// RemoteAppSessionAttachLines' own script builds, without reimplementing the
-// naming.
+// RemoteAppSessionSocketPath returns the dtach socket path for a session.
 func RemoteAppSessionSocketPath(tenant, environment, id string) string {
 	return fmt.Sprintf("%s/%s-%s-%s.dtach", activity.RemoteAppSessionSocketDir, core.SanitizeForFilename(tenant), core.SanitizeForFilename(environment), core.SanitizeForFilename(id))
 }
 
-// RemoteAppSessionEndScript returns the sh script that permanently ends a
-// persistent desktop session. The desktop runs it only when the user
-// explicitly closes a terminal tab; closing the env or quitting the app merely
-// detach and leave the session running for the next attach.
+// RemoteAppSessionEndScript permanently ends a session; only an explicit tab
+// close runs it.
 func RemoteAppSessionEndScript(tenant, environment, id string) string {
 	socket := RemoteAppSessionSocketPath(tenant, environment, id)
 	lines := activity.RemoteAppSessionMasterScanLines(socket)
@@ -547,14 +469,11 @@ func RemoteAppSessionEndScript(tenant, environment, id string) string {
 	return strings.Join(lines, "\n")
 }
 
-// RemoteSessionLauncherBody is the dtach session's create-time program: the
-// per-tab prelude (run once on create) followed by the interactive shell. A
-// reattach connects to whatever this program is running, so the prelude — and
-// in particular the AI tool launch — never repeats.
+// RemoteSessionLauncherBody is the dtach create-time program, so its prelude
+// never repeats on reattach.
 func RemoteSessionLauncherBody(req configpkg.ShellLaunchParams, bashrcPath string) []string {
 	var body []string
 	if req.Contribute {
-		// Match the desktop's former contribute prelude.
 		body = append(body,
 			"export PATH=\"$HOME/.erun/contribute/bin:$PATH\"",
 			"cd \"$HOME/git/erun\"",

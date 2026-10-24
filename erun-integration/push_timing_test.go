@@ -13,16 +13,7 @@ import (
 )
 
 func pushStepTimingScenarios(t *testing.T) {
-	// The two scenarios below cover step timing: a push reports where its time
-	// went, per component and per architecture, on success and on failure,
-	// plus a JSON record alongside the trace, so a slow or failed push can be
-	// attributed to a cause. The table's
-	// per-step durations are real, sub-second wall-clock measurements even
-	// under an instant stub, so they cannot be locked into a byte-exact golden
-	// the way the rounded `<ELAPSED>` marker in the existing `==> ...` lines
-	// can (erun-integration/AGENTS.md § "Whole-output snapshots vs targeted
-	// substring assertions", case 3); these scenarios assert on structure and
-	// presence instead.
+	// Per-step durations are real wall-clock values, so these assert structure, not a golden.
 	t.Run("real_run_reports_step_timing_table_and_json_record", testPushRealRunReportsStepTimingTableAndJsonRecord)
 	t.Run("real_run_failure_still_reports_step_timing", testPushRealRunFailureStillReportsStepTiming)
 }
@@ -39,8 +30,6 @@ func testPushRealRunReportsStepTimingTableAndJsonRecord(t *testing.T) {
 		`esac`,
 	}, "\n"))
 	fixture.StubBinary(t, stubs, "helm", "")
-	// Give the registry-credential preflight a resolvable credential
-	// so this scenario still reaches the step-timing behavior it is about.
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 	envVars = append(envVars, "GH_TOKEN=integration-test-token")
 	result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -110,9 +99,7 @@ func testPushRealRunFailureStillReportsStepTiming(t *testing.T) {
 	}
 }
 
-// findTimingRecordStep locates a named step among a record's direct children,
-// failing the test if it is missing (rather than returning a zero value that
-// would let a nil-CacheHit assertion pass for the wrong reason).
+// findTimingRecordStep fails on a missing step so a zero value cannot pass a nil-CacheHit check.
 func findTimingRecordStep(t testing.TB, steps []timingRecordStep, name string) timingRecordStep {
 	t.Helper()
 	for _, step := range steps {
@@ -124,9 +111,6 @@ func findTimingRecordStep(t testing.TB, steps []timingRecordStep, name string) t
 	return timingRecordStep{}
 }
 
-// readTimingRecord finds the single `<command>-*.json` file the run just
-// wrote under the scenario's isolated $HOME/.erun/timing (timing.go's
-// timingRecordDir) and decodes it.
 func readTimingRecord(t testing.TB, home, command string) timingRecord {
 	t.Helper()
 	matches, err := filepath.Glob(filepath.Join(home, ".erun", "timing", command+"-*.json"))
@@ -154,9 +138,7 @@ type timingRecord struct {
 	Steps   []timingRecordStep `json:"steps"`
 }
 
-// timingRecordStep/timingRecord mirror the shape of core.TimingStepJSON/
-// core.TimingRecord closely enough for these tests to assert on
-// structure without importing erun-common's internal types.
+// timingRecordStep/timingRecord mirror core's timing JSON without importing erun-common.
 type timingRecordStep struct {
 	Name     string             `json:"name"`
 	Failed   bool               `json:"failed"`

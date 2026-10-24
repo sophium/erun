@@ -7,11 +7,8 @@ import (
 	"testing"
 )
 
-// aptInstallTokens returns the package names named by one physical line of an
-// `apt-get install` command, and whether that command continues onto the next
-// line. Flags (`-y`, `--no-install-recommends`) and `VAR=value` assignments are
-// skipped; a shell metacharacter ends the command for good, so the `&& \` that
-// typically follows the package list does not drag the next command's words in.
+// aptInstallTokens returns the packages on one `apt-get install` line and whether it continues.
+// A shell metacharacter ends the command, so `&& \` does not pull in the next command.
 func aptInstallTokens(line string) (packages []string, continues bool) {
 	line = strings.TrimRight(line, " \t")
 	if strings.HasSuffix(line, "\\") {
@@ -31,22 +28,13 @@ func aptInstallTokens(line string) (packages []string, continues bool) {
 	return packages, continues
 }
 
-// dockerfileStage is one FROM in a Dockerfile: its base image reference, the
-// raw lines of its body, and every package it installs through apt-get install.
-// The lines are what a caller asking "which stage does X?" reads; the package
-// set is what the apt contract reads.
 type dockerfileStage struct {
 	base     string
 	lines    []string
 	packages []string
 }
 
-// dockerfileStages splits a Dockerfile into one entry per FROM, in file order,
-// carrying the base image reference, the stage's own lines, and the packages
-// that stage apt-get installs. Comment lines are skipped when reading packages
-// so prose in the file cannot be mistaken for a package list, which is the
-// failure mode a bare substring scan has; they stay in the stage's lines, which
-// are the stage's text as written.
+// dockerfileStages splits a Dockerfile per FROM; comment lines are skipped when reading packages.
 func dockerfileStages(text string) []dockerfileStage {
 	var stages []dockerfileStage
 	inInstall := false
@@ -80,8 +68,6 @@ func dockerfileStages(text string) []dockerfileStage {
 	return stages
 }
 
-// stageBasedOn returns the single stage whose FROM names an image containing
-// nameFragment, failing the test when there is not exactly one.
 func stageBasedOn(t *testing.T, stages []dockerfileStage, dockerfile, nameFragment string) dockerfileStage {
 	t.Helper()
 	var found []dockerfileStage
@@ -106,10 +92,7 @@ func aptPackageSet(stages ...dockerfileStage) map[string]struct{} {
 	return set
 }
 
-// erunDevopsDesktopRuntimePackages are the packages the erun-devops image needs
-// for the Wails/webkit desktop toolchain and the dtach-backed MCP attach
-// suite. They are the set the final stage used to apt-get install for itself
-// and now inherits from the erun-ubuntu base instead.
+// erunDevopsDesktopRuntimePackages are inherited by erun-devops from the erun-ubuntu base.
 var erunDevopsDesktopRuntimePackages = []string{
 	"dtach",
 	"build-essential",
@@ -136,19 +119,7 @@ func erunDevopsStageDockerfiles(t *testing.T) (baseStage, finalStage dockerfileS
 		stageBasedOn(t, dockerfileStages(string(finalData)), finalPath, "erun-ubuntu")
 }
 
-// TestErunDevopsFinalImageStillInstallsItsDesktopRuntimePackages locks the
-// correctness half of moving the Wails/webkit set out of the erun-devops final
-// stage and into the erun-ubuntu base image. That move is a pure build-cost
-// deduplication — the set used to be apt-get installed twice per build — and
-// it is only sound while the base really provides every package the final
-// stage stopped installing. Nothing else checks that: the two lists live in
-// different Dockerfiles, and dropping one from erun-ubuntu's list would not
-// fail any render, lint, or unit test. It would ship an image missing a
-// webkit2gtk or GTK dev header, which surfaces far away as a CGO compile
-// failure in the in-pod contribute-mode workflow or a missing shared library
-// in a Playwright run — the failure the move was explicitly not allowed to
-// trade for speed. This test resolves the union the final image actually ends
-// up with, across both files, and fails in the same run that breaks it.
+// The package lists live in different Dockerfiles; nothing else catches a dropped one.
 func TestErunDevopsFinalImageStillInstallsItsDesktopRuntimePackages(t *testing.T) {
 	baseStage, finalStage := erunDevopsStageDockerfiles(t)
 	available := aptPackageSet(baseStage, finalStage)
@@ -160,13 +131,7 @@ func TestErunDevopsFinalImageStillInstallsItsDesktopRuntimePackages(t *testing.T
 	}
 }
 
-// TestErunDevopsFinalStageDoesNotReinstallWhatTheBaseProvides is the cost half
-// of the same move: it fails when the final stage starts apt-get installing a
-// package it already inherits, which is how the duplication this change
-// removed would come back. It is deliberately separate from the correctness
-// test above — re-adding one of these to the final stage still produces a
-// correct image, just a slower build — so a reviewer sees "the dedup
-// regressed" rather than "the image is broken".
+// Separate from the correctness test: a reinstall is a slower build, not a broken image.
 func TestErunDevopsFinalStageDoesNotReinstallWhatTheBaseProvides(t *testing.T) {
 	baseStage, finalStage := erunDevopsStageDockerfiles(t)
 	base := aptPackageSet(baseStage)

@@ -18,9 +18,7 @@ func DesktopIdentityPublicKeyPath(dir string) string {
 	return filepath.Join(dir, DesktopMCPPublicKeyFile)
 }
 
-// LoadDesktopIdentityKey reads the persisted private key and never generates a
-// missing one: a fresh identity signs tokens no deployed environment trusts, so
-// the honest outcome is to tell the caller where the identity should come from.
+// LoadDesktopIdentityKey never generates a key: a fresh identity would sign tokens no environment trusts.
 func LoadDesktopIdentityKey(dir string) ([]byte, error) {
 	if strings.TrimSpace(dir) == "" {
 		return nil, fmt.Errorf("desktop identity directory is unset")
@@ -37,8 +35,6 @@ func LoadDesktopIdentityKey(dir string) ([]byte, error) {
 }
 
 // SignDesktopMCPToken mints a short-lived bearer for one environment's MCP edge.
-// The per-env audience stops a token minted for one environment from being
-// replayed against another.
 func SignDesktopMCPToken(privatePEM []byte, tenant, environment string, now time.Time) (string, error) {
 	return SignMCPToken(privatePEM, MCPTokenClaims{
 		Issuer:    DesktopMCPIssuer(),
@@ -49,9 +45,7 @@ func SignDesktopMCPToken(privatePEM []byte, tenant, environment string, now time
 	})
 }
 
-// MintDesktopMCPToken loads the desktop identity and signs a fresh token for one
-// environment, so a caller holds a bearer only for the request it is about to
-// make instead of caching one that can age out mid-call.
+// MintDesktopMCPToken signs a fresh token per request so none ages out mid-call.
 func MintDesktopMCPToken(dir, tenant, environment string, now time.Time) (string, error) {
 	key, err := LoadDesktopIdentityKey(dir)
 	if err != nil {

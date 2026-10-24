@@ -13,8 +13,7 @@ const kindIcons: Record<AppNotificationKind, typeof AlertCircle> = {
   warning: AlertTriangle,
   info: Info,
   success: CheckCircle2,
-  // Never rendered as a titlebar icon (see TITLEBAR_ICON_KINDS) -- present so
-  // this stays a total map over the kind union.
+  // Never a titlebar icon; present to keep the map total.
   debug: Info,
 };
 
@@ -26,22 +25,13 @@ const kindButtonClassName: Record<AppNotificationKind, string> = {
   debug: 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
 };
 
-// TitlebarMessageCenter replaces the old single-pill notification display
-// with one icon per class carrying an unread count -- a class
-// with nothing unread renders no icon at all, so the titlebar stays quiet
-// until there is something to review. Clicking an icon opens the dialog
-// already filtered to that class; the dialog itself owns the full session
-// history, the debug-visibility toggle, and every per-message action.
+// TitlebarMessageCenter renders one icon per class with unread messages.
 export function TitlebarMessageCenter(): React.ReactElement | null {
   const counts = useAppSelector(selectNotificationUnreadCounts);
   const historyCount = useAppSelector(selectNotificationHistoryCount);
   const [openFilter, setOpenFilter] = React.useState<AppNotificationKind | 'all' | null>(null);
   const visibleKinds = TITLEBAR_ICON_KINDS.filter((kind) => counts[kind] > 0);
-  // Every class fully read but the session still has history -- render one
-  // muted entry point rather than leaving that history unreachable (root
-  // AGENTS.md "Smooth, Seamless, No Dead Ends": a capability with no way in
-  // is a defect, and dismissal is meaningless if the dialog it feeds can
-  // never be reopened).
+  // Keep the history reachable once every class is read.
   const showHistoryFallback = visibleKinds.length === 0 && historyCount > 0;
 
   return (
@@ -108,11 +98,7 @@ function MessageCenterIconButton({
         onClick={onClick}
       >
         <Icon aria-hidden="true" />
-        {/* A badge tinted with the icon's own currentColor (e.g. red-on-red
-            for an error icon) has almost no visual separation from the glyph
-            it overlaps -- bg-foreground/text-background is fixed regardless
-            of kind, so the badge always contrasts against the icon beneath
-            it. The digit is the signal; this is only its container. */}
+        {/* Fixed foreground/background so the badge contrasts with any icon colour. */}
         <span className="absolute -top-1.5 -right-1.5 inline-flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full bg-foreground px-1 text-[11px] font-semibold leading-none text-background">
           {count > 9 ? '9+' : count}
         </span>

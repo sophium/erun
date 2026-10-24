@@ -1,37 +1,6 @@
-// OIDC Authorization Code + PKCE sign-in against the platform issuer, plus the
-// dev-token fallback. The console redirects the Operator to the instance's OIDC
-// issuer, completes the PKCE code exchange on the callback, and holds the
-// resulting JWT to present as `Authorization: Bearer <jwt>` to erun-backend-api
-// (whose verifier discovers the issuer's JWKS and checks the signature — see
-// api-protocol.md § Sign-in). The id_token is used as the bearer because it is
-// always a JWT; an issuer's access tokens may be opaque.
-//
-// The issuer + client id are resolved at runtime from GET /v1/platform
-// (resolveOidcConfig below) — a single built image must be able to serve any
-// PaaS instance, so nothing instance-specific can be baked in at build
-// time. oidcConfig()'s VITE_* env vars remain only as the local-dev override
-// (set them to skip a live backend), and as the fallback resolveOidcConfig uses
-// when the discovery endpoint is absent (an older backend) or unreachable. With
-// neither source configured the dev token (VITE_DEV_BEARER_TOKEN) applies so
-// local dev can still drive the read view with a desktop-signed token.
-//
-// Driving each env's per-env MCP tools over the live edge
-// (mcp.<tenant>-<env>.<services-zone>) is implemented in src/mcp/
-// (liveClient.ts speaks the edge's JSON-RPC protocol directly; erun-mcp's
-// corsMiddleware unblocks the cross-origin browser call). The hostname is
-// operator-supplied rather than resolved here, since exposing `mcp` is still
-// a manual `erun expose` step for most environment types — see
-// erun-console/AGENTS.md's "What is verifiable here" section for the current
-// scope and its disclosed gap.
-//
-// signOut performs RP-initiated logout (OIDC Session Management) rather than
-// clearing the local token alone: the IdP's session otherwise outlives the
-// console's, so the next sign-in is silently re-authenticated as the same
-// account with no way to reach a different one. Not every IdP advertises
-// end_session_endpoint, so callers that state what sign-out will do (the
-// not-enrolled screen) check endSessionSupported first rather than assume it.
-// The redirect target (post_logout_redirect_uri, this origin) must be
-// registered on the IdP client the same way redirect_uri already is.
+// OIDC Authorization Code + PKCE sign-in, plus the dev-token fallback. The id_token
+// is the bearer because it is always a JWT; access tokens may be opaque. Issuer and
+// client id come from GET /v1/platform at runtime so one image serves any instance.
 
 import { fetchPlatformConfig } from '../config/platform';
 
@@ -40,16 +9,8 @@ const PKCE_VERIFIER_KEY = 'erun.console.pkceVerifier';
 const PKCE_STATE_KEY = 'erun.console.oauthState';
 const ORG_SCOPE_RETRIED_KEY = 'erun.console.oidcOrgScopeRetried';
 
-// ORG_CLAIM_SCOPE asks the shipped Zitadel IdP to include the org
-// (resourceowner) claim erun's tenant resolution reads for a shared,
-// org-scoped issuer -- the same scope erun-common's CLI/desktop OIDC login
-// requests by default (see erun-common/infra/cloud/cloud_erun_oidc.go's
-// erunOrgClaimScope). Without it, a console session's token carries no org
-// claim, so once an issuer is org-scoped, the console cannot resolve its
-// tenant even for an already-enrolled operator. A dedicated/BYO issuer has
-// never heard of this scope; beginLogin retries once without it (see
-// resolveToken's authCallbackError handling) when the issuer redirects back
-// with error=invalid_scope, so sign-in still succeeds.
+// ORG_CLAIM_SCOPE asks Zitadel for the org claim tenant resolution needs on a shared
+// issuer. Issuers that reject it (invalid_scope) get one retry without it.
 const ORG_CLAIM_SCOPE = 'urn:zitadel:iam:user:resourceowner';
 
 export interface OidcConfig {
@@ -58,10 +19,7 @@ export interface OidcConfig {
   redirectUri: string;
 }
 
-// oidcConfig returns the configured OIDC settings, or undefined when the console
-// is not wired for OIDC (then the dev-token fallback applies). The redirect URI
-// is the SPA's own origin — the callback is handled in place (the App detects
-// the ?code= query), so no separate route is needed.
+// The callback is handled in place at the SPA origin, so no separate route is needed.
 export function oidcConfig(): OidcConfig | undefined {
   const issuer = trimmed(import.meta.env.VITE_OIDC_ISSUER);
   const clientId = trimmed(import.meta.env.VITE_OIDC_CLIENT_ID);
@@ -71,20 +29,13 @@ export function oidcConfig(): OidcConfig | undefined {
   return { issuer, clientId, redirectUri: window.location.origin + '/' };
 }
 
-// Resolving the OIDC config from platform discovery vs. the VITE_* override —
-// the App surfaces `fallbackReason` so an operator debugging a misconfigured
-// instance can see why the local-dev values are in play instead of silently
-// running against a possibly-wrong client id.
+// `fallbackReason` explains why local-dev values are in play.
 export interface OidcConfigResolution {
   config: OidcConfig | undefined;
   fallbackReason?: string;
 }
 
-// resolveOidcConfig fetches GET /v1/platform for the issuer + console client id
-// (so one built image serves any PaaS instance), falling back to the VITE_*
-// local-dev override when discovery has nothing usable — an older backend
-// (404), an unreachable one, or one with the fields unset all resolve to the
-// override rather than a hard failure.
+// resolveOidcConfig falls back to the VITE_* override when discovery has nothing usable.
 export async function resolveOidcConfig(): Promise<OidcConfigResolution> {
   const platform = await fetchPlatformConfig();
   const issuer = trimmed(platform?.issuer);
@@ -116,9 +67,7 @@ function trimmed(value: string | undefined): string | undefined {
 interface Discovery {
   authorization_endpoint: string;
   token_endpoint: string;
-  // Not every IdP advertises RP-initiated logout (OIDC Session Management is
-  // an optional extension), so this is the one discovery field callers must
-  // treat as absent rather than assume present.
+  // Optional: RP-initiated logout is an OIDC extension not every IdP supports.
   end_session_endpoint?: string;
 }
 
@@ -164,16 +113,8 @@ async function pkceChallenge(verifier: string): Promise<string> {
   return base64url(new Uint8Array(digest));
 }
 
-// beginLogin starts the Authorization Code + PKCE flow: it mints a code verifier
-// and a CSRF state (stashed in sessionStorage for the callback), then redirects
-// the browser to the issuer's authorization endpoint. `prompt` is the one
-// standard OIDC param a caller may add on top of the baseline request —
-// `select_account` is what the tenant switcher (shell/tenantSwitch.ts) passes
-// so the IdP offers an account/org picker instead of silently reusing
-// whatever session it already holds, which would make "switch" a no-op for a
-// caller who is still signed into the browser as the same identity.
-// `includeOrgScope` defaults to true; resolveToken passes false on the
-// one-shot retry after an issuer refuses ORG_CLAIM_SCOPE.
+// `select_account` makes the IdP offer an account picker so a tenant switch is not a
+// silent reuse of the current session.
 export async function beginLogin(
   config: OidcConfig,
   prompt?: string,
@@ -202,24 +143,17 @@ export async function beginLogin(
   window.location.assign(discovery.authorization_endpoint + '?' + params.toString());
 }
 
-// isAuthCallback reports whether the current URL is an OIDC redirect callback
-// (carries ?code=&state=).
 export function isAuthCallback(): boolean {
   const params = new URLSearchParams(window.location.search);
   return params.has('code') && params.has('state');
 }
 
-// authCallbackError reads the OIDC error code from a failed redirect (the
-// issuer sends ?error=...&error_description=... instead of ?code=&state=
-// when it refuses the request).
 function authCallbackError(): string | undefined {
   const params = new URLSearchParams(window.location.search);
   return params.get('error') ?? undefined;
 }
 
-// completeLogin finishes the callback: it validates the state, exchanges the
-// code + PKCE verifier for tokens, stores the id_token, clears the one-shot PKCE
-// state, and strips the query from the URL so a reload is not a replay.
+// Strips the query from the URL so a reload is not a replay.
 export async function completeLogin(config: OidcConfig): Promise<string> {
   const params = new URLSearchParams(window.location.search);
   const code = params.get('code');
@@ -267,37 +201,19 @@ function cleanCallbackUrl(): void {
   );
 }
 
-// storedToken returns a previously-obtained id_token from this browser session.
 export function storedToken(): string | undefined {
   const token = sessionStorage.getItem(TOKEN_STORAGE_KEY);
   return token !== null && token.length > 0 ? token : undefined;
 }
 
 export interface SignOutResult {
-  // Whether this call redirected the browser to the IdP's end_session_endpoint
-  // to end its session there too. false means only the local token was
-  // cleared — no OIDC config, no discovered end_session_endpoint, or
-  // discovery failed — so the caller (whose UI made a claim about what
-  // sign-out does) must not treat this as "the IdP session ended" silently.
+  // false means only the local token was cleared.
   idpSessionEnded: boolean;
 }
 
-// signOut always clears the locally-held token first, then attempts
-// RP-initiated logout: it redirects to the IdP's discovered
-// end_session_endpoint with id_token_hint (the id_token this session held, so
-// the IdP knows which session to end without prompting) and
-// post_logout_redirect_uri back to this origin. Not every IdP advertises
-// end_session_endpoint (it's an optional OIDC extension), and discovery
-// itself can fail (network, misconfigured issuer) — either case falls back
-// to the local-only clear rather than throwing, since a failed logout
-// redirect must never leave the caller signed in.
-//
-// It also clears ORG_SCOPE_RETRIED_KEY: that flag exists to bound a single
-// sign-in attempt to one retry, not to survive past a sign-out. Leaving it
-// set would mean a dedicated/BYO issuer that already consumed its one retry
-// gets no retry on the next sign-in after sign-out either — resolveToken
-// would treat the resulting invalid_scope callback as "no token" and bounce
-// back to the sign-in screen with no explanation, forever.
+// signOut clears the local token first so a failed IdP redirect never leaves the caller
+// signed in. It also clears ORG_SCOPE_RETRIED_KEY, which bounds one sign-in attempt,
+// not the session.
 export async function signOut(config: OidcConfig | undefined): Promise<SignOutResult> {
   const idToken = storedToken();
   sessionStorage.removeItem(TOKEN_STORAGE_KEY);
@@ -325,11 +241,7 @@ async function discoverEndSessionEndpoint(issuer: string): Promise<string | unde
   }
 }
 
-// endSessionSupported reports whether signOut(config) will be able to end the
-// IdP session, without performing sign-out. A screen that advises "sign out
-// to use a different account" must know this before the click — advising a
-// remedy discovery cannot back up is the same dead end as a wrong error
-// message (see root AGENTS.md § "Smooth, Seamless, No Dead Ends").
+// endSessionSupported lets a screen avoid advising a sign-out remedy the IdP cannot back.
 export async function endSessionSupported(config: OidcConfig | undefined): Promise<boolean> {
   if (config === undefined) {
     return false;
@@ -337,17 +249,8 @@ export async function endSessionSupported(config: OidcConfig | undefined): Promi
   return (await discoverEndSessionEndpoint(config.issuer)) !== undefined;
 }
 
-// resolveToken produces the bearer token to present to the API on load: the OIDC
-// callback exchange when this is a redirect callback, else a token already held
-// this session, else the dev-token fallback. undefined means no token — the
-// operator must sign in (OIDC) or set a dev token.
-//
-// A callback that failed with error=invalid_scope means the issuer refused
-// ORG_CLAIM_SCOPE (a dedicated/BYO IdP that has never heard of it) — this
-// retries sign-in once without that scope, the same one-shot fallback
-// erun-common's CLI/desktop login already does, so a dedicated issuer still
-// signs in. The
-// sessionStorage flag bounds the retry to once per browser session.
+// resolveToken returns undefined when the operator must sign in. An invalid_scope
+// callback retries once without ORG_CLAIM_SCOPE, bounded by a sessionStorage flag.
 export async function resolveToken(config: OidcConfig | undefined): Promise<string | undefined> {
   if (config !== undefined && isAuthCallback()) {
     return completeLogin(config);
@@ -365,9 +268,6 @@ export async function resolveToken(config: OidcConfig | undefined): Promise<stri
   return storedToken() ?? devBearerToken();
 }
 
-// devBearerToken is the local-dev fallback when OIDC is not configured: the
-// token from VITE_DEV_BEARER_TOKEN (a desktop-signed or dev token the API
-// trusts), or undefined when unset.
 export function devBearerToken(): string | undefined {
   return trimmed(import.meta.env.VITE_DEV_BEARER_TOKEN);
 }

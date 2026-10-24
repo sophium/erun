@@ -8,8 +8,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// activityPollerInterval is short enough that deploy state transitions
-// surface within seconds, yet long enough to keep kubectl/helm load negligible.
 const activityPollerInterval = 5 * time.Second
 
 func (a *App) startActivityPollers() {
@@ -26,22 +24,15 @@ func (a *App) startActivityPollers() {
 
 	go a.runHelmReleasePoller(stop)
 	go a.runStaleShellDetector(stop)
-	// The stale detector reconciles sessions whose process died; the heartbeat
-	// poller reconciles the opposite case — a session that is alive but has
-	// stopped printing. Together they keep what the UI shows tied to what the
-	// pod is doing rather than to stream traffic.
+	// The heartbeat poller catches sessions alive but silent; the stale detector catches dead ones.
 	go a.runSessionHeartbeatPoller(stop)
-	// Both of the above only see environments the desktop itself opened. This
-	// one sweeps every configured environment, so one driven from the CLI or by
-	// an in-pod agent stops rendering as untouched.
+	// Sweeps every configured environment, including ones driven from the CLI or in-pod agents.
 	go a.runEnvironmentActivityPoller(stop)
-	// The usage sweep piggybacks on the same reachability observation but runs
-	// on its own slower cadence, since each reading costs a real kubectl exec
-	// rather than a lightweight local check. See environment_usage.go.
+	// Usage readings cost a kubectl exec, so they run on a slower cadence.
 	go a.runEnvironmentUsagePoller(stop)
 }
 
-// stopActivityPollers is idempotent: safe to call more than once.
+// stopActivityPollers is idempotent.
 func (a *App) stopActivityPollers() {
 	a.mu.Lock()
 	stop := a.activityPollersStop
@@ -52,9 +43,8 @@ func (a *App) stopActivityPollers() {
 	}
 }
 
-// seedConfiguredKubeContexts surfaces deploys left pending by a previous run
-// before any session opens. Store errors are deliberately non-fatal — startup
-// falls back to on-demand context discovery.
+// seedConfiguredKubeContexts surfaces deploys left pending by a previous run;
+// store errors are non-fatal.
 func (a *App) seedConfiguredKubeContexts() {
 	if a.deps.store == nil {
 		return
@@ -100,8 +90,7 @@ func (a *App) snapshotConfiguredKubeContexts() []string {
 	return out
 }
 
-// watchedKubeContexts bounds the helm poller to contexts actually in use, so
-// helm list stays cheap for users with large kubeconfigs.
+// watchedKubeContexts limits the helm poller to contexts in use.
 func (a *App) watchedKubeContexts() []string {
 	seen := make(map[string]struct{})
 	var contexts []string

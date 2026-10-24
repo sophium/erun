@@ -20,8 +20,6 @@ func inPodProjectionRuntimeSpecs(tenant string) []DeploySpec {
 	}}
 }
 
-// inPodProjectionRuntimeChart writes the minimal runtime umbrella a repo-local
-// runtime chart resolves through, so a deploy spec can be built from it.
 func inPodProjectionRuntimeChart(t *testing.T) string {
 	t.Helper()
 	chartPath := t.TempDir()
@@ -33,13 +31,6 @@ func inPodProjectionRuntimeChart(t *testing.T) string {
 	return chartPath
 }
 
-// TestGuardInPodRuntimeDeployRefusesAnInPodProjection is the reported failure: a
-// remote-agent environment's own pod resolving its own runtime chart was not
-// refused, so the projection's values were carried straight into the rollout.
-// What makes an in-pod resolve untrustworthy is that it read the chart's
-// projection rather than the host config store, and that is as true of a
-// remote-agent env's own runtime pod as of a local-agent one — the guard's
-// original scoping to the environment type answered a different question.
 func TestGuardInPodRuntimeDeployRefusesAnInPodProjection(t *testing.T) {
 	inPod := map[string]string{"ERUN_TENANT": "tenant-a", "ERUN_ENVIRONMENT": "dev"}
 	for _, tc := range []struct {
@@ -61,8 +52,6 @@ func TestGuardInPodRuntimeDeployRefusesAnInPodProjection(t *testing.T) {
 			wantError: false,
 		},
 		{
-			// A component-only deploy carries no environment shape, so an env's
-			// own pod keeps deploying its own components.
 			name:      "a non-runtime component is left alone",
 			envType:   configpkg.EnvironmentTypeRemoteAgent,
 			env:       inPodProjection(inPod),
@@ -90,16 +79,10 @@ func TestGuardInPodRuntimeDeployRefusesAnInPodProjection(t *testing.T) {
 	}
 }
 
-// TestInPodProjectionResolvesDeployValuesTheGuardRefuses is the value half of
-// the same failure: what the refusal above exists to stop. An environment's own
-// pod holds only the chart's projection, so a runtime chart resolved from it
-// carries sshdEnabled=false where the environment is in fact running its sshd,
-// and the default runtime sizing where the host store holds a configured limit.
-// Those are the values that reach the rollout once the resolve is allowed.
+// TestInPodProjectionResolvesDeployValuesTheGuardRefuses shows the values the
+// guard keeps out of a rollout.
 func TestInPodProjectionResolvesDeployValuesTheGuardRefuses(t *testing.T) {
-	// Deterministic everywhere: without a runtime-pod identity the resolver
-	// cannot fall back to this machine's own cgroup limits, so the projection
-	// side resolves the same way wherever the suite runs.
+	// Clear the pod identity so the resolver never reads this machine's cgroup.
 	t.Setenv("ERUN_TENANT", "")
 	t.Setenv("ERUN_ENVIRONMENT", "")
 	t.Setenv("ERUN_ENV_TYPE", "")
@@ -110,8 +93,6 @@ func TestInPodProjectionResolvesDeployValuesTheGuardRefuses(t *testing.T) {
 		config.Name, config.Type = "dev", configpkg.EnvironmentTypeRemoteAgent
 		return configpkg.OpenResult{Tenant: "tenant-a", Environment: "dev", EnvConfig: config}
 	}
-	// The host config store's authoritative shape, and the subset of it the
-	// chart's projection actually carries.
 	hostStore := configpkg.EnvConfig{SSHD: configpkg.SSHDConfig{Enabled: true}, RuntimePod: configpkg.RuntimePodResources{CPU: "4", Memory: "8192Mi"}}
 	projection := configpkg.EnvConfig{}
 

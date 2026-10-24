@@ -23,20 +23,15 @@ func NewInviteRepository(txs *TxManager) *InviteRepository {
 	return &InviteRepository{txs: txs}
 }
 
-// InviteFilter scopes List. TenantID, when set, is the explicit target
-// tenant — required for an operations-scoped caller, since erun_operations
-// bypasses RLS and would otherwise return every tenant's invites, mirroring
-// UserFilter.
+// InviteFilter scopes List; TenantID is required for operations callers, whose
+// RLS is unconditional.
 type InviteFilter struct {
 	TenantID string
 }
 
-// CreateInviteParams is the invite-creation input. TenantID, when set,
-// targets a tenant other than the caller's own resolved tenant — honored
-// only for an operations-scoped caller (enforced by the route, not here),
-// mirroring CreateUserParams. Issuer is the inviter's own authenticated
-// issuer, captured so the accept flow (which has no caller session) can
-// link the new user's external identity correctly.
+// CreateInviteParams is the invite-creation input. TenantID overrides the target
+// tenant (operations only, enforced by the route); Issuer is kept so the
+// sessionless accept flow can link the external identity.
 type CreateInviteParams struct {
 	TenantID string
 	Issuer   string
@@ -44,9 +39,7 @@ type CreateInviteParams struct {
 	TTL      time.Duration
 }
 
-// Create mints a new invite token and persists its record. The token is
-// generated here, not accepted from a caller, so an invite can never be
-// created for a token of the caller's choosing.
+// Create mints the token itself so a caller can never choose it.
 func (r *InviteRepository) Create(ctx context.Context, params CreateInviteParams) (model.Invite, error) {
 	tenantID := strings.TrimSpace(params.TenantID)
 	issuer := strings.TrimSpace(params.Issuer)
@@ -79,8 +72,7 @@ func (r *InviteRepository) Create(ctx context.Context, params CreateInviteParams
 	return invite, nil
 }
 
-// List returns the filter's target tenant's outstanding (unconsumed)
-// invites — the ones an operator can still revoke or hand out again.
+// List returns the target tenant's unconsumed invites.
 func (r *InviteRepository) List(ctx context.Context, filter InviteFilter) ([]model.Invite, error) {
 	tenantID := strings.TrimSpace(filter.TenantID)
 	var invites []model.Invite
@@ -96,9 +88,7 @@ func (r *InviteRepository) List(ctx context.Context, filter InviteFilter) ([]mod
 	return invites, err
 }
 
-// Revoke deletes an outstanding invite by its globally unique ID. RLS scopes
-// which row a caller can reach the same way Get(ctx, id) does elsewhere in
-// this package, so no separate tenant filter is needed here.
+// Revoke deletes an outstanding invite; RLS scopes which row is reachable.
 func (r *InviteRepository) Revoke(ctx context.Context, inviteID string) error {
 	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		result, err := tx.NewRaw(`DELETE FROM invites WHERE invite_id = ?`, inviteID).Exec(ctx)
@@ -117,38 +107,26 @@ func (r *InviteRepository) Revoke(ctx context.Context, inviteID string) error {
 }
 
 var (
-	// ErrInviteExpired reports a token that resolved to a real, unconsumed
-	// invite whose expires_at has already passed.
+	// ErrInviteExpired reports an unconsumed invite past expires_at.
 	ErrInviteExpired = errors.New("invite has expired")
-	// ErrInviteConsumed reports a token that has already been used —
-	// invites are single-use by design.
+	// ErrInviteConsumed reports an already-used single-use invite.
 	ErrInviteConsumed = errors.New("invite has already been used")
 )
 
-// ConsumedInvite is what a successful ConsumeByToken hands back: the invite
-// record plus the target tenant's own type, which the caller needs to bind
-// the correct database role (erun_tenant vs erun_operations) for the
-// enrollment that follows.
+// ConsumedInvite carries the tenant type so the caller binds the right database role.
 type ConsumedInvite struct {
 	Invite     model.Invite
 	TenantType string
 }
 
-// ConsumeByToken atomically validates and marks an invite consumed, for the
-// unauthenticated accept endpoint: there is no caller identity yet, so this
-// runs under WithinSystemTx (erun_operations, no tenant scoping) rather than
-// the normal authenticated WithinTx. ErrNotFound/ErrInviteExpired/
-// ErrInviteConsumed are distinguished so the accept flow can tell an
-// invitee exactly why their link doesn't work, so a stale link says so
-// plainly instead of failing generically.
+// ConsumeByToken atomically validates and consumes an invite under
+// WithinSystemTx, since the accept endpoint has no caller identity.
 func (r *InviteRepository) ConsumeByToken(ctx context.Context, token string) (ConsumedInvite, error) {
 	token = strings.TrimSpace(token)
 	var result ConsumedInvite
 	err := r.txs.WithinSystemTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		var invite model.Invite
-		// FOR UPDATE serializes concurrent accept attempts against the same
-		// token so two requests cannot both observe it unconsumed and both
-		// succeed.
+		// FOR UPDATE prevents two concurrent accepts both succeeding.
 		scanErr := tx.NewRaw(`
 			SELECT `+inviteColumns+`
 			  FROM invites
@@ -180,9 +158,7 @@ func (r *InviteRepository) ConsumeByToken(ctx context.Context, token string) (Co
 
 const inviteTokenBytes = 32
 
-// generateInviteToken mints a high-entropy, URL-safe opaque token — the
-// credential is the token itself (the accept endpoint is unauthenticated),
-// so it must not be guessable the way a sequential or short ID would be.
+// generateInviteToken mints an unguessable token; it is the credential itself.
 func generateInviteToken() (string, error) {
 	raw := make([]byte, inviteTokenBytes)
 	if _, err := cryptorand.Read(raw); err != nil {

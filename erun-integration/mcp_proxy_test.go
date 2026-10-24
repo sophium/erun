@@ -16,18 +16,12 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// proxyStdin frames JSON-RPC messages the way an MCP client writes them: one
-// per line, newline-delimited, then EOF.
 func proxyStdin(messages ...string) string {
 	return strings.Join(messages, "\n") + "\n"
 }
 
-// requireJSONRPCLines is the proxy's stdout contract, and the one thing the
-// Combined snapshot cannot assert: it concatenates both streams, so it cannot
-// tell a diagnostic that leaked onto stdout from one that went to stderr where it
-// belongs. A single stray byte on stdout desynchronizes the client's parser, so
-// every line is parsed here and the decoded messages are returned for the
-// scenario to assert against.
+// requireJSONRPCLines checks stdout alone: one stray byte desynchronizes the
+// client, and Combined cannot tell stdout from stderr.
 func requireJSONRPCLines(t *testing.T, stdout string, want int) []map[string]any {
 	t.Helper()
 	if stdout == "" && want == 0 {
@@ -51,8 +45,6 @@ func requireJSONRPCLines(t *testing.T, stdout string, want int) []map[string]any
 	return messages
 }
 
-// jsonRPCErrorMessage returns a reply's error message, failing when the reply
-// carries no error at all.
 func jsonRPCErrorMessage(t *testing.T, message map[string]any) string {
 	t.Helper()
 	failure, ok := message["error"].(map[string]any)
@@ -65,8 +57,7 @@ func jsonRPCErrorMessage(t *testing.T, message map[string]any) string {
 
 func testMCPProxyDryRunTracesTheResolvedEdge(t *testing.T) {
 	t.Parallel()
-	// The plan must name the edge the relay would reach, and must neither read
-	// stdin nor touch the network.
+	// The plan must neither read stdin nor touch the network.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"mcp", "proxy", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -77,10 +68,8 @@ func testMCPProxyDryRunTracesTheResolvedEdge(t *testing.T) {
 }
 
 func testMCPProxyRealRunRelaysAJsonFramedSession(t *testing.T) {
-	// The whole session an MCP client drives: initialize, the initialized
-	// notification, then tools/list. The notification must produce no stdout
-	// line at all, and the tools/list must carry the session the handshake
-	// handed out — the client never sees either fact, so the relay owns both.
+	// The notification produces no stdout line, and tools/list carries the
+	// handshake's session.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -110,11 +99,8 @@ func testMCPProxyRealRunRelaysAJsonFramedSession(t *testing.T) {
 	if list.SessionID != "test-session" {
 		t.Fatalf("tools/list session id = %q, want test-session", list.SessionID)
 	}
-	// Every relayed request carries its own freshly minted bearer — the reason
-	// a session outlives the 5-minute token lifetime. The headers are in
-	// neither stream, so the snapshot cannot see them. (Two mints inside the
-	// same second sign identical claims, so the bearers are byte-equal here;
-	// what is assertable is that each request carried a verifiable one.)
+	// Each request carries a freshly minted, verifiable bearer so a session
+	// outlives token lifetime. Same-second mints are byte-equal.
 	for _, request := range []fakeMCPRequest{edge.requestFor(t, "initialize"), list} {
 		claims := verifyMCPToken(t, request.Authbearer, identity.PublicKey)
 		if claims.Audience != "erun-mcp:team/dev" {
@@ -124,9 +110,6 @@ func testMCPProxyRealRunRelaysAJsonFramedSession(t *testing.T) {
 }
 
 func testMCPProxyRealRunRelaysAnSseFramedReply(t *testing.T) {
-	// The edge may frame a reply as an event stream; the client only speaks
-	// newline-delimited JSON, so the relay must unwrap the data: framing and
-	// drop the progress event ahead of it.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -146,8 +129,7 @@ func testMCPProxyRealRunRelaysAnSseFramedReply(t *testing.T) {
 }
 
 func testMCPProxyRealRunWritesNothingForANotification(t *testing.T) {
-	// A notification has no id, so the protocol has nothing to answer it with.
-	// Writing anything here would leave the client one reply ahead of itself.
+	// A notification has no id; any reply would desync the client.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -166,17 +148,13 @@ func testMCPProxyRealRunWritesNothingForANotification(t *testing.T) {
 }
 
 func testMCPProxyRealRunUnreachableEdgeAnswersEveryRequestAndKeepsServing(t *testing.T) {
-	// Nothing listening means the port-forward is missing. A relay that went
-	// quiet here would look to the client like a hung server, so each request
-	// gets a JSON-RPC error naming `erun open`, and the next one is still
-	// served — the port-forward can come back mid-session.
+	// Each request gets an error naming `erun open`, and later requests are still
+	// served in case the forward returns.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
 	fixture.SeedDesktopIdentity(t, setup)
 
-	// The notification in the middle still has no id to answer against, so the
-	// outage reaches stderr only and stdout stays at one line per request.
 	stdin := proxyStdin(
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
@@ -197,8 +175,6 @@ func testMCPProxyRealRunUnreachableEdgeAnswersEveryRequestAndKeepsServing(t *tes
 }
 
 func testMCPProxyRealRunUnauthorizedEdgeAnswersWithTheRedeployRecovery(t *testing.T) {
-	// An edge that rejects the bearer is a trust problem, not connectivity, and
-	// the client must see that distinction rather than a generic failure.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -206,9 +182,7 @@ func testMCPProxyRealRunUnauthorizedEdgeAnswersWithTheRedeployRecovery(t *testin
 	edge := &fakeMCPEdge{Status: http.StatusUnauthorized}
 	edge.start(t, mcpEdgeLocalPort)
 
-	// Deliberately unterminated: a client that closes the pipe right after its
-	// last message leaves no trailing newline, and that message must still be
-	// relayed rather than dropped.
+	// Unterminated on purpose: the last message without a newline must still be relayed.
 	stdin := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
 	result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: stdin})
 	if result.ExitCode != 0 {
@@ -223,11 +197,7 @@ func testMCPProxyRealRunUnauthorizedEdgeAnswersWithTheRedeployRecovery(t *testin
 }
 
 func testMCPProxyRealRunRecoversWhenTheEdgeForgetsItsSession(t *testing.T) {
-	// The relay pins one session id for its whole lifetime, so an edge that
-	// restarts inside a still-running pod would otherwise 404 every later
-	// request and leave the client with no tools at all. A forgotten session
-	// must cost one transparent re-handshake and nothing else: the client still
-	// sees one reply per request, on its own ids.
+	// A forgotten session costs one transparent re-handshake.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -255,8 +225,6 @@ func testMCPProxyRealRunRecoversWhenTheEdgeForgetsItsSession(t *testing.T) {
 	if replies[1]["id"] != float64(2) {
 		t.Fatalf("tools/list reply came back on the wrong id: %v", replies[1])
 	}
-	// Session ids are request headers, so the snapshot cannot see them: the
-	// retry must have gone out on the session the second handshake handed out.
 	if handshakes := edge.requestsFor("initialize"); len(handshakes) != 2 {
 		t.Fatalf("edge saw %d initialize requests, want exactly one re-handshake: %+v", len(handshakes), edge.recorded())
 	}
@@ -270,9 +238,7 @@ func testMCPProxyRealRunRecoversWhenTheEdgeForgetsItsSession(t *testing.T) {
 }
 
 func testMCPProxyRealRunSurfacesASessionTheEdgeNeverAccepts(t *testing.T) {
-	// The recovery is bounded: an edge that rejects every session must produce
-	// one JSON-RPC error against the request the client is waiting on, not an
-	// endless re-handshake loop.
+	// Recovery is bounded: no endless re-handshake loop.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -302,10 +268,7 @@ func testMCPProxyRealRunSurfacesASessionTheEdgeNeverAccepts(t *testing.T) {
 }
 
 func testMCPProxyRealRunAnswersARequestTheEdgeLeftUnanswered(t *testing.T) {
-	// An edge that accepts a request and returns no body would leave the client
-	// waiting forever on a reply. The relay closes that hole: the request is
-	// answered with an error naming what happened, so the client fails visibly
-	// instead of hanging.
+	// A bodyless accept must be answered with an error, not hang the client.
 	skipIfPortsBusy(t, mcpEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
@@ -328,9 +291,7 @@ func testMCPProxyRealRunAnswersARequestTheEdgeLeftUnanswered(t *testing.T) {
 
 func testMCPProxyRealRunServesInputsUploadLocally(t *testing.T) {
 	t.Parallel()
-	// inputs_upload is host-served like workspace_sync: it must never touch
-	// the edge at all, which is why no fake edge is started here — a message
-	// reaching the network would fail this scenario outright.
+	// No fake edge: inputs_upload is host-served and must not touch the network.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	local := filepath.Join(setup.Cwd, "evidence.bin")
@@ -377,9 +338,7 @@ func testMCPProxyRealRunServesInputsUploadLocally(t *testing.T) {
 
 func testMCPProxyRealRunPreviewsInputsUploadWithoutSending(t *testing.T) {
 	t.Parallel()
-	// preview must resolve and describe the transfer without ever invoking
-	// kubectl — no stub is declared, so a real call here would fail on a
-	// missing binary rather than silently pass.
+	// No kubectl stub, so a real call would fail.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	local := filepath.Join(setup.Cwd, "evidence.bin")

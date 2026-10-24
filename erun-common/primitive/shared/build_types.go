@@ -41,71 +41,32 @@ type DockerBuildSpec struct {
 	Platforms      []string
 	Push           bool
 	Verbosity      int
-	// Fingerprint is a content hash of the Dockerfile and its COPY sources. A
-	// matching fingerprint lets a later build skip rebuilding and promote the
-	// existing image (re-tag + push) instead.
+	// Fingerprint hashes the Dockerfile and its COPY sources.
 	Fingerprint string
-	// Promote indicates a local image already matches this Fingerprint, so the
-	// build is skipped and the existing image is re-tagged and pushed instead of
-	// rebuilt.
+	// Promote re-tags and pushes an existing matching image instead of building.
 	Promote bool
-	// MissingFingerprintPlatforms lists platforms that lacked a matching
-	// fingerprint tag, so the trace can explain why a build is rebuilding rather
-	// than promoting. For non-multi-platform builds the slot is the empty string.
+	// MissingFingerprintPlatforms uses "" for a single-platform build.
 	MissingFingerprintPlatforms []string
-	// CascadeRebuildFromTag holds a local FROM dependency's image tag when this
-	// build must rebuild only because that dependency is rebuilding, even though
-	// its own fingerprint matched. It lets the trace name the real cause instead
-	// of the misleading "fingerprint image is missing".
+	// CascadeRebuildFromTag names the rebuilding FROM dependency that forces this
+	// rebuild despite a matching fingerprint.
 	CascadeRebuildFromTag string
-	// LocalBaseTag holds the image tag of the `FROM …:${ERUN_VERSION}` base that
-	// this same build produces locally, when that base is never published by this
-	// run. Such a base only exists under its per-arch local tags, so the wrapper's
-	// ERUN_VERSION build arg must name the arch being built or the plain version
-	// reference resolves nowhere.
+	// LocalBaseTag is set when the base exists only under per-arch local tags,
+	// so ERUN_VERSION must name the arch being built.
 	LocalBaseTag string
-	// DindCPULimit / DindMemoryLimitMiB carry this build's actual erun-dind
-	// sidecar resource limits (EnvConfig.RuntimeDindPod, normalized) into a
-	// Dockerfile that declares matching DIND_CPU_LIMIT / DIND_MEMORY_LIMIT_MIB
-	// ARGs, so a component's in-build test stage can size its concurrent
-	// fan-out against what this build's dind sidecar is actually entitled to,
-	// instead of the Dockerfile's own hardcoded ARG default or the host node's
-	// raw, cgroup-invisible capacity. Left empty for a
-	// Dockerfile that declares neither ARG, so an unrelated build's docker
-	// command is unchanged. See applyDindResourceBuildArgs.
+	// DindCPULimit / DindMemoryLimitMiB stay empty unless the Dockerfile
+	// declares the matching ARG.
 	DindCPULimit       string
 	DindMemoryLimitMiB string
-	// CgroupParent names the cgroup every RUN-instruction container this build
-	// creates should nest under, so it inherits a real, enforced CPU quota
-	// instead of escaping the erun-dind sidecar's own kubelet-declared limit as
-	// a sibling cgroup. Left empty outside an injected runtime pod.
-	// See buildContainerCPUCapCgroupParent.
+	// CgroupParent nests RUN containers under an enforced CPU quota instead of
+	// a sibling of the dind sidecar's cgroup.
 	CgroupParent string
-	// DockerSecrets carries the build secrets declared under `docker.secrets`
-	// (resolved for this build's environment) into the docker build argv as
-	// `--secret id=<id>,env=<VAR>` / `,src=<path>` references. Each entry holds
-	// a reference, never a credential value, which is what keeps a secret out of
-	// every trace, log, and timing record this build writes — see
-	// DockerBuildSecret.
+	// DockerSecrets holds references only, never credential values.
 	DockerSecrets []config.DockerBuildSecret
-	// PlatformObserver, when set, is called after each platform's build (or
-	// promote+push) finishes, reporting that platform's elapsed time, error,
-	// build-cgroup cost (nil for a promote, which runs no docker build), and
-	// (when a real `docker build` ran) its captured `--progress=plain`
-	// output, which a caller can mine for a per-Dockerfile-step timing
-	// breakdown. It lets a caller attach per-architecture timing (see
-	// core.Context.TimingPlatformObserver) without DockerImageBuilderFunc
-	// needing a signature change, since executeDockerBuild sets this field on
-	// the same buildInput value it hands to the builder — exactly how it already
-	// threads Verbosity through. Never marshaled: a func value has no JSON form.
+	// PlatformObserver reports per-platform timing without changing
+	// DockerImageBuilderFunc's signature.
 	PlatformObserver func(platform string, elapsed time.Duration, err error, cgroup *core.BuildCgroupMetrics, buildOutput string) `json:"-"`
-	// Cache is the same fingerprint cache decision the timing tree recorded for
-	// this image (see cacheDecision), threaded through by value so the builder
-	// can correct it: a promote whose cached image cannot be published falls back
-	// to a real build, and a row that still said "cache hit" would report the
-	// opposite of what the run did. Unexported because it is erun-common's own
-	// timing bookkeeping, not an input a caller sets; nil whenever no timing root
-	// is active, which is most callers.
+	// Cache lets the builder correct a "cache hit" when a promote falls back to
+	// a real build; nil without a timing root.
 	Cache *core.CacheDecision
 }
 
@@ -122,24 +83,18 @@ type ScriptSpec struct {
 }
 
 type BuildExecutionSpec struct {
-	Release *ReleaseSpec
-	Script  *ScriptSpec
-	// LinuxPackages are the linux package components a plain build runs
-	// through their test stage. A release exports them from its ReleaseSpec.
+	Release       *ReleaseSpec
+	Script        *ScriptSpec
 	LinuxPackages []LinuxPackageSpec
 	DockerBuilds  []DockerBuildSpec
 	DockerPushes  []DockerPushSpec
-	// ComponentCharts are the Helm charts under <tenant>-devops/k8s/*, resolved as
-	// first-class build source independent of images. A plain build packages them
-	// (validate); a build that pushes publishes them.
+	// ComponentCharts are build sources independent of images.
 	ComponentCharts []helm.HelmChartPublishSpec
 }
 
 type DockerPushExecutionSpec struct {
-	Builds []DockerBuildSpec
-	Pushes []DockerPushSpec
-	// ComponentCharts are the <tenant>-devops/k8s/* charts this push publishes,
-	// discovered by directory scan rather than keyed to same-named images.
+	Builds          []DockerBuildSpec
+	Pushes          []DockerPushSpec
 	ComponentCharts []helm.HelmChartPublishSpec
 }
 
@@ -150,27 +105,13 @@ type DockerCommandTarget struct {
 	Release         bool
 	Force           bool
 	Deploy          bool
-	// Build is the `erun push --build` operator shortcut: build the current source
-	// first, then push that version. It is orchestration policy owned by the CLI
-	// caller — the shared resolvers never read it. See root AGENTS.md § "Command
-	// primitives vs orchestration".
-	Build bool
-	// NoIncremental disables the default fingerprint-based incremental build cache.
-	NoIncremental bool
-	// DisableBuildScriptDiscovery skips project build.sh discovery so builds
-	// resolve docker/release contexts directly.
+	// Build is CLI orchestration policy; the shared resolvers never read it.
+	Build                       bool
+	NoIncremental               bool
 	DisableBuildScriptDiscovery bool
-	// Platforms explicitly overrides the docker --platform targets a non-release
-	// build mints (e.g. ["linux/amd64"]), taking precedence over the project's
-	// configured docker.platforms. It must be empty when
-	// Release is set: a release build always publishes every platform erun
-	// supports, regardless of any override.
+	// Platforms must be empty for a release, which always publishes every platform.
 	Platforms []string
-	// Component selects one components: entry (base/config/project_components_config.go) for
-	// a monorepo that declares more than one docker/k8s/version root. Empty
-	// auto-selects the lone entry when exactly one is declared, or resolves
-	// through the project-global paths: block when no components: map exists;
-	// more than one entry with Component empty fails naming the choices.
+	// Component selects a components: entry; empty auto-selects a lone entry.
 	Component string
 }
 

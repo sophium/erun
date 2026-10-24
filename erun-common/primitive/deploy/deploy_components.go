@@ -10,15 +10,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// deployComponentBaseOrder is the tenant-agnostic base of each platform
-// component chart, ordered so backend charts precede their dependents: powerdns
-// and zitadel deploy after backend-postgres (their backend store), oci-registry
-// after backend-api (it trusts a public key the operator copies from the
-// backend-api signer, per erun-devops/AGENTS.md), and docs — a one-shot Job with
-// no in-cluster dependency — orders last. A component's published chart is
-// named <prefix>-<base> where prefix is the tenant's release base (see
-// componentChartPrefix), e.g. erun-backend-postgres or frs-backend-api. Governs
-// ordering only, not which components deploy.
+// deployComponentBaseOrder orders component chart bases so backend charts precede dependents;
+// oci-registry follows backend-api because it trusts that signer's key. It governs order only.
 var deployComponentBaseOrder = []string{
 	"backend-postgres",
 	"backend-db",
@@ -29,26 +22,15 @@ var deployComponentBaseOrder = []string{
 	"docs",
 }
 
-// canonicalChartPrefix is the registry prefix of erun's own published charts
-// (erun-devops, erun-backend-api, ...). A tenant's <tenant>-<base> umbrella
-// wraps the same-base canonical chart erun-<base>, so this is also the subchart
-// value-scope prefix a by-reference umbrella deploy re-scopes under.
+// canonicalChartPrefix prefixes erun's published charts and is the umbrella subchart value scope.
 const canonicalChartPrefix = "erun"
 
-// componentChartPrefix is the registry prefix a tenant's component charts carry,
-// matching the runtime release base: erun for the canonical product, <tenant>
-// for a tenant that publishes its own charts (e.g. frs). Derived from
-// RuntimeReleaseName so it stays in lockstep with the runtime chart naming.
+// componentChartPrefix derives from RuntimeReleaseName to stay in lockstep with runtime chart naming.
 func componentChartPrefix(tenant string) string {
 	return shared.TenantResourcePrefix(tenant)
 }
 
-// publishablePlatformComponentNames are the component charts published to the
-// registry (oci://<registry>/charts/<name>) that a sourceless env — one with no
-// local repo, i.e. a runtime or remote-agent env — can deploy by reference, no
-// local umbrella chart required. The names are tenant-prefixed so a tenant that
-// publishes its own charts (frs-backend-api) is offered them, not the canonical
-// erun set; a transport filters to those actually published at the deploy version.
+// publishablePlatformComponentNames are the tenant-prefixed charts a sourceless env can deploy by reference.
 func publishablePlatformComponentNames(tenant string) []string {
 	prefix := componentChartPrefix(tenant)
 	names := make([]string, len(deployComponentBaseOrder))
@@ -58,8 +40,6 @@ func publishablePlatformComponentNames(tenant string) []string {
 	return names
 }
 
-// componentBaseName strips the tenant/product prefix (the first "-" segment) so
-// ordering ranks erun-backend-api and frs-backend-api by the same base.
 func componentBaseName(name string) string {
 	if _, base, ok := strings.Cut(strings.TrimSpace(name), "-"); ok {
 		return base
@@ -67,10 +47,7 @@ func componentBaseName(name string) string {
 	return strings.TrimSpace(name)
 }
 
-// SelectedPublishableComponents returns the selected non-runtime components,
-// ordered by plan when one was resolved (see resolvePublishedDeployPlan) or
-// else by the default rank (postgres → db → api → powerdns → docs), for the
-// sourceless by-reference deploy path; the runtime is resolved separately.
+// SelectedPublishableComponents returns selected non-runtime components in plan or default order.
 func SelectedPublishableComponents(selected []string, tenant string, plan config.ProjectK8sConfig) []string {
 	runtimeAliases := runtimeComponentNames(tenant)
 	out := make([]string, 0, len(selected))
@@ -94,10 +71,8 @@ const (
 	deploySelectionSourceDefault = "default (runtime only)"
 )
 
-// resolveSelectedDeployComponents takes the selection from the highest non-empty
-// precedence tier (flag, then saved set, then repo plan); tiers never merge. An
-// empty result means no explicit selection, which the caller treats as the runtime
-// chart alone (bootstrap/heal).
+// resolveSelectedDeployComponents takes the highest non-empty tier (flag, saved, plan); tiers never
+// merge. Empty means the runtime chart alone.
 func resolveSelectedDeployComponents(flagComponents, savedComponents []string, plan config.ProjectK8sConfig) ([]string, string) {
 	if names := NormalizeComponentNames(flagComponents); len(names) > 0 {
 		return names, deploySelectionSourceFlag
@@ -136,9 +111,7 @@ func planComponentNameList(plan config.ProjectK8sConfig) []string {
 	return NormalizeComponentNames(names)
 }
 
-// filterDeployContextsBySelection is opt-in-only: a chart deploys iff its name is
-// in the selection, and an empty selection deploys the runtime alone
-// (bootstrap/heal).
+// An empty selection deploys the runtime alone (bootstrap/heal).
 func filterDeployContextsBySelection(contexts []shared.KubernetesDeployContext, selected []string, tenant string) ([]shared.KubernetesDeployContext, error) {
 	if err := validateSelectedDeployComponents(selected, contexts, tenant); err != nil {
 		return nil, err
@@ -171,8 +144,6 @@ func deploySelectionIncludesRuntime(selected []string, tenant string) bool {
 	return false
 }
 
-// containsRuntimeContext tells the caller whether a repo-local runtime chart backs
-// the deploy, or whether the published erun-devops fallback is needed.
 func containsRuntimeContext(contexts []shared.KubernetesDeployContext, tenant string) bool {
 	for _, deployContext := range contexts {
 		if deployContextOwnsRuntimeChart(deployContext, tenant) {
@@ -182,9 +153,7 @@ func containsRuntimeContext(contexts []shared.KubernetesDeployContext, tenant st
 	return false
 }
 
-// validateSelectedDeployComponents rejects unknown component names. Runtime aliases
-// stay valid even with no local runtime chart because they resolve to the published
-// erun-devops chart.
+// Runtime aliases stay valid without a local chart; they resolve to the published erun-devops.
 func validateSelectedDeployComponents(selected []string, contexts []shared.KubernetesDeployContext, tenant string) error {
 	if len(selected) == 0 {
 		return nil
@@ -220,48 +189,27 @@ func sortedNameSet(set map[string]struct{}) []string {
 	return names
 }
 
-// DeployableComponent describes one selectable deploy target for an
-// environment. Transports that let the operator choose what `erun deploy` rolls
-// out (the desktop "Components to deploy" checklist) render a list of these.
+// DeployableComponent is one selectable deploy target for an environment.
 type DeployableComponent struct {
-	// Name is the canonical selector: a chart directory name under
-	// <tenant>-devops/k8s/, or the runtime release name for the runtime item.
-	Name string `json:"name"`
-	// Runtime marks the environment's runtime chart item.
-	Runtime bool `json:"runtime"`
-	// Source is "local-chart" when a repo-local chart backs the component, or
-	// "published-chart" for the runtime when only the published erun-devops
-	// chart is available (no local <tenant>-devops/erun-devops chart).
+	// Name is a chart directory under <tenant>-devops/k8s/, or the runtime release name.
+	Name    string `json:"name"`
+	Runtime bool   `json:"runtime"`
+	// Source is "local-chart" or, for a runtime with no local chart, "published-chart".
 	Source string `json:"source"`
-	// Selected reports whether the component is in the env's current resolved
-	// default selection (saved deploy.components, else the repo plan, else —
-	// when both are empty — the runtime alone).
+	// Selected reports membership in the env's resolved default selection.
 	Selected bool `json:"selected"`
-	// PublishedChart is the chart repo a by-reference deploy actually installs for
-	// this item at the chosen version. For the runtime it is the tenant's own
-	// <tenant>-devops chart when that is published at the version, else the
-	// canonical erun-devops fallback — so the picker can name the chart the deploy
-	// will install rather than assuming the fallback. Empty until a version-aware
-	// transport resolves it (see ResolvedRuntimeChartName); non-runtime items are
-	// their own chart (Name).
+	// PublishedChart is the chart a by-reference deploy installs at the chosen version; empty until
+	// a version-aware transport resolves it.
 	PublishedChart string `json:"publishedChart,omitempty"`
 }
 
 const deployComponentSourcePublished = "published-chart"
 
-// DeployComponentSourcePublished is the Source value of a component installed by
-// reference from the registry rather than from a repo-local chart, for a caller
-// that must tell the two apart -- the desktop, deciding whether a registry has any
-// say in which chart the runtime installs.
+// DeployComponentSourcePublished is the Source of a component installed by reference.
 const DeployComponentSourcePublished = deployComponentSourcePublished
 
-// ResolvedRuntimeChartName returns the published chart a by-reference runtime
-// deploy installs: the tenant's own <tenant>-devops chart when it is published at
-// the deploy version (tenantChartPublished), else the canonical erun-devops. The
-// erun product tenant's runtime release name IS erun-devops, so it always resolves
-// there. It labels the desktop picker; the deploy itself walks the candidate
-// ladder (runtimeChartCandidates), which searches the same two charts in order
-// and then widens to the registry erun publishes the platform chart in.
+// ResolvedRuntimeChartName returns the tenant's <tenant>-devops chart when published, else erun-devops.
+// It only labels the picker; deploy walks runtimeChartCandidates.
 func ResolvedRuntimeChartName(tenant string, tenantChartPublished bool) string {
 	chart := config.RuntimeReleaseName(tenant)
 	if chart != config.DevopsComponentName && tenantChartPublished {
@@ -270,12 +218,8 @@ func ResolvedRuntimeChartName(tenant string, tenantChartPublished bool) string {
 	return config.DevopsComponentName
 }
 
-// ResolveDeployableComponents lists the published component charts a deploy of a
-// chosen version can roll out — the canonical platform components plus the runtime,
-// installed by reference — so a transport can render the checklist. The list is the
-// same for every env type because the deploy version, not the env's local source,
-// decides which charts exist; a transport filters it to those actually published at
-// the selected version. It reads only: it never builds, pushes, or requires a version.
+// ResolveDeployableComponents lists the published component charts plus the runtime for a deploy.
+// The version, not the env's source, decides which charts exist. It never builds or pushes.
 func ResolveDeployableComponents(store DeployStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now shared.NowFunc, target DeployTarget) ([]DeployableComponent, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = freezeNow(now)
@@ -287,21 +231,13 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot shared.Proje
 	tenant := resolvedTarget.Tenant
 	runtimeName := config.RuntimeReleaseName(tenant)
 
-	// The checklist lists what deploying a chosen version rolls out — the published
-	// component charts (installed by reference) plus the runtime — the same for every
-	// env type, because the version (not the env's local source) decides which charts
-	// exist. A transport then filters this to the charts actually published at the
-	// selected version. Deploying local working-tree charts by name stays available
-	// to an operator via the CLI; the desktop checklist is a published-version view.
 	selected, _ := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, config.ProjectK8sConfig{})
 	runtimeSelected := deploySelectionIncludesRuntime(selected, tenant)
 
 	platformNames := publishablePlatformComponentNames(tenant)
 	platform := make(map[string]struct{}, len(platformNames))
 	components := make([]DeployableComponent, 0, len(platformNames)+len(selected)+1)
-	// Runtime first: it is the default-checked, primary deploy target, so it must
-	// head the checklist rather than sit below the optional component charts (where
-	// a scrollable picker can hide it).
+	// Runtime first, so a scrollable picker cannot hide the primary target.
 	components = append(components, DeployableComponent{
 		Name:     runtimeName,
 		Runtime:  true,
@@ -316,10 +252,7 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot shared.Proje
 			Selected: slices.Contains(selected, name),
 		})
 	}
-	// A tenant publishes its own component charts (e.g. frs-backend-api) beyond the
-	// fixed platform set; surface any this env selects so the checklist reflects
-	// what deploying it rolls out. A transport filters to those actually published
-	// at the chosen version.
+	// Surface tenant-published charts beyond the platform set that this env selects.
 	runtimeAliases := runtimeComponentNames(tenant)
 	for _, name := range selected {
 		if _, ok := platform[name]; ok {
@@ -337,9 +270,7 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot shared.Proje
 	return components, nil
 }
 
-// sortDeployContextsByDeployOrder ranks contexts by the k8s plan (hardcoded fallback
-// when the plan is empty); the sort must stay stable so plan-less contexts keep their
-// input order at the end.
+// The sort must stay stable so plan-less contexts keep their input order.
 func sortDeployContextsByDeployOrder(contexts []shared.KubernetesDeployContext, plan config.ProjectK8sConfig) {
 	rank := componentRankByPlan(plan)
 	sort.SliceStable(contexts, func(i, j int) bool {
@@ -349,8 +280,6 @@ func sortDeployContextsByDeployOrder(contexts []shared.KubernetesDeployContext, 
 
 func componentRankByPlan(plan config.ProjectK8sConfig) func(name string) int {
 	if len(plan.Deployments) == 0 {
-		// Rank by tenant-agnostic base so erun-backend-api and frs-backend-api
-		// share ordering; a name with no known base sorts last.
 		rank := make(map[string]int, len(deployComponentBaseOrder))
 		for i, base := range deployComponentBaseOrder {
 			rank[base] = i

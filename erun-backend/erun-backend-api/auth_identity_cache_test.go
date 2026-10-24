@@ -98,10 +98,7 @@ func TestAuthMiddlewareExpiresFailedExternalUserResolutionCache(t *testing.T) {
 	}
 }
 
-// TestAuthMiddlewareKeepsOrgScopedTenantsDistinctInCache guards the cross-tenant
-// RLS hole: under a shared org-scoped issuer the same (issuer, subject) resolves
-// to a different tenant per org, so the identity cache must key on the resolved
-// org, which must also surface on the audit event.
+// A shared issuer maps (issuer, subject) to a tenant per org, so the cache must key on org.
 func TestAuthMiddlewareKeepsOrgScopedTenantsDistinctInCache(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	cache := NewIdentityResolutionCache(IdentityCacheOptions{
@@ -162,22 +159,15 @@ func TestAuthMiddlewareKeepsOrgScopedTenantsDistinctInCache(t *testing.T) {
 	if got, ev := resolve("org-a"); got != tenantForOrg["org-a"] || ev.ExternalOrgID != "org-a" {
 		t.Fatalf("org-a: tenant=%q externalOrgID=%q", got, ev.ExternalOrgID)
 	}
-	// Same issuer+subject, different org: must NOT return the cached org-a tenant.
 	if got, ev := resolve("org-b"); got != tenantForOrg["org-b"] || ev.ExternalOrgID != "org-b" {
 		t.Fatalf("org-b leaked cached tenant: tenant=%q externalOrgID=%q", got, ev.ExternalOrgID)
 	}
-	// org-a again resolves from cache to the original tenant (no cross-org bleed).
 	if got, _ := resolve("org-a"); got != tenantForOrg["org-a"] {
 		t.Fatalf("org-a re-resolve: tenant=%q", got)
 	}
 }
 
-// TestAuthMiddlewareBypassesIdentityCacheWhenOrgDerivationFails guards the
-// error-path variant of the cross-tenant hole: when org derivation fails for a
-// shared org-scoped issuer, the resolved tenant must NOT be cached under org=""
-// (which would collide with single-tenant successes or another org). A failed
-// derivation bypasses the cache entirely, so every request re-resolves from the
-// token rather than reading a stale tenant.
+// A failed org derivation must bypass the cache rather than cache under org="".
 func TestAuthMiddlewareBypassesIdentityCacheWhenOrgDerivationFails(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	cache := NewIdentityResolutionCache(IdentityCacheOptions{
@@ -196,8 +186,6 @@ func TestAuthMiddlewareBypassesIdentityCacheWhenOrgDerivationFails(t *testing.T)
 		OrgResolver: OrgResolverFunc(func(ctx context.Context, claims Claims) (string, error) {
 			return "", errors.New("transient org lookup failure")
 		}),
-		// Full resolution re-derives the org from the token itself, so it still
-		// resolves the correct tenant despite the failed cache-key derivation.
 		TenantResolver: TenantResolverFunc(func(ctx context.Context, claims Claims) (Tenant, error) {
 			tenantResolverCalls++
 			org, _ := claims.Raw["org"].(string)
@@ -235,16 +223,12 @@ func TestAuthMiddlewareBypassesIdentityCacheWhenOrgDerivationFails(t *testing.T)
 	if got := resolve("org-a"); got != tenantForOrg["org-a"] {
 		t.Fatalf("org-a: tenant=%q", got)
 	}
-	// Same issuer+subject, different org, derivation still failing: must NOT
-	// return a cached org-a tenant.
 	if got := resolve("org-b"); got != tenantForOrg["org-b"] {
 		t.Fatalf("org-b leaked cached tenant: tenant=%q", got)
 	}
 	if got := resolve("org-a"); got != tenantForOrg["org-a"] {
 		t.Fatalf("org-a re-resolve: tenant=%q", got)
 	}
-	// The cache was bypassed on every request (nothing cached under org=""), so
-	// the tenant resolver ran for all three.
 	if tenantResolverCalls != 3 {
 		t.Fatalf("expected cache bypass to re-resolve every request, got %d tenant resolver calls", tenantResolverCalls)
 	}

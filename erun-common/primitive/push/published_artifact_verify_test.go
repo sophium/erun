@@ -10,21 +10,12 @@ import (
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
-// isTransientRegistryReadError decides between "retry the read-back" and "abort
-// the publish" by matching the read-back's text, so its only damaging failure
-// mode is under-matching: a wording it stops recognising aborts a release
-// immediately on a read the registry would have answered a moment later. These
-// tables pin the wordings erun has evidence for, and each row records where its
-// output came from so a later reader can tell an observed registry answer from a
-// reconstructed one. Adding a marker to the classifier means adding a row here.
+// Each classifier marker needs a row here; under-matching aborts a release.
 type registryReadSample struct {
 	output string
 	source string
 }
 
-// transientRegistryReadSamples covers every marker in the classifier with the
-// shape of output helm, docker, or their registries produce on a read-back of an
-// artifact erun has just pushed.
 func transientRegistryReadSamples() []registryReadSample {
 	return []registryReadSample{
 		{
@@ -114,10 +105,7 @@ func transientRegistryReadSamples() []registryReadSample {
 	}
 }
 
-// finalRegistryReadSamples are failures that say nothing about propagation: the
-// artifact is malformed, misnamed, or the invocation itself is wrong. Retrying
-// one of these costs three seconds and reaches the same verdict, so the retry
-// must not engage.
+// finalRegistryReadSamples say nothing about propagation and must not retry.
 func finalRegistryReadSamples() []registryReadSample {
 	return []registryReadSample{
 		{
@@ -148,10 +136,7 @@ func finalRegistryReadSamples() []registryReadSample {
 }
 
 func TestIsTransientRegistryReadErrorMatchesEveryMarker(t *testing.T) {
-	// The classifier's marker list as this test last saw it. Duplicating the
-	// literals is deliberate: it fails if a marker is dropped, which is the
-	// under-matching direction that aborts a release. A marker added to the
-	// classifier needs a realistic row in transientRegistryReadSamples instead.
+	// Duplicated deliberately so a dropped marker fails.
 	markers := []string{
 		"401", "403", "404",
 		"denied", "unauthorized", "not found", "manifest unknown",
@@ -182,9 +167,6 @@ func TestIsTransientRegistryReadErrorTreatsFinalFailuresAsFinal(t *testing.T) {
 	}
 }
 
-// captureRegistryReadLog points both trace writers at one buffer: the retry
-// announcement is what tells an operator the publish is waiting rather than
-// wedged, so the loop under test must be readable from the Context it was given.
 func captureRegistryReadLog() (core.Context, *bytes.Buffer) {
 	log := &bytes.Buffer{}
 	return core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, log, log)}, log

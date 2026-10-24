@@ -10,18 +10,13 @@ import (
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
-// AISessionRepository is the persistence access AISessionRoutes needs:
-// upserting the environment's own self-reported event, and listing every
-// session last reported for one environment.
+// AISessionRepository persists and lists environments' self-reported AI sessions.
 type AISessionRepository interface {
 	Record(ctx context.Context, event model.AISessionEvent) (model.AISessionEvent, error)
 	List(ctx context.Context, environmentID string) ([]model.AISessionEvent, error)
 }
 
-// EnvironmentGetter is the narrow read access AISessionRoutes needs to
-// confirm an environment id names one that belongs to the caller's tenant
-// (RLS-scoped) before accepting a report against it — the same check
-// deploy/stop already run before acting on a path-supplied environment id.
+// EnvironmentGetter confirms an environment belongs to the caller's tenant (RLS-scoped).
 type EnvironmentGetter interface {
 	Get(ctx context.Context, environmentID string) (model.Environment, error)
 }
@@ -31,23 +26,14 @@ type AISessionRoutes struct {
 	environments EnvironmentGetter
 }
 
-// RegisterAISessionRoutes wires the environment's own AI-session self-report
-// and its read-back: the structured busy/idle/awaiting-input status model
-// erun-common already resolves locally for the desktop and per-env MCP (see
-// base/model/ai_session_status.go), reportable and readable over the
-// authenticated edge so a caller with no local kubeconfig/port-forward can
-// see it too.
+// RegisterAISessionRoutes wires the AI-session self-report and its read-back.
 func RegisterAISessionRoutes(register ProtectedRouteRegistrar, sessions AISessionRepository, environments EnvironmentGetter) {
 	routes := AISessionRoutes{sessions: sessions, environments: environments}
 	register(http.MethodPost, "/v1/environments/{environment_id}/ai-sessions", http.HandlerFunc(routes.reportAISessionEvent))
 	register(http.MethodGet, "/v1/environments/{environment_id}/ai-sessions", http.HandlerFunc(routes.listAISessions))
 }
 
-// reportAISessionEventRequest carries only what the tool's own hook actually
-// observed. There is no client-supplied timestamp: the server stamps its own
-// receipt time (occurred_at = NOW() in the repository), since trusting a
-// caller's clock for the field ResolveAISessionStatus surfaces as
-// "lastActivity" would let a stale or skewed report read as current.
+// The server stamps occurred_at; a caller's clock is not trusted for lastActivity.
 type reportAISessionEventRequest struct {
 	SessionID  string `json:"sessionId"`
 	Tool       string `json:"tool"`
@@ -56,11 +42,7 @@ type reportAISessionEventRequest struct {
 	ExitReason string `json:"exitReason"`
 }
 
-// validAISessionEvents mirrors erun-common's unexported validAISessionEventKinds
-// set (base/model/ai_session_status.go) via its exported constants, so an
-// unrecognized event is refused here rather than silently resolving to Idle —
-// the "unknown must not render as a definite value" property
-// modelpkg.ResolveAISessionStatus's own default case protects locally.
+// Unknown events are refused rather than resolving to Idle.
 var validAISessionEvents = map[string]bool{
 	string(modelpkg.AISessionEventTurnStart): true,
 	string(modelpkg.AISessionEventToolUse):   true,
@@ -107,10 +89,6 @@ func (r AISessionRoutes) reportAISessionEvent(w http.ResponseWriter, req *http.R
 	writeJSON(w, http.StatusCreated, resolveAISessionStatus(recorded))
 }
 
-// listAISessions returns the resolved status of every session last reported
-// for this environment, sorted by session id (AISessionRepository.List's own
-// order) — the read-back half of reportAISessionEvent, for a caller with no
-// local kubeconfig/port-forward to poll instead.
 func (r AISessionRoutes) listAISessions(w http.ResponseWriter, req *http.Request) {
 	environmentID := req.PathValue("environment_id")
 	if _, err := r.environments.Get(req.Context(), environmentID); err != nil {
@@ -130,10 +108,8 @@ func (r AISessionRoutes) listAISessions(w http.ResponseWriter, req *http.Request
 	writeJSON(w, http.StatusOK, statuses)
 }
 
-// resolveAISessionStatus converts the persisted row to the same
-// modelpkg.AISessionStatus shape activity.LoadAISessionStatuses resolves
-// locally, so a caller sees exactly the desktop/MCP view, never a second,
-// drifting resolution of the same states.
+// resolveAISessionStatus reuses erun-common's resolution so callers see the
+// same states as the desktop and MCP.
 func resolveAISessionStatus(event model.AISessionEvent) modelpkg.AISessionStatus {
 	return modelpkg.ResolveAISessionStatus(modelpkg.AISessionRecord{
 		SessionID:  event.SessionID,

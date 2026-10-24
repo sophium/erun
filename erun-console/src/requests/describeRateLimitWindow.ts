@@ -1,14 +1,5 @@
-// describeRateLimitWindow turns the raw admission-window seconds into the
-// consequence sentence: say what the number means, not just the number.
-// The limiter (InviteRequestRateLimiter.allowIdentity,
-// erun-backend-api/internal/routes/invite_requests.go) is a per-identity
-// fixed-window bucket with limit 1, keyed on the verified (issuer, subject).
-// An identity with no bucket yet -- i.e. any first-time applicant -- is
-// always admitted regardless of the window's length; the window only bounds
-// how soon that *same* identity may submit again (SubmitInviteRequest updates
-// a still-pending request in place, so a repeat submission is mostly an
-// edit). A long window never closes new applications, and the sentence must
-// not imply it does.
+// describeRateLimitWindow explains the window's consequence. The limiter is per identity,
+// so first-time applicants are always admitted; a long window never closes new applications.
 export function describeRateLimitWindow(seconds: number): string {
   if (seconds < 300) {
     const unit = seconds === 1 ? 'second' : 'seconds';

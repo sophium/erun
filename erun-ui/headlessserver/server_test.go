@@ -13,9 +13,6 @@ import (
 	"time"
 )
 
-// stubTarget models the four method-return shapes the reflective invoke
-// handler supports — (T, error), (T), (error), () — without importing the
-// real desktop App.
 type stubTarget struct {
 	calls []string
 }
@@ -231,8 +228,6 @@ func readFirstSSEEvent(body io.Reader, got chan<- event) {
 	}
 }
 
-// waitForSubscriber blocks until the SSE subscription registers, so Emit
-// cannot race ahead of it.
 func waitForSubscriber(t *testing.T, srv *Server) {
 	t.Helper()
 
@@ -275,12 +270,6 @@ func TestClipboardStoresInMemory(t *testing.T) {
 	}
 }
 
-// TestEmitReplacesDroppedEventWithGapMarker fills a subscriber's channel to
-// capacity, then emits one more event. Silently discarding it would leave the
-// subscriber unable to tell "nothing happened" apart from "I missed one" —
-// instead the oldest queued event must be evicted and replaced with an
-// eventsDroppedName marker carrying the miss count, so the subscriber always
-// has an explicit, actionable trace of the gap.
 func TestEmitReplacesDroppedEventWithGapMarker(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 
@@ -316,9 +305,6 @@ func drainAll(ch <-chan event, n int) []event {
 	return out
 }
 
-// assertFillerRange checks a contiguous run of filler events starting at
-// startArg, proving the dropped "overflow" event was replaced rather than
-// silently queued alongside the survivors.
 func assertFillerRange(t *testing.T, events []event, startArg int) {
 	t.Helper()
 	for i, ev := range events {

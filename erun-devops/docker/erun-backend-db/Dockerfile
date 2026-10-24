@@ -1,9 +1,6 @@
 ARG ERUN_VERSION=1.0.0
 
-# Stages: `build` stages the migrations beside an atlas for the build host,
-# `test` checks them, `atlas-fetcher` supplies the atlas the image's own
-# architecture runs, and `runtime` is the migration job. `runtime` takes the
-# migrations from `test`, so no image exists unless the check passed.
+# `runtime` takes the migrations from `test`, so no image exists unless the check passed.
 FROM --platform=$BUILDPLATFORM alpine:3.20 AS build
 
 ARG BUILDARCH
@@ -15,15 +12,11 @@ RUN apk add --no-cache ca-certificates curl && \
 
 COPY erun-backend/erun-backend-db /opt/erun-backend-db
 
-# An image whose baked migration directory is internally inconsistent is never
-# produced, so it cannot be published from a directory `atlas migrate apply`
-# would refuse at deploy time. The check needs no database.
 FROM build AS test
 
 RUN atlas migrate validate --dir file:///opt/erun-backend-db/migrations/default
 
-# Not pinned to BUILDPLATFORM: the runtime image runs this atlas itself. The
-# stage only downloads, so it costs no emulation.
+# Not pinned to BUILDPLATFORM: the runtime image runs this atlas; downloading costs no emulation.
 FROM alpine:3.20 AS atlas-fetcher
 
 ARG TARGETARCH

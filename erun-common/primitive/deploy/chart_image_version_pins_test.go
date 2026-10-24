@@ -9,16 +9,10 @@ import (
 	"testing"
 )
 
-// A wrapped image's erun-devops/docker/<image>/VERSION is the tag its build
-// publishes under, and the charts repeat that tag as a template default.
-// Nothing else ties the two together, so a bump could build and publish an
-// image no environment ever deploys: a dind daemon.json fix once shipped in a
-// new tag while the chart kept defaulting to the previous one.
+// Nothing else ties a wrapped image's VERSION to the chart's default tag.
 var (
-	// printf "%s/<image>:<tag>" -- a literal tag written beside the image name.
 	chartLiteralImageTagRe = regexp.MustCompile(`%s/(erun-[a-z0-9-]+):([A-Za-z0-9][^"\s]*)"`)
-	// default "<tag>" .Values.<image>ImageTag -- the tag behind a value.
-	chartValueImageTagRe = regexp.MustCompile(`default "([A-Za-z0-9][^"]*)" \.Values\.([a-z0-9-]+)ImageTag`)
+	chartValueImageTagRe   = regexp.MustCompile(`default "([A-Za-z0-9][^"]*)" \.Values\.([a-z0-9-]+)ImageTag`)
 )
 
 func TestChartImageTagsMatchTheirVersionPins(t *testing.T) {
@@ -49,9 +43,7 @@ func TestChartImageTagsMatchTheirVersionPins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The dind sidecar's default sits behind .Values.dindImageTag; a parse
-	// that stopped seeing it would leave the case this test exists for
-	// unchecked while the rest still passed.
+	// A parse that stopped seeing the dind default would leave the key case unchecked.
 	if !checked["erun-dind"] {
 		t.Fatal("no erun-dind image tag was found in the chart templates; the templates moved the tag somewhere this test does not read, so follow it rather than deleting the check")
 	}
@@ -73,9 +65,7 @@ func chartImageTagPins(template string) []chartImageTagPin {
 	return pins
 }
 
-// imageVersionPin returns the image's pinned VERSION, or "" when the repo
-// ships no such wrapper (a release-versioned image takes the chart's
-// appVersion instead).
+// imageVersionPin returns "" for a release-versioned image, which takes the chart's appVersion.
 func imageVersionPin(t *testing.T, root, image string) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(root, "erun-devops", "docker", image, "VERSION"))

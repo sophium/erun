@@ -12,9 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// HelmChartPublishSpec describes a chart package-then-push step. It packages
-// into the chart's parent directory rather than a temp dir so the dry-run trace
-// shows the real helm argv and working directory.
+// HelmChartPublishSpec packages into the chart's parent dir so the dry-run trace shows the real argv and cwd.
 type HelmChartPublishSpec struct {
 	ChartPath string
 	ChartName string
@@ -48,8 +46,7 @@ func (p HelmChartPublishSpec) pushCommand() CommandSpec {
 	}
 }
 
-// dependencyBuildCommand vendors an umbrella chart's declared subcharts into
-// charts/ so `helm package` (and later `helm upgrade --install`) can find them.
+// dependencyBuildCommand vendors an umbrella chart's subcharts into charts/.
 func (p HelmChartPublishSpec) dependencyBuildCommand() CommandSpec {
 	return CommandSpec{
 		Name: "helm",
@@ -61,8 +58,6 @@ func (p HelmChartPublishSpec) tgzPath() string {
 	return filepath.Join(filepath.Dir(p.ChartPath), p.ChartName+"-"+p.Version+".tgz")
 }
 
-// traceChartPackage traces the package sequence: `helm dependency build` first
-// for umbrella charts, then `helm package`. runChartPackage executes it.
 func traceChartPackage(ctx core.Context, spec HelmChartPublishSpec, declaresDeps bool) {
 	if declaresDeps {
 		dep := spec.dependencyBuildCommand()
@@ -74,9 +69,7 @@ func traceChartPackage(ctx core.Context, spec HelmChartPublishSpec, declaresDeps
 
 func runChartPackage(ctx core.Context, spec HelmChartPublishSpec, declaresDeps bool) error {
 	if declaresDeps {
-		// `helm dependency build` vendors declared subcharts into <chart>/charts/.
-		// The packaged .tgz is self-contained, so remove a charts/ we vendored to
-		// keep the working tree pristine (build --release is worktree-clean-gated).
+		// Remove the vendored charts/ to keep the tree clean; build --release requires it.
 		chartsDir := filepath.Join(spec.ChartPath, "charts")
 		if _, err := os.Stat(chartsDir); os.IsNotExist(err) {
 			defer func() { _ = os.RemoveAll(chartsDir) }()
@@ -91,11 +84,8 @@ func runChartPackage(ctx core.Context, spec HelmChartPublishSpec, declaresDeps b
 	return nil
 }
 
-// PackageResolvedChart packages a resolved chart spec to validate it builds and
-// record its identity as a build artifact — the chart-side analogue of building
-// an image. It runs `helm dependency build` first for umbrella charts, then
-// removes the .tgz so the working tree stays clean; publishing to OCI is push's
-// job (RunHelmChartPublish).
+// PackageResolvedChart packages a chart to validate it, then removes the .tgz; pushing
+// is RunHelmChartPublish's job.
 func PackageResolvedChart(ctx core.Context, spec HelmChartPublishSpec) error {
 	spec.Verbosity = ctx.Verbosity
 	declaresDeps, err := HelmChartDeclaresDependencies(spec.ChartPath)
@@ -114,8 +104,7 @@ func PackageResolvedChart(ctx core.Context, spec HelmChartPublishSpec) error {
 	return nil
 }
 
-// RunHelmChartPublish traces and executes the chart package-then-push sequence
-// (dependency build for umbrella charts, package, push).
+// RunHelmChartPublish runs dependency build (for umbrellas), package, and push.
 func RunHelmChartPublish(ctx core.Context, spec HelmChartPublishSpec) error {
 	if strings.TrimSpace(spec.ChartName) == "" {
 		return errors.New("publish: chart name is required")
@@ -149,9 +138,7 @@ func RunHelmChartPublish(ctx core.Context, spec HelmChartPublishSpec) error {
 	return nil
 }
 
-// RunHelmCommand runs helm with both of its streams on erun's stderr: what
-// helm prints here ("Successfully packaged chart …", push digests) is progress,
-// never data, and on stdout it would land ahead of `--output json` results.
+// RunHelmCommand sends both helm streams to stderr so progress never precedes --output json.
 func RunHelmCommand(ctx core.Context, spec CommandSpec) error {
 	cmd := core.Command(spec.Name, spec.Args...)
 	cmd.Dir = spec.Dir
@@ -160,9 +147,7 @@ func RunHelmCommand(ctx core.Context, spec CommandSpec) error {
 	return cmd.Run()
 }
 
-// RunHelmCommandCapturingOutput streams helm's output as usual while also
-// capturing it, so a caller can classify the failure it reports. See
-// commandOutputCapture for why stdout and stderr need separate buffers.
+// RunHelmCommandCapturingOutput streams helm output and also returns it for failure classification.
 func RunHelmCommandCapturingOutput(ctx core.Context, spec CommandSpec) (string, error) {
 	capture := &core.CommandOutputCapture{}
 	cmd := core.Command(spec.Name, spec.Args...)
@@ -191,10 +176,7 @@ func loadHelmChartName(chartPath string) (string, error) {
 	return name, nil
 }
 
-// HelmChartDeclaresDependencies flags an umbrella chart that vendors published
-// subcharts into charts/ (the erun-blueprint-platform pattern): deploy must run
-// `helm dependency build` on it first, since helm upgrade --install fails when
-// the declared subcharts are missing from charts/.
+// HelmChartDeclaresDependencies reports an umbrella chart needing `helm dependency build` before install.
 func HelmChartDeclaresDependencies(chartPath string) (bool, error) {
 	data, err := os.ReadFile(filepath.Join(chartPath, "Chart.yaml"))
 	if err != nil {
@@ -211,11 +193,8 @@ func HelmChartDeclaresDependencies(chartPath string) (bool, error) {
 	return len(chart.Dependencies) > 0, nil
 }
 
-// HelmChartRuntimeSubchartKey returns the value-scope key of a local runtime
-// umbrella's wrapped erun-devops subchart — its dependency alias, else its name
-// — or "" when the chart declares no erun-devops dependency (a forked top-level
-// runtime chart, or not a runtime chart at all). erun deploy nests the runtime
-// --sets under this key so a wrapped erun-devops receives its wiring.
+// HelmChartRuntimeSubchartKey returns the erun-devops subchart's alias or name, or "" when
+// none is declared; deploy nests runtime --sets under it.
 func HelmChartRuntimeSubchartKey(chartPath string) (string, error) {
 	data, err := os.ReadFile(filepath.Join(chartPath, "Chart.yaml"))
 	if err != nil {
@@ -242,9 +221,7 @@ func HelmChartRuntimeSubchartKey(chartPath string) (string, error) {
 	return "", nil
 }
 
-// ResolveHelmChartPublishSpec keeps every erun chart under the registry's
-// /charts path so a chart never collides with its component's same-named image
-// repo at the same ref.
+// ResolveHelmChartPublishSpec puts charts under /charts so they never collide with a same-named image repo.
 func ResolveHelmChartPublishSpec(chartPath, version, containerRegistry string) (HelmChartPublishSpec, error) {
 	chartName, err := loadHelmChartName(chartPath)
 	if err != nil {
@@ -267,22 +244,13 @@ func ResolveHelmChartPublishSpec(chartPath, version, containerRegistry string) (
 	}, nil
 }
 
-// shippedComponentChartPath returns the chart that ships with imageName; ok is
-// false when there is none.
 func shippedComponentChartPath(projectRoot, imageName string) (string, bool) {
 	chartPath, err := FindComponentHelmChartPath(projectRoot, imageName)
 	return chartPath, err == nil
 }
 
-// PublishComponentChart publishes the Helm chart that ships with a component
-// image so every component is deployable by envs and platform wrapper charts,
-// not just the runtime erun-devops chart.
-//
-// chartVersion is intentionally decoupled from image.Version: version-pinned
-// bases (e.g. erun-powerdns at upstream 4.9.3, erun-backend-postgres at 18.3)
-// keep their image at the upstream pin but must still publish their chart at the
-// release version so platform deploys resolve it. It is a no-op for an image
-// that ships no chart (a tenant's <tenant>-devops override, or infra like dind).
+// PublishComponentChart publishes the chart shipped with a component image. chartVersion
+// is separate from image.Version because version-pinned bases keep their upstream image tag.
 func PublishComponentChart(ctx core.Context, image DockerImageReference, chartVersion string) error {
 	imageName := strings.TrimSpace(image.ImageName)
 	projectRoot := strings.TrimSpace(image.ProjectRoot)
@@ -291,7 +259,6 @@ func PublishComponentChart(ctx core.Context, image DockerImageReference, chartVe
 	}
 	chartPath, ok := shippedComponentChartPath(projectRoot, imageName)
 	if !ok {
-		// No chart ships with this image; nothing to publish.
 		return nil
 	}
 	version := strings.TrimSpace(chartVersion)

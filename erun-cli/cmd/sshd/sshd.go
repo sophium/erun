@@ -77,10 +77,7 @@ func NewSSHDCmd(prepareContext func(core.Context) core.Context, resolveOpen func
 	return shared.NewCommandGroup("sshd", "Remote SSH utilities", initCmd, syncCmd)
 }
 
-// runSSHDSyncCommand runs one workspace-sync pass, so an orchestrator whose
-// mirror is empty or stale can fill it without the desktop. Each precondition it
-// refuses on is named, because "the mirror did not change" is the one symptom
-// they all share.
+// runSSHDSyncCommand runs one workspace-sync pass, naming each refused precondition.
 func runSSHDSyncCommand(ctx context.Context, cmdCtx core.Context, result config.OpenResult, findProjectRoot sharedpkg.ProjectFinderFunc) error {
 	params, err := workspace.ResolveWorkspaceSyncParams(result, findProjectRoot)
 	if err != nil {
@@ -104,11 +101,8 @@ func runSSHDSyncCommand(ctx context.Context, cmdCtx core.Context, result config.
 }
 
 func runSSHDInitCommand(ctx core.Context, result config.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, config.EnvConfig) error, findProjectRoot sharedpkg.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
-	// The desktop pipes `erun sshd init` into its shared Local shell, which
-	// never produces a PTY exit (see erun-ui/AGENTS.md § "Command Completion
-	// And State-Refresh Wiring"), so these are the only completion signal the
-	// desktop has: an activity-queue entry to show the run in progress, and a
-	// recorded outcome the Manage dialog can display as the last run's result.
+	// The desktop's Local shell gives no PTY exit, so the activity entry and recorded outcome
+	// are its only completion signal.
 	ctx.Info(fmt.Sprintf("==> SSHD init %s/%s", result.Tenant, result.Environment))
 	if err := runSSHDInitForTarget(ctx, result, publicKeyPath, localPort, saveEnvConfig, findProjectRoot, resolveRuntimeDeploySpec, deployHelmChart, runRemoteCommand, writeLocalConfig); err != nil {
 		ctx.Info(fmt.Sprintf("==> SSHD init failed %s/%s: %s", result.Tenant, result.Environment, err.Error()))

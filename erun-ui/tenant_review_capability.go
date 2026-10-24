@@ -6,29 +6,18 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// uiTenantReviewCreateCapability reports whether the signed-in user may open
-// a review for tenant, resolved independently of the full tenant dashboard
-// load so a caller who has not opened the Reviews tab — the diff panel's own
-// "Start a review" affordance — can still degrade by permission instead of
-// rendering a control that would only fail on submit.
+// uiTenantReviewCreateCapability gates the diff panel's Start a review
+// without loading the whole dashboard.
 type uiTenantReviewCreateCapability struct {
 	CanCreate bool `json:"canCreate"`
-	// Restricted names why the caller may not create a review here, in
-	// operator language, so the diff panel can show it directly instead of a
-	// dead control. Empty means CanCreate is true.
+	// Restricted is empty when CanCreate is true.
 	Restricted string `json:"restricted,omitempty"`
-	// AccessRemedy is the copyable grant that would give the caller the write
-	// they were refused, so the notice hands over the request rather than only
-	// naming the capability. Absent when no role covers the write or the
-	// tenant's roles could not be read.
+	// AccessRemedy is absent when no role covers the write or roles are unreadable.
 	AccessRemedy *platformclient.PlatformAccessRemedy `json:"accessRemedy,omitempty"`
 }
 
-// TenantReviewCreateCapability mirrors tenant_dashboard.go's own
-// CanCreateReview derivation (resolveTenantPlatform, then Whoami, then
-// restrictedTenantDashboardRead against the same write route), without
-// loading reviews, the merge queue, builds, or audit events the dashboard
-// also reads — this call exists only to gate one button.
+// TenantReviewCreateCapability mirrors the dashboard's CanCreateReview
+// derivation without loading the dashboard's other reads.
 func (a *App) TenantReviewCreateCapability(tenant string) (uiTenantReviewCreateCapability, error) {
 	tenant, err := requireTenant("checking whether you can create a review", tenant)
 	if err != nil {

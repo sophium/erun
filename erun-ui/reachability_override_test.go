@@ -5,15 +5,8 @@ import (
 	"testing"
 )
 
-// TestLocalPortReachabilityOverrideWinsOverARealListener pins the invariant
-// that the headless Playwright harness's isolated config store depends on:
-// it computes local port ranges purely from its own seeded tenant/env
-// list, so a seeded env's port can coincide with a real port a genuine
-// environment on the same host has bound (this host's own MCP/SSH forwards,
-// or another agent's). Unforced, canReachMCPEndpoint/canConnectLocalPort read
-// that real listener as if it belonged to the seeded (never-deployed) env.
-// ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE must win even when a real listener is
-// present on the exact probed port — the adverse condition that used to leak.
+// The harness's seeded env ports can collide with real listeners on the host,
+// so the override must win even when a real listener is bound.
 func TestLocalPortReachabilityOverrideWinsOverARealListener(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -33,10 +26,6 @@ func TestLocalPortReachabilityOverrideWinsOverARealListener(t *testing.T) {
 	}
 }
 
-// TestLocalPortReachabilityOverrideUnsetFallsBackToRealProbe pins that the
-// override is opt-in: with no env var set, the real listener above is
-// observed as reachable so production behavior (a genuine stale-forward vs.
-// no-forward diagnosis) is unchanged.
 func TestLocalPortReachabilityOverrideUnsetFallsBackToRealProbe(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

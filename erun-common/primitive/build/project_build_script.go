@@ -23,8 +23,7 @@ func resolveProjectBuildScript(findProjectRoot shared.ProjectFinderFunc, target 
 	return ResolveNestedProjectBuildScript(findProjectRoot, target)
 }
 
-// ResolveProjectRootBuildScript returns the project root's own build.sh, or
-// nil when there is none.
+// ResolveProjectRootBuildScript returns the project root's build.sh, or nil.
 func ResolveProjectRootBuildScript(findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) (*shared.ScriptSpec, error) {
 	projectRoot, ok, err := buildScriptDiscoveryRoot(findProjectRoot, target)
 	if err != nil || !ok {
@@ -37,8 +36,7 @@ func ResolveProjectRootBuildScript(findProjectRoot shared.ProjectFinderFunc, tar
 	return &script, nil
 }
 
-// ResolveNestedProjectBuildScript returns the first build.sh below the project
-// root, or nil when there is none.
+// ResolveNestedProjectBuildScript returns the first build.sh below the project root, or nil.
 func ResolveNestedProjectBuildScript(findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) (*shared.ScriptSpec, error) {
 	projectRoot, ok, err := buildScriptDiscoveryRoot(findProjectRoot, target)
 	if err != nil || !ok {
@@ -51,8 +49,6 @@ func ResolveNestedProjectBuildScript(findProjectRoot shared.ProjectFinderFunc, t
 	return &script, nil
 }
 
-// buildScriptDiscoveryRoot reports the cleaned project root to search for a
-// build script, or false when discovery is disabled or there is no root.
 func buildScriptDiscoveryRoot(findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) (string, bool, error) {
 	if target.DisableBuildScriptDiscovery {
 		return "", false, nil

@@ -3,14 +3,8 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
 
-// Hovering an orchestrator row raises a hover card, like the environment row's
-// EnvHoverCard. The busy spinner's IconTooltip exists only WHILE the
-// orchestrator is spinning, so it cannot serve an idle orchestrator, the
-// common case.
-//
-// The card says what the orchestrator is working on and for how long, from
-// orchestratorInfo's `busyAtUnix`, not just `${name} is working` — the fact
-// the spinner already conveys.
+// The busy spinner's tooltip exists only while spinning, so an idle
+// orchestrator needs the row hover card; it reports work and duration.
 
 const RUNNING_SESSION_ID = 4242;
 
@@ -51,8 +45,7 @@ function card(page: Page) {
 
 test.describe('orchestrator row hover card (#1343)', () => {
   test('a working orchestrator names what it is doing and for how long', async ({ app, page }) => {
-    // 4m12s before now, so the label must render a real duration rather than
-    // a bare "is working".
+    // 4m12s ago, so the label must render a real duration.
     const busyAtUnix = Math.floor(Date.now() / 1000) - 252;
     await stubOrchestratorList(
       page,
@@ -71,9 +64,8 @@ test.describe('orchestrator row hover card (#1343)', () => {
 
     await expect(card(page)).toBeVisible();
     await expect(card(page)).toContainText('Running');
-    // How long it has been working.
     await expect(card(page)).toContainText('Working, for 4m');
-    // Linked scope, which the row itself has never shown.
+    // Linked scope, which the row itself never shows.
     await expect(card(page)).toContainText('acme / build');
     await expect(card(page)).toContainText('acme / prod');
   });
@@ -97,8 +89,6 @@ test.describe('orchestrator row hover card (#1343)', () => {
     app,
     page,
   }) => {
-    // An orchestrator that is not spinning still needs a hover surface; the
-    // spinner's own tooltip cannot provide one.
     await stubOrchestratorList(page, snapshot({ status: 'stopped', sessionId: 0 }));
     await app.reboot();
 
@@ -113,8 +103,7 @@ test.describe('orchestrator row hover card (#1343)', () => {
     app,
     page,
   }) => {
-    // EnvHoverCard's own constraint, inherited deliberately: the hover surface
-    // wraps the row, so it must not become a focus trap or eat the click.
+    // The hover surface wraps the row, so it must not trap focus or eat the click.
     await stubOrchestratorList(page, snapshot({ busy: false }));
     await app.reboot();
 
@@ -123,7 +112,6 @@ test.describe('orchestrator row hover card (#1343)', () => {
     await expect(card(page)).toBeVisible();
     await expect(row).toBeEnabled();
     await row.click();
-    // The row stays operable; the card is decoration over it, not a modal.
     await expect(row).toBeVisible();
   });
 });

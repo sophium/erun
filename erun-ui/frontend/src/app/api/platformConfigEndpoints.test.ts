@@ -7,18 +7,8 @@ import { describe, it } from 'vitest';
 
 import { wailsQueryFn } from './wailsBaseQuery';
 
-// Proof that the console's httpBaseQuery and the desktop's
-// wailsBaseQuery contract resolve the identical shared endpoint definition
-// (buildPlatformConfigEndpoints, defined once in erun-kit) to the identical
-// model — see erun-kit/src/api/platformConfigEndpoints.test.ts for the
-// http-shaped half of this proof. The desktop has no live Wails binding for
-// this hosted-platform read today (its own Wails-exposed reads are the local
-// erun config on disk, a different domain from the console's per-tenant
-// provisioning view over erun-backend-api), so this wraps a fixture-returning
-// async call the exact way every real desktop endpoint wraps its actual Go
-// binding — see stateApi.ts/tenantApi.ts for the identical
-// `wailsQueryFn(() => Go(...))` shape this test mirrors with a fixture in
-// place of a real binding.
+// The shared endpoint definition resolves to the same model through a
+// Wails-style base query as through the console's http one (see the erun-kit test).
 
 const FIXTURE_BODY = {
   tenant: { tenantId: 'tn-1', name: 'Acme', type: 'COMPANY' },
@@ -42,9 +32,7 @@ const EXPECTED = {
       name: 'prod',
       type: 'runtime',
       status: 'running',
-      // The row's own owning tenant, which an OPERATIONS caller listing another
-      // tenant's environments needs; absent from this fixture body, so the
-      // lenient parse leaves it undefined.
+      // Absent from the fixture, so the lenient parse leaves it undefined.
       tenantId: undefined,
       kubernetesContext: undefined,
       contextId: undefined,
@@ -59,11 +47,7 @@ const EXPECTED = {
   inviteRequestRateLimitWindowSeconds: 0,
 };
 
-// wailsStyleBaseQuery is what a real desktop implementation would look like:
-// a base query whose every request routes, by url, to wailsQueryFn wrapping
-// a Wails-bound call. No fetch, no URL construction — exactly the fallback
-// guard wailsBaseQuery.ts documents every real endpoint replacing with its
-// own queryFn.
+// Routes each request to wailsQueryFn, as a real desktop endpoint would.
 const wailsStyleBaseQuery: PlatformBaseQuery = (request) => {
   if (request.url !== '/v1/config') {
     return Promise.resolve({ error: { message: `unexpected request: ${request.url}` } });

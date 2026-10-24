@@ -14,19 +14,11 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// runtimeImagePullTraceContext returns a Context whose Trace/Info output
-// lands in a buffer a test can assert against, alongside the DryRun flag
-// under test -- the same WithTraceSink shape as traceCapturingContext
-// (cloud_aws_sdk_test.go), plus the DryRun parameter this package's dry-run
-// branches need.
 func runtimeImagePullTraceContext(dryRun bool) (core.Context, *bytes.Buffer) {
 	var buf bytes.Buffer
 	return core.Context{Logger: core.NewLogger(core.VerbosityInfo).WithTraceSink(&buf), DryRun: dryRun}, &buf
 }
 
-// failingProbe fails the test if the anonymous-pullability probe runs at all,
-// for cases where a resolved credential or an absent/non-ghcr image override
-// must short-circuit before ever reaching the network.
 func failingProbe(t *testing.T) shared.AnonymousPullProbeFunc {
 	t.Helper()
 	return func(context.Context, *http.Client, string, string) (bool, error) {
@@ -46,10 +38,6 @@ func TestEnsureRuntimeImagePullSecretNoImageOverrideIsNoOp(t *testing.T) {
 	}
 }
 
-// TestEnsureRuntimeImagePullSecretAttachesWhenCredentialResolves proves the
-// core fix: a resolvable ghcr.io credential auto-provisions and attaches a
-// pull secret without needing an operator to have named one, and never
-// touches the network to decide whether the image is actually private.
 func TestEnsureRuntimeImagePullSecretAttachesWhenCredentialResolves(t *testing.T) {
 	dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, b64Auth("alice:s3cret")))
 	useDockerConfigDir(t, dir)
@@ -71,9 +59,6 @@ func TestEnsureRuntimeImagePullSecretAttachesWhenCredentialResolves(t *testing.T
 	}
 }
 
-// TestEnsureRuntimeImagePullSecretDoesNotDuplicateAnExistingEntry proves a
-// redeploy (or an operator who already named the same auto secret by
-// coincidence) never grows the list on every run.
 func TestEnsureRuntimeImagePullSecretDoesNotDuplicateAnExistingEntry(t *testing.T) {
 	dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, b64Auth("alice:s3cret")))
 	useDockerConfigDir(t, dir)
@@ -93,10 +78,6 @@ func TestEnsureRuntimeImagePullSecretDoesNotDuplicateAnExistingEntry(t *testing.
 	}
 }
 
-// TestEnsureRuntimeImagePullSecretRefusesOnInconclusiveProbe proves an
-// inconclusive pullability probe is never treated as "public" -- exactly the
-// assumption that let this failure hide until the image actually went
-// private.
 func TestEnsureRuntimeImagePullSecretRefusesOnInconclusiveProbe(t *testing.T) {
 	useDockerConfigDir(t, t.TempDir())
 

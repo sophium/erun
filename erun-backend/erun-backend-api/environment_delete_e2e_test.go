@@ -16,12 +16,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// The delete state machine's correctness lives in SQL — a conditional claim
-// with stale reclaim, a status write that must also clear the previous
-// error, a quota count that must exclude mid-teardown rows — so it is
-// exercised against a real migrated PostgreSQL rather than a fake that
-// agrees with itself. Needs only the database, no cluster. Mirrors
-// releaseQueueDatabase's shape (release_queue_sql_e2e_test.go).
+// The delete state machine lives in SQL, so it runs against real PostgreSQL (no cluster).
 func environmentDeleteDatabase(t *testing.T) (*repository.EnvironmentRepository, context.Context, *sql.DB) {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -54,9 +49,7 @@ func seedDeleteTestTenant(t *testing.T, db *sql.DB) string {
 	return tenantID
 }
 
-// deleteTestEnvironmentSeq gives each seeded environment within a test a
-// unique name: environments.environments_tenant_name_key is unique per
-// tenant, and several scenarios seed more than one row in the same tenant.
+// environments_tenant_name_key is unique per tenant.
 var deleteTestEnvironmentSeq int
 
 func seedDeleteTestEnvironment(t *testing.T, ctx context.Context, repo *repository.EnvironmentRepository, status model.EnvironmentStatus) model.Environment {
@@ -71,9 +64,6 @@ func seedDeleteTestEnvironment(t *testing.T, ctx context.Context, repo *reposito
 	return created
 }
 
-// TestClaimDeleteTakesExclusiveOwnership pins the concurrency guard: a second
-// delete request must not restart a teardown that is already in flight, or two
-// concurrent deletes could both launch a Job against the same namespace.
 func TestClaimDeleteTakesExclusiveOwnership(t *testing.T) {
 	repo, ctx, _ := environmentDeleteDatabase(t)
 	env := seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)
@@ -97,14 +87,8 @@ func TestClaimDeleteTakesExclusiveOwnership(t *testing.T) {
 	}
 }
 
-// TestClaimDeleteReclaimsAStaleAttempt pins the recovery half of the same
-// guard: a delete whose claim went stale (a control-plane restart, or a Job
-// that ran past its own deadline) must not wedge an environment forever. The
-// environments_set_timestamps trigger unconditionally sets updated_at = NOW()
-// on every UPDATE (erun-backend-db schema/triggers/timestamps.sql), so a claim
-// can't be back-dated directly; a negative staleAfter exercises the identical
-// "updated_at < NOW() - MAKE_INTERVAL(secs => staleAfter)" branch by moving the
-// staleness threshold into the future instead of the claim into the past.
+// The timestamps trigger forces updated_at = NOW(), so a negative staleAfter
+// moves the threshold into the future instead of back-dating the claim.
 func TestClaimDeleteReclaimsAStaleAttempt(t *testing.T) {
 	repo, ctx, _ := environmentDeleteDatabase(t)
 	env := seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)
@@ -122,11 +106,7 @@ func TestClaimDeleteReclaimsAStaleAttempt(t *testing.T) {
 	}
 }
 
-// TestClaimDeleteAlwaysReclaimsABlockedAttempt pins the "no operator
-// re-issue needed" half: a blocked delete reached a terminal outcome, so a
-// fresh attempt must not wait out any staleness window. The claim must not
-// clear delete_error: the previous blocker's reason still reads back until the
-// new attempt's own outcome overwrites it.
+// The claim must keep delete_error until the new attempt overwrites it.
 func TestClaimDeleteAlwaysReclaimsABlockedAttempt(t *testing.T) {
 	repo, ctx, _ := environmentDeleteDatabase(t)
 	env := seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)
@@ -150,8 +130,6 @@ func TestClaimDeleteAlwaysReclaimsABlockedAttempt(t *testing.T) {
 	}
 }
 
-// TestMarkDeleteBlockedRecordsTheReason pins that the namespace's own blocker
-// survives as readable state, not just a log line.
 func TestMarkDeleteBlockedRecordsTheReason(t *testing.T) {
 	repo, ctx, _ := environmentDeleteDatabase(t)
 	env := seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)
@@ -169,9 +147,6 @@ func TestMarkDeleteBlockedRecordsTheReason(t *testing.T) {
 	}
 }
 
-// TestCountExcludesEnvironmentsMidTeardown pins that an environment whose
-// teardown has been requested does not lock the tenant out of its own
-// allowance through a delete it cannot complete.
 func TestCountExcludesEnvironmentsMidTeardown(t *testing.T) {
 	repo, ctx, _ := environmentDeleteDatabase(t)
 	_ = seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)
@@ -198,9 +173,6 @@ func TestCountExcludesEnvironmentsMidTeardown(t *testing.T) {
 	}
 }
 
-// TestListByStatusesFindsMidTeardownEnvironments pins the reconciler's own
-// read: it must find every environment stuck mid-teardown, regardless of
-// which of the two non-terminal statuses it is in.
 func TestListByStatusesFindsMidTeardownEnvironments(t *testing.T) {
 	repo, ctx, _ := environmentDeleteDatabase(t)
 	running := seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)

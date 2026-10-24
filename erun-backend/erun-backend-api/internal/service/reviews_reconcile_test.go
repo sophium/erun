@@ -9,9 +9,6 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
 
-// reconcilingReview wires a review sitting at status whose branch the
-// verifier will answer for, so a test can drive reconcileMerged without a
-// real remote.
 func reconcilingReview(status model.ReviewStatus, verifier fakeMergeVerifier) (*fakeReviewRepo, *ReviewService) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", SourceBranch: "bug/thing", Status: status})
 	svc := NewReviewService(reviews, &fakeReviewBuilds{},
@@ -19,10 +16,6 @@ func reconcilingReview(status model.ReviewStatus, verifier fakeMergeVerifier) (*
 	return reviews, svc
 }
 
-// TestReconcileMergedAcceptsALandedBranchFromAnyOpenStatus: a review whose
-// work landed without the queue — a GitHub squash merge — reaches MERGED from
-// wherever it was sitting, on the verifier's word that the branch's changes
-// really are in the target, rather than sitting OPEN forever.
 func TestReconcileMergedAcceptsALandedBranchFromAnyOpenStatus(t *testing.T) {
 	for _, status := range []model.ReviewStatus{model.ReviewStatusOpen, model.ReviewStatusReady, model.ReviewStatusFailed} {
 		t.Run(string(status), func(t *testing.T) {
@@ -45,9 +38,6 @@ func TestReconcileMergedAcceptsALandedBranchFromAnyOpenStatus(t *testing.T) {
 	}
 }
 
-// TestReconcileMergedRefusesWhenTheBranchIsNotInTheTarget: the reconciliation
-// verifies rather than believes — a branch that did not land is refused, and
-// the review is left exactly where it was.
 func TestReconcileMergedRefusesWhenTheBranchIsNotInTheTarget(t *testing.T) {
 	reviews, svc := reconcilingReview(model.ReviewStatusOpen, fakeMergeVerifier{contained: false})
 
@@ -64,9 +54,6 @@ func TestReconcileMergedRefusesWhenTheBranchIsNotInTheTarget(t *testing.T) {
 	}
 }
 
-// TestReconcileMergedRefusesWithNoVerifier: without a way to check the real
-// repository there is nothing to reconcile against, the same fail-closed
-// stance verifyRepositoryState takes for a queue-driven merge.
 func TestReconcileMergedRefusesWithNoVerifier(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", SourceBranch: "bug/thing", Status: model.ReviewStatusOpen})
 	svc := NewReviewService(reviews, &fakeReviewBuilds{},
@@ -82,9 +69,6 @@ func TestReconcileMergedRefusesWithNoVerifier(t *testing.T) {
 	}
 }
 
-// TestReconcileMergedRefusesAClosedReview: CLOSED is terminal — reconciliation
-// is for the review that is stuck open, not for reopening a decision already
-// made.
 func TestReconcileMergedRefusesAClosedReview(t *testing.T) {
 	reviews, svc := reconcilingReview(model.ReviewStatusClosed, fakeMergeVerifier{contained: true})
 

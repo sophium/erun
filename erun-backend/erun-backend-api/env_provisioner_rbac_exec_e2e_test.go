@@ -18,11 +18,6 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 )
 
-// TestProvisionerPlatformRoleGrantsPowerDNSExec proves the namespaced
-// env-provisioner-platform Role's pods/exec grant against a real RBAC
-// engine: `erun expose`'s DNS write shells out to `kubectl exec` against the
-// platform's PowerDNS pod, and that call must succeed under the current
-// rules and be Forbidden without the grant.
 func TestProvisionerPlatformRoleGrantsPowerDNSExec(t *testing.T) {
 	if os.Getenv("ERUN_E2E_PROVISIONER_RBAC") != "1" {
 		t.Skip("opt-in: set ERUN_E2E_PROVISIONER_RBAC=1 on a live cluster where this identity may create Pods/ServiceAccounts/Roles/RoleBindings and impersonate, to prove the env-provisioner-platform Role's pods/exec grant against a real RBAC engine")
@@ -52,8 +47,6 @@ func TestProvisionerPlatformRoleGrantsPowerDNSExec(t *testing.T) {
 	assertExecSucceedsUnderFixedRules(t, fixedConfig, namespace, pod.Name)
 }
 
-// createProbePod stands up a real, minimal Pod -- standing in for the
-// platform's PowerDNS pod -- for the exec probe under test to run against.
 func createProbePod(t *testing.T, admin kubernetes.Interface, namespace, name, image string) *corev1.Pod {
 	t.Helper()
 	spec := &corev1.Pod{
@@ -74,8 +67,6 @@ func createProbePod(t *testing.T, admin kubernetes.Interface, namespace, name, i
 	return created
 }
 
-// waitForPodRunning polls the admin client -- unaffected by anything under
-// test -- until the probe Pod is actually running and execable.
 func waitForPodRunning(t *testing.T, admin kubernetes.Interface, namespace, name string) {
 	t.Helper()
 	deadline := time.Now().Add(60 * time.Second)
@@ -92,8 +83,6 @@ func waitForPodRunning(t *testing.T, admin kubernetes.Interface, namespace, name
 	}
 }
 
-// assertExecForbiddenUnderPreFixRules asserts the broken state:
-// `kubectl exec` => Forbidden for lack of the pods/exec grant.
 func assertExecForbiddenUnderPreFixRules(t *testing.T, config *rest.Config, namespace, podName string) {
 	t.Helper()
 	err := execProbeCommand(config, namespace, podName)
@@ -106,8 +95,6 @@ func assertExecForbiddenUnderPreFixRules(t *testing.T, config *rest.Config, name
 	t.Logf("confirmed pre-fix rules: pods/exec => Forbidden (%v)", err)
 }
 
-// assertExecSucceedsUnderFixedRules performs the exact call `erun expose`'s
-// PowerDNS write makes.
 func assertExecSucceedsUnderFixedRules(t *testing.T, config *rest.Config, namespace, podName string) {
 	t.Helper()
 	err := execProbeCommand(config, namespace, podName)
@@ -115,11 +102,8 @@ func assertExecSucceedsUnderFixedRules(t *testing.T, config *rest.Config, namesp
 	t.Logf("confirmed current rules: pods/exec => succeeded")
 }
 
-// execProbeCommand runs the exact call `erun expose`'s pdnsutil write makes
-// (command/expose's upsertPowerDNSRecord): a `kubectl exec`
-// against a real pod, negotiating the same SPDY protocol upgrade kubectl
-// itself uses, so an RBAC denial surfaces the same Forbidden a real
-// replace-rrset write would hit.
+// execProbeCommand negotiates the same SPDY upgrade kubectl exec uses, so RBAC
+// denials surface identically.
 func execProbeCommand(config *rest.Config, namespace, podName string) error {
 	execConfig := rest.CopyConfig(config)
 	execConfig.APIPath = "/api"

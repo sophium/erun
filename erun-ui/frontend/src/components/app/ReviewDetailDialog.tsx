@@ -38,10 +38,7 @@ import { ReviewDetailReviewers } from './ReviewDetailDialog.Reviewers';
 import { ReviewKeyboardShortcutsHint } from './ReviewKeyboardShortcuts';
 import { BranchArrow, RelativeTime } from './TenantDashboardMessage';
 
-// ReviewDetailDialog is the review object's own detail surface, opened from a
-// row in the tenant dashboard's Reviews tab. Named "review detail" — not
-// "review panel" — because that name already belongs to the local diff panel
-// (ReviewPanel.tsx); this dialog shows the hosted platform review.
+// ReviewDetailDialog shows a hosted platform review; ReviewPanel.tsx is the local diff panel.
 export function ReviewDetailDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const detail = useAppSelector((state) => state.reviewDetail);
@@ -152,10 +149,7 @@ function ReviewDetailLoaded({
   );
 }
 
-// ReviewDetailThreadStatus is the "is this review actually finished" signal
-// at the top of the dialog, visible without scrolling into the comments
-// list. Rendered only once at least one thread exists — a review with no
-// comments yet has nothing to call "all resolved".
+// Rendered only once a thread exists.
 function ReviewDetailThreadStatus({
   data,
 }: {
@@ -184,10 +178,7 @@ function ReviewDetailThreadStatus({
 
 const reviewOpenStatuses = new Set(['OPEN', 'READY', 'FAILED', 'MERGE']);
 
-// CloseReviewAction degrades by permission (no access, named rather than
-// discovered from a failed submit) and gives Close a visible commitment
-// boundary: a confirm step before the write, and the write's own
-// busy/error state.
+// CloseReviewAction degrades by permission and confirms before writing.
 function CloseReviewAction({
   review,
   data,

@@ -123,12 +123,9 @@ func LoginCloudProviderAlias(ctx core.Context, store CloudStore, params CloudLog
 			return status, err
 		}
 	case configpkg.CloudProviderCloudflare:
-		// Cloudflare has no interactive login; fall through to the token
-		// status re-check.
+		// Cloudflare has no interactive login.
 	case configpkg.CloudProviderERun:
-		// erunCloudProviderLogin resolves its own final status (it may have
-		// just persisted a new refresh token ref onto provider), so it returns
-		// directly rather than falling through to the stale pre-login value.
+		// Returns its own status: it may have just persisted a new refresh token ref.
 		return erunCloudProviderLogin(ctx, store, provider, params.Flow, params.Scopes, deps)
 	default:
 		return status, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
@@ -149,8 +146,7 @@ func LogoutCloudProviderAlias(ctx core.Context, store CloudStore, params CloudLo
 			return status, err
 		}
 	case configpkg.CloudProviderCloudflare:
-		// Cloudflare has no SSO session; "logout" removes the stored token so
-		// the alias keeps its identity but loses its credential.
+		// Cloudflare has no SSO session; logout removes the stored token.
 		if err := deleteCloudflareToken(ctx, provider, deps); err != nil {
 			return status, err
 		}
@@ -248,21 +244,14 @@ func awsBearerTokenWithOIDCRetry(ctx core.Context, provider configpkg.CloudProvi
 	if err == nil && !ctx.DryRun {
 		return rawToken, nil
 	}
-	// Either federation was reported disabled on a real run, or this is a dry
-	// run: RunAWSBearerToken always reports success without ever invoking AWS,
-	// so the only way to preview the recovery this command would perform is to
-	// trace it unconditionally here too.
+	// RunAWSBearerToken always succeeds in dry run, so trace the recovery unconditionally.
 	if _, enableErr := deps.RunAWSEnableOIDC(ctx, provider.Profile); enableErr != nil {
 		return "", enableErr
 	}
 	return deps.RunAWSBearerToken(ctx, provider.Profile, audience)
 }
 
-// ExportCloudProviderCredentials returns short-lived AWS credentials derived
-// from the host profile registered under alias. The desktop uses these to keep
-// a remote runtime's `~/.aws/credentials` refreshed so it acts as the host
-// identity; a failure typically means the SSO session expired and needs
-// `erun cloud login`.
+// ExportCloudProviderCredentials returns short-lived AWS credentials from the alias's host profile.
 func ExportCloudProviderCredentials(ctx core.Context, store configpkg.CloudReadStore, alias string, deps CloudDependencies) (CloudProviderCredentials, error) {
 	provider, err := ResolveCloudProvider(store, alias)
 	if err != nil {
@@ -349,8 +338,7 @@ func saveManagedCloudAliasIfNeeded(ctx core.Context, store EnvironmentCloudAlias
 	return config, nil
 }
 
-// cloudEnvAliasForType reads AWS from the legacy scalar field and every other
-// provider type from the per-type map.
+// cloudEnvAliasForType reads AWS from the legacy scalar field, other types from the per-type map.
 func cloudEnvAliasForType(config configpkg.EnvConfig, providerType string) string {
 	if providerType == configpkg.CloudProviderAWS {
 		return config.CloudProviderAlias
@@ -358,8 +346,7 @@ func cloudEnvAliasForType(config configpkg.EnvConfig, providerType string) strin
 	return config.CloudProviderAliases[providerType]
 }
 
-// setCloudEnvAliasForType keeps AWS in the legacy scalar field so AWS behavior
-// stays byte-for-byte unchanged; other types go in the per-type map.
+// setCloudEnvAliasForType keeps AWS in the legacy scalar field for compatibility.
 func setCloudEnvAliasForType(config *configpkg.EnvConfig, providerType, alias string) {
 	if providerType == configpkg.CloudProviderAWS {
 		config.CloudProviderAlias = alias

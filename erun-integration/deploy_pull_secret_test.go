@@ -16,11 +16,6 @@ import (
 )
 
 func testDeployRealRunRefreshesImagePullSecretViaStubbedKubectl(t *testing.T) {
-	// Real-run counterpart of the dry-run image-pull-secret scenarios:
-	// proves the kubectl apply actually executes (Command + stdin
-	// manifest + CombinedOutput), not just that dry-run traces it. The
-	// kubectl stub exits 0 so the apply — and the rollout after it —
-	// both succeed.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -33,11 +28,7 @@ func testDeployRealRunRefreshesImagePullSecretViaStubbedKubectl(t *testing.T) {
 	dockerCfgDir, encoded := seedInlineDockerAuth(t, setup, "registry.example", "AWS:s3cret-token")
 
 	stubs := setup.Cwd + "/stubs"
-	// The refresh reads the Secret back before applying (to merge rather
-	// than replace its auths), so the generic empty-output kubectl stub
-	// every other kubectl call here still uses must answer "get secret"
-	// specifically: NotFound, since ecr-pull has never been created in
-	// this fixture.
+	// The refresh reads the Secret before applying, so "get secret" answers NotFound.
 	fixture.StubBinaryWithScript(t, stubs, "kubectl", `case "$*" in
   *"get secret"*) echo 'Error from server (NotFound): secrets "ecr-pull" not found' >&2; exit 1 ;;
   *) exit 0 ;;
@@ -58,15 +49,8 @@ esac
 }
 
 func testDeployRealRunImagePullSecretMergePreservesUnresolvedHost(t *testing.T) {
-	// The core of the merge fix: a Secret already covering two hosts,
-	// redeployed on a host that can only resolve one of them, must refresh
-	// the resolvable host and leave the other byte-for-byte untouched --
-	// not lose it to a full-document rewrite. A third host that is in play
-	// this run (via runtimeimage) but has never had an entry and does not
-	// resolve must get no placeholder auth. The applied manifest is
-	// captured to a file (a side effect outside erun.Run's captured
-	// streams) so the test can assert on the actual merged
-	// .dockerconfigjson rather than the trace alone.
+	// An unresolvable existing host must survive untouched, and an unresolvable new
+	// host gets no placeholder. The applied manifest is captured to a file.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -108,8 +92,6 @@ esac
 	golden.Equal(t, "deploy/real_run_image_pull_secret_merge_preserves_unresolved_host", normalize.Apply(result.Combined))
 }
 
-// assertMergedPullSecretManifest checks the applied regcred manifest refreshed
-// the resolvable host, kept the unresolved one, and invented no placeholder.
 func assertMergedPullSecretManifest(t *testing.T, appliedManifestPath, freshEncoded string) {
 	t.Helper()
 	applied, err := os.ReadFile(appliedManifestPath)
@@ -132,10 +114,7 @@ func assertMergedPullSecretManifest(t *testing.T, appliedManifestPath, freshEnco
 }
 
 func testDeployRealRunImagePullSecretRefusesMalformedExistingSecret(t *testing.T) {
-	// The other design decision the merge fix makes explicit: an existing
-	// Secret that cannot be decoded is refused rather than silently
-	// rebuilt from the resolved subset alone, since guessing wrong there
-	// would destroy exactly the coverage the merge exists to protect.
+	// An undecodable Secret is refused rather than rebuilt from the resolved subset.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -145,8 +124,7 @@ func testDeployRealRunImagePullSecretRefusesMalformedExistingSecret(t *testing.T
 	}
 	mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - regcred\n")
 
-	// A host must actually resolve this run, or refreshImagePullSecrets
-	// never reaches the Secret read at all (nothing to overlay).
+	// A host must resolve or the Secret is never read.
 	dockerCfgDir, encoded := seedInlineDockerAuth(t, setup, "registry.example", "AWS:s3cret-token")
 
 	malformedSecretJSON := fmt.Sprintf(`{"data":{".dockerconfigjson":%q}}`,
@@ -177,11 +155,7 @@ esac
 }
 
 func testDeployDryRunRemoteEnvImagePullSecrets(t *testing.T) {
-	// A tenant umbrella image can be a private ghcr package. The env's
-	// imagepullsecrets list rides into the runtime deploy as
-	// imagePullSecrets[i].name, re-scoped under the erun-devops subchart key so
-	// the runtime pod authenticates the pull. Orthogonal to the umbrella's
-	// own-image default (both appear); an env with no list emits nothing.
+	// Pull secrets are re-scoped under the erun-devops subchart key.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -199,15 +173,8 @@ func testDeployDryRunRemoteEnvImagePullSecrets(t *testing.T) {
 }
 
 func testDeployDryRunRemoteEnvImagePullSecretRefreshedFromHostCredential(t *testing.T) {
-	// An ECR authorization token expires after twelve hours, so a
-	// pull secret named once via --image-pull-secret and never refreshed
-	// eventually rots. When the host running `erun deploy` already has a
-	// credential for the deploy registry (docker config, or the AWS CLI
-	// for ECR), deploy re-mints the named Secret from it instead of
-	// leaving whatever it held days ago. DOCKER_CONFIG points the host
-	// resolver at this isolated dir, the same seam the init registry
-	// credential scenario uses; the fixture's containerregistry
-	// (registry.example/test) is deliberately addressed here.
+	// ECR tokens expire after 12h, so deploy re-mints a named Secret from host
+	// credentials. DOCKER_CONFIG isolates the host resolver.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -231,16 +198,8 @@ func testDeployDryRunRemoteEnvImagePullSecretRefreshedFromHostCredential(t *test
 }
 
 func testDeployDryRunRemoteEnvImagePullSecretCoversRuntimeImageOverrideRegistry(t *testing.T) {
-	// A runtimeimage pinned to a registry other than the env's
-	// containerRegistry (e.g. built into one registry, deployed from
-	// another) needs the refreshed pull secret to cover the registry the
-	// pod actually pulls from, not just containerRegistry's host. Here DOCKER_CONFIG
-	// carries a credential for the runtimeimage's own registry
-	// (otherregistry.example) but NOT for the fixture's containerregistry
-	// (registry.example): before the fix this applied no secret at all
-	// ("no host credential resolved for registry.example; leaving
-	// ecr-pull untouched" and nothing else tried); after the fix the
-	// image's own registry still resolves and the secret is applied.
+	// The pull secret must cover the runtimeimage's own registry, which here is
+	// the only one with a host credential.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -264,11 +223,7 @@ func testDeployDryRunRemoteEnvImagePullSecretCoversRuntimeImageOverrideRegistry(
 }
 
 func testDeployDryRunPrivateGHCRRuntimeImageWithNoHostCredentialTracesPullSecretDecision(t *testing.T) {
-	// A runtime-only env's image defaults onto ghcr.io/sophium/<tenant>-devops
-	// (DefaultContainerRegistry) the moment it is not the erun product's own
-	// tenant, with no operator action needed -- so --dry-run must show whether
-	// that image can even be pulled instead of staying silent about it, the
-	// one moment the operator could still fix a missing credential cheaply.
+	// A non-erun tenant's image defaults onto ghcr.io, so --dry-run must report pullability.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "build")
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*")
@@ -280,19 +235,13 @@ func testDeployDryRunPrivateGHCRRuntimeImageWithNoHostCredentialTracesPullSecret
 }
 
 func testDeployRealRunRefusesBeforeRolloutWhenPrivateRuntimeImageHasNoPullCredential(t *testing.T) {
-	// The severity this preflight exists for: the runtime chart's Recreate
-	// strategy tears down the running pod before the new one is scheduled, so
-	// discovering an unpullable image only after the rollout starts takes the
-	// environment down rather than leaving a stalled rollout beside a healthy
-	// pod. No kubectl/helm stub is declared at all -- if the refusal did not
-	// fire before any cluster interaction, the command would instead fail with
-	// "executable file not found", which would show up in the golden below.
+	// Recreate tears down the running pod first, so an unpullable image must be
+	// refused before any cluster call. No kubectl/helm stub is declared.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "build")
 	envVars := append(setup.Env(),
 		"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*",
-		// Absent from the override, an anonymous-pull probe of this specific
-		// image resolves to "not pullable" (anonymousPullableOverrideEnv).
+		// Empty: no image counts as anonymously pullable.
 		"ERUN_ANONYMOUS_PULLABLE_OVERRIDE=",
 	)
 	result := erun.Run(t, []string{"deploy", "frs", "build", "--version", "1.0.86"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
@@ -305,24 +254,13 @@ func testDeployRealRunRefusesBeforeRolloutWhenPrivateRuntimeImageHasNoPullCreden
 	golden.Equal(t, "deploy/real_run_refuses_before_rollout_when_private_runtime_image_has_no_pull_credential", normalize.Apply(result.Combined))
 }
 
-// A deploy running inside the target env's own runtime pod has none of the
-// three credential routes resolveGHCRBasicAuth knows -- no docker config, no gh
-// session, no GH_TOKEN/GITHUB_TOKEN -- so an anonymous read of the tenant's
-// private chart would be refused. The env already declares where the credential
-// lives: its imagepullsecrets names a dockerconfigjson Secret in its own
-// namespace that the pod's service account can read. The pod resolves it from
-// there instead of falling back to anonymous.
-//
-// The in-pod runtime-chart guard refuses the rollout itself once the resolve is
-// done, so the in-pod leg ends at the authenticated chart read rather than at a
-// completed deploy; both are asserted below, so the leg still proves the
-// credential carried the read.
+// TestDeployInPodResolvesDeclaredImagePullSecret: in-pod, the credential comes from
+// the env's imagepullsecrets Secret; the runtime-chart guard then refuses the
+// rollout, so the in-pod leg ends at the chart read.
 func TestDeployInPodResolvesDeclaredImagePullSecret(t *testing.T) {
 	t.Parallel()
 
-	// run deploys team/dev from a credential-less process, optionally marking it
-	// as team/dev's own runtime pod. Everything else is identical, so the trace
-	// difference is the gating and nothing else.
+	// run differs only in whether the process is marked as team/dev's own pod.
 	run := func(t *testing.T, inPod bool) string {
 		t.Helper()
 		setup := env.New(t)
@@ -334,9 +272,6 @@ func TestDeployInPodResolvesDeclaredImagePullSecret(t *testing.T) {
 		}
 		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ghcr-pull\n")
 
-		// The pod pulls with the credential the Secret declares; the process
-		// holds no docker config of its own, so only the declared Secret can
-		// supply one.
 		secretJSON := fmt.Sprintf(`{"data":{".dockerconfigjson":%q}}`,
 			base64.StdEncoding.EncodeToString([]byte(`{"auths":{"ghcr.io":{"auth":"cHVsbHNlY3JldDpwdw=="}}}`)))
 
@@ -371,10 +306,6 @@ esac
 	}
 
 	const resolved = "registry credential: resolved 1 registry credential(s) from this environment's declared image pull secret(s) ghcr-pull"
-	// The read the credential exists for: the tenant's private chart probe
-	// authenticates instead of being refused as an anonymous read. The in-pod
-	// runtime-chart guard stops the rollout after the resolve, so this read — not
-	// a completed deploy — is where the in-pod leg ends.
 	const authenticatedRead = "runtime chart team-devops 1.0.0 found in registry.example/test"
 
 	inPodTrace := run(t, true)
@@ -392,8 +323,6 @@ esac
 	}
 }
 
-// seedInlineDockerAuth writes a docker config carrying an inline auth for
-// registry and returns its directory and the encoded credential.
 func seedInlineDockerAuth(t *testing.T, setup env.Setup, registry, credential string) (string, string) {
 	t.Helper()
 	dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")

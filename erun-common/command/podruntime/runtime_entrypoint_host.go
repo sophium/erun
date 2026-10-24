@@ -23,12 +23,8 @@ func describeRuntimeKubeconfig(boot runtimeBoot) string {
 	return "write " + boot.kubeconfigPath() + " for the pod's service account"
 }
 
-// writeRuntimeKubeconfig points kubectl at the cluster the pod runs in, through
-// its own service account. The outer cloud-context name (for example
-// `erun-001-020362606330-eu-west-2`) is added as a second context on the same
-// cluster: the desktop-synced env config and any lookup that knows the outer
-// name run `kubectl --context <outer-name>` from inside the pod, which would
-// otherwise fail with "context does not exist".
+// writeRuntimeKubeconfig also adds the outer cloud-context name as a context on the same
+// cluster, since synced configs run `kubectl --context <outer-name>` inside the pod.
 func writeRuntimeKubeconfig(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	tokenFile := filepath.Join(boot.serviceAccountDir, "token")
 	caFile := filepath.Join(boot.serviceAccountDir, "ca.crt")
@@ -66,11 +62,8 @@ func describeRuntimeSSHPermissions(boot runtimeBoot) string {
 	return "restore private modes under " + boot.path(".ssh")
 }
 
-// normalizeRuntimeSSHPermissions re-applies canonical modes to ~/.ssh. The pod no
-// longer carries a fsGroup, but an environment that once ran with one still
-// holds the g+rw the kubelet ORed into every home-volume file, and ssh refuses a
-// private key looser than 0600. *.pub stays world-readable; everything else
-// directly in ~/.ssh is treated as private.
+// Environments that once ran with a fsGroup still carry g+rw on the home volume, and ssh
+// refuses a private key looser than 0600.
 func normalizeRuntimeSSHPermissions(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	dir := boot.path(".ssh")
 	if entries, err := os.ReadDir(dir); err == nil {
@@ -97,9 +90,7 @@ func describeRuntimeOutputsDir(boot runtimeBoot) string {
 	return "create " + boot.outputsDir()
 }
 
-// ensureRuntimeOutputsDir creates the directory agents write deliverables to,
-// which `erun outputs` lists. The image creates the default one; an overridden
-// path may not exist yet.
+// The image creates the default outputs dir; an overridden path may not exist yet.
 func ensureRuntimeOutputsDir(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	return os.MkdirAll(boot.outputsDir(), 0o755)
 }
@@ -108,15 +99,9 @@ func describeRuntimeGitSafeDirectory(boot runtimeBoot) string {
 	return "mark " + boot.repoDir() + " as a git safe.directory"
 }
 
-// ensureRuntimeGitSafeDirectory lets git operate on a worktree owned by a foreign
-// uid. A local-agent environment on Windows shares the repository into the WSL2
-// node, where its files surface as root:root, and git's dubious-owner guard then
-// aborts every in-pod `git status`. On a worktree erun already owns this is a
-// no-op, so it is applied unconditionally and only once.
-//
-// Every child the boot starts goes through the supervisor, here and below: the
-// init reaps each zombie it does not own, and a child it reaps before os/exec
-// waits for it reports "no child processes" instead of its exit status.
+// On Windows local-agent environments the worktree surfaces as root:root, tripping git's
+// dubious-owner guard. Children run through the supervisor so the init does not reap
+// them before os/exec waits.
 func ensureRuntimeGitSafeDirectory(_ core.Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
 	if !onPath("git") {
 		return nil
@@ -149,11 +134,7 @@ func describeRuntimeSource(boot runtimeBoot) string {
 	return description
 }
 
-// ensureRuntimeSource clones the environment's source into its worktree at boot
-// for a runtime environment that opted into a mutable source mount. It clones
-// only into an empty worktree, so live patches survive pod restarts, then checks
-// out the deployed release ref. Failures are reported and the pod keeps serving
-// without mounted source.
+// ensureRuntimeSource clones only into an empty worktree so live patches survive restarts.
 func ensureRuntimeSource(ctx core.Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
 	url := boot.get("ERUN_REPO_URL")
 	repoDir := boot.repoDir()
@@ -186,9 +167,7 @@ func describeRuntimeReleaseLink(boot runtimeBoot) string {
 	return "link " + boot.repoDir() + " to " + boot.releaseDir + " when the image bakes one"
 }
 
-// linkRuntimeRelease surfaces the image's baked release tree through the git
-// folder of a sourceless runtime environment. Agent environments and runtime
-// environments that mount source carry a real worktree and are not linked.
+// linkRuntimeRelease applies only to sourceless runtime environments.
 func linkRuntimeRelease(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	_, err := LinkRuntimeRelease(boot.repoDir(), boot.releaseDir)
 	return err

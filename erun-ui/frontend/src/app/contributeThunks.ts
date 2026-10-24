@@ -28,7 +28,6 @@ export interface ToggleContributeResult {
   error?: string;
 }
 
-/** Toggle the Contribute switch for the currently-selected env. */
 export const toggleContribute =
   (selection: UISelection): AppThunk<Promise<ToggleContributeResult>> =>
   async (dispatch, getState) => {
@@ -110,7 +109,7 @@ function removeContributeTabsFromState(
   }
 }
 
-/** Sync slice with the persisted backend flag for the given selection. */
+/** Sync the slice with the persisted backend flag. */
 export const refreshContributeFlag =
   (selection: UISelection): AppThunk<Promise<boolean>> =>
   async (dispatch) => {
@@ -129,7 +128,6 @@ export const refreshContributeFlag =
     }
   };
 
-/** Resolve eligibility from the backend so the UI can show or hide the toggle. */
 export async function isContributeToggleEligible(selection: UISelection): Promise<boolean> {
   if (!selection.tenant.trim() || !selection.environment.trim()) {
     return false;
@@ -141,7 +139,6 @@ export async function isContributeToggleEligible(selection: UISelection): Promis
   }
 }
 
-/** Flip the diff source for the env's review panel. */
 export const switchDiffSource =
   (selection: UISelection, source: DiffSource): AppThunk =>
   (dispatch) => {

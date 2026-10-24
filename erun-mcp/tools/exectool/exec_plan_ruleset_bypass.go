@@ -9,10 +9,8 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// ExecPlanRulesetBypassInput plans narrowing a protected branch's ruleset
-// bypass grant to one non-human queue identity. It only ever reads from
-// GitHub: the payloads it resolves are applied by a human, since a ruleset
-// governs every contributor's merges.
+// ExecPlanRulesetBypassInput plans narrowing a ruleset bypass to one queue
+// identity; it only reads, and a human applies the result.
 type ExecPlanRulesetBypassInput struct {
 	RemoteURL      string `json:"remoteUrl,omitempty" jsonschema:"the github.com remote the ruleset lives on; defaults to the current checkout's origin"`
 	RulesetID      int64  `json:"rulesetId" jsonschema:"the ruleset whose bypass grant is being narrowed"`

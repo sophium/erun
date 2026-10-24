@@ -7,16 +7,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// control_plane_version_drift_test.go covers the branches of the advertised
-// apiUrl check that the integration suite cannot reach from the compiled
-// binary (erun-integration/AGENTS.md): telling a benign canonical/CNAME alias
-// apart from a foreign backend needs two *resolvable hostnames*, and the
-// black-box suite has no seam to stub DNS across a subprocess boundary, so it
-// can only drive the literal-address cases. Those live there; the aliasing
-// and no-verdict branches are exercised here against a fake resolver.
+// The integration suite cannot stub DNS across a subprocess, so the aliasing and
+// no-verdict branches of the apiUrl check are covered here with a fake resolver.
 
-// fakeHostResolver stands in for CloudDependencies.ResolveHostAddrs, counting
-// calls so a case can assert that no lookup was attempted at all.
 type fakeHostResolver struct {
 	hostToAddrs map[string][]string
 	calls       []string
@@ -33,8 +26,7 @@ func (r *fakeHostResolver) resolve(_ core.Context, host string) ([]string, error
 
 func TestDetectAdvertisedAPIURLMismatch(t *testing.T) {
 	t.Run("a discovered apiUrl resolving to the same address as this plane's own host is not flagged", func(t *testing.T) {
-		// A vanity hostname CNAMEing to the one erun queried: different name,
-		// same backend, so the textual difference alone is not evidence.
+		// A vanity CNAME: different name, same backend.
 		resolve := &fakeHostResolver{hostToAddrs: map[string][]string{
 			"api.vanity.example.com": {"203.0.113.10"},
 			"api.real.example.com":   {"203.0.113.10"},

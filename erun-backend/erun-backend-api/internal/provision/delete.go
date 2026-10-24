@@ -9,10 +9,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// EnvDeleteInput is the durable delete workflow's checkpointed input: the
-// non-secret twin of EnvLifecycleInput plus the identity a resumed or
-// reconciler-driven attempt needs to rebind its status writes to the right
-// tenant, and DeleteID, the attempt id that keys the workflow.
+// EnvDeleteInput is the delete workflow's checkpointed, non-secret input.
 type EnvDeleteInput struct {
 	TenantID      string `json:"tenantId"`
 	TenantType    string `json:"tenantType"`
@@ -20,21 +17,13 @@ type EnvDeleteInput struct {
 	EnvironmentID string `json:"environmentId"`
 	Tenant        string `json:"tenant"`
 	Environment   string `json:"environment"`
-	// RunningVersion mirrors EnvLifecycleInput.RunningVersion: empty means the
-	// environment never successfully deployed, so there is no namespace to
-	// tear down.
+	// RunningVersion is empty when the environment never deployed, so there is no namespace.
 	RunningVersion             string `json:"runningVersion,omitempty"`
 	ContextID                  string `json:"contextId,omitempty"`
 	PlacementKubernetesContext string `json:"placementKubernetesContext,omitempty"`
 	PlacementServerURL         string `json:"placementServerUrl,omitempty"`
-	// DeleteID identifies one explicit delete attempt. Being part of the
-	// checkpointed input is what lets a resumed workflow rebuild the same Job
-	// name and re-watch its own run, and — like EnvProvisionInput.DeployID —
-	// is why the workflow is keyed by the attempt rather than the
-	// environment: an environment-keyed id would replay a completed (e.g.
-	// deletion-blocked) attempt's cached result on retry instead of actually
-	// running again, the same replay bug root AGENTS.md's "Server-Side
-	// Executors" section warns against for Job names.
+	// DeleteID keys the workflow per attempt: an environment-keyed id would replay
+	// a completed attempt's cached result instead of running again.
 	DeleteID string `json:"deleteId"`
 }
 
@@ -52,50 +41,34 @@ func (input EnvDeleteInput) lifecycleInput() EnvLifecycleInput {
 	}
 }
 
-// EnvDeleteRunner runs one delete attempt to a terminal outcome, persisting
-// the environment row accordingly (hard-deleted once the namespace is
-// confirmed gone, or moved to deletion-blocked naming why it is not) —
-// satisfied by *EnvLifecycle.
+// EnvDeleteRunner runs one delete attempt to a terminal outcome.
 type EnvDeleteRunner interface {
 	Delete(ctx context.Context, input EnvLifecycleInput) error
 }
 
-// EnvDeleter runs the durable env-delete workflow, so a control-plane restart
-// resumes an in-flight delete rather than leaving the environment stranded in
-// `deleting` until something notices. It wraps EnvDeleteRunner in a
-// DBOS workflow keyed by the delete attempt, mirroring EnvProvisioner's
-// wrapping of EnvCoordinator for deploy.
+// EnvDeleter runs the durable delete workflow so a restart resumes an in-flight delete.
 type EnvDeleter struct {
 	dbosCtx    dbos.DBOSContext
 	runner     EnvDeleteRunner
 	workflowFn func(dbos.DBOSContext, EnvDeleteInput) (string, error)
 }
 
-// NewEnvDeleter wires the durable deleter.
 func NewEnvDeleter(dbosCtx dbos.DBOSContext, runner EnvDeleteRunner) *EnvDeleter {
 	d := &EnvDeleter{dbosCtx: dbosCtx, runner: runner}
-	// One stable function value shared by RegisterWorkflow and RunWorkflow, which
-	// is how DBOS names the workflow and recovers it across restarts.
+	// DBOS names and recovers the workflow by this one stable function value.
 	d.workflowFn = d.deleteWorkflow
 	dbos.RegisterWorkflow(dbosCtx, d.workflowFn)
 	return d
 }
 
-// Start kicks off one delete attempt asynchronously so the HTTP handler
-// returns immediately (bounded) while the durable workflow runs
-// the actual teardown, however long that takes. input.DeleteID must be a
-// fresh id per attempt (see EnvDeleteInput.DeleteID) — the caller's
-// responsibility, since both a fresh operator request and a reconciler
-// retry need their own.
+// Start runs one delete attempt asynchronously. input.DeleteID must be fresh per attempt.
 func (d *EnvDeleter) Start(input EnvDeleteInput) error {
 	_, err := dbos.RunWorkflow(d.dbosCtx, d.workflowFn, input, dbos.WithWorkflowID("delete-env-"+input.EnvironmentID+"-"+input.DeleteID))
 	return err
 }
 
 func (d *EnvDeleter) deleteWorkflow(dctx dbos.DBOSContext, input EnvDeleteInput) (string, error) {
-	// One step: the runner is idempotent on re-run (a retried Job create
-	// tolerates already-exists and re-watches), so a mid-delete restart
-	// resumes cleanly without a second Job.
+	// The runner is idempotent on re-run, so a restart resumes without a second Job.
 	return dbos.RunAsStep(dctx, func(c context.Context) (string, error) {
 		scoped := security.WithContext(c, security.Context{
 			TenantID:   input.TenantID,
@@ -109,20 +82,9 @@ func (d *EnvDeleter) deleteWorkflow(dctx dbos.DBOSContext, input EnvDeleteInput)
 	})
 }
 
-// DefaultDeleteReconcileSchedule is how often EnvDeleteReconciler re-attempts
-// every environment mid-teardown: a standard, second-precision cron
-// expression, every 5 minutes. Frequent enough that a namespace which
-// finishes terminating on its own converges within minutes rather than
-// waiting for an operator to notice; infrequent enough that a genuinely wedged
-// namespace is not re-attempted so often it never gets to breathe between
-// tries.
+// DefaultDeleteReconcileSchedule re-attempts environments mid-teardown every 5 minutes.
 const DefaultDeleteReconcileSchedule = "0 */5 * * * *"
 
-// DeleteClaimStaleAfter bounds how long a delete may hold its environment's
-// claim before a retry (an operator's or the reconciler's) may take it over.
-// Longer than the delete Job's own 30-minute deadline (deployexec's
-// jobActiveDeadlineSeconds), so a claim only looks stale once the run behind
-// it cannot still be live — the same reasoning as routes.deployClaimStaleAfter.
-// Shared (not routes-private like deployClaimStaleAfter) because both the
-// route handler's initial claim and the reconciler's retry claim need it.
+// DeleteClaimStaleAfter exceeds the delete Job's 30-minute deadline, so a claim
+// only looks stale once its run cannot still be live.
 const DeleteClaimStaleAfter = 45 * time.Minute

@@ -65,10 +65,6 @@ func testConsumedInvite() repository.ConsumedInvite {
 	}
 }
 
-// TestAcceptInviteHappyPath locks the core accept flow: a
-// consumed invite's tenant and issuer drive the IdP identity and the erun
-// user mapping, bound to the invite's own target tenant rather than any
-// caller session (there is none).
 func TestAcceptInviteHappyPath(t *testing.T) {
 	invites := &stubInviteConsumer{result: testConsumedInvite()}
 	admin := &stubInviteZitadelAdmin{user: zitadel.User{ID: "idp-1", Username: "newbie"}}
@@ -98,9 +94,6 @@ func TestAcceptInviteHappyPath(t *testing.T) {
 	}
 }
 
-// TestAcceptInviteReportsHalfLandedFailure mirrors Enroll's own contract:
-// an erun-side mapping failure after the IdP identity was created is
-// reported with the orphaned IdP user still attached, not swallowed.
 func TestAcceptInviteReportsHalfLandedFailure(t *testing.T) {
 	invites := &stubInviteConsumer{result: testConsumedInvite()}
 	admin := &stubInviteZitadelAdmin{user: zitadel.User{ID: "idp-2", Username: "orphan"}}
@@ -116,9 +109,6 @@ func TestAcceptInviteReportsHalfLandedFailure(t *testing.T) {
 	}
 }
 
-// TestAcceptInviteRefusesEmailMismatch locks the pinned-email option: a
-// request that supplies a different email than the invite was
-// pinned to is refused before ever reaching the identity provider.
 func TestAcceptInviteRefusesEmailMismatch(t *testing.T) {
 	pinned := testConsumedInvite()
 	pinned.Invite.Email = "expected@example.com"
@@ -138,9 +128,6 @@ func TestAcceptInviteRefusesEmailMismatch(t *testing.T) {
 	}
 }
 
-// TestAcceptInviteUsesPinnedEmailWhenRequestOmitsIt proves the pinned email
-// is not just a validation check — it is used when the accepting request
-// leaves email blank.
 func TestAcceptInviteUsesPinnedEmailWhenRequestOmitsIt(t *testing.T) {
 	pinned := testConsumedInvite()
 	pinned.Invite.Email = "expected@example.com"
@@ -157,9 +144,6 @@ func TestAcceptInviteUsesPinnedEmailWhenRequestOmitsIt(t *testing.T) {
 	}
 }
 
-// TestAcceptInvitePropagatesConsumeFailureWithoutCallingZitadel locks that a
-// bad token (expired, consumed, unknown) never reaches the identity
-// provider at all.
 func TestAcceptInvitePropagatesConsumeFailureWithoutCallingZitadel(t *testing.T) {
 	invites := &stubInviteConsumer{err: repository.ErrInviteExpired}
 	admin := &stubInviteZitadelAdmin{}

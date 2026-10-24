@@ -52,9 +52,7 @@ func TestLockTerminalsForActivityLocksMatchingSessions(t *testing.T) {
 	}
 }
 
-// TestLockTerminalsForActivityClearsEnvNotifications: starting a deploy is the
-// operator acting on any outstanding env-scoped warning (runtime-unreachable,
-// prior deploy-failed), so locking that env's terminals clears its notifications.
+// Starting a deploy acts on any outstanding env-scoped warning.
 func TestLockTerminalsForActivityClearsEnvNotifications(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
@@ -85,9 +83,6 @@ func TestLockTerminalsForActivityClearsEnvNotifications(t *testing.T) {
 	}
 }
 
-// TestDeployFailedTraceSurfacesToToolbar: a `==> Deploy failed` trace (emitted on
-// any deploy failure, including a pre-rollout spec-resolution failure) must
-// surface in the toolbar so a failed deploy is never silent.
 func TestDeployFailedTraceSurfacesToToolbar(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
@@ -118,9 +113,6 @@ func TestDeployFailedTraceSurfacesToToolbar(t *testing.T) {
 	}
 }
 
-// TestLockTerminalsForActivityWithoutMatchClearsNothing: a deploy that locks no
-// local sessions has nothing to act on, so it must not fire a stray
-// notification-clear.
 func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
@@ -141,11 +133,6 @@ func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
 	}
 }
 
-// TestLockNewlyJoinedSessionIfDeployInFlightLocksImmediately: a session that
-// joins after a deploy has already started must lock as soon as it joins,
-// not whenever the deploy's poller or completion handler next touches the
-// queue -- lockTerminalForActivity existed but nothing called it from the
-// session-start paths, so a late-joining ERun/AI tab never locked.
 func TestLockNewlyJoinedSessionIfDeployInFlightLocksImmediately(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
@@ -171,8 +158,6 @@ func TestLockNewlyJoinedSessionIfDeployInFlightLocksImmediately(t *testing.T) {
 	}
 }
 
-// TestLockNewlyJoinedSessionIfDeployInFlightNoOpWithoutADeploy: a session
-// joining an env with no active deploy must not be touched.
 func TestLockNewlyJoinedSessionIfDeployInFlightNoOpWithoutADeploy(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
@@ -194,9 +179,7 @@ func TestLockNewlyJoinedSessionIfDeployInFlightNoOpWithoutADeploy(t *testing.T) 
 	}
 }
 
-// TestLockTerminalEventsAlwaysCarryReason: the ActivityLockOverlay carries no
-// fallback string, so every Locked=true event must populate Reason or the
-// overlay header renders blank.
+// The overlay has no fallback, so every Locked=true event needs a Reason.
 func TestLockTerminalEventsAlwaysCarryReason(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
@@ -292,11 +275,7 @@ func TestReleaseNameForTenant(t *testing.T) {
 	}
 }
 
-// TestPollActivityContainerStatusesDoesNotFinalizeOnReadyPods pins the
-// display-only contract: pod readiness can flip seconds before helm's `--wait`
-// returns, so finalizing on Ready pods would show "done" while the terminal
-// still spins. Completion is owned by the trace handler and the helm
-// version+freshness check.
+// Pods can be Ready before helm --wait returns, so the poller must not finalize.
 func TestPollActivityContainerStatusesDoesNotFinalizeOnReadyPods(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	entry, _ := app.activityQueue.start(activityQueueEntry{
@@ -342,11 +321,7 @@ func TestForceDismissActivityRemovesActiveEntry(t *testing.T) {
 	}
 }
 
-// An env that states its chart separately runs an image versioned on its own
-// line, so the release's appVersion is the chart's number, not the environment's.
-// The desktop must label the environment with what it runs -- reporting the chart
-// version is the "it shows 1.0.178" confusion that made the two coordinates
-// separate in the first place.
+// With a separately stated chart, appVersion is the chart's version, not the runtime's.
 func TestObservedRuntimeVersionPrefersTheRecordedVersionWhenTheChartIsStated(t *testing.T) {
 	store := stubUIStore{
 		tenants: map[string]config.TenantConfig{"petios": {Name: "petios"}},
@@ -368,8 +343,7 @@ func TestObservedRuntimeVersionPrefersTheRecordedVersionWhenTheChartIsStated(t *
 	if got := app.observedRuntimeVersion("petios", "develop", release); got != "1.0.322-snapshot-20260813072257" {
 		t.Fatalf("expected the recorded runtime version, got %q", got)
 	}
-	// An env whose chart and image ride one line is unchanged: the chart's
-	// appVersion is the environment's version, and it is the live reading.
+	// When chart and image share a line, appVersion is the live version.
 	if got := app.observedRuntimeVersion("petios", "paired", release); got != "1.0.178" {
 		t.Fatalf("expected the release appVersion for a paired env, got %q", got)
 	}

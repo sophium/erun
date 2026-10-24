@@ -4,12 +4,6 @@ import (
 	"testing"
 )
 
-// TestBranchIssueNumberReadsTheDocumentedConvention pins the four states the
-// derivation answers for: both documented branch prefixes name their issue,
-// and everything else names nothing. The "nothing" half carries the weight --
-// a branch that merely contains a number is not a link to the issue with that
-// number, and a derivation that guesses one attaches a review to work nobody
-// named it for.
 func TestBranchIssueNumberReadsTheDocumentedConvention(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -39,13 +33,6 @@ func TestBranchIssueNumberReadsTheDocumentedConvention(t *testing.T) {
 	}
 }
 
-// TestResolveIssueReferencePrefersADeclaredReferenceOverADerivableOne is the
-// state a careless implementation gets wrong. Here the branch names one issue
-// and the caller has named a different one, so the two answers disagree. The
-// declared reference is the only one the platform actually knows -- the branch
-// was either renamed or the work was deliberately reassigned -- and overruling
-// it with a string match would silently relink a caller's work to whatever
-// their branch name happens to look like.
 func TestResolveIssueReferencePrefersADeclaredReferenceOverADerivableOne(t *testing.T) {
 	t.Parallel()
 	resolved, ok := ResolveIssueReference("owner/repo#2109", "bug/2212-issue-ref-from-branch")
@@ -61,10 +48,6 @@ func TestResolveIssueReferencePrefersADeclaredReferenceOverADerivableOne(t *test
 	}
 }
 
-// TestResolveIssueReferenceMarksABranchDerivedIssueAsInferred: with nothing
-// declared, the branch is the only source, and the answer has to say so. This
-// is the half that keeps an inferred link from being written back as though it
-// had been declared.
 func TestResolveIssueReferenceMarksABranchDerivedIssueAsInferred(t *testing.T) {
 	t.Parallel()
 	resolved, ok := ResolveIssueReference("", "feature/2212-issue-ref-from-branch")
@@ -80,10 +63,6 @@ func TestResolveIssueReferenceMarksABranchDerivedIssueAsInferred(t *testing.T) {
 	}
 }
 
-// TestResolveIssueReferenceReportsNoIssueForABranchOutsideTheConvention: the
-// derivation is best-effort, so "no answer" is a real answer and not a reason
-// to fall back to a guess. ok being false is what tells a caller to leave the
-// work unlinked.
 func TestResolveIssueReferenceReportsNoIssueForABranchOutsideTheConvention(t *testing.T) {
 	t.Parallel()
 	resolved, ok := ResolveIssueReference("  ", "bugfix/2212-issue-ref")

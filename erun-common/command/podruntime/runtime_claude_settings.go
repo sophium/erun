@@ -13,21 +13,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// The runtime pod relays the routing values the chart injects into Claude Code's
-// settings.json, wires the erun MCP server into ~/.claude.json, and installs the
-// AI-session hooks and the permission mode the pod runs Claude Code under.
-//
-// Bedrock and a gateway both route Claude through a provider the environment
-// selects rather than a claude.ai login, so the same relay applies to both. The
-// chart emits ANTHROPIC_BASE_URL only when a gateway is configured, which makes
-// the environment itself the signal. Only non-secret routing values are relayed;
-// a credential stays in the pod environment through its Secret reference.
+// Only non-secret routing values are relayed into settings.json; credentials stay in the pod
+// environment. ANTHROPIC_BASE_URL is present only when a gateway is configured.
 
 const claudeSettingsSchema = "https://json.schemastore.org/claude-code-settings.json"
 
-// claudeRelayedPassthroughNames are relayed verbatim when set. A gateway serves
-// model ids Claude Code cannot size, so the context window the chart declares for
-// the catalog's default travels too.
+// A gateway serves model ids Claude Code cannot size, so the context window is relayed too.
 var claudeRelayedPassthroughNames = []string{
 	"AWS_PROFILE",
 	"ANTHROPIC_MODEL",
@@ -43,7 +34,6 @@ var claudeRelayedPassthroughNames = []string{
 	"ENABLE_PROMPT_CACHING_1H",
 }
 
-// claudeRelayedEnvNames is every settings env entry the relay can write.
 var claudeRelayedEnvNames = append([]string{
 	"CLAUDE_CODE_USE_BEDROCK",
 	"CLAUDE_CODE_USE_MANTLE",
@@ -53,11 +43,8 @@ var claudeRelayedEnvNames = append([]string{
 	"MAX_THINKING_TOKENS",
 }, claudeRelayedPassthroughNames...)
 
-// claudeRelayRecord is what the relay wrote on its last boot, kept beside the
-// settings file. settings.json lives on the persistent volume, so a value relayed
-// while the environment used a gateway or Bedrock would otherwise outlive the
-// deploy that turned it off; the record is how a later boot removes exactly what
-// it wrote and never an entry the operator wrote by hand.
+// claudeRelayRecord lets a later boot remove exactly what the relay wrote to the
+// persistent settings.json, never the operator's own entries.
 type claudeRelayRecord struct {
 	Env             []string `json:"env"`
 	AvailableModels bool     `json:"availableModels"`
@@ -86,7 +73,6 @@ func configureRuntimeClaude(boot runtimeBoot) error {
 	return nil
 }
 
-// relayRuntimeClaudeSettings reconciles settings.json and its relay record.
 func relayRuntimeClaudeSettings(env func(string) string, settingsPath string) error {
 	settings, err := readRuntimeJSONMap(settingsPath)
 	if err != nil {
@@ -119,10 +105,8 @@ func (r *claudeSettingsRelay) get(name string) string {
 	return strings.TrimSpace(r.env(name))
 }
 
-// resolveOwnership reads what the relay owns. A pod with no record predates it:
-// if its earlier relay evidently ran (it always wrote both token defaults), every
-// entry that relay wrote was one of claudeRelayedEnvNames, so all of them count as
-// owned once; a settings file the relay never touched owns nothing.
+// A pod with no record whose earlier relay evidently ran (both token defaults present)
+// owns all claudeRelayedEnvNames once.
 func (r *claudeSettingsRelay) resolveOwnership(recordPath string) {
 	if data, err := os.ReadFile(recordPath); err == nil {
 		var record claudeRelayRecord
@@ -169,8 +153,6 @@ func (r *claudeSettingsRelay) apply() {
 	}
 }
 
-// clear removes every entry the relay still owns: nothing routes through a
-// relay now, so each is a leftover from a deploy that did.
 func (r *claudeSettingsRelay) clear() {
 	if env, ok := r.settings["env"].(map[string]any); ok {
 		for _, name := range claudeRelayedEnvNames {
@@ -182,8 +164,7 @@ func (r *claudeSettingsRelay) clear() {
 	}
 }
 
-// applyUseFlags writes the two flags Claude Code reads as present-or-absent:
-// writing "0" would enable them, so a disabled flag is removed instead.
+// Claude Code reads these flags as present-or-absent: "0" would enable them.
 func (r *claudeSettingsRelay) applyUseFlags(env map[string]any) {
 	for _, name := range []string{"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_MANTLE"} {
 		if !runtimeEnvFlagEnabled(r.get(name)) {
@@ -206,8 +187,6 @@ func (r *claudeSettingsRelay) sync(env map[string]any, name, value string) {
 	}
 }
 
-// claudeModelList splits the chart's comma-separated model list, dropping blanks
-// and case-insensitive duplicates.
 func claudeModelList(value string) []string {
 	var models []string
 	seen := map[string]bool{}
@@ -223,12 +202,8 @@ func claudeModelList(value string) []string {
 	return models
 }
 
-// installRuntimeClaudeSessionSettings runs Claude Code in bypass-permissions mode
-// (the pod is the sandbox) and installs the AI-session hooks. The hooks are the
-// writer the structured AI-session status model needs: without them it resolves
-// from events nothing reports, and awaiting-input is unreachable. A previous
-// boot's hook block is replaced, and an operator's own hook on the same event is
-// kept beside it.
+// installRuntimeClaudeSessionSettings replaces the previous boot's hooks and keeps the
+// operator's own hooks on the same event. The pod is the sandbox.
 func installRuntimeClaudeSessionSettings(settings map[string]any) {
 	if _, ok := settings["$schema"]; !ok {
 		settings["$schema"] = claudeSettingsSchema
@@ -249,10 +224,7 @@ func installRuntimeClaudeSessionSettings(settings map[string]any) {
 	}
 }
 
-// runtimeAISessionHookCommand is one installed report. The environment check is
-// in the shell so a Claude the operator runs with no erun environment in scope
-// forks nothing on every turn boundary; nothing it prints or exits with reaches
-// the turn.
+// The shell-side environment check keeps a Claude run outside erun from forking on every turn.
 func runtimeAISessionHookCommand(event model.AISessionEventKind) string {
 	return `if [ -n "${ERUN_TENANT}" ] && [ -n "${ERUN_ENVIRONMENT}" ]; then ` + AISessionHookVerbPath + " --event " + string(event) + " --tool claude >/dev/null 2>&1 || true; fi"
 }
@@ -269,8 +241,6 @@ func isRuntimeAISessionHookBlock(block any) bool {
 	return false
 }
 
-// wireRuntimeClaudeMCP registers the environment's MCP edge for the repository
-// project in ~/.claude.json.
 func wireRuntimeClaudeMCP(statePath, projectPath, mcpURL string) error {
 	state, err := readRuntimeJSONMap(statePath)
 	if err != nil {
@@ -281,9 +251,7 @@ func wireRuntimeClaudeMCP(statePath, projectPath, mcpURL string) error {
 	return writeRuntimeJSONMap(statePath, state)
 }
 
-// readRuntimeJSONMap reads a JSON object, keeping numbers as written. A missing
-// or unparsable file reads as an empty object, as the shell relay always treated
-// it.
+// A missing or unparsable file reads as an empty object.
 func readRuntimeJSONMap(path string) (map[string]any, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -318,8 +286,6 @@ func writeRuntimeJSONMap(path string, value map[string]any) error {
 	return os.Chmod(path, 0o600)
 }
 
-// runtimeJSONObject returns parent[name] as an object, replacing a value that is
-// not one.
 func runtimeJSONObject(parent map[string]any, name string) map[string]any {
 	if object, ok := parent[name].(map[string]any); ok {
 		return object

@@ -8,9 +8,7 @@ import (
 	"testing"
 )
 
-// pathIDRequest drives the wrapped handler for apiPath the way the mux does:
-// the path values are already decoded and set on the request by the time a
-// handler runs, so a test sets them directly.
+// pathIDRequest sets path values directly, as the mux would have.
 func pathIDRequest(t *testing.T, apiPath string, handler http.Handler, values map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -22,9 +20,6 @@ func pathIDRequest(t *testing.T, apiPath string, handler http.Handler, values ma
 	return rec
 }
 
-// TestPathParamNamesReadsOnlyWholeSegments: the parser decides which segments
-// are guarded, so it must not mistake a literal segment that merely contains
-// braces -- or a segment that is not a parameter at all -- for one.
 func TestPathParamNamesReadsOnlyWholeSegments(t *testing.T) {
 	cases := []struct {
 		apiPath string
@@ -50,10 +45,6 @@ func TestPathParamNamesReadsOnlyWholeSegments(t *testing.T) {
 	}
 }
 
-// TestWithUUIDPathIDsRefusesAMalformedIDBeforeTheHandlerRuns is the guard's
-// own contract: a value that cannot be an API id is answered by the routes
-// layer, so the handler never sees it and nothing reaches the database to be
-// rejected there as a server fault.
 func TestWithUUIDPathIDsRefusesAMalformedIDBeforeTheHandlerRuns(t *testing.T) {
 	reached := false
 	handler := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })
@@ -64,8 +55,7 @@ func TestWithUUIDPathIDsRefusesAMalformedIDBeforeTheHandlerRuns(t *testing.T) {
 		"0",
 		"gr_01HZZZZZZZZZZZZZZZZZZZZZZZ",
 		"",
-		// Shapes uuid.Parse accepts but this API never emits, and the
-		// database reads differently from the canonical form.
+		// Shapes uuid.Parse accepts but this API never emits.
 		"01a01b39000070008000000000000000",
 		"{01a01b39-0000-7000-8000-000000000000}",
 		"urn:uuid:01a01b39-0000-7000-8000-000000000000",
@@ -90,10 +80,7 @@ func TestWithUUIDPathIDsRefusesAMalformedIDBeforeTheHandlerRuns(t *testing.T) {
 	}
 }
 
-// TestWithUUIDPathIDsAcceptsEveryWellFormedID: only the spelling is judged.
-// Requiring UUIDv7 here would be wrong -- a well-formed id that names nothing
-// is a 404, not a malformed request, and the nil UUID is the canonical absent
-// id callers exercise the not-found path with.
+// The nil UUID must stay a 404, so the version is not checked.
 func TestWithUUIDPathIDsAcceptsEveryWellFormedID(t *testing.T) {
 	for _, wellFormed := range []string{
 		"01a01b39-0000-7000-8000-000000000000",
@@ -113,9 +100,6 @@ func TestWithUUIDPathIDsAcceptsEveryWellFormedID(t *testing.T) {
 	}
 }
 
-// TestWithUUIDPathIDsLeavesNonIDParametersAlone: not every path parameter is
-// an id. These two carry a name the caller chose and an identifier another
-// system minted, so guarding them would refuse values that are correct.
 func TestWithUUIDPathIDsLeavesNonIDParametersAlone(t *testing.T) {
 	cases := []struct {
 		apiPath string
@@ -135,8 +119,6 @@ func TestWithUUIDPathIDsLeavesNonIDParametersAlone(t *testing.T) {
 	}
 }
 
-// TestWithUUIDPathIDsChecksEveryIDParameter: a route with more than one id
-// must not stop at the first well-formed one.
 func TestWithUUIDPathIDsChecksEveryIDParameter(t *testing.T) {
 	handler := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	rec := pathIDRequest(t, "/v1/reviews/{review_id}/builds/{build_id}", handler, map[string]string{
@@ -151,9 +133,6 @@ func TestWithUUIDPathIDsChecksEveryIDParameter(t *testing.T) {
 	}
 }
 
-// TestWithUUIDPathIDsLeavesParameterlessRoutesUntouched: a pattern with no
-// id parameter has nothing to guard, so the request reaches the handler
-// unchanged.
 func TestWithUUIDPathIDsLeavesParameterlessRoutesUntouched(t *testing.T) {
 	reached := false
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

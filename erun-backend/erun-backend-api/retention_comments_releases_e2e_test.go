@@ -12,36 +12,8 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 )
 
-// End-to-end proof that the comments/releases retention sweep
-// (erun-backend-db/retention/comments_releases.sql) deletes exactly the rows
-// the design in erun-backend-db/AGENTS.md ("Review Comments And Releases")
-// says it should, and nothing else -- against a real migrated postgres:18.3.
-// Locks four properties directly against persisted database state:
-//
-//  1. releases past the 180-day age bound are deleted; releases within it
-//     survive.
-//  2. releases beyond the 1,000-most-recent-per-tenant count cap are deleted
-//     even when every row is well within the age bound.
-//  3. comments: an OPEN root thread is exempt from the 30-day age bound no
-//     matter how old it is; a CLOSED root thread past the bound is deleted
-//     together with every reply on it, even a reply younger than the bound; a
-//     CLOSED root thread within the bound survives.
-//  4. comments beyond the 5,000-most-recent-closed-root-per-tenant count cap
-//     are deleted even when every row is well within the age bound.
-//
-// It also proves dry_run=true reports the same counts but deletes nothing,
-// that both runs record their outcome in retention_runs, and -- driving the
-// real retention.sh entrypoint rather than psql directly -- that a plain
-// invocation with no ERUN_RETENTION_DRY_RUN set defaults to report-only and
-// that a run started while another session holds the advisory lock is
-// refused.
-//
-// The retention SQL is a psql script (:dry_run, \if), so it runs through the
-// real psql of a postgres:18.3 container, exactly as retention.sh runs it.
-// The sweep is global across tenants and its counts are asserted globally, so
-// it runs against a private clone of the package's migrated database: rows
-// other tests in this package leave behind can neither inflate the counts nor
-// be deleted by the real run.
+// Runs erun-backend-db/retention/comments_releases.sql through the real psql, against
+// a private database clone because the sweep and its counts are global.
 
 const (
 	retentionCRTenantReleasesAge = "00000000-0000-0000-0000-000000000001"
@@ -51,20 +23,8 @@ const (
 	retentionCRPolicy            = "comments_releases.sql"
 )
 
-// retentionCRFixtures is the shared fixture block.
-//
-// releases-age-tenant (RA): one release 200 days old (past the 180-day bound,
-// eligible), one release 10 days old (within it, survives).
-// releases-count-tenant (RC): 1005 releases, all seconds old, spaced one
-// second apart so ranking by created_at is deterministic. Only the 5 oldest
-// (beyond the 1,000-row cap) are eligible.
-// comments-age-tenant (CA): an OPEN root 200 days old (exempt regardless of
-// age), a CLOSED root 200 days old with a reply posted moments ago (the whole
-// thread is eligible, including the young reply), and a CLOSED root 5 days old
-// (within the 30-day bound, survives).
-// comments-count-tenant (CC): 5005 CLOSED root threads with no replies, all
-// seconds old, spaced one second apart. Only the 5 oldest (beyond the 5,000-row
-// cap) are eligible.
+// Each tenant isolates one property; rows are spaced one second apart so ranking by
+// created_at is deterministic.
 const retentionCRFixtures = `
 INSERT INTO tenants (tenant_id, name) VALUES
   ('00000000-0000-0000-0000-000000000001', 'releases-age-tenant'),
@@ -104,8 +64,6 @@ SELECT '00000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-00000000
 FROM generate_series(1, 5005) AS i;
 `
 
-// TestRetentionCommentsReleasesE2E sweeps comments and releases with the real
-// retention policy.
 func TestRetentionCommentsReleasesE2E(t *testing.T) {
 	ctx := context.Background()
 	hostURL, db := retentionCRCloneDatabase(t, ctx)
@@ -117,15 +75,11 @@ func TestRetentionCommentsReleasesE2E(t *testing.T) {
 	h.assertReleasesSurvivors()
 	h.assertCommentsSurvivors()
 
-	// --- retention.sh itself: default dry_run, and the advisory lock refuses a
-	//     second run while one is already in flight ---
 	entrypointEnv := []string{"ERUN_DATABASE_URL=" + h.psql.url}
 	h.entrypointDefaultsToDryRun(entrypointEnv)
 	h.entrypointRefusedWhileLocked(entrypointEnv)
 }
 
-// retentionCRHarness carries the cloned database and psql container shared by
-// the phases of TestRetentionCommentsReleasesE2E.
 type retentionCRHarness struct {
 	t    *testing.T
 	ctx  context.Context
@@ -161,7 +115,6 @@ func (h *retentionCRHarness) expectRun(table string, dryRun bool, column string,
 	}
 }
 
-// seed loads the fixtures and returns the initial release and comment counts.
 func (h *retentionCRHarness) seed() (int, int) {
 	t := h.t
 	t.Helper()
@@ -179,8 +132,6 @@ func (h *retentionCRHarness) seed() (int, int) {
 	return initialReleases, initialComments
 }
 
-// dryRun: reports the exact eligible counts, deletes nothing, and records its
-// outcome with zero deleted.
 func (h *retentionCRHarness) dryRun(initialReleases, initialComments int) {
 	t := h.t
 	t.Helper()
@@ -203,7 +154,6 @@ func (h *retentionCRHarness) dryRun(initialReleases, initialComments int) {
 	h.expectRun("comments", true, "deleted_count", 0, "the dry run must record 0 comments deleted in retention_runs")
 }
 
-// realRun deletes exactly the eligible rows and records matching counts.
 func (h *retentionCRHarness) realRun() {
 	t := h.t
 	t.Helper()
@@ -219,13 +169,11 @@ func (h *retentionCRHarness) realRun() {
 
 func (h *retentionCRHarness) assertReleasesSurvivors() {
 	h.t.Helper()
-	// 1. releases-age-tenant: the 200-day-old row is gone, the 10-day-old row survives.
 	h.expectCount(0, "the age-bound tenant's old release must be deleted",
 		`SELECT count(*) FROM releases WHERE tenant_id = $1 AND commit_id = 'ra-old'`, retentionCRTenantReleasesAge)
 	h.expectCount(1, "the age-bound tenant's young release must survive",
 		`SELECT count(*) FROM releases WHERE tenant_id = $1 AND commit_id = 'ra-young'`, retentionCRTenantReleasesAge)
 
-	// 2. releases-count-tenant: exactly 1,000 survive -- the 5 oldest are gone.
 	h.expectCount(1000, "the count-cap tenant must keep exactly 1000 releases",
 		`SELECT count(*) FROM releases WHERE tenant_id = $1`, retentionCRTenantReleasesCnt)
 	h.expectCount(0, "the count-cap tenant's 5 oldest releases must be deleted",
@@ -236,8 +184,6 @@ func (h *retentionCRHarness) assertReleasesSurvivors() {
 
 func (h *retentionCRHarness) assertCommentsSurvivors() {
 	h.t.Helper()
-	// 3. comments-age-tenant: OPEN root survives regardless of age, CLOSED-old
-	//    root and its reply are both gone, CLOSED-young root survives.
 	h.expectCount(1, "an OPEN root must survive no matter how old it is",
 		`SELECT count(*) FROM comments WHERE tenant_id = $1 AND file_path = 'ca-open-root'`, retentionCRTenantCommentsAge)
 	h.expectCount(0, "a CLOSED root past the age bound must be deleted",
@@ -247,7 +193,6 @@ func (h *retentionCRHarness) assertCommentsSurvivors() {
 	h.expectCount(1, "a CLOSED root within the age bound must survive",
 		`SELECT count(*) FROM comments WHERE tenant_id = $1 AND file_path = 'ca-closed-young-root'`, retentionCRTenantCommentsAge)
 
-	// 4. comments-count-tenant: exactly 5,000 closed roots survive -- the 5 oldest are gone.
 	h.expectCount(5000, "the count-cap tenant must keep exactly 5000 comments",
 		`SELECT count(*) FROM comments WHERE tenant_id = $1`, retentionCRTenantCommentsCnt)
 	h.expectCount(0, "the count-cap tenant's 5 oldest closed roots must be deleted",
@@ -256,8 +201,6 @@ func (h *retentionCRHarness) assertCommentsSurvivors() {
 		`SELECT count(*) FROM comments WHERE tenant_id = $1 AND file_path = 'cc-1'`, retentionCRTenantCommentsCnt)
 }
 
-// entrypointDefaultsToDryRun: a plain invocation with ERUN_RETENTION_DRY_RUN
-// unset must default to report-only and delete nothing.
 func (h *retentionCRHarness) entrypointDefaultsToDryRun(entrypointEnv []string) {
 	t := h.t
 	t.Helper()
@@ -275,10 +218,7 @@ func (h *retentionCRHarness) entrypointDefaultsToDryRun(entrypointEnv []string) 
 	}
 }
 
-// entrypointRefusedWhileLocked holds the advisory lock in another session and
-// confirms a concurrent retention.sh run is refused. The shell script held it
-// from a background psql for a fixed pg_sleep(5); a session of this test's own
-// holds it until explicitly released instead, so neither side races a timer.
+// A session holds the advisory lock until released, so neither side races a timer.
 func (h *retentionCRHarness) entrypointRefusedWhileLocked(entrypointEnv []string) {
 	t, ctx := h.t, h.ctx
 	t.Helper()
@@ -308,11 +248,8 @@ func (h *retentionCRHarness) entrypointRefusedWhileLocked(entrypointEnv []string
 	}
 }
 
-// retentionCRCloneDatabase creates a private copy of the package's migrated
-// database for this test and returns its host-side URL and an open handle.
-// CREATE DATABASE ... TEMPLATE needs the template idle; the package's tests
-// run serially and close their pools, so a short retry covers backends still
-// exiting after an earlier test's cleanup.
+// CREATE DATABASE ... TEMPLATE needs the template idle; the retry covers backends
+// still exiting from an earlier test.
 func retentionCRCloneDatabase(t *testing.T, ctx context.Context) (string, *sql.DB) {
 	t.Helper()
 	fresh := testpg.FreshURL(t)

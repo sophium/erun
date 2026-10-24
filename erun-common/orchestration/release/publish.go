@@ -8,13 +8,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// RunPublish mirrors an already-built version's images from the FROM registry to
-// each TO registry without deploying. It reuses deploy's spec resolution — so the
-// image set and any cluster-registry concretization match exactly what a deploy
-// would use — but runs only the from→to copy, never helm. This makes "publish the
-// tested image to the shared registry once I'm happy" a deliberate action rather
-// than a side effect of deploying. A version is required (deploy's contract), and
-// the env must mark a FROM source and at least one TO destination.
+// RunPublish copies an already-built version's images from the FROM registry to each
+// TO registry, using deploy's spec resolution but never running helm.
 func RunPublish(ctx core.Context, store deploy.DeployStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, resolveKubernetesDeployContext deploy.DeployContextResolverFunc, now shared.NowFunc, target deploy.DeployTarget) error {
 	specs, err := deploy.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {

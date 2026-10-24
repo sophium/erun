@@ -8,9 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestDeployNeedsBuildOrchestration locks the desktop's per-env-type deploy
-// policy here because the Playwright harness has no cluster or Docker daemon to
-// drive the real build -> push -> deploy end-to-end.
+// Tested here because the Playwright harness has no cluster or Docker daemon.
 func TestDeployNeedsBuildOrchestration(t *testing.T) {
 	openOf := func(envType config.EnvironmentType) config.OpenResult {
 		return config.OpenResult{EnvConfig: config.EnvConfig{Type: envType}}
@@ -29,10 +27,7 @@ func TestDeployNeedsBuildOrchestration(t *testing.T) {
 		{"runtime, forced: still no local build", openOf(config.EnvironmentTypeRuntime), "", true, false},
 		{"remote-agent: builds in its pod, not here", openOf(config.EnvironmentTypeRemoteAgent), "", false, false},
 		{"unresolved type: no orchestration", openOf(""), "", false, false},
-		// A host env also satisfies BuildsHere() && !RemoteRepo() (it builds
-		// here, on a local worktree) — the exact combination that used to mean
-		// "local-agent" before host existed. It has no pod to deploy to at
-		// all, so it must never need build orchestration, forced or not.
+		// A host env satisfies BuildsHere() && !RemoteRepo() but has no pod.
 		{"host: no pod to deploy to, regardless of version", openOf(config.EnvironmentTypeHost), "", false, false},
 		{"host, forced: still no pod to deploy to", openOf(config.EnvironmentTypeHost), "", true, false},
 	}
@@ -46,11 +41,7 @@ func TestDeployNeedsBuildOrchestration(t *testing.T) {
 	}
 }
 
-// TestDeployOrchestrationFailureReasonKeepsCompilerErrorNotTraceMarker locks
-// down that erun routes Info to stderr, so the captured stderr's first line
-// is always a progress marker like "==> Building" — never the actual
-// failure. The reason surfaced in the failure notification must keep the
-// compiler/tool error that follows it, not the marker.
+// erun routes Info to stderr, so its first line is always a "==>" marker.
 func TestDeployOrchestrationFailureReasonKeepsCompilerErrorNotTraceMarker(t *testing.T) {
 	err := &erunCommandError{
 		Command: "build",
@@ -66,8 +57,6 @@ func TestDeployOrchestrationFailureReasonKeepsCompilerErrorNotTraceMarker(t *tes
 	}
 }
 
-// TestDeployOrchestrationFailureReasonFallsBackWithNoDetail covers a process
-// that exited non-zero before producing any captured stderr at all.
 func TestDeployOrchestrationFailureReasonFallsBackWithNoDetail(t *testing.T) {
 	err := &erunCommandError{Command: "deploy", Err: errors.New("exit status 1")}
 	got := deployOrchestrationFailureReason(err)
@@ -76,9 +65,6 @@ func TestDeployOrchestrationFailureReasonFallsBackWithNoDetail(t *testing.T) {
 	}
 }
 
-// TestDeployOrchestrationFailureReasonTruncatesTail covers the length cap:
-// the cap must keep the tail (where the actual error sits) rather than the
-// head, mirroring the marker-stripping behavior above.
 func TestDeployOrchestrationFailureReasonTruncatesTail(t *testing.T) {
 	long := strings.Repeat("x", 400) + " THE_REAL_ERROR_AT_THE_END"
 	err := &erunCommandError{Command: "build", Err: errors.New("exit status 1"), Detail: long}
@@ -91,8 +77,6 @@ func TestDeployOrchestrationFailureReasonTruncatesTail(t *testing.T) {
 	}
 }
 
-// TestParseBuildResultVersion covers pulling the minted version out of
-// `erun build --output json` stdout even when it carries surrounding noise.
 func TestParseBuildResultVersion(t *testing.T) {
 	cases := []struct {
 		name   string

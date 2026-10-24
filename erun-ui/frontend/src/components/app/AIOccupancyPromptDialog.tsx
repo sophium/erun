@@ -14,8 +14,6 @@ import { cancelAIOccupancyPrompt, confirmAIOccupancyPrompt } from '@/app/aiOccup
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { InlineAlert } from '@/components/app/InlineAlert';
 
-// heldSince renders a lease's age in the coarsest unit that stays readable —
-// "started just now" reads better than "started 0m ago" for a fresh lease.
 function heldSince(secondsHeld: number | undefined): string {
   if (!secondsHeld || secondsHeld < 60) {
     return 'started just now';
@@ -29,12 +27,8 @@ function heldSince(secondsHeld: number | undefined): string {
   return `running for ${String(hours)}h${remainingMinutes ? String(remainingMinutes) + 'm' : ''}`;
 }
 
-// AIOccupancyPromptDialog is "confirm, don't silently start a second agent":
-// opening the AI tab found the environment already held by
-// another job's activity lease. Starting anyway is a deliberate choice, not a
-// blocked one — there are legitimate reasons to run two (a long build in one,
-// a quick question in the other) — so this names the occupant and lets the
-// operator choose rather than refusing outright.
+// AIOccupancyPromptDialog lets the operator start a second agent deliberately
+// when another job already holds the environment.
 export function AIOccupancyPromptDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const prompt = useAppSelector((state) => state.aiOccupancyPrompt);

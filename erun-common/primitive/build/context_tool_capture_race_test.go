@@ -9,22 +9,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// TestToolCaptureDrainsHeavyOutputConcurrently exercises Context.ToolCapture
-// the same way build_docker_commands_race_test.go exercises the docker build
-// wiring: at VerbosityDebug, ToolCapture used to build cmd.Stdout and
-// cmd.Stderr from two independently-built teeWriter/io.MultiWriter calls that
-// both wrote into the same shared *bytes.Buffer, so os/exec's two per-stream
-// copier goroutines wrote it with no synchronization -- the same shape
-// deploy.go's helmOutputCapture exists to avoid for helm deploy. ToolCapture
-// backs cluster_registry_kubectl.go, doctor_remote_init.go, and terraform.go.
+// Both streams write one shared capture buffer from separate copier goroutines.
 func TestToolCaptureDrainsHeavyOutputConcurrently(t *testing.T) {
 	stub := writeExecutableScript(t, heavyDualStreamScript)
 
 	for _, verbosity := range []int{core.VerbosityInfo, core.VerbosityDebug} {
-		// Stdout/Stderr must be non-nil at VerbosityDebug: teeWriter shortcuts
-		// to returning the bare capture buffer unwrapped when its primary
-		// writer is nil, which would collapse stdout/stderr onto the exact
-		// same object (safe) and mask the very bug this test exists to catch.
+		// Non-nil writers keep teeWriter from collapsing both streams onto one object and masking the race.
 		ctx := core.Context{Verbosity: verbosity, Stdout: io.Discard, Stderr: io.Discard}
 		capture := ctx.ToolCapture()
 		cmd := core.Command(stub)

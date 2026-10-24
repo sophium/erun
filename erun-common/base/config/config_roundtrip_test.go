@@ -7,10 +7,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestMarshalConfigPreservingUnknownFieldsStillClearsKnownFields guards
-// against over-correcting into "never write a delete": a field the current
-// binary's type does know about, now empty, must still disappear from the
-// written document rather than being resurrected from the old file.
 func TestMarshalConfigPreservingUnknownFieldsStillClearsKnownFields(t *testing.T) {
 	existing, err := yaml.Marshal(EnvConfig{
 		Name:               "prod",
@@ -39,10 +35,6 @@ func TestMarshalConfigPreservingUnknownFieldsStillClearsKnownFields(t *testing.T
 	}
 }
 
-// TestMarshalConfigPreservingUnknownFieldsSurvivesUnknownTopLevelKey covers
-// the simpler top-level case: a whole key this binary's ERunConfig type has
-// never declared (e.g. a field added by a newer release) survives a save from
-// this older type.
 func TestMarshalConfigPreservingUnknownFieldsSurvivesUnknownTopLevelKey(t *testing.T) {
 	existing := []byte("defaulttenant: frs\nfutureField:\n  nested: true\n  value: 42\n")
 
@@ -64,11 +56,8 @@ func TestMarshalConfigPreservingUnknownFieldsSurvivesUnknownTopLevelKey(t *testi
 	}
 }
 
-// TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey guards the
-// one-way migration documented on migrateLegacyContainerRegistry: a legacy
-// scalar key UnmarshalYAML migrated into a current field must disappear on
-// the next save, not survive as an "unknown" field; otherwise the next load
-// re-migrates it and clobbers whatever roles the operator just set.
+// TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey: a surviving legacy
+// key would re-migrate on every load.
 func TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey(t *testing.T) {
 	existing := []byte("name: alpha\ncontainerregistry: registry.example/test\ntype: local-agent\n")
 
@@ -80,8 +69,6 @@ func TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey(t *testing.T
 		t.Fatalf("legacy scalar did not migrate: %+v", loaded)
 	}
 
-	// Mirrors what the desktop does for a local-agent env: the marked list
-	// moves to the project config, so the env's own ContainerRegistries clears.
 	cleared := loaded
 	cleared.ContainerRegistries = nil
 
@@ -102,9 +89,6 @@ func TestMarshalConfigPreservingUnknownFieldsDropsMigratedLegacyKey(t *testing.T
 	}
 }
 
-// TestMarshalConfigPreservingUnknownFieldsNoExistingFile covers the plain
-// first-write path: with nothing to preserve, the output is just the ordinary
-// marshal of config.
 func TestMarshalConfigPreservingUnknownFieldsNoExistingFile(t *testing.T) {
 	out, err := MarshalConfigPreservingUnknownFields(nil, ERunConfig{DefaultTenant: "frs"})
 	if err != nil {
@@ -119,9 +103,7 @@ func TestMarshalConfigPreservingUnknownFieldsNoExistingFile(t *testing.T) {
 	}
 }
 
-// staleCloudProviderConfig models a binary built before CloudProviderConfig
-// grew its ERun field: same shape, minus the field this test's "old" binary
-// cannot represent. Marshaling it is exactly what an old desktop build did.
+// staleCloudProviderConfig is CloudProviderConfig before it grew its ERun field.
 type staleCloudProviderConfig struct {
 	Alias         string `yaml:"alias"`
 	Provider      string `yaml:"provider"`
@@ -135,9 +117,6 @@ type staleERunConfig struct {
 	CloudProviders []staleCloudProviderConfig `yaml:"cloudproviders,omitempty"`
 }
 
-// TestMarshalConfigPreservingUnknownFieldsSurvivesNestedUnknownBlock checks
-// that a component whose struct type has no ERun field does not
-// delete config.yaml's "erun:" sub-block when it saves the same document.
 func TestMarshalConfigPreservingUnknownFieldsSurvivesNestedUnknownBlock(t *testing.T) {
 	existing, err := yaml.Marshal(ERunConfig{
 		DefaultTenant: "frs",
@@ -158,8 +137,6 @@ func TestMarshalConfigPreservingUnknownFieldsSurvivesNestedUnknownBlock(t *testi
 		t.Fatalf("seed marshal: %v", err)
 	}
 
-	// The stale binary re-saves the same alias, adding nothing, using a type
-	// that has never heard of CloudProviderConfig.ERun.
 	stale := staleERunConfig{
 		DefaultTenant: "frs",
 		CloudProviders: []staleCloudProviderConfig{{

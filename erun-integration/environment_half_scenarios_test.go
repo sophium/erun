@@ -11,18 +11,14 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// These scenarios cover the off-environment half: run from the operator's
-// machine, idle/job/lease must answer about, and act on, the environment rather
-// than the machine they were typed on. Each pins its own local port so the fake
-// edge never collides with a live erun session or with another scenario's edge.
+// Off-environment scenarios: idle/job/lease act on the environment through its
+// edge. Each pins its own port so fake edges never collide.
 const (
 	idleEdgeLocalPort  = 26200
 	jobEdgeLocalPort   = 26300
 	leaseEdgeLocalPort = 26400
 )
 
-// idleStatusPayload is an environment reporting itself busy: a lease is held, so
-// nothing about this status can be produced by reading the caller's own store.
 const idleStatusPayload = `{"content":[{"type":"text","text":"idle"}],"structuredContent":{` +
 	`"policy":{"timeout":300000000000,"workingHours":"08:00-20:00","idleTrafficBytes":0},` +
 	`"managedCloud":true,"stopEligible":false,"stopBlockedReason":"a lease is held",` +
@@ -33,9 +29,7 @@ const idleStatusPayload = `{"content":[{"type":"text","text":"idle"}],"structure
 
 func TestIdleOffEnvironment(t *testing.T) {
 	t.Run("reports_the_environments_own_answer", func(t *testing.T) {
-		// The environment says a lease is holding it busy. Read from the caller's
-		// own store the same command answers "idle" for every marker, which is the
-		// defect: a status that does not depend on the environment is not its status.
+		// A status read from the caller's own store would say "idle" regardless.
 		skipIfPortsBusy(t, idleEdgeLocalPort)
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", idleEdgeLocalPort)
@@ -49,8 +43,7 @@ func TestIdleOffEnvironment(t *testing.T) {
 		}
 		golden.Equal(t, "idle/off_environment_reports_the_environments_own_answer", normalize.Apply(result.Combined))
 
-		// Asking whether the environment is idle must not itself count as
-		// activity, or polling this command holds the environment awake forever.
+		// An idle check must not count as activity, or polling keeps the env awake.
 		call := edge.requestFor(t, "tools/call")
 		if !call.IdleProbe {
 			t.Errorf("expected the idle call to carry the idle-probe header so it does not reset the environment's idle timer")
@@ -58,9 +51,6 @@ func TestIdleOffEnvironment(t *testing.T) {
 	})
 
 	t.Run("unreachable_edge_is_not_reported_as_idle", func(t *testing.T) {
-		// The whole point: a check that cannot see the environment must not answer
-		// for it. Nothing is listening on the env's port, which is the same thing an
-		// operator sees before `erun open`.
 		skipIfPortsBusy(t, idleEdgeLocalPort)
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", idleEdgeLocalPort)
@@ -102,28 +92,16 @@ func TestJobOffEnvironment(t *testing.T) {
 	t.Run("start_agent_runs_the_agent_in_the_environment", testJobOffEnvironmentStartAgentRunsTheAgentInTheEnvironment)
 	t.Run("status_lists_every_job_when_no_id_is_given", testJobOffEnvironmentStatusListsEveryJobWhenNoIdIsGiven)
 
-	// A genuinely unresolved target (the edge's own runtime image predates the
-	// tenant/environment plumbing fix, or the pod was started with no bound
-	// context of its own) must still error -- and the message an operator
-	// actually sees has to name which tool refused and what would satisfy it,
-	// not a bare "tenant and environment are required" dead end that names no
-	// tool, no caller, and no recovery.
 	t.Run("status_reports_the_tool_and_the_remedy_when_the_target_is_unresolved", testJobOffEnvironmentStatusReportsTheToolAndTheRemedyWhenTheTargetIsUnresolved)
 }
 
 func testJobOffEnvironmentStartRunsTheWorkInTheEnvironment(t *testing.T) {
-	// The handle comes back naming the environment's own log path and the pid of
-	// a process there. Started on the caller's machine instead, the job would
-	// report a local path and a local pid, and the environment would never see
-	// the lease that keeps idle-stop off the work.
+	// A job started locally would hold no lease against the environment's idle-stop.
 	skipIfPortsBusy(t, jobEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
 	fixture.SeedDesktopIdentity(t, setup)
-	// Starting a plain command remotely goes through exec_raw's wait:false
-	// mode, whose own response only confirms
-	// the background start, so the CLI follows up with one exec_job_status
-	// call to learn the full record -- both need their own canned answer.
+	// wait:false only confirms the start, so the CLI follows up with exec_job_status.
 	edge := &fakeMCPEdge{ToolResults: map[string]string{
 		"exec_raw": `{"content":[{"type":"text","text":"started"}],` +
 			`"structuredContent":{"executed":true,"jobId":"suite","state":"running","wait":false}}`,
@@ -152,30 +130,19 @@ func testJobOffEnvironmentStartRunsTheWorkInTheEnvironment(t *testing.T) {
 	if calls[0].Tool != "exec_raw" {
 		t.Fatalf("the environment was asked for %q first, want exec_raw", calls[0].Tool)
 	}
-	// exec_raw does real work in the environment, so it must count as
-	// activity like any other action — never carry the idle-probe header.
 	if calls[0].IdleProbe {
 		t.Errorf("exec_raw must not carry the idle-probe header: it starts real work in the environment")
 	}
 	if calls[1].Tool != "exec_job_status" {
 		t.Fatalf("the environment was asked for %q second, want exec_job_status", calls[1].Tool)
 	}
-	// This host already resolved team/dev to reach this edge, and must
-	// restate it in the call itself rather than leaving the tool to infer it
-	// from the server's own bound context.
 	for _, call := range calls {
 		assertToolArgumentsNameTarget(t, call, "team", "dev")
 	}
 }
 
 func testJobOffEnvironmentStartForwardsThisProcessJobIdAsStartedByJobId(t *testing.T) {
-	// The MCP edge's own server process has no ERUN_JOB_ID of its own to
-	// inherit -- it was never itself started as anyone's job -- so a start
-	// forwarded off-environment would otherwise never record its real
-	// parent no matter how deep the logical nesting is on the calling
-	// side. This is what an off-environment start (this job's own worker
-	// running elsewhere, calling out to start work here) threads
-	// explicitly instead of relying on that inheritance.
+	// The edge process has no ERUN_JOB_ID to inherit, so the parent is passed explicitly.
 	skipIfPortsBusy(t, jobEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
@@ -220,8 +187,6 @@ func testJobOffEnvironmentStartDryRunTracesTheEnvironmentCall(t *testing.T) {
 
 func testJobOffEnvironmentAMalformedRequestFailsBeforeReachingTheEdge(t *testing.T) {
 	t.Parallel()
-	// A request that is wrong on its face is refused for that, not for whatever
-	// the edge happened to answer — so the error does not change with connectivity.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--", "work"},
@@ -233,9 +198,6 @@ func testJobOffEnvironmentAMalformedRequestFailsBeforeReachingTheEdge(t *testing
 }
 
 func testJobOffEnvironmentAwaitMapsTheEnvironmentsOutcomeOntoTheExitCode(t *testing.T) {
-	// The exit-code contract is what a shell caller branches on, so it has to
-	// survive the hop: a still-running job is 124 whether the wait happened here
-	// or in the environment.
 	skipIfPortsBusy(t, jobEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
@@ -252,8 +214,6 @@ func testJobOffEnvironmentAwaitMapsTheEnvironmentsOutcomeOntoTheExitCode(t *test
 	}
 	golden.Equal(t, "job/off_environment_await_maps_the_environments_outcome_onto_the_exit_code", normalize.Apply(result.Combined))
 
-	// Waiting on a job is a read of its state, not new activity in the
-	// environment.
 	call := edge.requestFor(t, "tools/call")
 	if !call.IdleProbe {
 		t.Errorf("expected job_await to carry the idle-probe header")
@@ -261,8 +221,6 @@ func testJobOffEnvironmentAwaitMapsTheEnvironmentsOutcomeOntoTheExitCode(t *test
 }
 
 func testJobOffEnvironmentStatusReadsTheEnvironmentsJobState(t *testing.T) {
-	// job_status is a pure read, same reasoning as idle: polling an
-	// environment's job status must not itself keep it awake.
 	skipIfPortsBusy(t, jobEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
@@ -290,8 +248,6 @@ func testJobOffEnvironmentStatusReadsTheEnvironmentsJobState(t *testing.T) {
 }
 
 func testJobOffEnvironmentOutputReadsTheEnvironmentsCapturedOutput(t *testing.T) {
-	// job_output is a pure read too: it serves a page of already-captured
-	// output, so reading it must not reset the environment's idle timer.
 	skipIfPortsBusy(t, jobEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
@@ -317,10 +273,6 @@ func testJobOffEnvironmentOutputReadsTheEnvironmentsCapturedOutput(t *testing.T)
 }
 
 func testJobOffEnvironmentAttachTracksTheEnvironmentsProcess(t *testing.T) {
-	// attach takes an activity lease on the environment, so -- like start --
-	// it must reach the environment's own exec_job_attach tool rather than
-	// resolve against the caller's local job store, and it must not carry
-	// the idle-probe header the read-only verbs above do.
 	skipIfPortsBusy(t, jobEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
@@ -350,9 +302,6 @@ func testJobOffEnvironmentAttachTracksTheEnvironmentsProcess(t *testing.T) {
 
 func testJobOffEnvironmentAttachAMalformedRequestFailsBeforeReachingTheEdge(t *testing.T) {
 	t.Parallel()
-	// A nameless attach is invalid on its face -- refused before the call
-	// ever reaches the environment's edge, the same shape as job start's
-	// equivalent refusal above.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"job", "attach", "--tenant", "team", "--environment", "dev", "--pid", "4242"},
@@ -363,9 +312,6 @@ func testJobOffEnvironmentAttachAMalformedRequestFailsBeforeReachingTheEdge(t *t
 }
 
 func testJobOffEnvironmentCancelSignalsTheEnvironmentsJob(t *testing.T) {
-	// cancel mutates the environment's process group, so it too must reach
-	// exec_job_cancel rather than resolve locally, and must not carry the
-	// idle-probe header.
 	skipIfPortsBusy(t, jobEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
@@ -394,10 +340,6 @@ func testJobOffEnvironmentCancelSignalsTheEnvironmentsJob(t *testing.T) {
 }
 
 func testJobOffEnvironmentStartAgentRunsTheAgentInTheEnvironment(t *testing.T) {
-	// --agent takes the exec_agent tool instead of exec_raw -- a materially
-	// different request shape (a prompt, not an argv) -- so it needs its own
-	// off-environment scenario rather than assuming exec_raw's coverage
-	// above carries over.
 	skipIfPortsBusy(t, jobEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
@@ -428,11 +370,7 @@ func testJobOffEnvironmentStartAgentRunsTheAgentInTheEnvironment(t *testing.T) {
 }
 
 func testJobOffEnvironmentStatusListsEveryJobWhenNoIdIsGiven(t *testing.T) {
-	// Omitting --id asks for every retained job rather than one. The
-	// environment's reply carries no single "job" field at all here (the
-	// shape a real edge sends back for a list request), which is what
-	// exercises the list branch's own nil-jobs normalization rather than
-	// the single-job branch above.
+	// The list reply carries no "job" field.
 	skipIfPortsBusy(t, jobEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", jobEdgeLocalPort)
@@ -491,8 +429,6 @@ func TestActivityLeaseOffEnvironment(t *testing.T) {
 }
 
 func testActivityLeaseOffEnvironmentTakeHoldsTheLeaseInTheEnvironment(t *testing.T) {
-	// A lease taken on the caller's machine defers nothing: it is the
-	// environment's idle-stop the lease exists to hold off.
 	skipIfPortsBusy(t, leaseEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", leaseEdgeLocalPort)
@@ -515,17 +451,12 @@ func testActivityLeaseOffEnvironmentTakeHoldsTheLeaseInTheEnvironment(t *testing
 	if call.Tool != "activity_lease_take" {
 		t.Fatalf("the environment was asked for %q, want activity_lease_take", call.Tool)
 	}
-	// Taking a lease is a deliberate claim on the environment's busy state, so
-	// it must count as activity, not be exempted via the idle-probe header.
 	if call.IdleProbe {
 		t.Errorf("activity_lease_take must not carry the idle-probe header")
 	}
 }
 
 func testActivityLeaseOffEnvironmentTakeExclusiveForwardsTheExclusiveClaimToTheEnvironment(t *testing.T) {
-	// Exclusive mode has to reach the environment the same way
-	// plain presence already does: through activity_lease_take, counting
-	// as activity, never as an idle probe.
 	skipIfPortsBusy(t, leaseEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", leaseEdgeLocalPort)
@@ -576,8 +507,6 @@ func testActivityLeaseOffEnvironmentListReadsTheEnvironmentsHeldLeases(t *testin
 	if call.Tool != "activity_lease_list" {
 		t.Fatalf("the environment was asked for %q, want activity_lease_list", call.Tool)
 	}
-	// Listing leases only observes them, so it must not itself count as
-	// activity.
 	if !call.IdleProbe {
 		t.Errorf("expected activity_lease_list to carry the idle-probe header")
 	}

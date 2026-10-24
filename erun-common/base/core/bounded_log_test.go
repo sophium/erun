@@ -66,21 +66,14 @@ func TestOpenBoundedAppendLogLeavesAnUnderCapLogAlone(t *testing.T) {
 	}
 }
 
-// TestRotateOversizedLogReportsWhatItDid covers the exported re-check a caller
-// holding an already-open log needs: OpenBoundedAppendLog hides the answer
-// behind the open it performs, so a caller re-applying the cap to a long-lived
-// writer has to be told whether anything actually moved.
 func TestRotateOversizedLogReportsWhatItDid(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "forward.log")
 
-	// Nothing there yet: nothing to rotate, and nothing reported.
 	if RotateOversizedLog(path, testBoundedLogMaxBytes) {
 		t.Error("expected no rotation for a log that does not exist")
 	}
 
-	// At the cap is left exactly as it is, so the run an operator opens the
-	// file to read is still there.
 	under := strings.Repeat("x", testBoundedLogMaxBytes)
 	if err := os.WriteFile(path, []byte(under), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -93,8 +86,6 @@ func TestRotateOversizedLogReportsWhatItDid(t *testing.T) {
 		t.Errorf("expected the under-cap log untouched, got %d bytes (err %v)", len(got), err)
 	}
 
-	// Over the cap rolls aside to the ".1" generation, and says so, because
-	// the caller is the only one that can report it.
 	if err := os.WriteFile(path, []byte(under+"y"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}

@@ -27,9 +27,7 @@ type ObserveInput struct {
 	Verbosity   int                       `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
-// ObserveTool is read-only by construction: RunObservation issues only
-// `kubectl get`, so this tool carries the erun:read capability rather than
-// erun:admin (see mcpReadOnlyTools), unlike raw or doctor's recovery actions.
+// ObserveTool only runs `kubectl get`, so it needs erun:read, not erun:admin.
 func ObserveTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ObserveInput) (*mcp.CallToolResult, observe.ObserveResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ObserveInput) (*mcp.CallToolResult, observe.ObserveResult, error) {
 		target, err := resolveObserveOpenResult(runtime, input)
@@ -54,11 +52,7 @@ func observeSecretChecksFromInput(inputs []ObserveSecretCheckInput) []observe.Ob
 	return checks
 }
 
-// resolveObserveOpenResult resolves tenant/environment through
-// resolveLocalTarget -- the same refusal every other typed MCP tool in this
-// module applies -- before asking the store to resolve the rest of the
-// OpenResult, so `observe` can never be pointed at a different environment
-// than the one this server's pod actually runs in.
+// resolveObserveOpenResult pins tenant/environment to this pod's environment.
 func resolveObserveOpenResult(runtime sharedpkg.RuntimeConfig, input ObserveInput) (config.OpenResult, error) {
 	tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {

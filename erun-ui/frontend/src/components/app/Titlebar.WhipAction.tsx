@@ -33,18 +33,8 @@ const whipButtonClassName =
 
 const whipLabel = 'Whip: push the focused target, or choose which ones to push';
 
-// useWhipAutoDismiss is the whip popover's auto-dismiss gate, pulled out of
-// TitlebarWhipAction so that component stays under the file's function-length
-// budget. A fully successful report auto-dismisses after the app's
-// established transient duration, matching notificationThunks' own
-// success/info rule -- anything else (capped/failed/skipped, or a call
-// failure) stays on screen until the operator closes it, since that is the
-// one place a push's real outcome is reported. Keyed on
-// [outcome, pending, hovered] rather than starting the timer from onWhip
-// directly: a fresh open nulls outcome (TitlebarWhipAction's onOpenChange),
-// which reruns this effect and clears any timer left over from a previous
-// report before the new pass even starts, so a second whip issued before the
-// first timer fires can never dismiss the new report early.
+// useWhipAutoDismiss auto-dismisses only a fully successful report. A fresh open
+// nulls outcome, rerunning the effect and clearing any earlier timer.
 function useWhipAutoDismiss({
   pending,
   outcome,
@@ -74,24 +64,8 @@ function whipButtonLabel(count: number): string {
   return `Whip ${String(count)} target${count === 1 ? '' : 's'}`;
 }
 
-// TitlebarWhipAction is the operator-triggered whip control. Whipping is a
-// write into a live AI session, not a read, so a click never fans out to
-// every configured environment and orchestrator on its own:
-// opening the popover preselects only the sidebar's current focus, and the
-// selection surface underneath (TitlebarWhipTargetPicker) is where "actually,
-// more than that" becomes a deliberate choice, with the three group shortcuts
-// and a primary action that states the count before it acts. Nothing here
-// persists between opens -- every open starts over from the current focus,
-// never a previous invocation's selection.
-//
-// It lives in the titlebar rather than on a per-row control, beside the other
-// action-with-a-reported-outcome affordances the titlebar's status surface
-// already carries (Titlebar.Status.tsx's StatusWaitAction /
-// StatusRestartOrchestratorAction). Its outcome renders inline in the same
-// popover rather than as a detached notification or an Activity Queue entry:
-// erun-ui/AGENTS.md's Design-Language Decision Record reserves a detached
-// surface for outcomes that resolve after the user has moved on, and a whip
-// pass resolves in seconds while the button is still on screen.
+// TitlebarWhipAction writes into live AI sessions, so each open preselects only
+// the sidebar's current focus; widening the selection is deliberate.
 export function TitlebarWhipAction(): React.ReactElement {
   const dispatch = useAppDispatch();
   const defaultTarget = useAppSelector(selectWhipDefaultTarget);
@@ -104,9 +78,7 @@ export function TitlebarWhipAction(): React.ReactElement {
     defaultWhipTargetSelection(null),
   );
   const [hovered, setHovered] = React.useState(false);
-  // setOpen is a stable dispatch reference, so this callback never changes
-  // identity -- useWhipAutoDismiss's effect must not re-run (and restart its
-  // timer) on every unrelated re-render.
+  // Stable identity so useWhipAutoDismiss does not restart its timer.
   const onAutoDismiss = React.useCallback(() => {
     setOpen(false);
   }, []);
@@ -118,9 +90,6 @@ export function TitlebarWhipAction(): React.ReactElement {
       if (!next) {
         return;
       }
-      // A fresh open always starts over: no leftover selection or report from
-      // a previous invocation, and the default is recomputed from whatever the
-      // sidebar is focused on right now.
       setOutcome(null);
       setSelection(defaultWhipTargetSelection(defaultTarget));
       setTargetsLoading(true);
@@ -134,10 +103,7 @@ export function TitlebarWhipAction(): React.ReactElement {
 
   const onWhip = React.useCallback(() => {
     setPending(true);
-    // Re-resolve the population immediately before pushing, not just at open
-    // or at the last "select all" click: an "all" category follows whoever is
-    // eligible right now, including an orchestrator that started after the
-    // popover opened: group selects follow the population, not a snapshot.
+    // Re-resolve right before pushing so group selects follow the current population.
     void dispatch(whipTargets()).then((freshTargets) => {
       const refs = resolveWhipTargetRefs(selection, freshTargets);
       void dispatch(whipNow(refs)).then((result) => {
@@ -151,12 +117,7 @@ export function TitlebarWhipAction(): React.ReactElement {
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      {/* No asChild here: PopoverAnchor's Slot-based asChild clones its
-          single child looking for one forwarded DOM ref, and IconTooltip is
-          a plain component that does not forward one, so the anchor rect
-          Popper measures against silently stays unset and the content
-          renders off-position. Rendering PopoverAnchor's own real wrapper div
-          keeps a genuine DOM node to anchor against. */}
+      {/* No asChild: IconTooltip does not forward a ref, so the anchor would stay unset. */}
       <PopoverAnchor>
         <IconTooltip label={whipLabel}>
           <Button
@@ -226,9 +187,6 @@ function WhipPopoverBody({
   onWhip: () => void;
   onClose: () => void;
 }): React.ReactElement {
-  // The report view replaces the picker (and its own selection controls)
-  // below, so the header's whip action follows the same gate: it only makes
-  // sense to show while there is a selection left to act on.
   const showPicker = !outcome && !pending;
   return (
     <div role="region" aria-label="Whip" className="flex max-h-[70vh] flex-col">

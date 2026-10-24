@@ -8,15 +8,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// ResolveReviewRepository answers which repository a review belongs to: the
-// remote the caller named, or the checkout they are standing in when they
-// named none. A command that always runs against the repository the operator
-// is in should not make them retype its remote to be usable at all.
-//
-// It is an error, not an empty answer, when neither names a repository: a
-// review whose repository cannot be recorded cannot be placed in any
-// repository's merge queue, and creating one anyway is the dead end this
-// resolution exists to prevent.
+// ResolveReviewRepository returns the named remote, else the checkout's origin.
+// Naming neither is an error: a review without a repository can never be queued.
 func ResolveReviewRepository(ctx core.Context, remoteURL, traceLabel string) (string, error) {
 	remote := strings.TrimSpace(remoteURL)
 	if remote == "" {

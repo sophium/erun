@@ -45,8 +45,7 @@ afterEach(() => {
 });
 
 function fillRequiredFields(name: string, issuer: string): void {
-  // Anchored regexes: a plain substring match on "Name" would also hit the
-  // "Display name (optional)" label further down the form.
+  // Anchored so "Name" does not also match "Display name (optional)".
   fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: name } });
   fireEvent.change(screen.getByLabelText(/^Issuer/), { target: { value: issuer } });
 }
@@ -76,12 +75,9 @@ describe('TenantsPanel', () => {
     });
     renderWithStore(<TenantsPanel token="dev-token" docsUrl={undefined} />);
     expect(await screen.findByText('acme')).toBeInTheDocument();
-    // Scoped to a table cell: the create form's own Type select also defaults
-    // to displaying "COMPANY", so a bare getByText would be ambiguous.
+    // A cell, because the create form's Type select also shows "COMPANY".
     expect(screen.getByRole('cell', { name: 'COMPANY' })).toBeInTheDocument();
-    // The response carried no userCount at all (a read path that never
-    // counts) -- this must render as "unresolved", never as the same "0
-    // users" badge a genuinely empty tenant gets.
+    // A missing userCount is unknown, not zero.
     expect(screen.getByText('Unknown')).toBeInTheDocument();
     expect(screen.queryByText('No users')).not.toBeInTheDocument();
   });
@@ -120,10 +116,6 @@ describe('TenantsPanel', () => {
     expect(screen.queryByText('Unknown')).not.toBeInTheDocument();
   });
 
-  // The other half of "unreachable in silence": a tenant whose issuer mapping
-  // no token can resolve through is listed identically to a healthy one
-  // unless the row itself says otherwise. POST /v1/tenants refuses to create
-  // that shape now, so this is for the rows a platform already carries.
   it('flags a tenant no token can resolve to, distinctly from one whose state was not computed', async () => {
     mockFetch((req) => {
       if (req.url === '/v1/tenants' && req.method === 'GET') {
@@ -211,7 +203,6 @@ describe('TenantsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Register tenant' }));
 
     expect(await screen.findByText(/no hyphens/)).toBeInTheDocument();
-    // Not rendered as the generic "create tenant failed (400)" banner.
     expect(screen.queryByText(/Could not register tenant/)).not.toBeInTheDocument();
   });
 
@@ -291,11 +282,7 @@ describe('TenantsPanel', () => {
         ]);
       }
       if (req.url === '/v1/quota?tenantId=tn-1' && req.method === 'GET') {
-        // Deliberately resolved on a later task. The dialog mounts its fields
-        // empty and seeds them from this read, so serving it synchronously
-        // would let the assertions below pass without ever exercising the
-        // order a real network produces -- the order that let a racy
-        // assertion on the mounted input's value go unnoticed.
+        // Resolve late so the form's seed-after-mount ordering is exercised.
         await new Promise((r) => setTimeout(r, 100));
         return jsonResponse({
           tenantId: 'tn-1',
@@ -319,12 +306,7 @@ describe('TenantsPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Set quota' }));
     expect(screen.getByText('Set quota for acme')).toBeInTheDocument();
-    // The dialog renders its fields empty and seeds them from the target
-    // tenant's caps once that read lands (TenantQuotaDialog's resync effect),
-    // so the input's mere existence is not the condition under test: an empty
-    // `type="number"` input reads as null, and asserting on it as soon as it
-    // mounts races the seed. Wait for the value the assertion is actually
-    // about instead.
+    // The form seeds after mount; wait for the value, not the input.
     await waitFor(() => {
       expect(screen.getByLabelText(/^Environments/)).toHaveValue(3);
     });
@@ -383,7 +365,6 @@ describe('TenantsPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Enroll user' }));
     const dialog = await screen.findByRole('dialog');
-    // Told before confirming, not discovered after: the notice is visible as soon as the dialog opens.
     expect(within(dialog).getByText(/will be granted TenantAdmin/)).toBeInTheDocument();
 
     fireEvent.change(within(dialog).getByLabelText('Username', { exact: false }), {

@@ -21,33 +21,16 @@ import type { Job, JobFilter, JobStatus } from '../app/api/jobsApi';
 import type { JobsState } from './controller';
 import { useJobsController } from './controller';
 
-// JobsPanel answers, without the operator knowing any job ids: what is being
-// worked on right now, by whom, and what recent work finished. It is the
-// console's counterpart to `erun job list`.
-//
-// Two rules shape what this renders:
-//
-//   - The row shows the *summary* and never the command. A job's summary is
-//     prose by contract (the API refuses one that is only a shell command),
-//     and the pod's own job record keeps the command line as technical
-//     detail. There is deliberately no field here that could render it.
-//   - RUNNING is the queue; everything else is history. The live work leads,
-//     grouped by job type, because that is the grouping an operator scans for
-//     "is anyone gating?" or "is anyone fixing that issue?".
+// A row shows the job's prose summary, never its command line.
 const STATUS_TONES: Record<JobStatus, StatusBadgeTone> = {
-  // PLANNED is work recorded before it starts -- the rung above RUNNING, and
-  // deliberately not toned as progress: nothing is running yet.
+  // Not toned as progress: nothing is running yet.
   PLANNED: 'muted',
   RUNNING: 'in-progress',
   SUCCEEDED: 'success',
   FAILED: 'destructive',
-  // ABANDONED is a job whose actor stopped updating it, swept by the
-  // platform. It is not a failure of the work and not a success -- `warning`
-  // is the honest tone.
+  // Neither failure nor success.
   ABANDONED: 'warning',
   SUPERSEDED: 'muted',
-  // A status this console does not know about is rendered as itself rather
-  // than guessed at.
   UNKNOWN: 'muted',
 };
 
@@ -60,8 +43,7 @@ const STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: 'SUPERSEDED', label: 'Superseded' },
 ];
 
-// JOB_TYPE_ORDER is the platform's own closed vocabulary, in the order the
-// API documents it, so the grouping reads the same way `erun job list` does.
+// The platform's job type vocabulary, in documented order.
 const JOB_TYPE_ORDER = [
   'fix',
   'review',
@@ -74,10 +56,7 @@ const JOB_TYPE_ORDER = [
   'maintenance',
 ];
 
-// groupByJobType orders the groups by the vocabulary above, then by name for
-// any type this console has not been taught yet -- appended rather than
-// dropped, so a newer platform's job type shows up in a group of its own
-// instead of vanishing from the queue.
+// Unknown types are appended, not dropped, so a newer platform's types still show.
 function groupByJobType(jobs: Job[]): { jobType: string; jobs: Job[] }[] {
   const byType = new Map<string, Job[]>();
   for (const job of jobs) {
@@ -97,9 +76,7 @@ function groupByJobType(jobs: Job[]): { jobType: string; jobs: Job[] }[] {
     .sort((a, b) => rank(a.jobType) - rank(b.jobType) || a.jobType.localeCompare(b.jobType));
 }
 
-// formatElapsed is how long the job has been going: to its own end when it
-// has one, to now while it is still running. Coarse on purpose -- an operator
-// scanning a queue needs "about 20 minutes", not seconds precision.
+// Coarse on purpose: a queue needs "about 20 minutes", not seconds.
 function formatElapsed(startedAt: string, endedAt?: string): string {
   const start = Date.parse(startedAt);
   if (Number.isNaN(start)) {
@@ -126,10 +103,7 @@ function formatElapsed(startedAt: string, endedAt?: string): string {
   return `${String(Math.floor(hours / 24))}d ${String(hours % 24)}h`;
 }
 
-// issueUrl turns a job's issue_ref in owner/repo#number form into a link, and
-// returns undefined for anything else. An unparseable ref renders as plain
-// text: a link built from a guess would send an operator somewhere that has
-// nothing to do with the job.
+// Undefined for an unparseable ref: a guessed link would mislead.
 function issueUrl(issueRef: string): string | undefined {
   const match = /^([^/\s#]+)\/([^/\s#]+)#(\d+)$/.exec(issueRef.trim());
   if (match === null) {
@@ -209,9 +183,7 @@ function JobTable({ jobs, showStatus }: { jobs: Job[]; showStatus: boolean }): R
   );
 }
 
-// RunningQueue is the live half: RUNNING jobs, grouped by job type, oldest
-// claim first within each group -- the one that has been held longest is the
-// one most likely to be stuck.
+// Oldest claim first: the longest-held is the most likely stuck.
 function RunningQueue({ jobs }: { jobs: Job[] }): React.ReactElement {
   const groups = groupByJobType(jobs);
   if (groups.length === 0) {
@@ -282,9 +254,6 @@ function JobsBody({ state }: { state: JobsState }): React.ReactElement {
   );
 }
 
-// JobsPanel is the tenant's own view of what is being worked on: the live
-// queue first, grouped by job type, then what recently finished. Read-only --
-// the actor doing the work records it.
 export function JobsPanel({ token }: { token: string }): React.ReactElement {
   const [status, setStatus] = React.useState('');
   const filter: JobFilter = status === '' ? {} : { status: status as JobStatus };

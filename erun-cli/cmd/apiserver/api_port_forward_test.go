@@ -7,19 +7,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestKubectlAPIPortForwardArgsResolvesTheEnvironmentsOwnServicePort keeps the
-// canonical-block and no-port-block cases; the off-block reproduction is
-// erun-integration's open/api_forward_targets_the_environments_own_service_port.
-// The API component chart publishes its Service on `{{ default 17033
-// .Values.apiPort }}`, which the deploy sets from the environment's own port
-// block, so the remote side of the forward has to come from that same block.
-// Pinned to common.APIServicePort it asked kubectl for a service port the
-// Service does not expose, which broke the API tunnel on every environment
-// outside the 17000 block while the environment itself was healthy.
 func TestKubectlAPIPortForwardArgsResolvesTheEnvironmentsOwnServicePort(t *testing.T) {
-	// The injected ERUN_* ports outrank the config-derived block, so an
-	// in-pod test process would otherwise resolve these fixtures to whatever
-	// environment it is running in.
+	// Injected ERUN_* ports outrank the config-derived block.
 	for _, name := range []string{"ERUN_TENANT", "ERUN_ENVIRONMENT", "ERUN_MCP_PORT", "ERUN_SSHD_PORT"} {
 		t.Setenv(name, "")
 	}
@@ -37,9 +26,6 @@ func TestKubectlAPIPortForwardArgsResolvesTheEnvironmentsOwnServicePort(t *testi
 			wantMap:   "17033:17033",
 		},
 		{
-			// An env that resolves no port block at all deploys the chart's
-			// `default 17033`, so that is the port to dial -- the same fallback
-			// the deploy's own apiPort --set makes.
 			name:      "an env with no resolved port block falls back to the chart default",
 			rangeSt:   0,
 			wantLocal: 0,
@@ -68,8 +54,6 @@ func TestKubectlAPIPortForwardArgsResolvesTheEnvironmentsOwnServicePort(t *testi
 
 var portMappingPattern = regexp.MustCompile(`^\d+:\d+$`)
 
-// apiPortMapping returns the single <local>:<remote> argument of a kubectl
-// port-forward argv.
 func apiPortMapping(args []string) string {
 	for _, arg := range args {
 		if portMappingPattern.MatchString(arg) {

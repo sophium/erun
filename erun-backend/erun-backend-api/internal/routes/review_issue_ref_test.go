@@ -9,12 +9,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 )
 
-// reviewIssueFields decodes a review-returning route's body into the raw field
-// maps, so a test can tell "the field is absent from the wire" apart from "the
-// field is present and empty". For a review's issue link those are different
-// answers: absent is a review the platform has no issue for, and a client that
-// reads an empty string as a link would route an operator to an issue named by
-// nothing.
+// reviewIssueFields decodes raw field maps so an absent field is distinguishable from an empty one.
 func reviewIssueFields(t *testing.T, rec *httptest.ResponseRecorder) []map[string]any {
 	t.Helper()
 	var reviews []map[string]any
@@ -24,15 +19,6 @@ func reviewIssueFields(t *testing.T, rec *httptest.ResponseRecorder) []map[strin
 	return reviews
 }
 
-// TestListReviewsMarksAnIssueDerivedFromTheSourceBranchAsInferred is the
-// reproduction of the state this route could not answer. A review created
-// without an issue recorded is linked by the branch it proposes, and the link
-// travels with its provenance, because an inferred link presented as a
-// declared one claims something the platform does not know.
-//
-// Before this, a listing carried no issue reference at all for a branch that
-// names one, so every review read as unlinked and a board pivoting on the
-// issue had nothing to pivot on.
 func TestListReviewsMarksAnIssueDerivedFromTheSourceBranchAsInferred(t *testing.T) {
 	reviews := &stubReviewRepository{reviews: []model.Review{{
 		ReviewID:     "review-1",
@@ -60,10 +46,7 @@ func TestListReviewsMarksAnIssueDerivedFromTheSourceBranchAsInferred(t *testing.
 	}
 }
 
-// TestListReviewsLeavesABranchOutsideTheConventionUnlinked: the derivation is
-// best-effort, so a branch that does not follow the documented convention is
-// unlinked rather than guessed at. A branch merely containing a number is not
-// a link to it.
+// A branch merely containing a number is not a link to it.
 func TestListReviewsLeavesABranchOutsideTheConventionUnlinked(t *testing.T) {
 	reviews := &stubReviewRepository{reviews: []model.Review{{
 		ReviewID:     "review-1",
@@ -91,11 +74,6 @@ func TestListReviewsLeavesABranchOutsideTheConventionUnlinked(t *testing.T) {
 	}
 }
 
-// TestGetReviewCarriesTheDerivedIssueRefToo: one review is the same resource
-// the listing returns, so it answers the same question the same way. A single
-// review reached by id is how a client checks one link, and a shape that
-// varied between the two surfaces would make the derived field look like
-// something only a listing produces.
 func TestGetReviewCarriesTheDerivedIssueRefToo(t *testing.T) {
 	reviews := &stubReviewRepository{reviews: []model.Review{{
 		ReviewID:     "review-1",
@@ -121,10 +99,6 @@ func TestGetReviewCarriesTheDerivedIssueRefToo(t *testing.T) {
 	}
 }
 
-// TestListMergeQueueCarriesTheDerivedIssueRef: the queue is a listing of the
-// same resource, and it is the surface that answers what state an issue's
-// review has reached. A review carrying its issue link in one listing and not
-// in the other is the inconsistency that makes a client join on nothing.
 func TestListMergeQueueCarriesTheDerivedIssueRef(t *testing.T) {
 	reviews := &stubReviewRepository{reviews: []model.Review{{
 		ReviewID:     "review-1",

@@ -11,22 +11,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// attachReadDeadline bounds each read from the attach WebSocket. Every one of
-// these reads waits for a real dtach + shell process to produce something, so
-// the bound has to tolerate a busy host rather than measure it: at 10s the
-// golden-path test failed inside the in-build gate, where six packages
-// including this one run their own shells side by side, while the same test
-// passes standalone in seconds. The same suite forks a real shell under a real
-// PTY (dtach, pgrep, several /proc reads) per scenario, and each fork queues
-// behind whatever else the node runs -- measured on a contended pod (~2x CPU
-// oversubscription), the slowest scenario still completed within 23s, so a
-// tighter bound turns ordinary scheduler contention into a spurious failure
-// indistinguishable from a real hang. It stays finite so a genuinely wedged
-// attach still fails its own test instead of hanging the suite.
+// attachReadDeadline tolerates a contended host (a real dtach and shell per
+// scenario took up to 23s) while still failing a wedged attach.
 const attachReadDeadline = 60 * time.Second
 
-// waitForBinaryContaining reads frames, accumulating binary payloads, until
-// want appears or the deadline lapses.
 func waitForBinaryContaining(t *testing.T, conn *websocket.Conn, want string) {
 	t.Helper()
 	_ = conn.SetReadDeadline(time.Now().Add(attachReadDeadline))
@@ -45,16 +33,8 @@ func waitForBinaryContaining(t *testing.T, conn *websocket.Conn, want string) {
 	}
 }
 
-// TestAttachReadHelpersToleratePastThePriorDeadline is the regression test
-// for the specific failure mode this suite hit under a contended host: every
-// subprocess-spawning scenario missed the outcome message by roughly 100ms
-// past a hardcoded 10s deadline -- the signature of a deadline too tight for
-// the host, not of a broken bridge (confirmed separately: the same scenarios
-// passed reliably once given a longer deadline under the same load). This
-// test proves the fix without depending on inducing real host contention: a
-// minimal websocket server with no PTY, no dtach, and no shell delays its one
-// binary frame past that old boundary, and the read helper these tests
-// actually use must still see it.
+// A frame delayed past the old 10s deadline must still be read, without needing
+// real host contention.
 func TestAttachReadHelpersToleratePastThePriorDeadline(t *testing.T) {
 	const priorDeadline = 10 * time.Second
 	const delay = priorDeadline + 2*time.Second

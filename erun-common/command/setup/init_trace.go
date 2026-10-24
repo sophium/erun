@@ -82,9 +82,8 @@ func (s tracedBootstrapStore) SaveERunConfig(config configpkg.ERunConfig) error 
 }
 
 func (s tracedBootstrapStore) SaveTenantConfig(config configpkg.TenantConfig) error {
-	// Validated (and normalized) exactly as the real save does before anything
-	// is traced, so a dry run never reports a mkdir and a write-yaml that the
-	// real run refuses, and the traced path is the one the real run would use.
+	// Validate exactly as the real save does, so a dry run never traces a write the
+	// real run refuses.
 	config = configpkg.NormalizeTenantConfig(config)
 	if err := configpkg.ValidateStatePathSegment("tenant", config.Name); err != nil {
 		return err
@@ -103,8 +102,6 @@ func (s tracedBootstrapStore) SaveTenantConfig(config configpkg.TenantConfig) er
 }
 
 func (s tracedBootstrapStore) SaveEnvConfig(tenant string, config configpkg.EnvConfig) error {
-	// Same shape rule and order as the real save: refuse before tracing, so a
-	// dry run's mkdir/write-yaml pair is one the real run would actually do.
 	if err := configpkg.ValidateStatePathSegment("tenant", tenant); err != nil {
 		return err
 	}

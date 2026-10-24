@@ -8,12 +8,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// resolveProjectDockerModuleDir resolves the docker build module the project
-// itself declares, independently of the current directory: the configured
-// paths.docker / selected components entry when there is one, otherwise the
-// project root's <tenant>-devops/docker convention. A caller uses it to ask
-// whether the project has images at all, which is a different question from
-// whether the current directory resolves any.
+// resolveProjectDockerModuleDir resolves the project's docker module independently
+// of the current directory.
 func resolveProjectDockerModuleDir(findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) (string, bool, error) {
 	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {

@@ -10,16 +10,9 @@ import (
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
-// Pushing an environment definition to the platform and pulling one back are
-// the same three steps in opposite directions: resolve the platform row this
-// local environment corresponds to, refuse if what came back is not that row,
-// and move the portable subset either way while stamping the revision that was
-// moved. Keeping both here — rather than in the CLI — is what lets the desktop
-// drive the identical transaction without a second implementation of the
-// refusals.
+// Push and pull live here, not in the CLI, so the desktop shares the same refusals.
 
-// PlatformEnvDefinitionClient is the platform access a push or a pull needs.
-// *PlatformClient satisfies it.
+// PlatformEnvDefinitionClient is the platform access a push or pull needs.
 type PlatformEnvDefinitionClient interface {
 	APIHost() string
 	GetEnvironment(ctx context.Context, environmentID string) (platformclient.PlatformEnvironment, error)
@@ -27,27 +20,19 @@ type PlatformEnvDefinitionClient interface {
 	PutEnvironmentDefinition(ctx context.Context, environmentID string, definition configpkg.PlatformEnvDefinition) (platformclient.PlatformEnvDefinitionRecord, error)
 }
 
-// envDefinitionConfigStore is the on-disk access a push or pull needs: the
-// environment's own config, and the port bookkeeping a pull-as-new has to
-// consult before it writes. ConfigStore satisfies it.
+// envDefinitionConfigStore is the on-disk access a push or pull needs.
 type envDefinitionConfigStore interface {
 	LoadEnvConfig(tenant, envName string) (configpkg.EnvConfig, string, error)
 	SaveEnvConfig(tenant string, config configpkg.EnvConfig) error
 	configpkg.EnvironmentPortStore
 }
 
-// EnvDefinitionPushParams names the local environment whose portable settings
-// are uploaded. The platform row is not named here: the local marker is the
-// only thing that knows which row this environment corresponds to, and letting
-// a caller supply one would be a second way to say it.
+// EnvDefinitionPushParams names the local environment to upload; only its marker names the row.
 type EnvDefinitionPushParams struct {
 	Tenant      string
 	Environment string
 }
 
-// EnvDefinitionPushResult is what an upload did, in the terms an operator reads
-// back: which row it landed on, what revision it wrote, and the settings that
-// travelled.
 type EnvDefinitionPushResult struct {
 	Marker      configpkg.HostedEnvironment        `json:"marker"`
 	Environment platformclient.PlatformEnvironment `json:"environment"`
@@ -55,49 +40,31 @@ type EnvDefinitionPushResult struct {
 	Revision    int                                `json:"revision"`
 }
 
-// EnvDefinitionPullParams names the local environment a definition is pulled
-// into.
-//
-// EnvironmentID is only consulted when the local environment does not exist
-// yet. There is nothing on this machine to say which row to read in that case —
-// the marker is what answers that question for an existing environment, and it
-// does not exist yet — so a pull-as-new must name the row explicitly rather
-// than guess one by name.
+// EnvDefinitionPullParams names the local environment to pull into. EnvironmentID is used
+// only for a pull-as-new, where no marker exists to name the row.
 type EnvDefinitionPullParams struct {
 	Tenant        string
 	Environment   string
 	EnvironmentID string
-	// LocalRepoPath is only consulted for a pull-as-new: the types that
-	// require a host repo path cannot build without one, and refusing here —
-	// before the write — is what keeps a pull from creating an environment
-	// that cannot build.
+	// LocalRepoPath is required for a pull-as-new of a type that cannot build without one.
 	LocalRepoPath string
-	// LocalPortRangeStart is an explicit range start for a pull-as-new; zero
-	// allocates the lowest free one.
+	// LocalPortRangeStart zero allocates the lowest free range.
 	LocalPortRangeStart int
-	// Confirm is asked when the local copy and the platform have both moved
-	// since the last sync, with the diff between them. Nil means "no prompt is
-	// available", which makes a two-sided edit a refusal rather than a silent
-	// overwrite — the non-interactive transports' behaviour.
+	// Confirm is asked about a two-sided edit; nil makes that a refusal, never an overwrite.
 	Confirm func(configpkg.EnvDefinitionPlan) (bool, error)
 }
 
-// EnvDefinitionPullResult is what a pull read and wrote.
 type EnvDefinitionPullResult struct {
 	Marker      configpkg.HostedEnvironment        `json:"marker"`
 	Environment platformclient.PlatformEnvironment `json:"environment"`
 	Plan        configpkg.EnvDefinitionPlan        `json:"plan"`
 	Config      configpkg.EnvConfig                `json:"config"`
-	// Revision is the definition revision the local copy now matches.
-	Revision int `json:"revision"`
-	// Created is true when the local environment did not exist before this
-	// pull and was written from the platform row.
+	Revision    int                                `json:"revision"`
+	// Created is true when this pull created the local environment.
 	Created bool `json:"created,omitempty"`
 }
 
-// HostedDefinitionConflictsError is returned by a pull that found a two-sided
-// portable edit and had no way to ask about it. The plan rides on the error so
-// a caller can render the diff without re-fetching.
+// HostedDefinitionConflictsError carries the plan of an unconfirmable two-sided edit.
 type HostedDefinitionConflictsError struct {
 	Plan configpkg.EnvDefinitionPlan
 }
@@ -109,9 +76,7 @@ func (e *HostedDefinitionConflictsError) Error() string {
 		renderDefinitionConflicts(e.Plan.Conflicts))
 }
 
-// HostedDefinitionRefusedError is returned when a transfer cannot proceed at all:
-// a platform-owned field disagrees, which no confirmation can resolve because
-// the platform's copy is what the row is addressed by.
+// HostedDefinitionRefusedError means a platform-owned field disagrees; no confirmation resolves it.
 type HostedDefinitionRefusedError struct {
 	Refusals []configpkg.EnvDefinitionRefusalError
 }
@@ -124,9 +89,7 @@ func (e *HostedDefinitionRefusedError) Error() string {
 	return "refusing to transfer this definition: " + strings.Join(rendered, "; ")
 }
 
-// ErrDefinitionPullDeclined is what a pull returns when the operator was asked
-// about a two-sided edit and said no. It is a distinct value rather than a
-// generic error so a caller can exit without printing a failure.
+// ErrDefinitionPullDeclined lets a caller exit without printing a failure.
 var ErrDefinitionPullDeclined = errors.New("pull declined")
 
 func confirmDefinitionConflicts(confirm func(configpkg.EnvDefinitionPlan) (bool, error), plan configpkg.EnvDefinitionPlan) (bool, error) {
@@ -144,13 +107,8 @@ func renderDefinitionConflicts(conflicts []configpkg.EnvDefinitionConflict) stri
 	return strings.Join(rendered, ", ")
 }
 
-// PushEnvironmentDefinition uploads the local environment's portable settings
-// to the platform row its marker names.
-//
-// The order is deliberate: the row is fetched and checked against the marker
-// *before* anything is written, so an environment whose marker points at
-// another tenant's row — or at a same-named row on another plane — fails
-// without having pushed its settings anywhere.
+// PushEnvironmentDefinition uploads portable settings to the marker's row, checking the row
+// before writing anything.
 func PushEnvironmentDefinition(ctx context.Context, store envDefinitionConfigStore, client PlatformEnvDefinitionClient, params EnvDefinitionPushParams) (EnvDefinitionPushResult, error) {
 	config, _, err := store.LoadEnvConfig(params.Tenant, params.Environment)
 	if err != nil {
@@ -168,11 +126,7 @@ func PushEnvironmentDefinition(ctx context.Context, store envDefinitionConfigSto
 	return uploadDefinition(ctx, store, client, config, row, params.Tenant)
 }
 
-// uploadDefinition is the half an upload and an adopt share: project the
-// portable subset, write it, and stamp the revision that landed. Keeping it in
-// one place is what makes "the marker means the platform holds this revision"
-// true on both paths — a marker written before the write would claim a sync
-// that never happened.
+// uploadDefinition stamps the marker only after the write lands.
 func uploadDefinition(ctx context.Context, store envDefinitionConfigStore, client PlatformEnvDefinitionClient, config configpkg.EnvConfig, row platformclient.PlatformEnvironment, tenant string) (EnvDefinitionPushResult, error) {
 	definition := configpkg.BuildPlatformEnvDefinition(config)
 	record, err := client.PutEnvironmentDefinition(ctx, row.EnvironmentID, definition)
@@ -194,23 +148,13 @@ func uploadDefinition(ctx context.Context, store envDefinitionConfigStore, clien
 	}, nil
 }
 
-// EnvDefinitionAdoptParams names the local environment whose portable settings
-// are uploaded alongside its registration.
 type EnvDefinitionAdoptParams struct {
 	Tenant      string
 	Environment string
 }
 
-// AdoptEnvironmentDefinition records the hosted marker for a just-registered
-// platform row and uploads revision 1 of the local environment's portable
-// settings, in that order.
-//
-// It is the same transaction as a push with one difference: the marker does not
-// exist yet, so the row the caller registered is what the marker is written
-// from. That is why the row is a parameter rather than resolved from the
-// marker — and why a local environment that already carries a marker naming a
-// *different* row is refused: adopting a second row over one this machine
-// already follows would leave the first one unreachable from here.
+// AdoptEnvironmentDefinition writes the marker for a just-registered row and uploads
+// revision 1. A marker naming a different row is refused.
 func AdoptEnvironmentDefinition(ctx context.Context, store envDefinitionConfigStore, client PlatformEnvDefinitionClient, row platformclient.PlatformEnvironment, params EnvDefinitionAdoptParams) (EnvDefinitionPushResult, error) {
 	config, _, err := store.LoadEnvConfig(params.Tenant, params.Environment)
 	if err != nil {
@@ -237,13 +181,8 @@ func AdoptEnvironmentDefinition(ctx context.Context, store envDefinitionConfigSt
 	return uploadDefinition(ctx, store, client, config, row, params.Tenant)
 }
 
-// PullEnvironmentDefinition reads the platform's stored definition and writes
-// its portable subset into the local environment's config, preserving every
-// field the platform has no opinion about.
-//
-// A local environment that does not exist yet is created from the platform row
-// — pull-as-new — which is the one case that needs a host repo path and a local
-// port range, both settled before anything is written.
+// PullEnvironmentDefinition writes the platform definition's portable subset into the local
+// config, creating the environment if absent (pull-as-new).
 func PullEnvironmentDefinition(ctx context.Context, store envDefinitionConfigStore, client PlatformEnvDefinitionClient, params EnvDefinitionPullParams) (EnvDefinitionPullResult, error) {
 	config, created, err := loadPullBase(store, params)
 	if err != nil {
@@ -294,9 +233,7 @@ func PullEnvironmentDefinition(ctx context.Context, store envDefinitionConfigSto
 	}, nil
 }
 
-// loadPullBase reads the local environment a pull is about to write, reporting
-// whether it is a pull-as-new rather than treating the absent config as an
-// error.
+// loadPullBase reports a missing config as pull-as-new rather than an error.
 func loadPullBase(store envDefinitionConfigStore, params EnvDefinitionPullParams) (configpkg.EnvConfig, bool, error) {
 	config, _, err := store.LoadEnvConfig(params.Tenant, params.Environment)
 	if err == nil {
@@ -308,8 +245,6 @@ func loadPullBase(store envDefinitionConfigStore, params EnvDefinitionPullParams
 	return configpkg.EnvConfig{}, false, fmt.Errorf("load %s/%s: %w", params.Tenant, params.Environment, err)
 }
 
-// confirmPullPlan refuses what no confirmation can resolve, and asks about what
-// only the operator can decide.
 func confirmPullPlan(plan configpkg.EnvDefinitionPlan, confirm func(configpkg.EnvDefinitionPlan) (bool, error)) error {
 	if len(plan.Refusals) > 0 {
 		return &HostedDefinitionRefusedError{Refusals: plan.Refusals}
@@ -327,8 +262,6 @@ func confirmPullPlan(plan configpkg.EnvDefinitionPlan, confirm func(configpkg.En
 	return nil
 }
 
-// applyPulledDefinition writes the portable subset and stamps the revision the
-// local copy now matches.
 func applyPulledDefinition(config configpkg.EnvConfig, definition configpkg.PlatformEnvDefinition, marker configpkg.HostedEnvironment) (configpkg.EnvConfig, error) {
 	updated, err := configpkg.ApplyPlatformEnvDefinition(config, definition)
 	if err != nil {
@@ -337,10 +270,7 @@ func applyPulledDefinition(config configpkg.EnvConfig, definition configpkg.Plat
 	return stampHostedMarker(updated, marker)
 }
 
-// resolvePullTarget answers which platform row this pull reads, and refuses any
-// disagreement between the local environment and that row. For an existing
-// local environment the marker answers it; for a pull-as-new nothing local can,
-// so the caller must name the row.
+// resolvePullTarget resolves the row from the marker, or from params for a pull-as-new.
 func resolvePullTarget(ctx context.Context, store envDefinitionConfigStore, client PlatformEnvDefinitionClient, params EnvDefinitionPullParams, config configpkg.EnvConfig, created bool) (configpkg.HostedEnvironment, platformclient.PlatformEnvironment, error) {
 	if !created {
 		marker, ok := configpkg.HostedEnvironmentFromConfig(config)
@@ -362,10 +292,7 @@ func resolvePullTarget(ctx context.Context, store envDefinitionConfigStore, clie
 	if err != nil {
 		return configpkg.HostedEnvironment{}, platformclient.PlatformEnvironment{}, err
 	}
-	// The local config path is derived from the name, so a row whose name is
-	// not the directory being pulled into would write a different environment
-	// than the one named — the silent rename the marker exists to prevent,
-	// caught here before anything is written.
+	// The config path derives from the name, so a mismatched row name would write another environment.
 	if row.Name != params.Environment {
 		return configpkg.HostedEnvironment{}, platformclient.PlatformEnvironment{}, &HostedDefinitionRefusedError{Refusals: []configpkg.EnvDefinitionRefusalError{{
 			Field:  "Name",
@@ -376,8 +303,6 @@ func resolvePullTarget(ctx context.Context, store envDefinitionConfigStore, clie
 	return configpkg.HostedEnvironment{APIHost: client.APIHost(), TenantID: row.TenantID, EnvironmentID: row.EnvironmentID}, row, nil
 }
 
-// buildPullAsNewConfig settles the two host-owned values a new environment
-// cannot inherit, before any of the pull's writes happen.
 func buildPullAsNewConfig(store envDefinitionConfigStore, params EnvDefinitionPullParams, marker configpkg.HostedEnvironment, row platformclient.PlatformEnvironment) (configpkg.EnvConfig, error) {
 	portRangeStart, err := PlanPullLocalPortRangeStart(store, params.Tenant, params.Environment, params.LocalPortRangeStart)
 	if err != nil {
@@ -386,8 +311,6 @@ func buildPullAsNewConfig(store envDefinitionConfigStore, params EnvDefinitionPu
 	return NewPullAsNewEnvironment(row, params.LocalRepoPath, portRangeStart)
 }
 
-// resolveHostedRow fetches the row the marker names and refuses any
-// disagreement between it and the local environment.
 func resolveHostedRow(ctx context.Context, client PlatformEnvDefinitionClient, config configpkg.EnvConfig, marker configpkg.HostedEnvironment) (platformclient.PlatformEnvironment, error) {
 	row, err := client.GetEnvironment(ctx, marker.EnvironmentID)
 	if err != nil {
@@ -396,10 +319,7 @@ func resolveHostedRow(ctx context.Context, client PlatformEnvDefinitionClient, c
 	if err := configpkg.CheckHostedMarkerTarget(marker, client.APIHost(), row.TenantID, row.EnvironmentID); err != nil {
 		return platformclient.PlatformEnvironment{}, err
 	}
-	// A platform-owned field that disagrees is a refusal in both directions,
-	// not only on a pull: uploading the settings of a local directory that is
-	// not the row the marker names would attribute them to the wrong
-	// environment.
+	// A platform-owned mismatch refuses a push too, or settings land on the wrong environment.
 	refusals := configpkg.PlatformOwnedMismatches(configpkg.EnvDefinitionPlanParams{
 		Local:                     config,
 		PlatformName:              row.Name,
@@ -427,15 +347,7 @@ func markerFor(row platformclient.PlatformEnvironment, apiHost string, revision 
 	}
 }
 
-// stampHostedMarker records the row a transfer landed on, and fingerprints the
-// portable settings as of that transfer.
-//
-// The digest is taken from the config passed in, and both callers pass the
-// post-transfer config: an upload passes the settings it just sent, a pull
-// passes the ones it just merged. That makes "the digest records what this
-// copy and the platform last agreed on" true on both paths without either one
-// re-deriving it, which is the same reason the marker is stamped here rather
-// than at each call site.
+// stampHostedMarker records the row and digests the post-transfer portable settings.
 func stampHostedMarker(config configpkg.EnvConfig, marker configpkg.HostedEnvironment) (configpkg.EnvConfig, error) {
 	if err := configpkg.ValidateStatePathSegment("environment", config.Name); err != nil {
 		return configpkg.EnvConfig{}, err
@@ -445,13 +357,8 @@ func stampHostedMarker(config configpkg.EnvConfig, marker configpkg.HostedEnviro
 	return config, nil
 }
 
-// PlanPullLocalPortRangeStart returns the local port range start a pull-as-new
-// should write, refusing a start another environment on this machine already
-// claims.
-//
-// It runs before the write on purpose. A collision discovered afterwards has
-// already written a config the port resolver will refuse on the next command
-// that needs a local port, which surfaces far from the pull that caused it.
+// PlanPullLocalPortRangeStart refuses a range start another environment claims, before the
+// write rather than at the next command.
 func PlanPullLocalPortRangeStart(store configpkg.EnvironmentPortStore, tenant, environment string, requested int) (int, error) {
 	claimed, err := claimedPortRangeIndexes(store, configpkg.EnvironmentPortKey(tenant, environment))
 	if err != nil {
@@ -463,10 +370,7 @@ func PlanPullLocalPortRangeStart(store configpkg.EnvironmentPortStore, tenant, e
 	return lowestFreePortRangeStart(claimed, configpkg.EnvironmentPortKey(tenant, environment))
 }
 
-// claimedPortRangeIndexes maps each port-range index another environment on
-// this machine holds to that environment. A pull into an environment that
-// already holds a range must not collide with itself, so its own claim is
-// skipped rather than counted.
+// claimedPortRangeIndexes skips the environment's own claim.
 func claimedPortRangeIndexes(store configpkg.EnvironmentPortStore, key string) (map[int]string, error) {
 	persisted, _, err := configpkg.CollectEnvironmentPortRefs(store)
 	if err != nil {
@@ -510,10 +414,7 @@ func lowestFreePortRangeStart(claimed map[int]string, key string) (int, error) {
 	}
 }
 
-// NewPullAsNewEnvironment builds the local config a pull writes when the
-// environment does not exist on this machine yet. It is not the pull itself:
-// the caller runs this first so the repo path and the port range are settled
-// before anything reaches the disk.
+// NewPullAsNewEnvironment builds a pull-as-new config; callers run it before writing.
 func NewPullAsNewEnvironment(row platformclient.PlatformEnvironment, repoPath string, portRangeStart int) (configpkg.EnvConfig, error) {
 	envType := configpkg.EnvironmentType(strings.TrimSpace(row.Type))
 	if !envType.IsValid() {
@@ -534,15 +435,8 @@ func NewPullAsNewEnvironment(row platformclient.PlatformEnvironment, repoPath st
 	}, nil
 }
 
-// IsHostableEnvironmentType reports whether a local environment type can have a
-// platform row at all.
-//
-// A host env cannot: it is a plain directory with no pod and no cluster, and
-// the platform's environment record exists to manage a pod's lifecycle — its
-// adopt path structurally requires a Kubernetes context a host env has none of.
-// The local model carries four types and the platform admits three, and this is
-// where that difference is enforced on the client side rather than left to a
-// server-side 400 to explain.
+// IsHostableEnvironmentType reports whether a type can have a platform row; a host env has no
+// pod for the platform to manage.
 func IsHostableEnvironmentType(envType configpkg.EnvironmentType) bool {
 	switch envType {
 	case configpkg.EnvironmentTypeLocalAgent, configpkg.EnvironmentTypeRemoteAgent, configpkg.EnvironmentTypeRuntime:

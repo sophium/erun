@@ -12,11 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// ObservedHelmRelease is the runtime helm release's own record of what should
-// be running — the deployed counterpart to a deploy plan's HelmDeploySpec.
-// Found distinguishes "no release exists here" from a read that failed: a
-// caller must never treat an empty release as "nothing deployed" when the
-// truth is "observe could not look" (see Error).
+// ObservedHelmRelease is the runtime release's record; Found false with Error set means observe could not look.
 type ObservedHelmRelease struct {
 	Name           string                     `json:"name"`
 	Found          bool                       `json:"found"`
@@ -27,15 +23,11 @@ type ObservedHelmRelease struct {
 	AppVersion     string                     `json:"appVersion,omitempty"`
 	ImageOverrides map[string]string          `json:"imageOverrides,omitempty"`
 	RuntimePod     config.RuntimePodResources `json:"runtimePod,omitempty"`
-	// Error explains why a field above could not be populated: insufficient
-	// RBAC, an unreachable cluster, or a release whose chart does not look
-	// like erun's runtime chart. Empty means the read above is trustworthy.
+	// Error explains why a field could not be populated; empty means the read is trustworthy.
 	Error string `json:"error,omitempty"`
 }
 
-// ObserveHelmStatusArgs builds a read-only `helm status <release> -o json`
-// invocation, mirroring doctor's helmStatusArgs (doctor_deploy.go) with a JSON
-// output flag added so observe can parse it instead of only displaying it.
+// ObserveHelmStatusArgs builds `helm status <release> -o json`.
 func ObserveHelmStatusArgs(req config.ShellLaunchParams) []string {
 	args := []string{"status", config.RuntimeReleaseName(req.Tenant)}
 	if strings.TrimSpace(req.Namespace) != "" {
@@ -47,11 +39,7 @@ func ObserveHelmStatusArgs(req config.ShellLaunchParams) []string {
 	return append(args, "-o", "json")
 }
 
-// ObserveHelmListArgs builds a read-only `helm list -o json` invocation
-// filtered to exactly the runtime release. `helm status -o json` carries no
-// chart metadata at all (its top-level keys are apply_method, config, info,
-// manifest, name, namespace, version — no chart), so observe reads chart and
-// appVersion from list instead, which does carry them.
+// ObserveHelmListArgs builds `helm list -o json` for the runtime release; helm status carries no chart metadata.
 func ObserveHelmListArgs(req config.ShellLaunchParams, releaseName string) []string {
 	args := []string{"list", "--filter", "^" + regexp.QuoteMeta(releaseName) + "$"}
 	if strings.TrimSpace(req.Namespace) != "" {
@@ -63,14 +51,8 @@ func ObserveHelmListArgs(req config.ShellLaunchParams, releaseName string) []str
 	return append(args, "-o", "json")
 }
 
-// helmStatusOutput is a deliberately partial parse of `helm status -o json`,
-// matching the podStatusList idiom elsewhere in observe: unknown fields are
-// ignored so a helm version's extra output does not break observe. Config is
-// the release's own merged --set/-f values (not the chart's computed
-// defaults), which is exactly "the values erun itself sets" the runtime chart
-// always passes explicitly (deploy.go's imageOverrides.* / runtime.resources.
-// limits.* --set-string args), including when a wrapping umbrella nests them
-// under its subchart key.
+// helmStatusOutput is a partial parse of `helm status -o json`; Config is the release's
+// user-supplied values, not chart defaults.
 type helmStatusOutput struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
@@ -81,16 +63,11 @@ type helmStatusOutput struct {
 	Config map[string]interface{} `json:"config"`
 }
 
-// helmListEntry is a deliberately partial parse of one `helm list -o json`
-// entry: chart (rendered as "<name>-<version>") and app_version are the
-// fields helmStatusOutput cannot carry (see observeHelmListArgs).
 type helmListEntry struct {
 	Chart      string `json:"chart"`
 	AppVersion string `json:"app_version"`
 }
 
-// helmChartNameVersionPattern splits a `helm list` chart string such as
-// "erun-devops-1.0.206" into its name and semver-shaped version.
 var helmChartNameVersionPattern = regexp.MustCompile(`^(.+)-(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.]+)*)$`)
 
 func splitHelmChartNameVersion(chart string) (name, version string, ok bool) {
@@ -101,10 +78,7 @@ func splitHelmChartNameVersion(chart string) (name, version string, ok bool) {
 	return match[1], match[2], true
 }
 
-// FetchObservedHelmRelease reads the runtime release's status. A missing
-// release and a failed read are both reported as Found: false, distinguished
-// by Error: a missing release means "confirmed nothing deployed", a non-empty
-// Error means "could not tell" plus what to do about it.
+// FetchObservedHelmRelease reads the runtime release; Error distinguishes a failed read from a missing release.
 func FetchObservedHelmRelease(args, listArgs []string, releaseName, namespace string) *ObservedHelmRelease {
 	raw, stderr, err := runObserveHelm(args)
 	if err != nil {
@@ -134,13 +108,8 @@ func FetchObservedHelmRelease(args, listArgs []string, releaseName, namespace st
 	return release
 }
 
-// populateObservedChartFields fills Chart/ChartVersion/AppVersion from `helm
-// list`, the only one of observe's two helm reads that carries them. When
-// that read genuinely cannot resolve them, it appends to release.Error
-// instead of leaving Chart/ChartVersion/AppVersion at their zero value: an
-// empty string there must never be read as "the release has no chart" when
-// the truth is "observe could not look" — the same hazard Found/Error already
-// guards against for the release as a whole.
+// populateObservedChartFields fills chart fields from `helm list`, recording in Error
+// when it cannot rather than leaving them empty.
 func populateObservedChartFields(release *ObservedHelmRelease, listArgs []string, releaseName, namespace string) {
 	raw, stderr, err := runObserveHelm(listArgs)
 	if err != nil {
@@ -181,8 +150,6 @@ func appendObserveHelmReleaseError(existing, addition string) string {
 	return existing + "; " + addition
 }
 
-// runObserveHelm runs a read-only `helm` invocation, matching
-// runObserveKubectl's stdout/stderr split so callers can classify failures.
 func runObserveHelm(args []string) (stdout []byte, stderr string, err error) {
 	cmd := core.Command("helm", args...)
 	var errBuf bytes.Buffer
@@ -191,11 +158,8 @@ func runObserveHelm(args []string) (stdout []byte, stderr string, err error) {
 	return out, strings.TrimSpace(errBuf.String()), runErr
 }
 
-// findNestedStringMap searches values for a key whose value is a map of
-// strings, at any depth. The runtime chart's imageOverrides can live at the
-// top level (a chart installed directly) or nested under a wrapping umbrella's
-// subchart key (deploy.go's prefixHelmSetKeys) — this walk finds it either
-// way without observe needing to know which umbrella wrapped it.
+// findNestedStringMap finds a string map under key at any depth, since an umbrella
+// may nest the runtime chart's values under its subchart key.
 func findNestedStringMap(values map[string]interface{}, key string) map[string]string {
 	if v, ok := values[key]; ok {
 		if m, ok := v.(map[string]interface{}); ok {
@@ -222,9 +186,6 @@ func stringifyMap(m map[string]interface{}) map[string]string {
 	return out
 }
 
-// findRuntimePodResourceLimits searches values for the runtime chart's own
-// "runtime.resources.limits.{cpu,memory}" shape, at any depth, the same way
-// findNestedStringMap does for imageOverrides.
 func findRuntimePodResourceLimits(values map[string]interface{}) config.RuntimePodResources {
 	if v, ok := values["runtime"]; ok {
 		if m, ok := v.(map[string]interface{}); ok {

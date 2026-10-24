@@ -15,16 +15,12 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// deployClaimStaleAfter bounds how long a deploy may hold its environment's
-// claim. It is longer than the deploy Job's own 30-minute deadline, so a claim
-// only looks stale once the run behind it cannot still be live.
+// deployClaimStaleAfter exceeds the deploy Job's 30-minute deadline, so a stale
+// claim can no longer have a live run behind it.
 const deployClaimStaleAfter = 45 * time.Minute
 
-// deployClaimRefusal names why ClaimDeploy refused, so a caller mid-teardown
-// is told that rather than the misleading "a deploy is already in progress".
-// It reads the status fetched before the claim attempt: the claim itself is
-// the authority on the outcome, so a row that changed in between yields a
-// slightly stale explanation but never a wrong decision.
+// deployClaimRefusal explains a refused ClaimDeploy from the pre-claim status; the
+// claim itself decides, so a race only makes the message stale.
 func deployClaimRefusal(status model.EnvironmentStatus) string {
 	switch status {
 	case model.EnvironmentStatusDeleting:
@@ -36,17 +32,12 @@ func deployClaimRefusal(status model.EnvironmentStatus) string {
 	return "a deploy is already in progress for this environment"
 }
 
-// deployEnvironmentRequest re-deploys at an explicit version; omitted, the
-// environment's own pinned runtimeVersion is deployed.
 type deployEnvironmentRequest struct {
 	Version string `json:"version"`
 }
 
-// deployEnvironment deploys an already-registered environment, which is what
-// makes the runtime version an environment runs changeable after creation: a
-// retry of a failed deploy, or a move to another published version. It composes
-// the pure deploy primitive — the version must already be published, and this
-// never builds or pushes.
+// deployEnvironment redeploys a registered environment at an already-published
+// version; it never builds or pushes.
 func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Request) {
 	if r.provisioner == nil {
 		writeError(w, http.StatusNotImplemented, "the deploy executor is not configured")
@@ -63,11 +54,7 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Re-checked here, not just at create: an operator can lower a tenant's
-	// quota (TenantQuotaRepository.Set) after the environment already exists,
-	// and a redeploy is the next thing that would hit the now-insufficient
-	// floor or budget. Failing here is a clear 409 instead of the Job's
-	// Deployment sitting at 0/1 until the rollout times out.
+	// Re-checked on redeploy: the quota may have been lowered since create.
 	if err := r.revalidateResourceQuota(ctx); err != nil {
 		var exceeded *resourceQuotaExceededError
 		if errors.As(err, &exceeded) {
@@ -77,8 +64,7 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 		writeRepositoryError(w, req, err)
 		return
 	}
-	// Claiming before starting the workflow is what keeps a double-submit from
-	// running two rollouts into the same release.
+	// Claiming first keeps a double-submit from running two rollouts.
 	claimed, err := r.environments.ClaimDeploy(ctx, environment.TenantID, environment.EnvironmentID, deployClaimStaleAfter)
 	if err != nil {
 		writeRepositoryError(w, req, err)
@@ -95,18 +81,13 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 	writeJSON(w, http.StatusAccepted, environment)
 }
 
-// resolveDeployVersion picks the version to deploy and rejects the requests that
-// have nothing deployable. Its error message is the operator-facing 400 reason.
-// Placement is a create-time decision (resolvePlacement), not re-run here: a
-// redeploy targets the cluster the environment was already placed on, never
-// a freshly auto-selected one.
+// resolveDeployVersion does not re-run placement: a redeploy stays on the
+// environment's existing cluster.
 func resolveDeployVersion(req *http.Request, environment model.Environment) (string, error) {
 	if environment.Type != model.EnvironmentTypeRuntime {
 		return "", errors.New("only a runtime environment can be deployed")
 	}
 	var body deployEnvironmentRequest
-	// A body-less deploy is the common case (deploy what the env is pinned to),
-	// so only a malformed body is an error.
 	if err := decodeJSON(req, &body); err != nil && !errors.Is(err, io.EOF) {
 		return "", errors.New("invalid request body")
 	}
@@ -120,21 +101,15 @@ func resolveDeployVersion(req *http.Request, environment model.Environment) (str
 	return version, nil
 }
 
-// writeStartDeployError marks the environment failed and answers 500:
-// ClaimDeploy already moved the row to provisioning before startDeploy ran, so
-// any failure to even enqueue the durable workflow would otherwise strand the
-// environment there with no workflow run left to move it out.
+// writeStartDeployError marks the row failed, since ClaimDeploy already moved it
+// to provisioning and no workflow would move it out.
 func (r EnvironmentRoutes) writeStartDeployError(w http.ResponseWriter, ctx context.Context, environment model.Environment, err error) {
 	_ = r.environments.MarkDeployFailed(ctx, environment.TenantID, environment.EnvironmentID, err.Error())
 	logServerErrorForRoute(ctx, "POST /v1/environments/{environment_id}/deploy", err)
 	writeError(w, http.StatusInternalServerError, "failed to start deploy")
 }
 
-// startDeploy kicks off the durable deploy workflow for an explicit deploy,
-// tagged with a fresh attempt id so it is a real re-run rather than a replay of
-// the environment's first deploy. It targets the cluster the environment was
-// already placed on at create time (resolvePlacementCoordinates), never a
-// freshly auto-selected one.
+// startDeploy uses a fresh attempt id so it re-runs rather than replays the first deploy.
 func (r EnvironmentRoutes) startDeploy(ctx context.Context, environment model.Environment, version string) error {
 	placement, err := r.resolvePlacementCoordinates(ctx, r.placementOwnerTenantFor(ctx, environment), environment.ContextID)
 	if err != nil {
@@ -148,12 +123,8 @@ func (r EnvironmentRoutes) startDeploy(ctx context.Context, environment model.En
 	return r.provisioner.StartDeploy(input)
 }
 
-// deployInput assembles the durable workflow input. The deploy needs the tenant
-// name (RLS-scoped to the caller, so always the caller's own) plus the
-// request-scoped identity so the workflow's status writes rebind to the right
-// tenant. placement carries the target cluster's non-secret coordinates; the
-// credential itself is resolved fresh at Job-build time, never
-// checkpointed in this durable-workflow input.
+// deployInput carries non-secret placement coordinates only; the credential is
+// resolved at Job-build time, never checkpointed in the workflow input.
 func (r EnvironmentRoutes) deployInput(ctx context.Context, environment model.Environment, version string, placement resolvedPlacement) (provision.EnvProvisionInput, error) {
 	tenant, err := r.tenants.Current(ctx)
 	if err != nil {

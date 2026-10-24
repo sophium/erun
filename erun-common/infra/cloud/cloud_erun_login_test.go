@@ -10,10 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// TestERunCloudProviderLoginDegradesWhenIssuerRejectsOrgClaimScope: the
-// org-claim scope is requested by default, but an issuer that has never heard
-// of it (a dedicated/BYO IdP, the common case, not the shipped Zitadel) must
-// still let the login through rather than breaking on an invalid_scope refusal.
+// An issuer that rejects the org-claim scope must still let login through.
 func TestERunCloudProviderLoginDegradesWhenIssuerRejectsOrgClaimScope(t *testing.T) {
 	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
 	secrets := NewFileCloudSecretStore(t.TempDir())
@@ -50,10 +47,6 @@ func TestERunCloudProviderLoginDegradesWhenIssuerRejectsOrgClaimScope(t *testing
 	}
 }
 
-// assertDegradedScopeAttempts checks the two device-authorization attempts a
-// graceful scope degradation must produce: the first requests the org-claim
-// scope by default, the second (after the issuer's refusal) drops it while
-// keeping the baseline scopes.
 func assertDegradedScopeAttempts(t *testing.T, gotScopes []string) {
 	t.Helper()
 	if len(gotScopes) != 2 {
@@ -81,8 +74,7 @@ func TestERunCloudProviderLoginFallsBackToAuthCodeWithoutDeviceEndpoint(t *testi
 	deps := CloudDependencies{
 		CloudSecretStore: secrets,
 		FetchOIDCDiscovery: func(core.Context, string) (OIDCDiscovery, error) {
-			// No DeviceAuthorizationEndpoint: the issuer does not support the
-			// device grant, so login must fall back to the PKCE path.
+			// No DeviceAuthorizationEndpoint: login must fall back to PKCE.
 			return OIDCDiscovery{Issuer: provider.OIDCIssuerURL, AuthorizationEndpoint: "https://auth.example.test/authorize", TokenEndpoint: "https://auth.example.test/token"}, nil
 		},
 		StartERunDeviceAuthorization: func(core.Context, OIDCDiscovery, string, string) (ERunDeviceAuthorization, error) {
@@ -116,10 +108,6 @@ func TestERunCloudProviderLoginRequiresInit(t *testing.T) {
 	}
 }
 
-// A device grant that cannot complete must not be a dead end: the issuer
-// advertises the endpoint, so auto starts there, but the authorization-code
-// path still has to run when it fails, so one broken authentication method
-// cannot lock the CLI out.
 func TestERunCloudProviderLoginFallsBackToAuthCodeWhenDeviceFlowFails(t *testing.T) {
 	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
 	secrets := NewFileCloudSecretStore(t.TempDir())
@@ -162,9 +150,6 @@ func TestERunCloudProviderLoginFallsBackToAuthCodeWhenDeviceFlowFails(t *testing
 	}
 }
 
-// An explicit --flow authcode skips the device grant even where one is
-// advertised: that is the whole point of the override, for an operator whose
-// device-page method is broken but whose browser session already works.
 func TestERunCloudProviderLoginHonoursExplicitAuthCodeFlow(t *testing.T) {
 	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
 	provider := erunTestProvider()
@@ -188,9 +173,6 @@ func TestERunCloudProviderLoginHonoursExplicitAuthCodeFlow(t *testing.T) {
 	}
 }
 
-// An explicit --flow device against an issuer without the endpoint fails
-// loudly, naming the flow that would work, rather than silently doing
-// something the operator did not ask for.
 func TestERunCloudProviderLoginExplicitDeviceFlowWithoutEndpointErrors(t *testing.T) {
 	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
 	provider := erunTestProvider()
@@ -240,11 +222,7 @@ func TestNormalizeERunLoginFlow(t *testing.T) {
 	}
 }
 
-// Reserved scopes are frequently absent from a provider's discovery document
-// (Zitadel's urn:zitadel:* family is), so the operator must be able to ask for
-// one by name and have it actually reach the authorization request. Without
-// the org claim such a scope carries, an org-scoped issuer resolves nobody
-// .
+// Reserved scopes are often missing from discovery, so --scope must still reach the request.
 func TestERunCloudProviderLoginRequestsExtraScopes(t *testing.T) {
 	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
 	provider := erunTestProvider()
@@ -279,8 +257,6 @@ func TestERunLoginScope(t *testing.T) {
 	if got := erunLoginScope(nil); got != erunOAuthScope {
 		t.Fatalf("erunLoginScope(nil) = %q, want the baseline %q", got, erunOAuthScope)
 	}
-	// A duplicate of the baseline must not be repeated, and a multi-scope
-	// string must be split rather than sent as one opaque value.
 	got := erunLoginScope([]string{"openid", "a b", "", "a"})
 	if got != "openid offline_access a b" {
 		t.Fatalf("erunLoginScope = %q, want deduped and split", got)

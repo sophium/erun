@@ -8,14 +8,10 @@ import (
 	"testing"
 )
 
-// machOArtifactBytes opens with the little-endian 64-bit Mach-O magic a
-// darwin/arm64 cross-build produces. The desktop classifies by content, so this
-// is all it takes to reach the signing branch.
+// machOArtifactBytes opens with the 64-bit Mach-O magic; the desktop
+// classifies by content.
 var machOArtifactBytes = append([]byte{0xCF, 0xFA, 0xED, 0xFE}, []byte("erun darwin arm64 artifact")...)
 
-// stubCodesign routes the shared codesign lookup at a script that records its
-// argv and reports the file as carrying no signature, so a test can watch what
-// the desktop does without a macOS host.
 func stubCodesign(t *testing.T, dir string) string {
 	t.Helper()
 	log := filepath.Join(dir, "codesign-calls.log")
@@ -44,16 +40,13 @@ func seedOrchestratorArtifact(t *testing.T, name string, content []byte) string 
 	return path
 }
 
-// arm64 macOS SIGKILLs a Mach-O carrying no signature at all, without printing
-// anything, so the desktop signs one before handing it to the operator to run —
-// and says so, because the file was modified on its way in.
+// arm64 macOS silently SIGKILLs an unsigned Mach-O.
 func TestRunOrchestratorOutputOnHostSignsAnUnsignedDarwinArtifact(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the codesign stub is a POSIX shell script")
 	}
 	home := withOrchestratorConfigHome(t)
 	artifact := seedOrchestratorArtifact(t, "erun-darwin-arm64", machOArtifactBytes)
-	// ERUN_HOST_OS_OVERRIDE pins the darwin branch so the test runs anywhere.
 	t.Setenv("ERUN_HOST_OS_OVERRIDE", "darwin")
 	codesignLog := stubCodesign(t, home)
 
@@ -95,8 +88,6 @@ func requireOnlyNotification(t *testing.T, emits *capturedEmits, kind, contains 
 	}
 }
 
-// codesign exists only on macOS and so does the problem: on any other host the
-// artifact is handed over exactly as it arrived, and nothing is said about it.
 func TestRunOrchestratorOutputOnHostLeavesANonDarwinHostAlone(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the codesign stub is a POSIX shell script")

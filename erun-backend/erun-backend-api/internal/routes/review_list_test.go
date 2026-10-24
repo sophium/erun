@@ -11,9 +11,6 @@ import (
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
 
-// TestListReviewsTranslatesQueryParamsIntoAReviewFilter is the discovery
-// surface the issue calls one filter wide: every new query param must reach
-// the repository filter, composed with the existing targetBranch.
 func TestListReviewsTranslatesQueryParamsIntoAReviewFilter(t *testing.T) {
 	reviews := &stubReviewRepository{}
 	routes := ReviewRoutes{reviews: reviews}
@@ -37,14 +34,7 @@ func TestListReviewsTranslatesQueryParamsIntoAReviewFilter(t *testing.T) {
 	}
 }
 
-// TestListReviewsRefusesAnUnknownStatusFilter: the read route handed any
-// `?status=` value straight to the repository, so an unrecognised one matched
-// no row and answered 200 with an empty list -- a mistyped filter was
-// indistinguishable from a review queue that genuinely had nothing in that
-// state, which is the conclusion an operator acts on. The refusal must name
-// the accepted values, and it must happen before the query, or the caller
-// still receives the empty listing this route is being fixed to stop
-// producing.
+// An unknown status must be refused before the query, naming the accepted values.
 func TestListReviewsRefusesAnUnknownStatusFilter(t *testing.T) {
 	reviews := &stubReviewRepository{}
 	routes := ReviewRoutes{reviews: reviews}
@@ -73,9 +63,6 @@ func TestListReviewsRefusesAnUnknownStatusFilter(t *testing.T) {
 	}
 }
 
-// Case-insensitivity is the documented behavior on this route, so a lower-case
-// spelling resolves to the stored one rather than being refused alongside the
-// values that are genuinely outside the vocabulary.
 func TestListReviewsResolvesALowerCaseStatusFilter(t *testing.T) {
 	reviews := &stubReviewRepository{}
 	routes := ReviewRoutes{reviews: reviews}

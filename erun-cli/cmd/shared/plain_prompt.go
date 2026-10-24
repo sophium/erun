@@ -16,19 +16,12 @@ import (
 	"golang.org/x/term"
 )
 
-// A single shared reader is deliberate: each bufio.Reader buffers ahead, so
-// constructing one per prompt would drop the piped input lines a later prompt
-// in the same run needs — the same read-ahead that limits piped promptui runs
-// to one prompt per process.
+// One shared reader: per-prompt bufio.Readers would buffer ahead and drop later piped answers.
 var PlainPromptInput = sync.OnceValue(func() *bufio.Reader {
 	return bufio.NewReader(os.Stdin)
 })
 
-// WriterIsTerminal asks whether w is a real terminal, not merely a character
-// device: os.ModeCharDevice is also set for /dev/null, /dev/zero, and
-// /dev/random, so a stat-based check misreads "command < /dev/null" — the
-// conventional way to run a command non-interactively — as an interactive
-// terminal.
+// WriterIsTerminal reports whether w is a real terminal; ModeCharDevice alone also matches /dev/null.
 func WriterIsTerminal(w io.Writer) bool {
 	if os.Getenv("ERUN_FORCE_TTY") == "1" {
 		return true
@@ -40,14 +33,8 @@ func WriterIsTerminal(w io.Writer) bool {
 	return term.IsTerminal(int(file.Fd()))
 }
 
-// runPlainPrompt is the non-TTY fallback for promptui.Prompt, mirroring its
-// semantics. One deterministic line per pipe keeps scripted use and the
-// integration goldens stable.
-//
-// It renders to the stream the prompt was built with, the same one promptui
-// would paint: a prompt routed off stdout (the open --no-shell alias confirm)
-// must not put its question back on stdout, where the eval-able script it is
-// kept away from is written.
+// runPlainPrompt is the non-TTY fallback for promptui.Prompt. It writes to the prompt's
+// own stream so a prompt routed off stdout stays off the eval-able script.
 func runPlainPrompt(prompt promptui.Prompt) (string, error) {
 	writer := promptOutputWriter(prompt)
 	reader := PlainPromptInput()
@@ -99,10 +86,7 @@ func plainPromptLabel(prompt promptui.Prompt) string {
 	return label + ": "
 }
 
-// renderPlainPromptTemplate strips promptui's style functions to identity so a
-// templated prompt keeps its wording in plain mode without emitting escape
-// sequences. Returns ok=false when there is no usable custom template, so the
-// caller falls back to the default plain label.
+// renderPlainPromptTemplate renders the custom template without escape sequences; ok=false means none usable.
 func renderPlainPromptTemplate(prompt promptui.Prompt) (string, bool) {
 	if prompt.Templates == nil {
 		return "", false
@@ -110,11 +94,7 @@ func renderPlainPromptTemplate(prompt promptui.Prompt) (string, bool) {
 	return renderPromptTemplate(prompt.Templates.Prompt, prompt.Label, plainPromptFuncs())
 }
 
-// renderPromptTemplate renders one of a prompt's templates against its label.
-// The style functions are the caller's choice: identity keeps a plain render
-// free of escape sequences, promptui.FuncMap reproduces the styled render a
-// repaint prompt would have produced. Returns ok=false for an unusable
-// template so the caller can fall back.
+// renderPromptTemplate renders one of a prompt's templates with the given style funcs; ok=false if unusable.
 func renderPromptTemplate(text string, label any, funcs template.FuncMap) (string, bool) {
 	if strings.TrimSpace(text) == "" {
 		return "", false
@@ -130,8 +110,7 @@ func renderPromptTemplate(text string, label any, funcs template.FuncMap) (strin
 	return rendered.String(), true
 }
 
-// plainPromptFuncs is promptui.FuncMap's key set with every style reduced to
-// identity, so a template parses in plain mode while its wording survives.
+// plainPromptFuncs is promptui.FuncMap with every style reduced to identity.
 func plainPromptFuncs() template.FuncMap {
 	identity := func(value any) string { return fmt.Sprintf("%v", value) }
 	funcs := make(template.FuncMap, len(promptui.FuncMap))
@@ -141,9 +120,7 @@ func plainPromptFuncs() template.FuncMap {
 	return funcs
 }
 
-// RunPlainSelect is the non-TTY fallback for promptui.Select. An empty line
-// picks the cursor's starting option, matching a piped "\r" confirm against
-// promptui.
+// RunPlainSelect is the non-TTY fallback for promptui.Select; an empty line picks the cursor's option.
 func RunPlainSelect(prompt promptui.Select) (int, string, error) {
 	items := plainSelectItems(prompt)
 	if len(items) == 0 {
@@ -199,10 +176,7 @@ func plainSelectItems(prompt promptui.Select) []string {
 	return items
 }
 
-// readPlainPromptLine tolerates a final unterminated line — piped input often
-// ends without a trailing newline, or with a bare "\r" written for promptui's
-// enter key. A clean EOF with no content maps to promptui.ErrEOF so callers
-// keep one error vocabulary across both prompt modes.
+// readPlainPromptLine accepts an unterminated final line; a clean empty EOF maps to promptui.ErrEOF.
 func readPlainPromptLine(reader *bufio.Reader) (string, error) {
 	line, err := reader.ReadString('\n')
 	if err != nil {

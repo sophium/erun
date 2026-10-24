@@ -15,8 +15,6 @@ func TestOrchestratorMCPUnreachableEnv(t *testing.T) {
 	if !ok || tenant != "frs" || environment != "dev" {
 		t.Fatalf("got tenant=%q environment=%q ok=%v, want frs/dev/true", tenant, environment, ok)
 	}
-	// orchestratorEnvLabel's degenerate shapes name no env a deploy action
-	// could target, so they must not produce one.
 	for _, label := range []string{"", "frs", "/dev", "frs/", "?/dev", "frs/?", "an unnamed linked entry"} {
 		if tenant, environment, ok := orchestratorMCPUnreachableEnv(label); ok {
 			t.Fatalf("label %q resolved to %q/%q, want no actionable env", label, tenant, environment)
@@ -36,9 +34,6 @@ func TestOrchestratorMCPUnreachableNoticeNamesTheEnvironments(t *testing.T) {
 	}
 }
 
-// TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo exercises the full
-// wiring path: the written config still carries the unreachable env, and the
-// operator gets a notice distinct from the partial-skip one.
 func TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo(t *testing.T) {
 	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
 	app, _ := orchestratorTestAppWithReachability(t, func(int) bool { return false })
@@ -69,9 +64,7 @@ func TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo(t *testing.T) {
 	if !strings.Contains(payload.Message, "frs/dev") || !strings.Contains(payload.Message, "not answering") {
 		t.Fatalf("notice does not name the environment and the reason: %q", payload.Message)
 	}
-	// Exactly one unreachable env is the unambiguous case: the notice can only
-	// mean this env, so it carries the deploy action and is tagged with it
-	// rather than leaving the "deploy or reopen" remedy unreachable.
+	// A single unreachable env makes the notice unambiguous, so it carries the deploy action.
 	wantTag := [4]string{"frs", "dev", notificationSourceOrchestratorEdgeUnreachable, notificationActionDeploy}
 	gotTag := [4]string{payload.Tenant, payload.Environment, payload.Source, payload.Action}
 	if gotTag != wantTag {
@@ -79,10 +72,6 @@ func TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo(t *testing.T) {
 	}
 }
 
-// TestWireOrchestratorMCPMultipleUnreachableEnvsAreEachActionable: with several
-// edges down at once, every unreachable env gets its own env-scoped notice
-// carrying the same deploy action the single-env case gets -- not one env picked for the
-// whole set, and not a notice that merely mentions the others.
 func TestWireOrchestratorMCPMultipleUnreachableEnvsAreEachActionable(t *testing.T) {
 	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
 	app, _ := orchestratorTestAppWithReachability(t, func(int) bool { return false })
@@ -110,10 +99,7 @@ func TestWireOrchestratorMCPMultipleUnreachableEnvsAreEachActionable(t *testing.
 	}
 }
 
-// assertActionableUnreachableNotice checks one notice about an unreachable edge
-// and returns the environment it names: a warning about that env, tagged with
-// it and carrying the deploy action. A notice that merely mentions the edge is
-// not recovery, which is what this locks.
+// assertActionableUnreachableNotice returns the env the notice names and targets with a deploy action.
 func assertActionableUnreachableNotice(t *testing.T, event any, orchestrator string) string {
 	t.Helper()
 	payload, ok := event.(appNotificationPayload)

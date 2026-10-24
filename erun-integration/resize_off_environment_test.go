@@ -11,17 +11,10 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// resize is a hybrid command: it always rolls the pod locally (kubectl/helm
-// against the caller's own kubeconfig), but its occupancy check has to answer
-// about the *target* environment's own activity leases, which off-environment
-// only the environment's own MCP edge can see. These scenarios cover that
-// half, mirroring TestActivityLeaseOffEnvironment/TestIdleOffEnvironment in
-// environment_half_scenarios_test.go; TestResize (resize_test.go) covers the
-// in-pod half via inEnvironment(...).
+// resize rolls the pod locally, but off-environment its occupancy check must read
+// the target environment's leases through that environment's MCP edge.
 const resizeEdgeLocalPort = 26600
 
-// resizeHeldLeasePayload and resizeNoLeasePayload are the environment edge's
-// activity_lease_list answers with and without a held exclusive lease.
 const (
 	resizeHeldLeasePayload = `{"content":[{"type":"text","text":"held"}],` +
 		`"structuredContent":{"tenant":"team","environment":"dev","held":[` +
@@ -39,9 +32,7 @@ func TestResizeOffEnvironment(t *testing.T) {
 }
 
 func testResizeOffEnvironmentDryRunHeldLeaseRefusesAndNamesHolder(t *testing.T) {
-	// A resize invoked from off the target environment must consult that
-	// environment's own lease store, not the caller's local one, which for
-	// a remote target is always empty.
+	// A remote target's leases live only in its own store; the caller's local one is empty.
 	skipIfPortsBusy(t, resizeEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", resizeEdgeLocalPort)
@@ -65,10 +56,8 @@ func testResizeOffEnvironmentDryRunHeldLeaseRefusesAndNamesHolder(t *testing.T) 
 	if call.Tool != "activity_lease_list" {
 		t.Fatalf("the environment was asked for %q, want activity_lease_list", call.Tool)
 	}
-	// The occupancy check only reads the environment's leases, so it must
-	// carry the idle-probe header like any other diagnostic read -- even
-	// though the caller forces the real call through under --dry-run (see
-	// resizeActivityLeaseLoader), it stays a read, never new activity.
+	// The occupancy check is a read even when forced through under --dry-run, so it must
+	// carry the idle-probe header.
 	if !call.IdleProbe {
 		t.Errorf("expected the resize occupancy check to carry the idle-probe header")
 	}
@@ -94,8 +83,6 @@ func testResizeOffEnvironmentDryRunHeldLeaseWithOverrideProceeds(t *testing.T) {
 }
 
 func testResizeOffEnvironmentDryRunNoLeaseTracesWillRoll(t *testing.T) {
-	// The control case: with nothing held in the environment's own store,
-	// the dispatched check must let the plan through rather than refuse.
 	skipIfPortsBusy(t, resizeEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", resizeEdgeLocalPort)
@@ -114,11 +101,7 @@ func testResizeOffEnvironmentDryRunNoLeaseTracesWillRoll(t *testing.T) {
 }
 
 func testResizeOffEnvironmentRealRunHeldLeaseRefusesBeforeAnyDeployCall(t *testing.T) {
-	// The occupancy check runs before the config is persisted or the pod is
-	// rolled, so a real (non-dry-run) resize against a held environment must
-	// refuse having touched neither -- no devops chart or kubectl/helm stub
-	// is seeded, so this scenario would fail for a different reason (a
-	// missing chart) if the refusal did not happen first.
+	// No chart is seeded, so the scenario would fail differently if the refusal were not first.
 	skipIfPortsBusy(t, resizeEdgeLocalPort)
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", resizeEdgeLocalPort)

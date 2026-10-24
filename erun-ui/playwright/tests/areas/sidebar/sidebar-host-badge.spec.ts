@@ -1,10 +1,6 @@
 import { test, expect } from '../../../fixtures/erunApp.js';
 
-// A host environment has no pod and no cluster at all — it must render like
-// any other environment, with its own distinct badge, never as a pod that
-// failed to start (root AGENTS.md "Smooth, Seamless, No Dead Ends"). This mirrors sidebar-local-badge.spec.ts's shape but for the badge
-// that must NOT collapse into "Local" even though a host env is also local by
-// worktree location.
+// A host env has no pod: it gets its own badge and never renders as a pod that failed to start.
 test.describe('sidebar HOST badge', () => {
   test('a host environment shows the Host badge, the (host) suffix, and no pod-shaped status dot', async ({
     app,
@@ -17,8 +13,7 @@ test.describe('sidebar HOST badge', () => {
         message: `Host badge for ${tenant} / ${environment}`,
       })
       .toBe(true);
-    // A host env is also "local" by worktree location, but must never show
-    // the LOCAL pill too — the two badges are mutually exclusive.
+    // HOST and LOCAL badges are mutually exclusive.
     expect(
       await app.sidebar.hasLocalBadge(tenant, environment),
       `Local badge must not also render for ${tenant} / ${environment}`,
@@ -26,8 +21,7 @@ test.describe('sidebar HOST badge', () => {
     expect(await app.sidebar.rowHasHostSuffix(tenant, environment)).toBe(true);
     expect(await app.sidebar.rowHasLocalSuffix(tenant, environment)).toBe(false);
 
-    // "Not stopped, it simply is": no pod-shaped open/close status dot, since
-    // a host env is never running or stopped.
+    // A host env is never running or stopped, so it has no open/close dot.
     await expect(app.sidebar.envOpenDot(tenant, environment)).toHaveCount(0);
   });
 

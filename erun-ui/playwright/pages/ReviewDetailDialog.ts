@@ -1,9 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-// ReviewDetailDialog is the hosted platform review's own detail surface,
-// opened from a row in the tenant dashboard's Reviews tab. Named
-// apart from ReviewPanel (the local diff panel's POM) on purpose — see
-// ReviewDetailDialog.tsx's own header comment for why.
+// The hosted platform review's detail dialog (distinct from ReviewPanel, the local diff panel).
 export class ReviewDetailDialog {
   constructor(public readonly page: Page) {}
 
@@ -23,22 +20,14 @@ export class ReviewDetailDialog {
     return this.locator().getByRole('listitem');
   }
 
-  // buildProfileButtonFor opens BuildProfileDialog for one build row in this
-  // review's build list.
   buildProfileButtonFor(buildId: string): Locator {
     return this.locator().getByRole('button', { name: `View build profile for ${buildId}` });
   }
 
-  // commentThread locates one thread's own roving-tabindex container
-  // (ReviewDetailDialog.Comments.tsx's CommentThread), by the same
-  // "Comment thread by <author>" accessible name a screen reader announces.
   commentThread(author: string): Locator {
     return this.locator().getByRole('region', { name: `Comment thread by ${author}` });
   }
 
-  // The "Keyboard shortcuts" popover this dialog's header renders
-  // (ReviewKeyboardShortcuts.tsx) -- the same shared affordance the diff
-  // panel exposes, so either entry point teaches the whole keyboard model.
   keyboardShortcutsButton(): Locator {
     return this.locator().getByRole('button', { name: 'Keyboard shortcuts' });
   }
@@ -67,9 +56,7 @@ export class ReviewDetailDialog {
     await this.locator().getByRole('button', { name: 'Cancel' }).click();
   }
 
-  // resolveButton/reopenButton are offered only on a thread's root; `threadIndex`
-  // is the thread's position among rendered threads (roots), matching reply()'s
-  // own indexing convention.
+  // `threadIndex` counts root threads, matching reply().
   resolveButton(threadIndex: number): Locator {
     return this.locator().getByRole('button', { name: 'Resolve' }).nth(threadIndex);
   }
@@ -112,7 +99,7 @@ export class ReviewDetailDialog {
 
   async choosePendingReviewer(username: string): Promise<void> {
     await this.reviewerPickerTrigger().click();
-    // The picker is a Radix Select, portal'd to the document body.
+    // Radix Select portals to the document body.
     await this.page.getByRole('option', { name: username }).click();
   }
 

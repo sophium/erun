@@ -25,9 +25,7 @@ type EnvironmentActivityParams struct {
 	Now           time.Time
 }
 
-// EnvironmentActivityClientUpdate carries a per-client byte delta so the
-// desktop tooltip can attribute activity to the peer keeping the marker
-// active, not just report a total.
+// EnvironmentActivityClientUpdate carries a per-client byte delta for attribution.
 type EnvironmentActivityClientUpdate struct {
 	Address string
 	Bytes   int64
@@ -38,20 +36,10 @@ type EnvironmentIdleStore interface {
 	LoadEnvConfig(tenant, environment string) (configpkg.EnvConfig, string, error)
 }
 
-// Every timestamp below carries omitzero rather than omitempty: a value
-// time.Time is never "empty" to encoding/json, so omitempty silently renders a
-// never-set field as the zero instant — a fabricated timestamp a consumer
-// cannot tell from a real one. A marker that has never seen activity must
-// carry no timestamp at all.
+// Timestamps use omitzero: omitempty never omits a time.Time, so it would render a
+// never-set field as the zero instant.
 
-// EnvironmentActivitySnapshot is the on-disk record for one activity kind.
-// Clients is bounded so a long-lived runtime cannot grow the file without
-// bound under churn (e.g. ephemeral source ports on a NAT'd peer).
-//
-// The timestamp tags are `omitzero`, not `omitempty`: `omitempty` has no empty
-// case for a time.Time, so a marker that had never been touched serialized as
-// Go's zero instant and a consumer could not tell it from one seen at the zero
-// instant. `omitzero` is what delivers the omission the tag names.
+// EnvironmentActivitySnapshot is the on-disk record for one activity kind; Clients is bounded.
 type EnvironmentActivitySnapshot struct {
 	LastActivity time.Time                            `json:"lastActivity,omitzero"`
 	LastSeen     time.Time                            `json:"lastSeen,omitzero"`
@@ -74,9 +62,7 @@ type EnvironmentIdleMarker struct {
 	Clients          []EnvironmentIdleMarkerClient `json:"clients,omitempty"`
 }
 
-// EnvironmentIdleMarkerClient is the marker's view for the desktop tooltip
-// and the CLI --json output. SecondsAgo is precomputed so renderers need
-// not recompute it off LastActivity every frame.
+// EnvironmentIdleMarkerClient is the marker's per-client view for renderers.
 type EnvironmentIdleMarkerClient struct {
 	Address      string    `json:"address"`
 	Bytes        int64     `json:"bytes,omitempty"`
@@ -96,14 +82,9 @@ type EnvironmentIdleStatus struct {
 	SecondsUntilStop    int64                                  `json:"secondsUntilStop,omitempty"`
 	Markers             []EnvironmentIdleMarker                `json:"markers"`
 	Activity            map[string]EnvironmentActivitySnapshot `json:"activity,omitempty"`
-	// Leases are the work claims currently holding the environment. They are
-	// carried on the status so a client can say *what* is deferring auto-stop,
-	// not merely that something is.
+	// Leases say what is deferring auto-stop.
 	Leases []EnvironmentActivityLease `json:"leases,omitempty"`
-	// StopPendingSince is the RFC3339 time the auto-stop grace period was
-	// first armed. While set, the in-pod monitor and the desktop treat the
-	// env as "warning, not yet ready to fire"; MaybeArmOrFireIdleStop fires
-	// only once now - since >= grace.
+	// StopPendingSince is when the auto-stop grace period was armed (RFC3339).
 	StopPendingSince       string `json:"stopPendingSince,omitempty"`
 	SecondsUntilForcedStop int64  `json:"secondsUntilForcedStop,omitempty"`
 	GracePeriodSeconds     int64  `json:"gracePeriodSeconds,omitempty"`
@@ -163,10 +144,7 @@ func environmentStopEligibility(markers []EnvironmentIdleMarker, outsideWorkingH
 		if marker.Name == "working-hours" || marker.Idle {
 			continue
 		}
-		// Outside working hours the quiet signals no longer hold the environment
-		// up. A lease is not a quiet signal: it is a job saying it is running
-		// right now, so it blocks the stop whatever the clock says — otherwise an
-		// agent run started at 19:59 loses its environment a minute later.
+		// A lease blocks the stop even outside working hours: it is a job running now.
 		if outsideWorkingHours && marker.Name != environmentActivityLeaseMarker {
 			continue
 		}
@@ -227,14 +205,10 @@ func ResolveStoredEnvironmentIdleStatus(store EnvironmentIdleStore, tenant, envi
 	return status, nil
 }
 
-// overlayStopPending surfaces the auto-stop grace window on the resolved
-// status so every consumer sees it — the in-pod monitor, the desktop via
-// the MCP `idle` tool, and future external clients — even though only
-// callers driving MaybeArmOrFireIdleStop write the pending state.
+// overlayStopPending exposes the grace window to read-only consumers too.
 func overlayStopPending(status EnvironmentIdleStatus, tenant, environment string, now time.Time) EnvironmentIdleStatus {
 	if !status.ManagedCloud || !status.StopEligible {
-		// Eligibility lapsed: don't surface a stale pending entry to
-		// read-only consumers; the next MaybeArmOrFireIdleStop clears it.
+		// Eligibility lapsed; the next MaybeArmOrFireIdleStop clears the stale entry.
 		return status
 	}
 	pending, ok, err := LoadEnvironmentStopPending(tenant, environment)
@@ -283,9 +257,7 @@ func loadEnvironmentIdleStopError(tenant, environment string) string {
 	return value[len(value)-maxStopErrorLength:]
 }
 
-// environmentIdleStopLogPath keys the idle-stop log by tenant and env so a
-// later doctor/activity read can attribute a shutdown failure to the right
-// environment when one $HOME hosts multiple tenants.
+// Keyed by tenant and env since one $HOME may host several.
 func environmentIdleStopLogPath(homeDir, tenant, environment string) string {
 	return filepath.Join(homeDir, ".erun", tenant, environment, "idle-stop.log")
 }
@@ -347,8 +319,7 @@ func RecordEnvironmentActivity(params EnvironmentActivityParams) error {
 		return err
 	}
 	data = append(data, '\n')
-	// Replaced, never rewritten in place: every idle-status read parses every
-	// snapshot, and one truncated mid-write fails that whole read.
+	// Replace atomically: every idle read parses every snapshot.
 	return configpkg.ReplaceFileAtomically(path, data, 0o644)
 }
 
@@ -453,9 +424,7 @@ func activityIdleMarker(kind string, snapshot EnvironmentActivitySnapshot, polic
 	return marker
 }
 
-// environmentIdleMarkerClients returns nil (not an empty slice) when no
-// clients were recorded so JSON omitempty keeps the payload terse for
-// kinds that never populate it.
+// Nil, not empty, so omitempty drops it.
 func environmentIdleMarkerClients(clients map[string]EnvironmentActivityClient, now time.Time) []EnvironmentIdleMarkerClient {
 	if len(clients) == 0 {
 		return nil
@@ -482,30 +451,11 @@ func environmentIdleMarkerClients(clients map[string]EnvironmentActivityClient, 
 	return out
 }
 
-// environmentOperatorPresenceMarkers are the activity kinds that name a human
-// at the console, and only that. "ssh" is unambiguous — no agent job opens an
-// interactive shell into its own pod as part of normal work. "codex" and
-// "process" were deliberately left out despite naming an AI session, because
-// they are not unambiguous: the "codex" marker names any invocation of the AI
-// tools, including the one a detached orchestrator job starts (job_agent.go
-// execs the same "claude"/"codex" on PATH), and the resident sampler's
-// "process" marker fires for that same resident process.
-// Both are environment-wide, not scoped to a worktree, so gating on either
-// would make an orchestrator refuse itself, and would make a second
-// legitimate job in a *different* clone of the same pod refuse against the
-// first one's resident process — exactly the "not a global mutex" outcome
-// this feature must avoid. Phase 2 as shipped here is therefore narrower than
-// the issue's description: SSH presence only. Codex/claude session presence
-// remains visible (the marker is unchanged and still surfaces on `idle` and
-// the sidebar) but does not by itself refuse an exclusive take.
+// environmentOperatorPresenceMarkers name only a human at the console. "codex" and "process"
+// also fire for orchestrator jobs, so gating on them would make a job refuse itself.
 var environmentOperatorPresenceMarkers = []string{configpkg.ActivityKindSSH}
 
-// EnvironmentOperatorPresenceReason reports why an environment reads as having
-// an operator physically present at an interactive shell, in the same words
-// environmentBusyFromIdleStatus / the desktop sidebar already use, so an
-// exclusive lease refusal and the sidebar's busy detail never disagree about
-// what "busy" means. The operator never takes a lease, so this is inferred
-// from markers rather than from a competing claim.
+// EnvironmentOperatorPresenceReason infers operator presence from markers, worded like the sidebar.
 func EnvironmentOperatorPresenceReason(status EnvironmentIdleStatus) (string, bool) {
 	for _, marker := range status.Markers {
 		if marker.Idle {
@@ -520,10 +470,7 @@ func EnvironmentOperatorPresenceReason(status EnvironmentIdleStatus) (string, bo
 	return "", false
 }
 
-// EnvironmentActivityMarkerDetail renders an idle marker's name as the phrase
-// an operator would use to describe it, so every surface that reports why an
-// environment is busy - the desktop sidebar, an exclusive lease refusal -
-// says the same thing.
+// EnvironmentActivityMarkerDetail renders a marker as the phrase every busy surface shares.
 func EnvironmentActivityMarkerDetail(marker string) string {
 	switch marker {
 	case ActivityKindProcess:

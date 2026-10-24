@@ -4,7 +4,6 @@ import (
 	"testing"
 )
 
-// TestEnvironmentTypeIsValid pins the canonical set, including host.
 func TestEnvironmentTypeIsValid(t *testing.T) {
 	cases := []struct {
 		envType EnvironmentType
@@ -24,10 +23,6 @@ func TestEnvironmentTypeIsValid(t *testing.T) {
 	}
 }
 
-// TestEnvironmentTypeUsesDindSidecar pins which types carry the erun-dind
-// sidecar RunRuntimeUsage's reading cannot see -- local-agent and
-// remote-agent build in-pod via the sidecar; runtime never builds there, and
-// host has no pod at all.
 func TestEnvironmentTypeUsesDindSidecar(t *testing.T) {
 	cases := []struct {
 		envType EnvironmentType
@@ -47,12 +42,8 @@ func TestEnvironmentTypeUsesDindSidecar(t *testing.T) {
 	}
 }
 
-// TestEnvironmentTypePredicatesCoverEveryValidType is a completeness net: it
-// walks every type IsValid() accepts and calls each exclusion-shaped predicate.
-// BuildsHere and RemoteWorktree panic on an unhandled type, so a fifth type
-// added to validEnvironmentTypes without a matching case in both switches fails
-// this test loudly — a compile-or-test failure, not a silent reclassification
-// into whichever branch nobody updated.
+// TestEnvironmentTypePredicatesCoverEveryValidType relies on BuildsHere and
+// RemoteWorktree panicking on an unhandled type.
 func TestEnvironmentTypePredicatesCoverEveryValidType(t *testing.T) {
 	for _, envType := range ValidEnvironmentTypes {
 		t.Run(string(envType), func(t *testing.T) {
@@ -71,9 +62,6 @@ func TestEnvironmentTypePredicatesCoverEveryValidType(t *testing.T) {
 	}
 }
 
-// TestHostEnvironmentPredicates names every classifier's answer for host
-// explicitly, one assertion per predicate, so a future change to any of them
-// has to look this test in the eye rather than fail somewhere downstream.
 func TestHostEnvironmentPredicates(t *testing.T) {
 	env := EnvConfig{Type: EnvironmentTypeHost}
 
@@ -83,33 +71,22 @@ func TestHostEnvironmentPredicates(t *testing.T) {
 	if got := env.ResolvedType(); got != EnvironmentTypeHost {
 		t.Errorf("ResolvedType() = %q, want %q", got, EnvironmentTypeHost)
 	}
-	// Building is the point of a host env (desktop-app builds, host-credential
-	// tasks) — it must answer true, not fall out of an "!= runtime" exclusion.
 	if !env.BuildsHere() {
 		t.Error("BuildsHere() = false, want true — a host env builds locally")
 	}
-	// A host worktree is the most local thing in the product, so this must be
-	// false, not true from a "!= local-agent" exclusion.
 	if env.RemoteWorktree() {
 		t.Error("RemoteWorktree() = true, want false — a host worktree lives on this machine")
 	}
-	// The one property that is actually unique to host: no pod at all.
 	if env.HasPod() {
 		t.Error("HasPod() = true, want false — a host environment has no pod")
 	}
-	// A host env iterates on local builds like an agent env, not like a
-	// runtime env consuming stable releases.
 	if got := env.ResolvedUpgradeChannel(); got != UpgradeChannelSnapshot {
 		t.Errorf("ResolvedUpgradeChannel() = %q, want %q", got, UpgradeChannelSnapshot)
 	}
 }
 
-// TestUnresolvedEnvironmentTypeKeepsPreHostBehavior guards the backward-
-// compatibility case every host-specific check in this codebase was written
-// against: a legacy env whose type never resolved (see
-// legacyEnvTypeFromRemoteSnapshot) must not be reclassified as a host
-// environment just because it also answers false to RemoteWorktree/BuildsHere
-// questions the same way host does.
+// TestUnresolvedEnvironmentTypeKeepsPreHostBehavior: a legacy env with an unresolved
+// type must not read as host.
 func TestUnresolvedEnvironmentTypeKeepsPreHostBehavior(t *testing.T) {
 	env := EnvConfig{}
 	if env.Type.IsValid() {

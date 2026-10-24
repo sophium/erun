@@ -17,13 +17,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// ErrRegistryAuthRequired marks a version listing that failed because the caller
-// is not authorized to read the (private) repository, so callers can tell
-// "log in to see this image" apart from a genuine registry/network failure.
+// ErrRegistryAuthRequired separates "log in to see this image" from registry or network failures.
 var ErrRegistryAuthRequired = errors.New("registry authentication required")
 
-// RegistryStatusError wraps a non-2xx registry response, tagging 401/403 with
-// ErrRegistryAuthRequired so callers can surface an actionable "authenticate" hint.
+// RegistryStatusError wraps a non-2xx response, tagging 401/403 with ErrRegistryAuthRequired.
 func RegistryStatusError(kind, status string, code int) error {
 	if code == http.StatusUnauthorized || code == http.StatusForbidden {
 		return fmt.Errorf("%s failed: %s: %w", kind, status, ErrRegistryAuthRequired)
@@ -31,12 +28,8 @@ func RegistryStatusError(kind, status string, code int) error {
 	return fmt.Errorf("%s failed: %s", kind, status)
 }
 
-// isTransientRegistryError reports whether err is a momentary transport failure
-// (connection reset, DNS blip) worth retrying. A timeout is terminal: it means a
-// slow or hung registry, and retrying only multiplies the wait a blocking caller
-// (erun version) already paid. Auth failures, a cancelled context, and definitive
-// HTTP status responses are terminal too — a listing that reached the registry and
-// got an answer surfaces as an actionable notice rather than being retried.
+// isTransientRegistryError reports a retryable transport blip. Timeouts, auth
+// failures, cancellation and any HTTP status are terminal.
 func isTransientRegistryError(err error) bool {
 	if err == nil {
 		return false
@@ -72,11 +65,7 @@ func ResolveDefaultRuntimeRegistryVersions(ctx context.Context) (RuntimeRegistry
 	return ResolveConfiguredRuntimeRegistryVersions(ctx, config.RuntimeRegistry)
 }
 
-// registryListMaxAttempts bounds retries of a transient transport failure;
-// registryListRetryBase is the linear backoff step (a var so tests can zero it).
-// A few fast attempts clear a momentary network blip without making a real outage
-// crawl — a persistent failure still surfaces as the picker's authenticate/unreachable
-// notice rather than silently degrading to the anonymous/upstream fallback.
+// registryListRetryBase is a var so tests can zero it.
 const registryListMaxAttempts = 3
 
 var registryListRetryBase = 200 * time.Millisecond
@@ -99,10 +88,6 @@ func resolveConfiguredRuntimeRegistryVersionsOnce(ctx context.Context, resolved 
 	return resolveDockerHubRuntimeRegistryVersionsAt(ctx, client, resolved.Namespace, resolved.Repository, resolved.BaseURL)
 }
 
-// resolveRegistryVersionsWithRetry re-runs resolve on a transient transport
-// failure with a short linear backoff, so a momentary network blip does not
-// immediately degrade to anonymous/upstream access. Auth failures, timeouts, and
-// any definitive HTTP status response return on the first try.
 func resolveRegistryVersionsWithRetry(ctx context.Context, resolve func() (RuntimeRegistryVersions, error)) (RuntimeRegistryVersions, error) {
 	var lastErr error
 	for attempt := 0; attempt < registryListMaxAttempts; attempt++ {
@@ -138,7 +123,7 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// ResolveRuntimeImageRegistryVersions is a compatibility overload for callers that pass an explicit namespace/repository pair.
+// ResolveRuntimeImageRegistryVersions takes an explicit namespace/repository pair.
 func ResolveRuntimeImageRegistryVersions(ctx context.Context, namespace, repository string) (RuntimeRegistryVersions, error) {
 	return ResolveConfiguredRuntimeRegistryVersions(ctx, configpkg.RuntimeRegistryConfig{
 		Namespace:  namespace,
@@ -193,8 +178,7 @@ func resolveGHCRRuntimeRegistryVersionsAt(ctx context.Context, client *http.Clie
 	tokenURL = NormalizeGHCRBaseURL(tokenURL)
 
 	repoPath := strings.ToLower(escapeRegistryPathSegments(owner) + "/" + escapeRegistryPathSegments(repository))
-	// Authenticate with the credential docker pulls with (falling back to gh) so
-	// private tenant images list their tags instead of failing anonymously.
+	// Authenticate so private tenant images list their tags.
 	auth, hasAuth := resolveGHCRBasicAuth(owner)
 	token, err := FetchGHCRPullToken(ctx, client, repoPath, tokenURL, auth, hasAuth)
 	if err != nil {
@@ -211,11 +195,8 @@ func resolveGHCRRuntimeRegistryVersionsAt(ctx context.Context, client *http.Clie
 	return versions, nil
 }
 
-// escapeRegistryPathSegments percent-escapes each slash-separated segment of a
-// registry repo path while preserving the slashes, so a multi-segment path like
-// charts/erun-backend-postgres addresses /v2/<owner>/charts/erun-backend-postgres
-// instead of collapsing the slash into %2F. A single-segment path (the runtime
-// image repo) is escaped identically to url.PathEscape.
+// escapeRegistryPathSegments escapes each segment but keeps slashes, so
+// multi-segment repos are not collapsed into %2F.
 func escapeRegistryPathSegments(path string) string {
 	segments := strings.Split(path, "/")
 	for i, segment := range segments {
@@ -259,8 +240,7 @@ func FetchGHCRPullToken(ctx context.Context, client *http.Client, repoPath, toke
 	if err != nil {
 		return "", err
 	}
-	// Basic auth on the token exchange makes GHCR mint a bearer token scoped with
-	// pull access to a private repo; without it the token grants anonymous access only.
+	// Without Basic auth GHCR mints an anonymous-only token.
 	if hasAuth {
 		req.SetBasicAuth(auth.Username, auth.Secret)
 	}
@@ -407,11 +387,7 @@ func latestRuntimeVersionsFromTags(tags []string) RuntimeRegistryVersions {
 		if tag = strings.TrimSpace(tag); tag == "" {
 			continue
 		}
-		// A repository's tag list is not a release list: scratch tags live beside
-		// real versions, and everything in Tags is offered to an operator as a
-		// pinnable version. Apply the same notion of "is a version" here that the
-		// latest stable/snapshot selection below already applies, so the
-		// enumeration cannot disagree with its own header lines.
+		// Tags is offered as pinnable versions, so scratch tags are filtered out.
 		if !isRuntimeRegistryVersionTag(tag) {
 			continue
 		}
@@ -434,11 +410,8 @@ func latestRuntimeVersionsFromTags(tags []string) RuntimeRegistryVersions {
 	return result
 }
 
-// isRuntimeRegistryVersionTag reports whether a registry tag names an erun
-// version an environment can pin to: a three-part numeric version, optionally
-// carrying a build suffix (`-snapshot-<timestamp>`, `-pr.<sha>`, `-arm64`).
-// Anchoring on the version shape rather than denying the scratch tags observed
-// today keeps the next temporary tag out on its own.
+// isRuntimeRegistryVersionTag accepts X.Y.Z with an optional suffix; matching the
+// version shape rather than denying known scratch tags keeps new ones out.
 func isRuntimeRegistryVersionTag(tag string) bool {
 	base, suffix, hasSuffix := strings.Cut(strings.TrimSpace(tag), "-")
 	if hasSuffix && suffix == "" {

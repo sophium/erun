@@ -21,10 +21,6 @@ func initRegistryScenarios(t *testing.T) {
 }
 
 func testInitClusterRegistryDryRun(t *testing.T) {
-	// --cluster-registry seeds the in-cluster erun-registry as the env's
-	// container registry (a cluster: entry whose push/pull hosts resolve from
-	// the kube-context at build/deploy time) instead of a static
-	// --container-registry, so the resolved plan carries the cluster marker.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "dev",
@@ -37,9 +33,7 @@ func testInitClusterRegistryDryRun(t *testing.T) {
 		"--confirm-environment=true",
 		"--dry-run",
 	}
-	// init's remote bootstrap deploys the runtime chart as part of setup; the
-	// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam confirms erun-devops published
-	// so that deploy confirms a chart instead of refusing.
+	// The probe override confirms erun-devops is published so the bootstrap deploy proceeds.
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 	result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode != 0 {
@@ -49,8 +43,6 @@ func testInitClusterRegistryDryRun(t *testing.T) {
 }
 
 func testInitClusterRegistryConflictsWithContainerRegistry(t *testing.T) {
-	// --cluster-registry and --container-registry are mutually exclusive; supplying
-	// both fails fast before any resolution.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "dev",
@@ -69,9 +61,6 @@ func testInitClusterRegistryConflictsWithContainerRegistry(t *testing.T) {
 }
 
 func testInitErunRegistryDryRun(t *testing.T) {
-	// --erun-registry seeds erun's hosted registry, namespaced under the
-	// tenant, as the env's container registry instead of a static
-	// --container-registry or the in-cluster --cluster-registry.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "dev",
@@ -84,9 +73,7 @@ func testInitErunRegistryDryRun(t *testing.T) {
 		"--confirm-environment=true",
 		"--dry-run",
 	}
-	// init's remote bootstrap deploys the runtime chart as part of setup; the
-	// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam confirms erun-devops published
-	// so that deploy confirms a chart instead of refusing.
+	// The probe override confirms erun-devops is published so the bootstrap deploy proceeds.
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 	result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode != 0 {
@@ -96,8 +83,6 @@ func testInitErunRegistryDryRun(t *testing.T) {
 }
 
 func testInitErunRegistryConflictsWithContainerRegistry(t *testing.T) {
-	// --erun-registry and --container-registry are mutually exclusive; supplying
-	// both fails fast before any resolution.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "dev",
@@ -116,8 +101,6 @@ func testInitErunRegistryConflictsWithContainerRegistry(t *testing.T) {
 }
 
 func testInitErunRegistryConflictsWithClusterRegistry(t *testing.T) {
-	// --erun-registry and --cluster-registry are mutually exclusive; supplying
-	// both fails fast before any resolution.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "dev",
@@ -136,11 +119,7 @@ func testInitErunRegistryConflictsWithClusterRegistry(t *testing.T) {
 }
 
 func testInitDryRunWithMcpAuthPublicKey(t *testing.T) {
-	// --mcp-auth-public-key folds the desktop's MCP-auth key into init's single
-	// runtime deploy: the runtime (team-devops) chart carries mcpAuth.* helm
-	// values and the <release>-mcp-auth Secret apply, so no post-init redeploy
-	// is needed to authenticate the env's MCP edge (mirrors the deploy scenario
-	// of the same name).
+	// The MCP-auth key folds into init's single runtime deploy, so no redeploy is needed.
 	setup := env.New(t)
 	keyPath := filepath.Join(t.TempDir(), "desktopid.pub")
 	if err := os.WriteFile(keyPath, []byte("-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAtestkeytestkeytestkeytestkeytestkeytestke=\n-----END PUBLIC KEY-----\n"), 0o600); err != nil {
@@ -158,9 +137,7 @@ func testInitDryRunWithMcpAuthPublicKey(t *testing.T) {
 		"--confirm-environment=true",
 		"--dry-run",
 	}
-	// init's remote bootstrap deploys the runtime chart as part of setup; the
-	// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam confirms erun-devops published
-	// so that deploy confirms a chart instead of refusing.
+	// The probe override confirms erun-devops is published so the bootstrap deploy proceeds.
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 	result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	if result.ExitCode != 0 {

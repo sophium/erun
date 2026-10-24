@@ -9,8 +9,6 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// ExecMergeInput names the branch to bring into the runtime repo's current
-// branch, mirroring ExecPushInput's shape.
 type ExecMergeInput struct {
 	TargetBranch string `json:"targetBranch" jsonschema:"branch to fetch and merge in; the merge always produces a merge commit, never a rebase, so review comments anchored to a commit id are never orphaned"`
 	Remote       string `json:"remote,omitempty" jsonschema:"git remote to fetch and merge from; defaults to origin"`

@@ -9,9 +9,7 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// ExecPushInput takes the branch as an explicit claim to verify, mirroring
-// `erun exec commit`'s own CommitInput. Named distinctly from build.go's
-// PushInput (the container-image `push` tool), which this is unrelated to.
+// ExecPushInput takes the branch as an explicit claim to verify.
 type ExecPushInput struct {
 	Branch    string `json:"branch" jsonschema:"branch the caller believes the working tree is on; verified against the actual current branch and refused, loudly, on mismatch"`
 	Remote    string `json:"remote,omitempty" jsonschema:"git remote to push to; defaults to origin"`

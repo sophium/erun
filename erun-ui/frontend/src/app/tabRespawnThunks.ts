@@ -20,17 +20,10 @@ import { recordTab } from './tabsThunks';
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
 
-// Click-driven recovery for the default terminal tabs (ai, local, erun):
-// a tab can point at a dead PTY (e.g. the cloud context auto-stopped
-// under an attached AI session), and clicking it should spawn a fresh
-// session rather than re-show the stale "exit status N" output.
-
 const respawnableDefaultKinds: ReadonlySet<TerminalTabKind> = new Set(['ai', 'local', 'erun']);
 
-// maybeRespawnDeadDefaultTab returns true when the click was handled as
-// a respawn and the caller should skip the regular setSessionId path.
-// The respawn itself runs asynchronously; the caller must not assume the
-// new sessionId is live by the time this returns.
+// maybeRespawnDeadDefaultTab returns true when it handled the click; the respawn
+// completes asynchronously.
 export const maybeRespawnDeadDefaultTab =
   (sessionId: number): AppThunk<boolean> =>
   (dispatch, getState, extra) => {
@@ -49,9 +42,7 @@ export const maybeRespawnDeadDefaultTab =
     if (!tab || !respawnableDefaultKinds.has(tab.kind)) {
       return false;
     }
-    // Refuse respawn when the env's deploy failed: reopening re-runs `erun open`,
-    // which would re-deploy the broken env — the same re-deploy storm
-    // auto-reconnect exists to stop. Recovery is left to the failed-deploy card.
+    // Respawning a failed-deploy env would re-deploy it in a loop.
     if (selectEnvHasFailedDeploy(state, selection.tenant, selection.environment)) {
       return false;
     }
@@ -115,7 +106,6 @@ const respawnDefaultTab =
       return;
     }
     if (!result) {
-      // The occupancy prompt took over; nothing to select until it resolves.
       dispatch(hideTerminalMessage());
       return;
     }
@@ -130,10 +120,8 @@ const respawnDefaultTab =
     controller.queueTerminalResize();
   };
 
-// startSessionForKind now only serves callers that never gate on occupancy: a
-// dead AI tab click routes through startAITabOrPrompt above instead, but a
-// launch-flag relaunch (respawnRelaunchedAITab) restarts a tool the user was
-// already running, not a second agent, so it confirms straight through.
+// startSessionForKind skips the occupancy gate: a launch-flag relaunch restarts
+// an existing agent, not a second one.
 async function startSessionForKind(
   runSelection: UISelection,
   tab: TerminalTab,
@@ -158,11 +146,8 @@ function isAITabKind(tab: TerminalTab): boolean {
   return tab.kind === 'ai' || tab.kind === 'contribute-ai';
 }
 
-// relaunchAISessionsForLaunchChange applies a saved Claude launch-flag change
-// to the env's AI sessions. Launch flags are read only when a pod session is
-// created — reattaches never re-run the launch command — so applying them
-// means ending the AI sessions and respawning them. The backend returns false
-// when nothing needs reopening (a non-claude tool that launches verbatim).
+// relaunchAISessionsForLaunchChange ends and respawns AI sessions, since launch
+// flags are only read when a pod session is created.
 export const relaunchAISessionsForLaunchChange =
   (selection: UISelection): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {

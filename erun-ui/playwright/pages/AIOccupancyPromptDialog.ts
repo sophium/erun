@@ -1,8 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-// Shown when opening the AI tab finds the environment already held by another
-// job's activity lease. Its title is unique across dialogs, so the
-// anchored role match stays unambiguous.
+// Shown when the AI tab finds the environment leased by another job.
 export class AIOccupancyPromptDialog {
   constructor(public readonly page: Page) {}
 

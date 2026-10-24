@@ -11,16 +11,9 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// An exclusive claim taken at the scope an exclusive take actually defaults to
-// -- "worktree", the environment's one shared worktree, which is what
-// `exec gate-merge` rewrites -- must refuse gate-merge. Reading only the
-// "environment" scope made the guard inert for the claim shape every transport
-// records when the caller does not name a scope, and it fails *open*: the
-// refusal never fires and the drive rewrites the shared worktree anyway.
+// The default exclusive scope is "worktree", which gate-merge rewrites, so it must refuse.
 
-// seedExclusiveClaim takes an exclusive claim the way a transport does when its
-// caller names no scope: through the store's own defaults, never by writing a
-// file directly, so the test cannot agree with a bug the take path shares.
+// seedExclusiveClaim takes a claim through the store's own defaults, not a direct file write.
 func seedExclusiveClaim(t *testing.T, tenant, environment, id, name, scope string) {
 	t.Helper()
 	if _, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
@@ -54,8 +47,6 @@ func TestGateMergeGuardRefusesADefaultScopedExclusiveClaim(t *testing.T) {
 	if conflict.Holder.ID != "merge-queue" || conflict.Holder.Holder.Orchestrator != "erun" {
 		t.Fatalf("refusal must name the actual holder, got %+v", conflict.Holder)
 	}
-	// The remedy has to name the scope the claim was actually taken on, or the
-	// release it suggests silently targets the other store and does nothing.
 	if conflict.Scope != activity.DefaultEnvironmentActivityLeaseScope {
 		t.Errorf("expected the refusal to carry the holder's own scope %q, got %q", activity.DefaultEnvironmentActivityLeaseScope, conflict.Scope)
 	}
@@ -76,10 +67,7 @@ func TestGateMergeGuardExemptsOnlyTheCallersOwnDefaultScopedClaim(t *testing.T) 
 	}
 }
 
-// A claim on a named resource that is not this environment's worktree -- the
-// second clone in the same pod an exclusive take explicitly allows -- must not
-// refuse gate-merge here, or the two-clones case scopes exist for stops
-// working.
+// Another clone's named scope must not refuse this worktree.
 func TestGateMergeGuardIgnoresAClaimOnAnUnrelatedNamedScope(t *testing.T) {
 	inPodGuardEnv(t, "erun", "pod")
 	seedExclusiveClaim(t, "erun", "pod", "clone-b", "clone b build", "/git/clone-b")
@@ -89,10 +77,7 @@ func TestGateMergeGuardIgnoresAClaimOnAnUnrelatedNamedScope(t *testing.T) {
 	}
 }
 
-// Two scopes can be held at once, one per scope. A caller that holds the
-// worktree claim is still not entitled to work under someone else's
-// environment-wide claim -- which is the stronger of the two, and the one the
-// job-start guard already reads.
+// Holding the worktree claim does not entitle working under another holder's environment claim.
 func TestGateMergeGuardRefusesADifferentHoldersEnvironmentClaimUnderTheCallersOwnWorktreeClaim(t *testing.T) {
 	inPodGuardEnv(t, "erun", "code1")
 	seedExclusiveClaim(t, "erun", "code1", "merge-queue", "merge-queue drive 2442", activity.DefaultEnvironmentActivityLeaseScope)
@@ -107,7 +92,6 @@ func TestGateMergeGuardRefusesADifferentHoldersEnvironmentClaimUnderTheCallersOw
 	}
 }
 
-// Off-pod there is no environment to contend for, so the guard stays a no-op.
 func TestGateMergeGuardIsANoOpOutsideAnEnvironment(t *testing.T) {
 	isolateActivityCache(t)
 	t.Setenv("ERUN_TENANT", "")

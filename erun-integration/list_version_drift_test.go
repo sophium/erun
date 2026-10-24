@@ -30,8 +30,6 @@ func testListVersionDriftTenantNotFound(t *testing.T) {
 }
 
 func testListVersionDriftReportsEveryEnvironmentAndTheMax(t *testing.T) {
-	// Two environments in one tenant on different erun versions must surface
-	// the drift. build stays behind at 1.0.246 while code4 already runs 1.0.247.
 	setup := env.New(t)
 	seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
 	seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
@@ -43,9 +41,7 @@ func testListVersionDriftReportsEveryEnvironmentAndTheMax(t *testing.T) {
 }
 
 func testListVersionDriftGateEnvironmentBehindFlagsWhatItGates(t *testing.T) {
-	// The real defect: the gate environment (build) is older than an
-	// environment it gates (code4), and that must read as behind=yes,
-	// naming code4.
+	// The gate environment is older than one it gates.
 	setup := env.New(t)
 	seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
 	seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
@@ -57,8 +53,6 @@ func testListVersionDriftGateEnvironmentBehindFlagsWhatItGates(t *testing.T) {
 }
 
 func testListVersionDriftGateEnvironmentUpToDate(t *testing.T) {
-	// The counterpart: the gate environment already carries the newest
-	// version observed, so behind must read no.
 	setup := env.New(t)
 	seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
 	seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
@@ -80,12 +74,7 @@ func testListVersionDriftGateEnvironmentNotFound(t *testing.T) {
 }
 
 func testListVersionDriftGateEnvironmentVersionUnresolved(t *testing.T) {
-	// The gate environment has never recorded a resolved runtime image, so
-	// its own erun version cannot be read from config alone -- that gap
-	// now falls back to a live helm read rather than assuming
-	// "none" -- stubbed here as a confirmed absence (no release at all),
-	// so behind must still read "unknown" naming why, never a silent "no"
-	// that would misreport an unknown gate as safely current.
+	// The gate's version is unknown, so behind must read "unknown", never "no".
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "gate")
 	seedTenantEnvOnErunLine(t, setup, "team", "peer", "1.0.247")
@@ -100,9 +89,6 @@ func testListVersionDriftGateEnvironmentVersionUnresolved(t *testing.T) {
 }
 
 func testListVersionDriftEnvironmentConfirmedNotDeployed(t *testing.T) {
-	// A live check now backs "none": it is a confirmed absence, not a
-	// guess from an empty config field. code4 has never been deployed
-	// anywhere, and the live helm read confirms exactly that.
 	setup := env.New(t)
 	seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.247")
 	fixture.SeedTenantEnv(t, setup, "erun", "code4")
@@ -117,11 +103,8 @@ func testListVersionDriftEnvironmentConfirmedNotDeployed(t *testing.T) {
 }
 
 func testListVersionDriftResolvesLiveVersionFromDeployedRelease(t *testing.T) {
-	// local's own config never recorded a runtime version (e.g. it was
-	// deployed from a different machine or session), but its cluster is
-	// reachable and running 1.0.203 -- newer than build's cached 1.0.100.
-	// The live read must resolve it, fold it into the tenant's own max,
-	// and flag build as behind, not silently report local as "none".
+	// A version missing from config but reachable live must be resolved and
+	// counted toward the max.
 	setup := env.New(t)
 	seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.100")
 	fixture.SeedTenantEnv(t, setup, "erun", "local")
@@ -136,9 +119,7 @@ func testListVersionDriftResolvesLiveVersionFromDeployedRelease(t *testing.T) {
 }
 
 func testListVersionDriftEnvironmentClusterUnreachable(t *testing.T) {
-	// petios's cluster cannot be reached at all -- distinct from both a
-	// confirmed absence and a resolved version, and excluded from the max
-	// / behind computation with the exclusion stated, not dropped silently.
+	// An unreachable cluster is excluded from the max with the exclusion stated.
 	setup := env.New(t)
 	seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.247")
 	fixture.SeedTenantEnv(t, setup, "erun", "petios")
@@ -156,9 +137,7 @@ func testListVersionDriftEnvironmentClusterUnreachable(t *testing.T) {
 }
 
 func testListFailOnDriftWithUnresolvedEnvironmentExitsNonZero(t *testing.T) {
-	// A drift check that cannot tell whether an environment is behind must
-	// not pass silently: --fail-on-drift treats an unresolved environment
-	// the same as one confirmed behind.
+	// --fail-on-drift treats an unresolved environment as behind.
 	setup := env.New(t)
 	seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.247")
 	fixture.SeedTenantEnv(t, setup, "erun", "petios")
@@ -176,11 +155,7 @@ func testListFailOnDriftWithUnresolvedEnvironmentExitsNonZero(t *testing.T) {
 }
 
 func testListVersionDriftDryRunTracesLiveCheckForUnresolvedEnvironment(t *testing.T) {
-	// Dry run must never touch the network: no helm stub is declared here
-	// at all, so if production code called helm for real this would fail
-	// loudly ("executable file not found") rather than pass by accident.
-	// The two helm calls that would run are traced instead, auditable
-	// before anyone lets the real check dial a cluster.
+	// No helm stub: a real helm call would fail loudly, so dry run must only trace.
 	setup := env.New(t)
 	seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.247")
 	fixture.SeedTenantEnv(t, setup, "erun", "petios")
@@ -192,10 +167,7 @@ func testListVersionDriftDryRunTracesLiveCheckForUnresolvedEnvironment(t *testin
 }
 
 func testListVersionDriftUnresolvedEnvironmentJSONOutput(t *testing.T) {
-	// Locks the JSON field names a scripted caller reads:
-	// versionUnresolved/versionUnresolvedReason, distinct from a bare
-	// missing "version" key (which alone cannot tell "none" apart from
-	// "undetermined").
+	// A bare missing "version" cannot tell "none" from "undetermined".
 	setup := env.New(t)
 	seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.247")
 	fixture.SeedTenantEnv(t, setup, "erun", "petios")
@@ -233,8 +205,6 @@ func testListFailOnDriftRequiresTenantOrControlPlanes(t *testing.T) {
 }
 
 func testListFailOnDriftWithTenantBehindMaxExitsNonZero(t *testing.T) {
-	// build is behind code4; with --fail-on-drift the report itself is what a
-	// schedule can gate on.
 	setup := env.New(t)
 	seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
 	seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
@@ -246,8 +216,7 @@ func testListFailOnDriftWithTenantBehindMaxExitsNonZero(t *testing.T) {
 }
 
 func testListFailOnDriftWithTenantNoDriftExitsZero(t *testing.T) {
-	// The report still prints in full; --fail-on-drift changes only the
-	// exit code, and only when there is something to fail on.
+	// --fail-on-drift changes only the exit code.
 	setup := env.New(t)
 	seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.247")
 	seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")

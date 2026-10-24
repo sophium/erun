@@ -6,11 +6,7 @@ import (
 	"testing"
 )
 
-// An exclusive lease take against an environment whose MCP edge predates the
-// exclusive-claim mechanism gets the go-sdk's own raw JSON-schema rejection
-// of "exclusive"/"orchestrator" as unknown arguments -- indistinguishable
-// from a caller typo. This is the exact wire text reported against erun
-// 1.0.201.
+// The go-sdk's raw schema rejection from an edge that predates exclusive claims.
 const rawExclusiveLeaseSchemaError = `MCP tools/call failed: invalid params: validating "arguments": validating root: unexpected additional properties ["orchestrator" "exclusive"] (code -32602)`
 
 func TestDescribeExclusiveActivityLeaseVersionSkewNamesTheVersionMismatch(t *testing.T) {

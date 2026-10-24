@@ -11,9 +11,7 @@ import (
 
 func init() {
 	newDefaultClaudeAgents = func() claudeAgentCLI { return newFakeClaudeAgents() }
-	// An orchestrator launch writes its agent's settings and record under the
-	// user config directory. A test that does not point HOME somewhere of its
-	// own must still never write into the developer's real one.
+	// Keep agent settings out of the developer's real HOME.
 	home, err := os.MkdirTemp("", "erun-ui-test-home-")
 	if err != nil {
 		panic(err)
@@ -23,8 +21,6 @@ func init() {
 	}
 }
 
-// fakeClaudeAgents is an in-memory Claude background service: it keeps the
-// agents a test created and records every lifecycle command it was sent.
 type fakeClaudeAgents struct {
 	mu        sync.Mutex
 	agents    []claudeBackgroundAgent
@@ -94,8 +90,6 @@ func (f *fakeClaudeAgents) Remove(id string) error {
 	return nil
 }
 
-// clear moves an agent onto a new conversation, as `/clear` does: same agent,
-// same name, a different session id.
 func (f *fakeClaudeAgents) clear(id, sessionID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -120,8 +114,6 @@ func fakeAgentsOf(t *testing.T, app *App) *fakeClaudeAgents {
 	return fake
 }
 
-// stageOrchestratorConversation writes the transcript the AI harness leaves for a
-// conversation, which is how a conversation on disk is told from one that is gone.
 func stageOrchestratorConversation(t *testing.T, conversationID string) {
 	t.Helper()
 	home, err := os.UserHomeDir()

@@ -10,17 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// TestActivateForwardersBestEffort locks the contract that the laptop-side
-// port-forwards are best-effort: a forward that cannot bind is surfaced as a
-// warning and skipped, and every forward is still attempted, so a convenience
-// forward never aborts the in-pod session.
-//
-// This needs a forward to fail while the runtime is present — the dry-run
-// integration binary can't stage that (its kubectl stub either reports the
-// runtime deployed, so the forwards succeed, or not-found, so the pre-forward
-// gate errors first), so this white-box test owns the contract. The
-// runtime-not-deployed gate and the corrected API port are covered by the
-// integration goldens instead.
+// The dry-run integration binary cannot fail a forward with the runtime present, so this test owns the contract.
 func TestActivateForwardersBestEffort(t *testing.T) {
 	var out bytes.Buffer
 	var sshdCalled, mcpCalled, apiCalled bool

@@ -3,20 +3,11 @@ import type { Page, Route } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// One size, one face, always -- every element in both sidebar hover cards
-// (Sidebar.HoverCardRow.tsx) renders at 10px in the shared sans face, and an
-// element earns emphasis only through colour, weight or state, never a
-// second size or face. This spec asserts that computationally rather than by
-// reading pixel counts off a screenshot, so a future one-off className on a
-// single row fails a test instead of drifting the scale back open.
+// Every element in both hover cards renders at 10px in the shared sans face; emphasis comes only
+// from colour, weight or state.
 
-// The card is only alive while the pointer rests on the row that raised it, so
-// every read below is bounded and taken in as few round trips as possible: a
-// sample split across one call per element leaves a window between counting
-// the rows and measuring them, and a card that closes inside that window does
-// not fail the read, it hangs it -- the next .nth() waits for an element that
-// cannot come back while the pointer still sits where it is. The callers
-// re-hover and re-read as one convergent step for the same reason.
+// The card lives only while the pointer rests on its row, so reads are bounded and batched; a card
+// closing mid-read hangs rather than fails.
 const READ_TIMEOUT_MS = 2_000;
 
 async function fontSizePx(locator: import('@playwright/test').Locator): Promise<number> {
@@ -78,9 +69,7 @@ test.describe('sidebar hover card type scale (#1694, #1901)', () => {
     let valueWeight = 0;
     await expect(async () => {
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
-      // Wait for the working-issue fetch (stubbed above) to resolve so every
-      // row -- including the branch value -- is actually rendered before
-      // sizes are sampled.
+      // Wait for the stubbed working-issue fetch so every row is rendered before sampling.
       await expect(card).toContainText('feature/1694-hover-card-type-scale', {
         timeout: READ_TIMEOUT_MS,
       });
@@ -92,13 +81,7 @@ test.describe('sidebar hover card type scale (#1694, #1901)', () => {
       valueWeight = await fontWeight(card.locator('dd').first());
       expect(valueSizes.size).toBeGreaterThan(0);
       expect(labelSizes.size).toBeGreaterThan(0);
-      // A card that closes mid-read (the pointer never left, so nothing
-      // reopens it -- see hoverEnvironmentRow) can leave title/weight reads
-      // resolving against a detached element, whose computed style comes
-      // back as an unparseable empty string (NaN here) rather than
-      // throwing. Guarding only the two Sets above let a NaN escape this
-      // retry and fail the assertions below unconditionally on the first
-      // bad read, with no further retry.
+      // A card closing mid-read yields NaN from a detached element; keep it inside the retry.
       expect(Number.isFinite(titleSize)).toBe(true);
       expect(Number.isFinite(titleWeight)).toBe(true);
       expect(Number.isFinite(valueWeight)).toBe(true);
@@ -109,8 +92,6 @@ test.describe('sidebar hover card type scale (#1694, #1901)', () => {
 
     const [valueSize] = [...valueSizes];
     const [labelSize] = [...labelSizes];
-    // One size everywhere: label, value and title all match -- no element
-    // earns emphasis by growing, only by weight/colour/state.
     expect(valueSize).toBe(labelSize);
     expect(titleSize).toBeCloseTo(valueSize as number, 1);
     expect(titleWeight).toBeGreaterThan(valueWeight);
@@ -169,8 +150,7 @@ test.describe('sidebar hover card type scale (#1694, #1901)', () => {
       valueWeight = await fontWeight(card.locator('dd').first());
       expect(valueSizes.size).toBeGreaterThan(0);
       expect(labelSizes.size).toBeGreaterThan(0);
-      // See the preceding test for why: guard against a NaN escaping this
-      // retry from a card that closed mid-read.
+      // See the preceding test.
       expect(Number.isFinite(titleSize)).toBe(true);
       expect(Number.isFinite(titleWeight)).toBe(true);
       expect(Number.isFinite(valueWeight)).toBe(true);
@@ -195,10 +175,7 @@ test.describe('sidebar hover card type scale (#1694, #1901)', () => {
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
       const version = card.locator('dd').first();
       await expect(version).toContainText('1.0.0', { timeout: READ_TIMEOUT_MS });
-      // tabular-nums is declared once on the card's wrapping container,
-      // not per value -- font-variant-numeric inherits, so the
-      // version span itself carries no class of its own and still reads
-      // tabular through inheritance.
+      // tabular-nums is inherited from the card container.
       const variant = await version
         .locator('span')
         .first()

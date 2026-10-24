@@ -25,13 +25,8 @@ func doctorInstallationScenarios(t *testing.T) {
 }
 
 func testDoctorDryRunReportsRuntimeImageRegistryMismatch(t *testing.T) {
-	// A runtimeimage pinned to one registry (an ECR build host)
-	// while runtimeregistry names another (the deploy/chart registry)
-	// leaves the pod unable to pull unless a credential happens to
-	// resolve for the image's own registry at deploy time. This is a
-	// pure config comparison — no exec, no live read — so doctor reports
-	// it identically in --dry-run and for real, naming both registries
-	// and the fix.
+	// An image registry different from runtimeregistry may be unpullable. Pure
+	// config comparison, so dry-run and real run report alike.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	appendEnvConfig(t, setup, "team", "dev", "runtimeimage: 123456789012.dkr.ecr.eu-west-2.amazonaws.com/team-devops\nruntimeregistry: ghcr.io/sophium\n")
@@ -43,13 +38,8 @@ func testDoctorDryRunReportsRuntimeImageRegistryMismatch(t *testing.T) {
 }
 
 func testDoctorDryRunReportsRuntimeImageLineMismatch(t *testing.T) {
-	// A runtimeimage naming the stock erun-devops image while
-	// the env's last confirmed deploy (runtimerunningimage) actually ran a
-	// tenant's own <tenant>-devops image is static config drift a health
-	// check exists to catch -- comparing the two image fields needs no
-	// live cluster read (a bare version number alone cannot name a
-	// release line, but an image name always can), so doctor reports it
-	// identically in --dry-run and for real.
+	// A stock runtimeimage while runtimerunningimage ran the tenant's own image is
+	// config drift, reported alike in dry-run and real run.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	appendEnvConfig(t, setup, "team", "dev", "runtimeimage: ghcr.io/sophium/erun-devops\nruntimerunningimage: ghcr.io/sophium/team-devops:1.0.86\n")
@@ -61,10 +51,6 @@ func testDoctorDryRunReportsRuntimeImageLineMismatch(t *testing.T) {
 }
 
 func testDoctorDryRunConsistentRuntimeImageLineReportsNothing(t *testing.T) {
-	// The other half: a consistent pairing (both fields name the same
-	// release line) must never be flagged, so an env riding the stock
-	// image on purpose (frs/local's shape in the issue) sees no new
-	// friction from this check.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	appendEnvConfig(t, setup, "team", "dev", "runtimeimage: erun-devops\nruntimerunningimage: ghcr.io/sophium/erun-devops:1.0.203\n")
@@ -79,9 +65,7 @@ func testDoctorDryRunConsistentRuntimeImageLineReportsNothing(t *testing.T) {
 }
 
 func testDoctorDryRunReportsGitignoredProjectConfig(t *testing.T) {
-	// A project config that resolves from disk but is excluded by .gitignore
-	// silently works on this machine only, since git never sees it. doctor
-	// must report that under "== Project config ==" rather than staying silent.
+	// A gitignored project config works on this machine only.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -94,8 +78,6 @@ func testDoctorDryRunReportsGitignoredProjectConfig(t *testing.T) {
 }
 
 func testDoctorDryRunTrackedProjectConfigReportsNothing(t *testing.T) {
-	// The other half: a config that is present but not gitignored (the
-	// common case) must never be flagged.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -111,11 +93,6 @@ func testDoctorDryRunTrackedProjectConfigReportsNothing(t *testing.T) {
 }
 
 func testDoctorDryRunReportsStaleDesktopAppBundle(t *testing.T) {
-	// The installed desktop app bundle can drift arbitrarily far
-	// behind the CLI with nothing to say so. A single ~/Applications/ERun.app
-	// bundle whose Info.plist version differs from this CLI's own build
-	// version must surface under "== Desktop app ==", identically in
-	// --dry-run and for real since this is a pure file read.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	writeDesktopAppBundle(t, filepath.Join(setup.Home, "Applications", "ERun.app"), "1.0.51")
@@ -134,16 +111,8 @@ func testDoctorDryRunReportsStaleDesktopAppBundle(t *testing.T) {
 }
 
 func testDoctorDryRunReportsTheDesktopAppErunAppLaunches(t *testing.T) {
-	// The dev wrapper writes the CLI and the desktop app into the same
-	// BIN_DIR -- erun-cli/bin, or $ERUN_DEV_BIN_DIR -- and that is where a
-	// running desktop actually came from, because `erun app`'s own sibling
-	// lookup resolves it there. Doctor inspected only ~/Applications and
-	// /Applications, so it reported on a bundle nothing was running and
-	// stayed silent about the live one. Seeding a drifted bundle where the
-	// CLI itself sits must surface it, and must say that this is the copy a
-	// launch reaches. The executable-dir seam stands in for the shared
-	// instrumented binary's own directory, which a scenario cannot write
-	// beside without leaking a bundle into every other scenario in the run.
+	// A bundle beside the CLI binary is the copy `erun app` launches. The
+	// executable-dir seam keeps the bundle out of other scenarios.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	binDir := filepath.Join(setup.Home, "erun-cli", "bin")
@@ -167,16 +136,8 @@ func testDoctorDryRunReportsTheDesktopAppErunAppLaunches(t *testing.T) {
 }
 
 func testDoctorDryRunReportsShadowedDesktopAppBundle(t *testing.T) {
-	// The operator-reported shape: a current bundle at
-	// ~/Applications/ERun.app sits alongside a stale one at
-	// /Applications/ERun.app (both simulated here since a test must never
-	// touch a real /Applications -- ERUN_DESKTOP_APP_SYSTEM_APPLICATIONS_DIR_OVERRIDE
-	// is the seam for that). Both share the bundle id com.sophium.erun, so
-	// Finder/Spotlight/the Dock can launch either one regardless of which
-	// is current -- doctor must name both bundles, flag the stale one
-	// against this CLI's own version, and warn about the shadow-copy
-	// hazard even though this CLI's own build (a "dev" build here) happens
-	// to match one of the two.
+	// Two bundles share one bundle id, so either may launch: both are named and the
+	// stale one flagged.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	systemApplications := filepath.Join(setup.Home, "system-applications")
@@ -194,9 +155,6 @@ func testDoctorDryRunReportsShadowedDesktopAppBundle(t *testing.T) {
 }
 
 func testDoctorDryRunNoDesktopAppBundleReportsNothing(t *testing.T) {
-	// The common case (this host's HOST_OS_OVERRIDE isn't even darwin, and
-	// even on darwin, no bundle installed anywhere): no "== Desktop app =="
-	// section at all.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -209,9 +167,7 @@ func testDoctorDryRunNoDesktopAppBundleReportsNothing(t *testing.T) {
 	golden.Equal(t, "doctor/dry_run_no_desktop_app_bundle_reports_nothing", normalize.Apply(result.Combined))
 }
 
-// writeDesktopAppBundle stages the minimal shape of a macOS ERun.app bundle
-// (Contents/Info.plist carrying CFBundleShortVersionString) that
-// reportInstalledDesktopAppVersion reads, at bundlePath.
+// writeDesktopAppBundle stages the Info.plist that reportInstalledDesktopAppVersion reads.
 func writeDesktopAppBundle(t *testing.T, bundlePath, version string) {
 	t.Helper()
 	plist := "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +

@@ -10,8 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// ReadEnvironmentJobOutputParams pages through a job's captured output. Offset
-// plus NextOffset is what makes progress readable while the work runs.
+// ReadEnvironmentJobOutputParams pages through a job's captured output.
 type ReadEnvironmentJobOutputParams struct {
 	Tenant      string
 	Environment string
@@ -22,20 +21,16 @@ type ReadEnvironmentJobOutputParams struct {
 
 // EnvironmentJobOutput is one page of a job's merged stdout and stderr.
 type EnvironmentJobOutput struct {
-	Job    shared.EnvironmentJob `json:"job"`
-	Offset int64                 `json:"offset"`
-	// NextOffset is where the next read should start.
-	NextOffset int64  `json:"nextOffset"`
-	Output     string `json:"output"`
-	// HasMore says bytes remain past this page right now.
-	HasMore bool `json:"hasMore"`
-	// Complete is true only when the job is finished and this page reached the
-	// end of its output, so a caller knows it has read everything there will be.
+	Job        shared.EnvironmentJob `json:"job"`
+	Offset     int64                 `json:"offset"`
+	NextOffset int64                 `json:"nextOffset"`
+	Output     string                `json:"output"`
+	HasMore    bool                  `json:"hasMore"`
+	// Complete means the job finished and this page reached the end of its output.
 	Complete bool `json:"complete"`
 }
 
-// ReadEnvironmentJobOutput returns one page of a job's output. It reads the log
-// as it stands, so progress is visible long before the work exits.
+// ReadEnvironmentJobOutput returns one page of a job's output, readable while it runs.
 func ReadEnvironmentJobOutput(params ReadEnvironmentJobOutputParams) (EnvironmentJobOutput, error) {
 	job, err := LoadEnvironmentJob(params.Tenant, params.Environment, params.ID, time.Now())
 	if err != nil {
@@ -50,9 +45,7 @@ func ReadEnvironmentJobOutput(params ReadEnvironmentJobOutputParams) (Environmen
 		maxBytes = DefaultEnvironmentJobOutputReadBytes
 	}
 	result := EnvironmentJobOutput{Job: job, Offset: offset, NextOffset: offset}
-	// A job with no log yet — an attached job that named none, or work whose
-	// supervisor never got as far as creating one — has nothing to serve, and
-	// says so as an empty page rather than as an error.
+	// No log yet is an empty page, not an error.
 	if strings.TrimSpace(job.LogPath) == "" {
 		result.Complete = job.Finished()
 		return result, nil
@@ -72,8 +65,7 @@ func ReadEnvironmentJobOutput(params ReadEnvironmentJobOutputParams) (Environmen
 	return result, nil
 }
 
-// readEnvironmentJobLogPage returns at most maxBytes from offset plus the log's
-// size at read time, which is what tells a caller whether more has arrived.
+// readEnvironmentJobLogPage returns at most maxBytes from offset plus the log's current size.
 func readEnvironmentJobLogPage(path string, offset, maxBytes int64) ([]byte, int64, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -113,11 +105,8 @@ func environmentJobOutputSize(path string, fallback int64) int64 {
 	return info.Size()
 }
 
-// jobOutputWriter captures the work's merged stdout and stderr up to the cap.
-// Past the cap it stops writing and says so once, so a bounded log can never be
-// mistaken for the whole story. agent, when set, is fed every byte regardless
-// of the cap: an agent's progress fields are small and bounded on their own, so
-// the log's disk cap must not be what silently freezes them.
+// jobOutputWriter caps the log file but feeds the agent reader every byte, so
+// the cap never freezes progress.
 type jobOutputWriter struct {
 	file       *os.File
 	limit      int64
@@ -129,9 +118,6 @@ type jobOutputWriter struct {
 	dropped bool
 }
 
-// Write feeds the agent reader (if any) with every byte, then applies the cap
-// to what actually reaches the log file. The two are independent so the cap
-// can bound the file without also bounding progress.
 func (w *jobOutputWriter) Write(p []byte) (int, error) {
 	if w.agent != nil {
 		w.agent.feed(p)

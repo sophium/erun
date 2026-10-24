@@ -11,8 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// DeployRecoveryActionPromptLabel is the interactive confirm shown before the
-// action runs.
+// DeployRecoveryActionPromptLabel is the confirm prompt shown before the action runs.
 func DeployRecoveryActionPromptLabel(action deploy.DeployRecoveryAction, req config.ShellLaunchParams) string {
 	target := strings.TrimSpace(req.Tenant) + "/" + strings.TrimSpace(req.Environment)
 	switch action {
@@ -25,10 +24,8 @@ func DeployRecoveryActionPromptLabel(action deploy.DeployRecoveryAction, req con
 	}
 }
 
-// DeployRecoveryActionWithoutPromptHint names the flag that runs this recovery
-// with no prompt, so a caller whose stdin reached EOF is told how to proceed
-// rather than only that the action did not run. It sits beside the prompt label
-// because it is the same question's non-interactive answer.
+// DeployRecoveryActionWithoutPromptHint names the flag that skips the prompt,
+// for a caller whose stdin hit EOF.
 func DeployRecoveryActionWithoutPromptHint(action deploy.DeployRecoveryAction) string {
 	switch action {
 	case deploy.DeployRecoveryClearPendingHelm:
@@ -53,8 +50,7 @@ func DeployRecoveryActionDescription(action deploy.DeployRecoveryAction) string 
 }
 
 func helmRollbackArgs(req config.ShellLaunchParams) []string {
-	// `helm rollback <release>` with no revision rolls back to the previous
-	// release revision (the last one helm recorded as deployed).
+	// With no revision, helm rolls back to the previous release.
 	args := []string{"rollback", config.RuntimeReleaseName(req.Tenant)}
 	if strings.TrimSpace(req.Namespace) != "" {
 		args = append(args, "--namespace", req.Namespace)
@@ -65,8 +61,7 @@ func helmRollbackArgs(req config.ShellLaunchParams) []string {
 	return append(args, "--wait", "--timeout", cloud.DefaultShellLaunchWaitTimeout)
 }
 
-// RunDeployRecovery runs the chosen helm-level recovery against the runtime
-// release, mutating the cluster only on a real (non-dry-run) run.
+// RunDeployRecovery runs the helm recovery; dry-run does not mutate the cluster.
 func RunDeployRecovery(ctx core.Context, req config.ShellLaunchParams, action deploy.DeployRecoveryAction) (string, error) {
 	switch action {
 	case deploy.DeployRecoveryClearPendingHelm:

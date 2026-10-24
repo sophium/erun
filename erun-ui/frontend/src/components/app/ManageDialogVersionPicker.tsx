@@ -30,9 +30,7 @@ import type { UIVersionSuggestion, UIVersionSuggestionNotice } from '@/types';
 
 type ManageDialog = ManageDialogState;
 
-// The version picker: an environment's deployable versions, grouped by the line
-// they come from, with that version's component checklist in the same panel.
-// Extracted from ManageDialogRuntimeTab to keep both files inside the 500-line cap.
+// RuntimeDeployVersionPicker lists deployable versions by source line, with the component checklist.
 export function RuntimeDeployVersionPicker({
   dialog,
   overrideVersion,
@@ -54,10 +52,7 @@ export function RuntimeDeployVersionPicker({
   onChoicesOpenChange: (open: boolean) => void;
   onSelect: (suggestion: UIVersionSuggestion | undefined) => void;
 }): React.ReactElement {
-  // Group by source so a tenant env's two same-labelled lines — its own
-  // <tenant>-devops runtime and the upstream erun-devops fallback — are told
-  // apart. Headings only appear when there is more than one source; a single-line
-  // picker keeps the plain "Version to deploy" heading.
+  // Headings only with more than one source; a tenant env has two same-labelled lines.
   const suggestionGroups = groupVersionSuggestionsBySource(suggestions);
   const showSourceHeadings = suggestionGroups.length > 1;
   return (
@@ -89,21 +84,11 @@ export function RuntimeDeployVersionPicker({
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          // Cap to the viewport's available height and scroll, so the version
-          // list plus the components checklist never overflow off-screen (which
-          // clipped the last components and the dialog buttons on shorter windows).
+          // Cap to the viewport height so the checklist and buttons stay on-screen.
           className="max-h-[var(--radix-popover-content-available-height)] w-[26rem] max-w-[calc(100vw-2rem)] overflow-y-auto p-0"
           align="start"
-          // This panel is a working surface, not a menu, so focus leaving it is
-          // routine rather than a dismissal: the operator tabs to the version
-          // field, clicks a chart checkbox, or presses a button that disables
-          // itself — and the dialog's focus scope then re-focuses the dialog
-          // container on the re-render that follows, which is a focusin outside
-          // this subtree. Radix reads any of those as "dismiss", so the panel
-          // would vanish under the operator mid-task. Preventing the focus-out
-          // dismissal keeps the panel open until it is actually closed — its own
-          // trigger, Escape, a click elsewhere (that is the pointer path, which
-          // still dismisses), or the dialog closing.
+          // The dialog's focus scope refocuses its container on re-render, which Radix reads as a focus-out dismissal.
+          // Pointer-outside, Escape and the trigger still close the panel.
           onFocusOutside={(event) => {
             event.preventDefault();
           }}
@@ -130,14 +115,10 @@ export function RuntimeDeployVersionPicker({
             </CommandList>
           </Command>
           <VersionNotices notices={notices} />
-          {/* The chart is the other half of what this version installs, so the
-              panel says whether it exists before the operator picks. */}
           <div className="px-3 pb-1">
             <RuntimeChartNotice dialog={dialog} id={RUNTIME_CHART_PANEL_NOTICE_ID} />
           </div>
-          {/* Pick a version above, then choose which of its charts to roll out:
-              one panel so the component list always reads as that version's. The
-              whole popover scrolls (capped to the viewport), so no nested scroll. */}
+          {/* The whole popover scrolls, so no nested scroll. */}
           <div className="border-t border-border p-3">
             <DeployComponentsField dialog={dialog} />
           </div>

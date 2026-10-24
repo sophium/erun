@@ -11,17 +11,10 @@ import (
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// The wire shape of the GitHub request (method, path, auth header, body) and
-// GitHub's own failure response surfacing have no integration-suite
-// equivalent: the compiled `erun` binary has no seam to point githubAPIBaseURL
-// at a local httptest server the way the chart-registry probe does, so these
-// two stay as erun-common unit tests. Everything else (validation, dry-run,
-// remote-url parsing, the no-token refusal) is exercised end-to-end from the
-// binary in erun-integration/exec_test.go.
+// The binary has no seam to point githubAPIBaseURL at httptest, so the GitHub
+// wire shape is unit-tested here; the rest is in erun-integration/exec_test.go.
 
-// capturedRequest is compared with == against a whole expected value below,
-// rather than field-by-field, to keep this test's cyclomatic complexity under
-// the module's cyclop limit -- one struct comparison instead of five branches.
+// capturedRequest is compared whole to stay under the cyclop limit.
 type capturedRequest struct {
 	method, path, auth string
 	body               commitStatusRequestBody

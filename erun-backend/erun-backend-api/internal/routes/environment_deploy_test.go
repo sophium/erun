@@ -12,9 +12,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// TestDeployEnvironmentRejectsAggregateBudgetExceeded: a redeploy re-checks
-// the aggregate budget too, using the runtime count as-is (the environment
-// being redeployed is already counted, unlike create's +1).
+// The redeployed environment is already counted, unlike create's +1.
 func TestDeployEnvironmentRejectsAggregateBudgetExceeded(t *testing.T) {
 	environments := runtimeEnvironment()
 	environments.countByRuntimeType = 1
@@ -48,8 +46,6 @@ func TestDeployEnvironmentRejectsAggregateBudgetExceeded(t *testing.T) {
 	}
 }
 
-// postDeployEnvironment posts to the explicit deploy endpoint through a
-// fully-wired route with a request-scoped security context.
 func postDeployEnvironment(t *testing.T, environments *stubEnvironmentRepository, prov EnvironmentProvisioner, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/environments/env-1/deploy", bytes.NewBufferString(body))
@@ -79,8 +75,6 @@ func runtimeEnvironment() *stubEnvironmentRepository {
 	}}
 }
 
-// TestDeployEnvironmentDeploysPinnedVersion: a body-less deploy is the common
-// case — deploy what the environment is already pinned to.
 func TestDeployEnvironmentDeploysPinnedVersion(t *testing.T) {
 	environments := runtimeEnvironment()
 	prov := &stubEnvironmentProvisioner{}
@@ -101,8 +95,6 @@ func TestDeployEnvironmentDeploysPinnedVersion(t *testing.T) {
 	}
 }
 
-// TestDeployEnvironmentDeploysRequestedVersion: an explicit version is how an
-// environment moves between published runtime versions after creation.
 func TestDeployEnvironmentDeploysRequestedVersion(t *testing.T) {
 	prov := &stubEnvironmentProvisioner{}
 	rec := postDeployEnvironment(t, runtimeEnvironment(), prov, `{"version":"1.3.0"}`)
@@ -115,8 +107,6 @@ func TestDeployEnvironmentDeploysRequestedVersion(t *testing.T) {
 	}
 }
 
-// TestDeployEnvironmentGivesEachAttemptItsOwnID: two deploys must not collapse
-// onto one workflow, or the second would be a silent no-op.
 func TestDeployEnvironmentGivesEachAttemptItsOwnID(t *testing.T) {
 	prov := &stubEnvironmentProvisioner{}
 	postDeployEnvironment(t, runtimeEnvironment(), prov, "")
@@ -130,8 +120,6 @@ func TestDeployEnvironmentGivesEachAttemptItsOwnID(t *testing.T) {
 	}
 }
 
-// TestDeployEnvironmentRejectsConcurrentDeploy: the claim is what keeps a
-// double-submit from running two rollouts into the same release.
 func TestDeployEnvironmentRejectsConcurrentDeploy(t *testing.T) {
 	environments := runtimeEnvironment()
 	environments.claimTaken = true
@@ -146,10 +134,7 @@ func TestDeployEnvironmentRejectsConcurrentDeploy(t *testing.T) {
 	}
 }
 
-// TestDeployEnvironmentRejectsQuotaBelowRuntimeFloor: an operator can lower a
-// tenant's quota (PUT .../quota) after the environment already exists; the
-// next deploy must refuse before claiming, rather than claim the environment
-// and only discover the shortfall as a five-minute rollout timeout.
+// Must refuse before claiming, not surface as a rollout timeout.
 func TestDeployEnvironmentRejectsQuotaBelowRuntimeFloor(t *testing.T) {
 	environments := runtimeEnvironment()
 	prov := &stubEnvironmentProvisioner{}
@@ -177,8 +162,6 @@ func TestDeployEnvironmentRejectsQuotaBelowRuntimeFloor(t *testing.T) {
 	}
 }
 
-// TestDeployEnvironmentClaimsBeforeStarting: the claim must precede the
-// workflow, otherwise the race it exists to prevent is still open.
 func TestDeployEnvironmentClaimsBeforeStarting(t *testing.T) {
 	environments := runtimeEnvironment()
 	postDeployEnvironment(t, environments, &stubEnvironmentProvisioner{}, "")
@@ -187,13 +170,7 @@ func TestDeployEnvironmentClaimsBeforeStarting(t *testing.T) {
 	}
 }
 
-// TestDeployEnvironmentStartFailureMarksFailed locks writeStartDeployError:
-// ClaimDeploy already moved the row to provisioning before StartDeploy ran, so
-// any failure to enqueue the durable workflow must also mark the environment
-// failed — otherwise it would be stranded in provisioning with no workflow
-// left to ever move it out. A confirmed-missing tenant runtime image is no
-// longer this path: it now selects the canonical-image bootstrap instead of
-// failing StartDeploy.
+// ClaimDeploy already moved the row to provisioning, so a failed enqueue must mark it failed.
 func TestDeployEnvironmentStartFailureMarksFailed(t *testing.T) {
 	environments := runtimeEnvironment()
 	prov := &stubEnvironmentProvisioner{err: errors.New("dbos: workflow start failed")}
@@ -247,8 +224,6 @@ func TestDeployEnvironmentRejectsInvalidRequests(t *testing.T) {
 	}
 }
 
-// TestDeployEnvironmentReportsUnconfiguredExecutor: without a wired executor the
-// endpoint says so, rather than accepting a deploy nothing will run.
 func TestDeployEnvironmentReportsUnconfiguredExecutor(t *testing.T) {
 	environments := runtimeEnvironment()
 	rec := postDeployEnvironment(t, environments, nil, "")

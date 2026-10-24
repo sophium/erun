@@ -7,11 +7,6 @@ import (
 	"github.com/sophium/erun/erun-common/command/podruntime"
 )
 
-// TestAISessionHookBindingsResolveToTheStateTheyClaim pins the mapping to the
-// model rather than to prose: an installed hook's value is the state the
-// resolver then reports for it, and the two that mean the human has control
-// must resolve to AwaitingInput -- the state this whole model exists to
-// surface.
 func TestAISessionHookBindingsResolveToTheStateTheyClaim(t *testing.T) {
 	wantState := map[model.AISessionEventKind]model.AISessionState{
 		model.AISessionEventTurnStart: model.AISessionStateBusy,
@@ -39,10 +34,6 @@ func TestAISessionHookBindingsResolveToTheStateTheyClaim(t *testing.T) {
 	}
 }
 
-// TestAISessionHookPayloadReadsTheSessionsOwnConversationID covers the payload
-// a hook is actually handed, including the fields the model ignores: Claude
-// Code sends the whole event context, and only session_id is the key the
-// record is filed under.
 func TestAISessionHookPayloadReadsTheSessionsOwnConversationID(t *testing.T) {
 	payload := []byte(`{
 	  "session_id": "0d5b1e0a-6f2b-4a0e-9a1f-2b1f8d3c4e77",

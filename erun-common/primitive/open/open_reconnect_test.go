@@ -9,9 +9,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
-// TestRemoteShellLaunchPersistentSession pins the reconnect contract: a desktop
-// tab persists in a dtach session so another window can reattach, while the bare
-// `erun open` CLI path stays unchanged.
 func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 	base := config.ShellLaunchParams{
 		Tenant:      "erun",
@@ -46,12 +43,7 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 	})
 }
 
-// TestSessionSocketPathCannotCollideWithTheDesktopBinary pins the property, not
-// the literal path: a session socket's name must share nothing with the desktop
-// binary's process name. Freeing that binary for a rebuild invites
-// `pkill -f erun-app`, and while the sockets lived under /tmp/erun-app that
-// pattern matched every session's dtach command line and killed the operator's
-// live terminals along with their agent sessions.
+// `pkill -f erun-app` must not match any session's dtach command line.
 func TestSessionSocketPathCannotCollideWithTheDesktopBinary(t *testing.T) {
 	paths := []string{
 		activity.RemoteAppSessionSocketDir,
@@ -63,8 +55,6 @@ func TestSessionSocketPathCannotCollideWithTheDesktopBinary(t *testing.T) {
 			t.Fatalf("session path %q contains the desktop binary's process name %q; a pkill aimed at the binary would match a live session", path, core.DesktopAppName)
 		}
 	}
-	// The dtach command line is what pkill actually matches, so the same
-	// property is asserted on the rendered script rather than only on the path.
 	script, err := PreviewShellLaunch(config.ShellLaunchParams{
 		Tenant:      "erun",
 		Environment: "local",
@@ -94,9 +84,6 @@ func assertScriptLacks(t *testing.T, script, unwanted, msg string) {
 	}
 }
 
-// TestParseRemoteAppSessionIDs pins the detection contract: parsing a pod's
-// /tmp/erun-sessions listing yields only this env's dtach-socket session ids, so a
-// fresh ERun window can rebuild tabs another window created.
 func TestParseRemoteAppSessionIDs(t *testing.T) {
 	lsOutput := strings.Join([]string{
 		"erun-local-open-0.dtach",
@@ -120,10 +107,7 @@ func TestParseRemoteAppSessionIDs(t *testing.T) {
 	}
 }
 
-// TestRemoteAppSessionEndScript pins the explicit-close contract: ending a
-// custom terminal tears down its session so detection cannot rebuild the tab,
-// and fails open — an unidentifiable master kills nothing but still drops the
-// socket.
+// An unidentifiable master kills nothing but still drops the socket.
 func TestRemoteAppSessionEndScript(t *testing.T) {
 	script := RemoteAppSessionEndScript("erun", "local", "open-2")
 	for _, want := range []string{
@@ -140,10 +124,6 @@ func TestRemoteAppSessionEndScript(t *testing.T) {
 	}
 }
 
-// TestRemoteShellGitSeedKeepsPrivateKeyOffArgv pins the security contract: the
-// private key never lands in a kubectl exec argv (visible via laptop `ps`, the
-// pod's /proc/<pid>/cmdline, or exec audit logs) — it reaches the pod only on
-// the separate seed exec's stdin.
 func TestRemoteShellGitSeedKeepsPrivateKeyOffArgv(t *testing.T) {
 	lines := RemoteShellGitSeedScriptLines(
 		`"$HOME/git/erun"`, "github.com", core.ShellQuote("sophium"), core.ShellQuote("erun"),
@@ -151,9 +131,7 @@ func TestRemoteShellGitSeedKeepsPrivateKeyOffArgv(t *testing.T) {
 	)
 	script := strings.Join(lines, "\n")
 
-	// The ssh config legitimately references the key via the tilde form
-	// (`~/.ssh/keys`, a pointer, not key material), so the leak check must assert
-	// on the $HOME form that the write/rm/chmod actually use.
+	// The ssh config's `~/.ssh/keys` is a pointer; writes use the $HOME form.
 	if strings.Contains(script, `"$HOME/.ssh/keys"`) {
 		t.Fatalf("inline script must not write/rm/chmod the private key file:\n%s", script)
 	}
@@ -172,9 +150,6 @@ func TestRemoteShellGitSeedKeepsPrivateKeyOffArgv(t *testing.T) {
 	}
 }
 
-// TestRemoteSSHKeySeedArgsStreamOnStdin pins that the key-seed exec streams the
-// key on stdin, not in the argv, so the key bytes never appear in a process
-// listing.
 func TestRemoteSSHKeySeedArgsStreamOnStdin(t *testing.T) {
 	args := RemoteSSHKeySeedArgs(config.ShellLaunchParams{Tenant: "erun", KubernetesContext: "ctx", Namespace: "erun-local"})
 

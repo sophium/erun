@@ -22,10 +22,7 @@ import type { UIEnvironmentHealthCheck } from '@/uiDiagnosticsTypes';
 
 type ManageDialog = AppState['manageDialog'];
 
-// EnvironmentHealthSection runs the out-of-pod "Check environment" diagnostics
-// (effective container registry configured, runtime deployed) and renders each
-// result as a first-class line with a recovery action. It is an explicit user
-// action — the dialog never runs it implicitly on open (Nielsen: user control).
+// EnvironmentHealthSection runs only on explicit request, never on open.
 export function EnvironmentHealthSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const health = useAppSelector((state) => state.manageDialog.health);
@@ -83,7 +80,6 @@ function HealthyBanner(): React.ReactElement {
   );
 }
 
-// Non-color-only status: each state has a distinct icon shape (WCAG 1.4.1).
 function HealthCheckRow({
   check,
   disabled,

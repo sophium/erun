@@ -233,14 +233,7 @@ func registerInspectionTools(reg shared.ToolRegistrar, runtime shared.RuntimeCon
 		Description: "Prove every route erun-backend-api's router registers is actually reachable on a deployed plane, rather than trusting that merged code is deployed code. Reads the route inventory straight out of erun-backend-api's own source (never a hand-maintained list) and GETs each one; first sanity-probes GET /v1/whoami and reports the plane unreachable rather than every route missing when that does not answer. Every probe is a plain GET regardless of a route's own registered method — the router reports 405 for a path it knows under a different method — so this never risks creating, updating, or deleting anything, and only the plane's own unmodified 404 page means a route was never registered at all. The result's planeReachable, missing, and errors fields are the loud signal: a caller must not treat a non-empty missing list as routine. Set preview to trace the resolved plane and route inventory without sending any request.",
 	}, expose.ExecRouteCheckTool(runtime))
 
-	// Deprecated aliases for the four exec tools, kept callable for one release.
-	// `erun exec` was the only command group on the surface whose tools
-	// dropped their prefix, and it is the group whose members differ most in
-	// blast radius -- exec_diff only reads, exec_raw runs arbitrary argv -- so
-	// the rename is worth the alias window rather than a hard break. Each alias
-	// shares its replacement's handler and resolves to the same descriptor and
-	// capability, so nothing about authorization or auditing changes with the
-	// name a caller happens to use.
+	// Deprecated aliases sharing their replacement's handler and capability, kept for one release.
 	shared.AddTool(reg, &mcp.Tool{
 		Name:        "diff",
 		Description: "Deprecated: use exec_diff. Retained for one release; this name will be removed.",

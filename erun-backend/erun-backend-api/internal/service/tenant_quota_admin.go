@@ -11,25 +11,17 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// TenantQuotaSetter is the persistence half SetForTenant wraps: the same
-// repository.TenantQuotaRepository.Set every ordinary set already uses.
 type TenantQuotaSetter interface {
 	Set(ctx context.Context, tenantID string, quota model.TenantQuota) (model.TenantQuota, error)
 }
 
-// TenantQuotaAdminAuditLogger records a tenant quota set. It is the raw audit
-// repository, the same narrow shape EnvironmentAdminAuditLogger is above.
+// TenantQuotaAdminAuditLogger records a tenant quota set.
 type TenantQuotaAdminAuditLogger interface {
 	LogAuditEvent(ctx context.Context, event model.AuditEvent) error
 }
 
-// TenantQuotaAdminService owns the one piece of tenant-quota administration
-// that is more than a single repository call: setting a tenant's quota is
-// operations-only with no "act on your own tenant" default, so it is always a
-// cross-tenant write and must leave a durable, attributable record — which
-// operator, from which home tenant, set which target tenant's caps to what —
-// mirroring EnvironmentAdminService's reasoning for cross-tenant environment
-// creates.
+// TenantQuotaAdminService sets tenant quotas, an always cross-tenant,
+// operations-only write that must leave an attributable audit record.
 type TenantQuotaAdminService struct {
 	quotas TenantQuotaSetter
 	audit  TenantQuotaAdminAuditLogger
@@ -39,9 +31,6 @@ func NewTenantQuotaAdminService(quotas TenantQuotaSetter, audit TenantQuotaAdmin
 	return &TenantQuotaAdminService{quotas: quotas, audit: audit}
 }
 
-// auditSetTenantQuotaParameters is the api_parameters payload shape for a
-// tenant quota set, machine-readable in the audit trail rather than a
-// hand-built string — mirrors auditCrossTenantEnvironmentCreateParameters.
 type auditSetTenantQuotaParameters struct {
 	TargetTenantID        string `json:"targetTenantId"`
 	MaxEnvironments       int    `json:"maxEnvironments"`
@@ -53,11 +42,7 @@ type auditSetTenantQuotaParameters struct {
 	MaxTotalStorageGB     int    `json:"maxTotalStorageGb"`
 }
 
-// SetForTenant sets targetTenantID's quota and records the audit event first,
-// mirroring EnvironmentAdminService.CreateForTenant's "audit before the
-// consequential write" ordering: a missing or failing audit logger fails the
-// set closed rather than silently changing another tenant's caps with no
-// attributable record of who did it.
+// SetForTenant audits before writing, failing closed without an audit logger.
 func (s *TenantQuotaAdminService) SetForTenant(ctx context.Context, targetTenantID string, quota model.TenantQuota) (model.TenantQuota, error) {
 	if s.audit == nil {
 		return model.TenantQuota{}, errors.New("setting a tenant's quota requires audit logging, which is not configured on this control plane")

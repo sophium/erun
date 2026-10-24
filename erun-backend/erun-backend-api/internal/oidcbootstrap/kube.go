@@ -17,7 +17,6 @@ import (
 )
 
 // applyConfigMap creates the ConfigMap, or replaces its data when it differs.
-// An unchanged ConfigMap is not written.
 func applyConfigMap(ctx context.Context, kube kubernetes.Interface, namespace string, name string, data map[string]string) error {
 	client := kube.CoreV1().ConfigMaps(namespace)
 	existing, err := client.Get(ctx, name, metav1.GetOptions{})
@@ -39,8 +38,7 @@ func applyConfigMap(ctx context.Context, kube kubernetes.Interface, namespace st
 	return err
 }
 
-// applySecret creates the Opaque Secret, or replaces its data when it
-// differs. An unchanged Secret is not written.
+// applySecret creates the Opaque Secret, or replaces its data when it differs.
 func applySecret(ctx context.Context, kube kubernetes.Interface, namespace string, name string, data map[string][]byte) error {
 	client := kube.CoreV1().Secrets(namespace)
 	existing, err := client.Get(ctx, name, metav1.GetOptions{})
@@ -63,13 +61,8 @@ func applySecret(ctx context.Context, kube kubernetes.Interface, namespace strin
 	return err
 }
 
-// RestorePATs seeds dir from the durable PATs Secret, so a restarted pod's
-// login and oidc-bootstrap containers find both PATs immediately: core writes
-// them only at first-instance init and an emptyDir does not survive a pod
-// restart. No Secret yet is the very first init, which mints the PATs itself,
-// and is not an error. Any other failure to read the Secret is, so the init
-// container retries instead of starting a pod that would wait forever on PAT
-// files nothing will write.
+// RestorePATs seeds dir from the PATs Secret, since core writes them only at
+// first init. A missing Secret is the first init, not an error.
 func RestorePATs(ctx context.Context, kube kubernetes.Interface, namespace string, secretName string, dir string, logger *log.Logger) error {
 	secret, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -86,8 +79,7 @@ func RestorePATs(ctx context.Context, kube kubernetes.Interface, namespace strin
 			logger.Printf("%s carries no %s; leaving it for core to write", secretName, file)
 			continue
 		}
-		// World-readable within the pod-private emptyDir, as before: core,
-		// the login container and the sidecar run as different users.
+		// Core, the login container and the sidecar run as different users.
 		if err := os.WriteFile(filepath.Join(dir, file), content, 0o644); err != nil {
 			return fmt.Errorf("restore %s: %w", file, err)
 		}
@@ -95,8 +87,7 @@ func RestorePATs(ctx context.Context, kube kubernetes.Interface, namespace strin
 	return nil
 }
 
-// WaitForFile blocks until path exists with non-empty content, polling every
-// interval, or until ctx is done.
+// WaitForFile blocks until path has non-empty content or ctx is done.
 func WaitForFile(ctx context.Context, path string, interval time.Duration) error {
 	for {
 		if info, err := os.Stat(path); err == nil && info.Size() > 0 {
@@ -110,9 +101,8 @@ func WaitForFile(ctx context.Context, path string, interval time.Duration) error
 	}
 }
 
-// Run reconciles once immediately and then every interval until ctx is done.
-// A failed tick is logged and retried on the next one, so a ConfigMap, an app,
-// or the PATs Secret deleted out of band is restored without a redeploy.
+// Run reconciles now and every interval; failed ticks are retried, so state
+// deleted out of band is restored.
 func (r *Reconciler) Run(ctx context.Context, interval time.Duration) error {
 	if err := r.Reconcile(ctx); err != nil {
 		r.log.Printf("initial reconcile incomplete, retrying next tick: %v", err)

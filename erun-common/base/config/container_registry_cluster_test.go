@@ -15,7 +15,6 @@ func TestClusterRegistryWithDefaults(t *testing.T) {
 	if got.Port != DefaultClusterRegistryPort {
 		t.Errorf("port = %d, want %d", got.Port, DefaultClusterRegistryPort)
 	}
-	// An explicit value is preserved.
 	custom := ClusterRegistry{Service: "reg", Namespace: "ns", Port: 6000}.WithDefaults()
 	if custom.Service != "reg" || custom.Namespace != "ns" || custom.Port != 6000 {
 		t.Errorf("explicit fields not preserved: %+v", custom)

@@ -1,12 +1,9 @@
 locals {
-  # Fully-qualified name of the delegated child zone, e.g. "services.example.com".
   delegated_zone_name = "${var.subdomain}.${var.base_domain_name}"
 
-  # Resolve the parent zone id: an explicit input wins, otherwise the looked-up zone.
   parent_zone_id = var.parent_zone_id != "" ? var.parent_zone_id : try(data.cloudflare_zone.parent[0].zone_id, "")
 }
 
-# Look up the parent zone only when no id was supplied.
 data "cloudflare_zone" "parent" {
   count = var.parent_zone_id == "" ? 1 : 0
 
@@ -16,9 +13,7 @@ data "cloudflare_zone" "parent" {
   }
 }
 
-# Delegate the child zone to the platform's own PowerDNS nameservers by publishing
-# one NS record per nameserver in the parent zone. Authority for the child lives
-# outside Cloudflare, so no cloudflare_zone is created here.
+# Authority for the child zone lives in the platform's PowerDNS, not Cloudflare.
 resource "cloudflare_dns_record" "delegation" {
   for_each = toset(var.nameservers)
 
@@ -37,8 +32,8 @@ resource "cloudflare_dns_record" "delegation" {
   }
 }
 
-# Glue A records for in-bailiwick nameservers, so a resolver following the
-# delegation can resolve the nameserver FQDNs without looping back through it.
+# Glue for in-bailiwick nameservers, so resolving them does not loop back
+# through the delegation.
 resource "cloudflare_dns_record" "glue" {
   for_each = var.glue_records
 

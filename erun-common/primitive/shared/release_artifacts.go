@@ -50,11 +50,8 @@ func discoverStableReleaseArtifacts(ctx core.Context, inputs releaseInputs, arti
 	return nil
 }
 
-// releaseChartSearchRoot scopes chart discovery to the project's own devops
-// module when the project declares where that module lives, so a repository
-// migrating onto erun publishes the tenant module's charts and not the legacy
-// module's alongside them. A project that declares neither keeps the
-// whole-project walk.
+// releaseChartSearchRoot scopes chart discovery to the declared devops module, if any, so a
+// legacy module's charts are not published too.
 func releaseChartSearchRoot(projectRoot string) (string, error) {
 	k8sDir, ok, err := ConfiguredK8sDir(projectRoot)
 	if err != nil {
@@ -101,12 +98,7 @@ func discoverReleaseCharts(projectRoot, version string) ([]ReleaseChartSpec, []R
 	return charts, updates, nil
 }
 
-// releaseDockerDir is where the release looks for the images it publishes: the
-// project's configured paths.docker when set, otherwise the conventional
-// <release root>/docker. The build side already honours the override, so
-// without this a project that relocates its build contexts resolved no images
-// to publish — the release built them, pushed nothing, and still tagged a
-// version whose verify-publication had nothing to re-resolve.
+// releaseDockerDir honours paths.docker like the build does, else <release root>/docker.
 func releaseDockerDir(projectRoot, releaseRoot string) (string, error) {
 	configured, ok, err := ConfiguredDockerDir(projectRoot)
 	if err != nil {
@@ -118,10 +110,7 @@ func releaseDockerDir(projectRoot, releaseRoot string) (string, error) {
 	return filepath.Join(releaseRoot, "docker"), nil
 }
 
-// sameVersionFile reports whether two VERSION paths are the same file. A module
-// that symlinks the project's version line shares it, so it belongs in the
-// release; only a module carrying its own VERSION is a separately pinned
-// component the release must leave alone.
+// sameVersionFile reports whether two VERSION paths are the same file; a symlinked one belongs to the release.
 func sameVersionFile(a, b string) bool {
 	return versionFileIdentity(a) == versionFileIdentity(b)
 }
@@ -168,9 +157,7 @@ func discoverReleaseDockerImages(ctx core.Context, projectRoot, releaseRoot, ver
 	return images, nil
 }
 
-// releaseDockerImageForContext resolves one build context into the image the
-// release publishes, or reports it as excluded when the context takes its
-// version from a different VERSION file than the one being released.
+// releaseDockerImageForContext excludes a context versioned by a different VERSION file.
 func releaseDockerImageForContext(buildContext DockerBuildContext, releaseRoot, versionFilePath, version, registry string) (ReleaseDockerImageSpec, bool, error) {
 	_, _, candidateVersionFilePath, err := ResolveDockerBuildVersion(buildContext.Dir, releaseRoot, "")
 	if err != nil {
@@ -199,8 +186,7 @@ func releaseDockerImageForContext(buildContext DockerBuildContext, releaseRoot, 
 	}, true, nil
 }
 
-// DiscoverReleaseLinuxPackages resolves the linux package components under
-// <release root>/linux. Each must declare the `dist` stage a release exports.
+// DiscoverReleaseLinuxPackages resolves <release root>/linux components; each must declare a dist stage.
 func DiscoverReleaseLinuxPackages(projectRoot, releaseRoot string) ([]LinuxPackageSpec, error) {
 	contexts, err := ResolveLinuxPackageContextsAtDir(filepath.Join(releaseRoot, "linux"))
 	if err != nil {

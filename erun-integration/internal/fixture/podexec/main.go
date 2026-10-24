@@ -1,15 +1,5 @@
-// Command erun-podexec stands in for the runtime pod that `erun outputs
-// download` reads through, and for the exec stream that carries the answer.
-//
-// A fixed-stdout stub cannot serve this path: the download asks the pod several
-// different questions (what would you send, then one byte range at a time, then
-// discard the staging file), and the whole point of the fix under test is that
-// the answers differ per call. So this program answers each of erun's real
-// scripts against a real directory tree, and — the part that makes it a
-// regression test rather than a smoke test — refuses to carry more than
-// --max-stream-bytes in one call, failing with the exact error kubectl reports
-// when its exec stream breaks. A caller that asks for a whole large file in one
-// call therefore fails here the same way it fails against a real cluster.
+// Command erun-podexec emulates the runtime pod and exec stream behind `erun
+// outputs download`, failing like kubectl once a call exceeds --max-stream-bytes.
 package main
 
 import (
@@ -30,27 +20,23 @@ import (
 	"time"
 )
 
-// The scripts erun sends. Matching the real text (rather than a marker planted
-// for the test) is deliberate: a change to what erun asks the pod shows up here
-// as a loud "unrecognized script" instead of a silently passing scenario.
+// Match erun's real scripts so a change to them fails loudly as
+// "unrecognized script".
 var (
 	probeScript   = regexp.MustCompile(`(?m)^target='([^']*)'$`)
 	rangeRequest  = regexp.MustCompile(`tail -c \+(\d+) (?:'([^']*)'|"([^"]*)") \| head -c (\d+)`)
 	discardScript = regexp.MustCompile(`^rm -f '([^']*)'\s*$`)
 )
 
-// wholePayloadRequest is the script erun sent before it read a payload range by
-// range: one exec for the entire file. It is still answered here so a scenario
-// pointed at that erun fails for the reason the bug report gives — a stream that
-// carried too much and died — rather than for a protocol the pod never saw.
+// wholePayloadRequest is the old single-exec protocol, still answered so it
+// fails on stream size rather than on protocol.
 const wholePayloadRequest = `base64 "$target"`
 
 // streamEOF is what kubectl prints when the exec stream dies mid-transfer.
 const streamEOF = `E0904 16:36:15.551881   90445 v2.go:167] "Unhandled Error" err="read message: unexpected EOF"
 error: error reading from error stream: read message: unexpected EOF`
 
-// tarEntryEpoch keeps a staged directory archive byte-identical across runs, so
-// a scenario's reported archive size is a fact rather than a coin flip.
+// tarEntryEpoch keeps staged archives byte-identical across runs.
 var tarEntryEpoch = time.Unix(1700000000, 0).UTC()
 
 type options struct {
@@ -108,8 +94,7 @@ func respond(opts options, script string) ([]byte, error) {
 	return nil, fmt.Errorf("podexec: unrecognized script:\n%s", script)
 }
 
-// respondToProbe answers what the pod would send: the entry kind, the payload's
-// length, the path to read it from, its digest, and the payload's first range.
+// respondToProbe answers kind, length, path, digest, and the first range.
 func respondToProbe(opts options, script string) ([]byte, error) {
 	target := probeScript.FindStringSubmatch(script)
 	if target == nil {
@@ -140,8 +125,7 @@ func respondToProbe(opts options, script string) ([]byte, error) {
 	return append([]byte(metadata), head...), nil
 }
 
-// respondWithWholePayload answers the pre-range protocol: a kind marker and the
-// entire payload, base64, in one stream.
+// respondWithWholePayload answers the pre-range protocol.
 func respondWithWholePayload(opts options, script string) ([]byte, error) {
 	target := probeScript.FindStringSubmatch(script)
 	if target == nil {
@@ -191,9 +175,7 @@ func respondToRange(opts options, script string) ([]byte, error) {
 	return encodeRange(opts, payload, offset-1, requestedLength(script))
 }
 
-// encodeRange frames one range the way the pod's own pipeline does: an encoding
-// marker line, then base64 of the bytes (compressed first when the pod would
-// have had gzip).
+// encodeRange frames a range like the pod's pipeline: marker line, then base64.
 func encodeRange(opts options, payload []byte, offset, length int64) ([]byte, error) {
 	end := offset + length
 	if end > int64(len(payload)) {
@@ -207,9 +189,7 @@ func encodeRange(opts options, payload []byte, offset, length int64) ([]byte, er
 	if opts.encoding == "gzip" {
 		marker = "gzip"
 		var buffer bytes.Buffer
-		// The pod compresses; how well it compresses is not what a scenario
-		// asserts, and scanning for matches it will not find is the single
-		// most expensive thing this emulator would otherwise do.
+		// Compression ratio is not asserted; NoCompression keeps the emulator fast.
 		writer, err := gzip.NewWriterLevel(&buffer, gzip.NoCompression)
 		if err != nil {
 			return nil, err
@@ -225,8 +205,7 @@ func encodeRange(opts options, payload []byte, offset, length int64) ([]byte, er
 	return []byte(marker + "\n" + wrapBase64(body) + "\n"), nil
 }
 
-// wrapBase64 breaks the encoding at 76 columns the way base64(1) does, so a
-// scenario's stream size matches what the real pipeline would have produced.
+// wrapBase64 wraps at 76 columns like base64(1), so stream sizes match.
 func wrapBase64(body []byte) string {
 	encoded := base64.StdEncoding.EncodeToString(body)
 	var wrapped strings.Builder
@@ -249,8 +228,7 @@ func requestedLength(script string) int64 {
 	return length
 }
 
-// stageArchive writes the throwaway tarball a directory download reads from,
-// where the pod's own mktemp would have put it.
+// stageArchive writes the tarball a directory download reads, under /tmp.
 func stageArchive(root, podPath string) (string, error) {
 	if err := os.MkdirAll(filepath.Join(root, "tmp"), 0o755); err != nil {
 		return "", err
@@ -304,9 +282,7 @@ func tarGz(hostDir, name string) ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
-// consumeFailOnce reports whether this offset is due to break the stream, and
-// records that it has, so a scenario can prove the download recovers by
-// re-reading the same range rather than by never being tested on one.
+// consumeFailOnce reports whether offset should break now and records it.
 func consumeFailOnce(opts options, offset int64) (bool, error) {
 	if opts.statePath == "" || !listsOffset(opts.failOnceAt, offset) {
 		return false, nil

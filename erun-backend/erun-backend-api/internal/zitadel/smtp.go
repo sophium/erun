@@ -9,10 +9,8 @@ import (
 	"strings"
 )
 
-// SMTPConfig is the non-secret half of the platform's outbound-mail
-// configuration -- everything Zitadel's Admin API returns from a read. The
-// password is never included: Zitadel does not return it either, and this
-// client only ever writes it.
+// SMTPConfig is the non-secret outbound-mail configuration; Zitadel never returns
+// the password.
 type SMTPConfig struct {
 	Host           string `json:"host"`
 	User           string `json:"user"`
@@ -22,11 +20,7 @@ type SMTPConfig struct {
 	TLS            bool   `json:"tls"`
 }
 
-// SMTPStatus is the platform's honest answer to "can this instance send mail
-// at all". Every flow that reaches a user out of band -- signup
-// verification, password reset, invitation -- depends on it, and Zitadel's
-// own signal is only a 404. Configured reports whether
-// an ACTIVE Zitadel SMTP config exists; Config is the zero value otherwise.
+// SMTPStatus reports whether an ACTIVE Zitadel SMTP config exists; Config is zero otherwise.
 type SMTPStatus struct {
 	Configured bool       `json:"configured"`
 	Config     SMTPConfig `json:"config"`
@@ -45,10 +39,8 @@ type smtpConfigResponse struct {
 	} `json:"smtpConfig"`
 }
 
-// GetSMTPStatus reads the platform's active outbound-mail configuration.
-// Zitadel answers 404 ("SMTP configuration not found") when no config is
-// active -- verified live against a real instance -- which this reports as
-// SMTPStatus{Configured: false}, not as an error.
+// GetSMTPStatus reads the active SMTP config; Zitadel's 404 when none is active
+// is reported as Configured: false.
 func (c *Client) GetSMTPStatus(ctx context.Context) (SMTPStatus, error) {
 	var resp smtpConfigResponse
 	if err := c.call(ctx, http.MethodGet, "/admin/v1/smtp", nil, &resp); err != nil {
@@ -71,14 +63,8 @@ func (c *Client) GetSMTPStatus(ctx context.Context) (SMTPStatus, error) {
 	}, nil
 }
 
-// SetSMTPConfigParams is the declarative desired state for the platform's
-// outbound mail: provider-agnostic host (including port,
-// e.g. "smtp.example.com:587"), username, sender identity, and TLS, plus
-// Password -- sourced by the caller from wherever it holds the credential
-// out of band, never generated or invented here. Password empty on an
-// update leaves Zitadel's existing password untouched; it is required the
-// first time a config is created, since there is nothing yet to leave
-// untouched.
+// SetSMTPConfigParams is the desired outbound-mail state. An empty Password keeps
+// the existing one on update and is rejected on first create.
 type SetSMTPConfigParams struct {
 	Host           string
 	User           string
@@ -98,15 +84,9 @@ type smtpConfigSearchResponse struct {
 	Result []smtpConfigSearchResult `json:"result"`
 }
 
-// UpdateSMTPConfig converges the platform's outbound-mail configuration to
-// params. Zitadel's SMTP API is id-addressed and a freshly created config
-// defaults to SMTP_CONFIG_INACTIVE (invisible to GetSMTPStatus until
-// activated) -- confirmed live -- so this creates-and-activates the
-// platform's first config when none exists, or read-modify-writes the
-// existing one otherwise, the same create-vs-update split UpdateOrgSettings
-// uses for org policy. Unlike the login/password policies, Zitadel accepts a
-// no-op SMTP PUT without a "NotChanged" error (also confirmed live), so this
-// does not need that convergence guard.
+// UpdateSMTPConfig creates and activates the first config (Zitadel creates it
+// INACTIVE) or updates the existing one. A no-op SMTP PUT is accepted, so no
+// diff guard is needed.
 func (c *Client) UpdateSMTPConfig(ctx context.Context, params SetSMTPConfigParams) (SMTPStatus, error) {
 	if strings.TrimSpace(params.Host) == "" || strings.TrimSpace(params.SenderAddress) == "" {
 		return SMTPStatus{}, fmt.Errorf("smtp host and sender address are required")
@@ -143,13 +123,7 @@ func (c *Client) createAndActivateSMTPConfig(ctx context.Context, params SetSMTP
 	return nil
 }
 
-// convergeExistingSMTPConfig activates before writing the password:
-// Zitadel's password-update command refuses an inactive config with the
-// same "SMTP configuration not found" error GetSMTPStatus's 404 uses, even
-// though the same config happily accepts a plain field update while
-// inactive (confirmed live against a real v4.15.3 instance) -- so
-// activation has to come first, not last, whenever the existing config is
-// not already active.
+// Zitadel's password update refuses an inactive config, so activation comes first.
 func (c *Client) convergeExistingSMTPConfig(ctx context.Context, current smtpConfigSearchResult, params SetSMTPConfigParams) error {
 	if current.State != "SMTP_CONFIG_ACTIVE" {
 		if err := c.activateSMTPConfig(ctx, current.ID); err != nil {
@@ -211,10 +185,7 @@ func (c *Client) activateSMTPConfig(ctx context.Context, id string) error {
 	return c.call(ctx, http.MethodPost, fmt.Sprintf("/admin/v1/smtp/%s/_activate", url.PathEscape(id)), map[string]any{}, nil)
 }
 
-// smtpConfigBody builds the AddSMTPConfig/UpdateSMTPConfig request body.
-// includePassword is false for the update-fields PUT: Zitadel exposes
-// password changes through its own dedicated endpoint
-// (updateSMTPConfigPassword), so the update-fields body never carries one.
+// Password changes go through their own endpoint, so the update-fields PUT omits it.
 func smtpConfigBody(params SetSMTPConfigParams, includePassword bool) map[string]any {
 	body := map[string]any{
 		"senderAddress":  strings.TrimSpace(params.SenderAddress),

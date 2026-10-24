@@ -124,11 +124,9 @@ func TestArtifactReadOnlyRoundTrip(t *testing.T) {
 }
 
 func TestEnsureLocalWorkspaceSyncTargetAcceptsPlainDirAndCreatesMissing(t *testing.T) {
-	// An existing plain directory is accepted without any local git.
 	existing := t.TempDir()
 	requireWorkspaceSyncNoError(t, EnsureLocalWorkspaceSyncTarget(existing), "accept plain dir")
 
-	// A missing directory is created.
 	missing := filepath.Join(t.TempDir(), "nested", "mirror")
 	requireWorkspaceSyncNoError(t, EnsureLocalWorkspaceSyncTarget(missing), "create missing dir")
 	info, err := os.Stat(missing)
@@ -137,7 +135,6 @@ func TestEnsureLocalWorkspaceSyncTargetAcceptsPlainDirAndCreatesMissing(t *testi
 		t.Fatal("expected the created path to be a directory")
 	}
 
-	// A path that is a file, not a directory, is rejected.
 	file := filepath.Join(t.TempDir(), "afile")
 	requireWorkspaceSyncNoError(t, os.WriteFile(file, []byte("x"), 0o644), "write file")
 	if err := EnsureLocalWorkspaceSyncTarget(file); err == nil {
@@ -176,7 +173,6 @@ func TestLocalWorkspaceSourceFileMetaMissingRootIsEmpty(t *testing.T) {
 }
 
 func TestChangedWorkspaceSyncPathsFetchesNewChangedAndUnknown(t *testing.T) {
-	// remotePaths order is preserved in the output.
 	remotePaths := []string{"changed.txt", "new.txt", "same.txt", "unknown-remote.txt"}
 	remoteMeta := map[string]workspaceFileMeta{
 		"changed.txt": {Size: 10, MTime: 200},
@@ -188,7 +184,6 @@ func TestChangedWorkspaceSyncPathsFetchesNewChangedAndUnknown(t *testing.T) {
 		"changed.txt":        {Size: 10, MTime: 100}, // mtime differs → fetch
 		"same.txt":           {Size: 7, MTime: 150},  // identical → skip
 		"unknown-remote.txt": {Size: 1, MTime: 1},
-		// new.txt absent locally → fetch.
 	}
 	got := changedWorkspaceSyncPaths(remotePaths, remoteMeta, localMeta)
 	want := []string{"changed.txt", "new.txt", "unknown-remote.txt"}
@@ -239,7 +234,6 @@ func TestExcludeWorkspaceSyncPaths(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected filtered paths: got %v want %v", got, want)
 	}
-	// An empty symlink set is a no-op (returns the input).
 	if got := excludeWorkspaceSyncPaths(paths, nil); !reflect.DeepEqual(got, paths) {
 		t.Fatalf("nil symlink set must be a no-op, got %v", got)
 	}

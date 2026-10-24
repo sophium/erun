@@ -4,19 +4,12 @@ import path from 'node:path';
 
 import { test, expect } from '../../../fixtures/erunApp.js';
 
-// The repository path is editable for local-agent envs so an operator can retarget
-// a moved repo in place instead of hand-editing config; non-local-agent envs have
-// no local host path, so it stays read-only.
 test.describe('manage dialog repository path (#709)', () => {
   test('edits and persists the repository path for a local-agent env', async ({
     app,
     seededEnv,
   }) => {
-    // The dialog validates this field with init's own definition — a local-agent
-    // env hostPath-mounts the path into its pod — so the retarget target has to
-    // be a real absolute directory on this machine. A save of a path that is not
-    // is refused with init's reason, which correctly leaves the tab dirty; the
-    // value this spec persists is therefore staged rather than invented.
+    // Validated like init: the path must be a real absolute directory, so it is staged.
     const newRepoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'erun-pw-repo-'));
     try {
       await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);

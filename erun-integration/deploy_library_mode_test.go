@@ -20,12 +20,7 @@ import (
 )
 
 func testDeployDryRunUnaffectedByKubectlSecretGetLibraryExecutionMode(t *testing.T) {
-	// Locks the dry-run/audit contract for kubectl-secret-get: the plan
-	// must stay byte-identical to the subprocess-mode golden
-	// (dry_run_remote_env_image_pull_secrets) even with
-	// execution.modes.kubectl-secret-get=library, since
-	// applyImagePullSecrets only ever renders the get/apply trace lines
-	// and never calls existingImagePullSecretAuths on a dry run.
+	// Library mode must not change the dry-run trace: the secret is never read on a dry run.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -44,15 +39,8 @@ func testDeployDryRunUnaffectedByKubectlSecretGetLibraryExecutionMode(t *testing
 }
 
 func testDeployRealRunKubectlSecretGetLibraryExecutionModeReachesTheAPIServerDirectly(t *testing.T) {
-	// Proves the library path produces the same observable result as the
-	// subprocess path (existing Secret read back and merged into) via a
-	// real client-go call against a fake API server instead of shelling
-	// out to kubectl. The kubectl stub fails loudly and distinctively
-	// only for the "get secret ... -o json" argv shape (the apply that
-	// follows, and every other kubectl subcommand this deploy needs,
-	// still succeeds), so a fallback to the subprocess path for the
-	// image-pull-secret read surfaces as a recognizable deploy failure
-	// instead of silently passing.
+	// The kubectl stub fails only for "get secret ... -o json", so a subprocess
+	// fallback surfaces as a recognizable failure.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -108,15 +96,7 @@ func testDeployRealRunKubectlSecretGetLibraryExecutionModeReachesTheAPIServerDir
 }
 
 func testDeployDryRunUnaffectedByKubectlSecretApplyLibraryExecutionMode(t *testing.T) {
-	// Locks the dry-run/audit contract for kubectl-secret-apply: the plan
-	// must stay byte-identical to the subprocess-mode golden
-	// (dry_run_remote_env_image_pull_secrets) even with
-	// execution.modes.kubectl-secret-apply=library, since
-	// applyImagePullSecrets only ever renders the get/apply trace lines
-	// and never calls applySecretManifest on a dry run. The whole point of
-	// the switch is that the rendered command is the audit contract
-	// regardless of which path executes it, and this is the assertion that
-	// says so for the first mutating operation on it.
+	// Library mode must not change the dry-run trace: the rendered command is the audit contract.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -135,23 +115,9 @@ func testDeployDryRunUnaffectedByKubectlSecretApplyLibraryExecutionMode(t *testi
 }
 
 func testDeployRealRunKubectlSecretApplyLibraryExecutionModeClientSideAppliesViaTheAPIServer(t *testing.T) {
-	// The mutating counterpart of the read-side library scenarios, and the
-	// test that pins the design finding behind this operation: the library
-	// path must reproduce kubectl's *client-side* apply, not substitute a
-	// server-side one. Server-side apply writes no
-	// last-applied-configuration annotation and records ownership under
-	// its own field manager, so an object applied once in each mode would
-	// permanently diverge from one only ever applied by kubectl -- and the
-	// traced `kubectl apply` line would stop describing what reached the
-	// cluster. Asserting the wire format (a strategic-merge PATCH carrying
-	// the annotation, never an apply-patch) is what keeps a later
-	// "simplification" to SSA from landing silently.
-	//
-	// kubectl-secret-get stays on the subprocess path here so the stub
-	// answers the read and only the apply crosses to the library path; the
-	// stub then fails loudly and distinctively for the "apply -f -" argv
-	// shape, so a fallback surfaces as a recognizable deploy failure
-	// instead of silently passing.
+	// The library path must reproduce kubectl's client-side apply (strategic-merge
+	// PATCH with last-applied annotation), not SSA, or objects diverge from kubectl's.
+	// The stub fails only for "apply -f -", so a subprocess fallback is caught.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -218,19 +184,12 @@ func testDeployRealRunKubectlSecretApplyLibraryExecutionModeClientSideAppliesVia
 }
 
 func testDeployRealRunNewWorktreeVolumeAnnouncesTheAdoption(t *testing.T) {
-	// The regression this exists for: a deploy that first introduces the
-	// dedicated worktree volume to an environment whose checkout still lives
-	// on the home volume reported plain success while mounting an empty
-	// claim over that checkout. The claim's absence is a decision input a
-	// trace cannot supply, so kubectl is stubbed to report it NotFound; the
-	// deploy must then name the worktree path, the volume it moves onto, and
-	// where the pre-move copy is kept.
+	// A claim missing from the cluster is a decision input, so kubectl reports it NotFound.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	stubs := setup.Cwd + "/stubs"
 	fixture.StubBinary(t, stubs, "helm", "")
-	// The ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam marks erun-devops published
-	// so the runtime chart ladder confirms it instead of refusing.
+	// The probe override marks erun-devops published so the runtime chart ladder confirms it.
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 	envVars = append(envVars, fixture.StubKubectlWorktreeClaim(t, stubs, fixture.KubectlWorktreeClaimStubSpec{
 		ClaimName: "team-devops-worktree",
@@ -246,15 +205,12 @@ func testDeployRealRunNewWorktreeVolumeAnnouncesTheAdoption(t *testing.T) {
 }
 
 func testDeployRealRunUnreadableWorktreeVolumeStillAnnounces(t *testing.T) {
-	// A cluster the claim read fails against is "unknown", never "settled":
-	// staying quiet is the exact failure being fixed, so the notice prints
-	// anyway and the read's error is traced beside it.
+	// A failed claim read is "unknown", so the notice prints with the error traced.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	stubs := setup.Cwd + "/stubs"
 	fixture.StubBinary(t, stubs, "helm", "")
-	// The ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam marks erun-devops published
-	// so the runtime chart ladder confirms it instead of refusing.
+	// The probe override marks erun-devops published so the runtime chart ladder confirms it.
 	envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 	envVars = append(envVars, fixture.StubKubectlWorktreeClaim(t, stubs, fixture.KubectlWorktreeClaimStubSpec{
 		ClaimName: "team-devops-worktree",
@@ -270,14 +226,7 @@ func testDeployRealRunUnreadableWorktreeVolumeStillAnnounces(t *testing.T) {
 }
 
 func testDeployDryRunUnaffectedByKubectlPVCGetLibraryExecutionMode(t *testing.T) {
-	// Locks the dry-run/audit contract for kubectl-pvc-get: the plan must
-	// stay byte-identical to the subprocess-mode golden
-	// (dry_run_remote_env_prefers_tenant_published_runtime_chart, which
-	// already exercises the worktree-claim trace via a remote-agent env's
-	// pvc worktree storage) even with execution.modes.kubectl-pvc-get=library,
-	// since announceWorktreeVolumeChange only ever renders the trace line
-	// (kubectlWorktreeClaimArgs) and never calls worktreeClaimExists on a
-	// dry run.
+	// Library mode must not change the dry-run trace: the claim is never read on a dry run.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	seedExecutionMode(t, setup, "kubectl-pvc-get", "library")
@@ -290,15 +239,8 @@ func testDeployDryRunUnaffectedByKubectlPVCGetLibraryExecutionMode(t *testing.T)
 }
 
 func testDeployRealRunKubectlPVCGetLibraryExecutionModeReachesTheAPIServerDirectly(t *testing.T) {
-	// Proves the library path produces the same observable result as the
-	// subprocess path (worktree claim already exists, no adoption notice)
-	// via a real client-go call against a fake API server instead of
-	// shelling out to kubectl. The kubectl stub fails loudly and
-	// distinctively only for the "get pvc ... -o name" argv shape (every
-	// other kubectl subcommand this deploy needs — the post-helm rollout
-	// wait and pod-watch poll — still succeeds), so a fallback to the
-	// subprocess path for the worktree-claim check surfaces as a
-	// recognizable deploy failure instead of silently passing.
+	// The kubectl stub fails only for "get pvc ... -o name", so a subprocess
+	// fallback surfaces as a recognizable failure.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	seedExecutionMode(t, setup, "kubectl-pvc-get", "library")
@@ -340,13 +282,7 @@ func testDeployRealRunKubectlPVCGetLibraryExecutionModeReachesTheAPIServerDirect
 }
 
 func testDeployDryRunUnaffectedByKubectlNamespaceGetLibraryExecutionMode(t *testing.T) {
-	// Locks the dry-run/audit contract for kubectl-namespace-get: the plan
-	// must stay byte-identical to the subprocess-mode golden
-	// (dry_run_from_devops_cwd) even with
-	// execution.modes.kubectl-namespace-get=library, since
-	// TraceEnsureKubernetesNamespace only ever renders the trace line
-	// (kubectlGetNamespaceArgs) and never calls kubernetesNamespaceExists
-	// on a dry run.
+	// Library mode must not change the dry-run trace: the namespace is never read on a dry run.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -359,15 +295,8 @@ func testDeployDryRunUnaffectedByKubectlNamespaceGetLibraryExecutionMode(t *test
 }
 
 func testDeployRealRunKubectlNamespaceGetLibraryExecutionModeReachesTheAPIServerDirectly(t *testing.T) {
-	// Proves the library path produces the same observable result as the
-	// subprocess path (namespace already exists, no create needed) via a
-	// real client-go call against a fake API server instead of shelling
-	// out to kubectl. The kubectl stub fails loudly and distinctively
-	// only for the "get namespace" argv shape (every other kubectl
-	// subcommand this deploy needs — the post-helm rollout wait and
-	// pod-watch poll — still succeeds), so a fallback to the subprocess
-	// path for the namespace check surfaces as a recognizable deploy
-	// failure instead of silently passing.
+	// The kubectl stub fails only for "get namespace", so a subprocess fallback
+	// surfaces as a recognizable failure.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -408,8 +337,6 @@ func testDeployRealRunKubectlNamespaceGetLibraryExecutionModeReachesTheAPIServer
 	}
 }
 
-// writeFakeAPIServerKubeconfig points the scenario's kubeconfig at a fake API
-// server so library execution modes reach it instead of a real cluster.
 func writeFakeAPIServerKubeconfig(t *testing.T, setup env.Setup, serverURL string) {
 	t.Helper()
 	kubeDir := filepath.Join(setup.Home, ".kube")

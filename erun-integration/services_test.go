@@ -10,16 +10,8 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// servicesStubResponses is the canned pair of `kubectl get ... -o json` bodies
-// the services real-run scenarios share: three Services, one of which an
-// erun-expose Ingress fronts, plus an Ingress that is not an expose Ingress at
-// all (no expose- prefix) and so must not be attributed to any Service.
-//
-// The exposed Service is deliberately not named after the Ingress's label:
-// "pw-api" is fronted by the Ingress "expose-api", which is the repo-native
-// chart shape the derivation `<tenant>-<service>` gets wrong. A listing that
-// re-derived instead of reading the Ingress backend would report "team-api"
-// here, a Service that does not exist.
+// servicesStubResponses: pw-api is fronted by Ingress "expose-api", so a listing that
+// re-derived <tenant>-<service> instead of reading the backend would report "team-api".
 func servicesStubResponses() map[string]string {
 	return map[string]string{
 		"service": `{"items":[{"metadata":{"name":"pw-api"},"spec":{"type":"ClusterIP","ports":[{"name":"http","port":80,"protocol":"TCP"}]}},{"metadata":{"name":"team-mcp"},"spec":{"type":"ClusterIP","ports":[{"name":"mcp","port":80,"protocol":"TCP"}]}},{"metadata":{"name":"pw-web"},"spec":{"type":"ClusterIP","ports":[{"name":"http","port":80,"protocol":"TCP"}]}}]}`,
@@ -40,9 +32,6 @@ func TestServices(t *testing.T) {
 	})
 
 	t.Run("dry_run", func(t *testing.T) {
-		// The listing's own plan, before anything is read: the two kubectl gets
-		// in the order a real run issues them, and the decision the listing makes
-		// about how it matches an exposure to a Service.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"services", "--dry-run", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -53,8 +42,6 @@ func TestServices(t *testing.T) {
 	})
 
 	t.Run("dry_run_missing_tenant", func(t *testing.T) {
-		// No tenant configured at all: resolution fails before any kubectl call
-		// is planned.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"services", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
@@ -63,12 +50,7 @@ func TestServices(t *testing.T) {
 		golden.Equal(t, "services/dry_run_missing_tenant", normalize.Apply(result.Combined))
 	})
 
-	// real_run_reports_the_exposure_state is the reported gap this scenario
-	// exists for: the listing must say which Services are already published,
-	// and it must take that from the Ingress's own backend rather than
-	// re-deriving <tenant>-<service>. Both claims are visible in one run --
-	// pw-api is reported exposed under the label "api", while pw-web, whose
-	// only Ingress is not an expose Ingress, is reported plainly.
+	// The exposure must come from the Ingress backend, not a re-derived name.
 	t.Run("real_run_reports_the_exposure_state", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -111,10 +93,7 @@ func TestServices(t *testing.T) {
 		golden.Equal(t, "services/real_run_empty_namespace", normalize.Apply(result.Combined))
 	})
 
-	// real_run_forbidden_is_not_an_empty_environment: the desktop renders this
-	// case as a distinct permission-restricted state, and the CLI must not
-	// report the same thing a genuinely empty namespace reports. The headline
-	// says what could not be read before the kubectl cause follows.
+	// Forbidden must not read like an empty namespace.
 	t.Run("real_run_forbidden_is_not_an_empty_environment", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")

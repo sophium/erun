@@ -50,18 +50,9 @@ import { InlineAlert } from './InlineAlert';
 import { SignInAction } from './PlatformSignInAlert';
 import { RequestInvitationDialog } from './RequestInvitationDialog';
 
-// TenantPlatformState.tsx renders the tenant dashboard's platform-readiness
-// states: not-connected, choose-alias, not-signed-in, not-enrolled,
-// no-permission, and tenant-mismatch. Each is a distinct user situation with
-// its own next action — never one generic "sign in again" sentence — per the
-// repo's "Smooth, Seamless, No Dead Ends" standard: a state with no action
-// is a defect of the same severity as a crash.
-//
-// tenant-mismatch is the one that is not about a *failed* resolution: the
-// identity resolved and the platform answered, with a tenant that is not the
-// local tenant this dashboard was opened from. It is rendered instead of the
-// rows rather than beside them, because everything below the tab strip would
-// be that tenant's — including the writes it offers.
+// Platform-readiness states for the tenant dashboard, each with its own next
+// action. tenant-mismatch replaces the rows because they and their writes
+// belong to another tenant.
 
 export function TenantPlatformStateCard({
   data,
@@ -86,9 +77,7 @@ export function TenantPlatformStateCard({
   }
 }
 
-// PlatformContactLine names what the surface actually talked to: a resolved
-// URL and identity, so a misconfiguration is self-diagnosing rather than
-// requiring a network trace.
+// PlatformContactLine shows the resolved URL and identity so misconfiguration is self-diagnosing.
 function PlatformContactLine({ data }: { data: UITenantDashboard }): React.ReactElement | null {
   if (!data.platformUrl && !data.platformAlias) {
     return null;
@@ -112,14 +101,8 @@ function PlatformContactLine({ data }: { data: UITenantDashboard }): React.React
 function NotConnectedState(): React.ReactElement {
   const dispatch = useAppDispatch();
   const draft = useAppSelector((state) => state.tenantDashboard.connectApiUrlDraft);
-  // Prefill with the one hosted platform's own API URL — a property of the
-  // platform, not of the tenant connecting to it. Interpolating the tenant
-  // name here previously produced a host that only ever resolved for
-  // whichever tenant happened to share a name with the platform's own
-  // namespace, and NXDOMAIN for every other tenant; do not reintroduce that
-  // shape. Still fully editable — this is a starting guess the Connect
-  // action itself verifies against the real platform, not an assumption the
-  // app is asking the operator to trust blindly.
+  // Prefill with the platform's own API URL; never interpolate the tenant name,
+  // which only resolves for a tenant sharing the platform's namespace.
   React.useEffect(() => {
     if (!draft.trim()) {
       dispatch(setConnectApiUrlDraft(HOSTED_PLATFORM_API_URL));
@@ -129,23 +112,14 @@ function NotConnectedState(): React.ReactElement {
     <EmptyState
       icon={<Link2 />}
       heading="Connect this tenant to erunpaas.com"
-      // This state replaces the dashboard before its tab strip renders, so no
-      // tab loads -- including the API log, which reads the environment rather
-      // than the platform. Never name a subset here: a list of some tabs reads
-      // as an account of what is unavailable and leaves the rest looking
-      // usable, and any list drifts as tabs are added.
+      // No tab loads in this state; never name a subset of tabs here.
       body="This tenant isn't connected to a hosted erun platform yet, so none of this dashboard's tabs can load."
       action={<ConnectPlatformForm />}
     />
   );
 }
 
-// ConnectPlatformForm is the URL field + Connect button both states that end
-// in "connect this local tenant to the platform that serves it" need: the
-// not-connected state, and tenant-mismatch, whose remedy is to reach the
-// platform tenant this local tenant actually is rather than the one its
-// current credential happens to resolve to. Shared rather than copied so the
-// two cannot drift into offering different ways to do the same thing.
+// ConnectPlatformForm is shared by not-connected and tenant-mismatch so the two cannot drift.
 function ConnectPlatformForm(): React.ReactElement {
   const dispatch = useAppDispatch();
   const draft = useAppSelector((state) => state.tenantDashboard.connectApiUrlDraft);
@@ -180,17 +154,8 @@ function ConnectPlatformForm(): React.ReactElement {
   );
 }
 
-// TenantMismatchState is the one state here that is not a failure: the
-// platform answered, and what it answered with is a tenant that is not the
-// local tenant this dashboard was opened from. Nothing in the two configs
-// links them, so the platform's own name for the tenant behind the bearer is
-// the only thing that can say whether the rows are this tenant's — and it
-// says they are not. Rendering them anyway would show another tenant's
-// reviews, merge queue, users and audit under this tenant's own heading,
-// behind the write controls that act on them, which is exactly what an
-// operator cannot tell apart from their own tenant. The header above still
-// names the platform tenant, so the mismatch is stated whichever state the
-// body is in.
+// TenantMismatchState: the platform resolved the bearer to a different tenant,
+// so its rows and writes are withheld from this tenant's heading.
 function TenantMismatchState({ data }: { data: UITenantDashboard }): React.ReactElement {
   const platformTenant = tenantDashboardPlatformTenantName(data);
   return (
@@ -333,12 +298,7 @@ function NotEnrolledState({ data }: { data: UITenantDashboard }): React.ReactEle
               <FieldLabel htmlFor="enroll-admin-command">Or ask an administrator to run</FieldLabel>
               <CopyCommandButton command={command} />
             </div>
-            {/* whitespace-pre-wrap + break-all (not overflow-x-auto) so the
-                full issuer/subject values are always visible on their own,
-                never clipped at the card edge with no visual cue that more
-                text exists — the whole point of showing this command is for
-                the administrator to read and verify it, not just copy it
-                blind. */}
+            {/* Wrap rather than scroll so the administrator can read the full values. */}
             <code
               id="enroll-admin-command"
               className="block overflow-x-hidden whitespace-pre-wrap break-words rounded bg-background px-2 py-1.5 text-[12px]"
@@ -353,19 +313,12 @@ function NotEnrolledState({ data }: { data: UITenantDashboard }): React.ReactEle
   );
 }
 
-// RequestInvitationAction is NotEnrolledState's second option: its own
-// rendering distinguishes none-yet (offer the action) from
-// pending/declined (show status — no cancel/withdraw exists server-side, so
-// none is offered) — never silently reusing "Try to enroll myself"'s button
-// for a fundamentally different request.
+// RequestInvitationAction shows status for pending/declined; the server offers no withdraw.
 function RequestInvitationAction({ data }: { data: UITenantDashboard }): React.ReactElement {
   const dispatch = useAppDispatch();
   const request = data.myInviteRequest;
   if (!request) {
-    // A failed read is never presented as "never requested" -- the caller
-    // could already have a pending or approved request this load just
-    // couldn't see, and offering the submit action would let them resubmit
-    // into whatever the platform actually holds.
+    // A failed read is never shown as "never requested", which would invite a resubmit.
     if (data.myInviteRequestError) {
       return (
         <div className="grid gap-2 rounded-[var(--radius)] border border-border bg-muted/30 p-3">
@@ -450,9 +403,6 @@ function RequestInvitationAction({ data }: { data: UITenantDashboard }): React.R
   );
 }
 
-// CopyCommandButton is the one-click copy the not-enrolled hand-off needs:
-// the operator's explicit ask is that the administrator never has to
-// reconstruct the enrollment command by hand.
 function CopyCommandButton({ command }: { command: string }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (

@@ -11,15 +11,10 @@ import (
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// An exclusivity defect *between* the transports has to be asserted across
-// both rather than within either: a claim an orchestrator took through this
-// pod's MCP edge has to be the same claim the CLI running in that pod refuses
-// gate-merge on. Taking over MCP and asserting only that MCP reads it back is
-// exactly the check that passed while the guard stayed inert.
+// A claim taken over MCP must be the same claim the in-pod CLI's gate-merge
+// guard refuses on, so these tests cross transports.
 
-// inPodGuardIdentity makes the guard below behave as it does in the pod the
-// MCP edge serves: ERUN_TENANT/ERUN_ENVIRONMENT are what the runtime chart
-// injects, and are what scope the check to a real environment.
+// inPodGuardIdentity sets the tenant/environment the runtime chart injects.
 func inPodGuardIdentity(t *testing.T, tenant, environment string) {
 	t.Helper()
 	t.Setenv("ERUN_TENANT", tenant)
@@ -31,8 +26,7 @@ func TestExclusiveClaimTakenOverMCPRefusesTheInPodGateMergeGuard(t *testing.T) {
 	inPodGuardIdentity(t, "erun", "code1")
 	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "erun", Environment: "code1"}}
 
-	// The shape reported: name, id, exclusive, and no explicit scope, so the
-	// claim lands at the scope an exclusive take documents as its default.
+	// No explicit scope, so the claim lands at the exclusive default.
 	_, taken, err := ActivityLeaseTakeTool(runtime)(context.Background(), nil, ActivityLeaseTakeInput{
 		Name: "merge-queue drive 2442", ID: "merge-queue", Exclusive: true, Orchestrator: "erun",
 	})
@@ -43,15 +37,10 @@ func TestExclusiveClaimTakenOverMCPRefusesTheInPodGateMergeGuard(t *testing.T) {
 		t.Fatalf("expected an exclusive worktree-scoped claim, got %+v", taken.Lease)
 	}
 
-	// The in-pod CLI, in the same store, with no --under-lease: it must refuse
-	// rather than report there is no claim and rewrite the shared worktree.
 	expectInPodGuardRefusal(t, "merge-queue", "erun")
-	// The drive that took the claim names it and proceeds; anyone else does not.
 	expectInPodGuardExemption(t, "merge-queue")
 }
 
-// expectInPodGuardRefusal runs the guard as the in-pod CLI does and asserts it
-// refuses, naming the holder the MCP edge recorded.
 func expectInPodGuardRefusal(t *testing.T, holderID, orchestrator string) {
 	t.Helper()
 	err := shared.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", "")
@@ -67,8 +56,6 @@ func expectInPodGuardRefusal(t *testing.T, holderID, orchestrator string) {
 	}
 }
 
-// expectInPodGuardExemption asserts --under-lease exempts the named claim and
-// nothing else.
 func expectInPodGuardExemption(t *testing.T, underLeaseID string) {
 	t.Helper()
 	if err := shared.EnsureEnvironmentNotExclusivelyHeld(core.Context{}, "gate-merge", underLeaseID); err != nil {
@@ -79,10 +66,6 @@ func expectInPodGuardExemption(t *testing.T, underLeaseID string) {
 	}
 }
 
-// The mirror direction: a claim the CLI took in the pod must be one the MCP
-// edge reads back as exclusive, with its holder and scope. Both transports
-// write the same store, and a test that only ever writes on one side is what
-// let the two drift.
 func TestExclusiveClaimTakenByTheInPodCLIIsReadBackOverMCPAsExclusive(t *testing.T) {
 	isolateLeaseCache(t)
 	runtime := sharedpkg.RuntimeConfig{Context: sharedpkg.RuntimeContext{Tenant: "erun", Environment: "code1"}}

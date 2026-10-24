@@ -62,13 +62,7 @@ func testExecWriteRefusesPathOutsideProjectRoot(t *testing.T) {
 }
 
 func testExecWriteRefusesSymlinkLeafPointingOutsideTree(t *testing.T) {
-	// The whole justification for `exec write` over `raw` is that a write
-	// can only land inside the working tree. A lexical containment check
-	// does not follow symlinks, so a symlink inside the tree pointing
-	// anywhere on the filesystem would defeat it. Assert on the actual
-	// filesystem outcome, not just the exit code: the defect is that the
-	// check returns the wrong answer, so a check-only assertion would not
-	// have caught it.
+	// A lexical containment check does not follow symlinks; assert on the filesystem outcome.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	outside := t.TempDir()
@@ -89,8 +83,6 @@ func testExecWriteRefusesSymlinkLeafPointingOutsideTree(t *testing.T) {
 }
 
 func testExecWriteRefusesWriteThroughSymlinkedDirectoryComponent(t *testing.T) {
-	// Same escape, one level up: the symlink is a directory component of
-	// the requested path rather than the leaf itself.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	outside := t.TempDir()
@@ -107,9 +99,7 @@ func testExecWriteRefusesWriteThroughSymlinkedDirectoryComponent(t *testing.T) {
 }
 
 func testExecWriteRootItselfSymlinkStillWritesInsideRealTree(t *testing.T) {
-	// The root the write is confined to may itself be a symlink (e.g. a
-	// tempdir alias); containment must be decided against the real
-	// directory, and the write must still land there.
+	// The root may itself be a symlink; containment is decided against the real directory.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	rootLink := setup.Cwd + "-link"

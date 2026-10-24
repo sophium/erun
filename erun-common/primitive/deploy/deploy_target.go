@@ -57,15 +57,8 @@ func resolveDeployTargetOpenResult(command string, scopesTenantByFlag bool, stor
 	})
 }
 
-// refuseHostEnvironmentOperation refuses a pod-requiring operation (deploy,
-// pin, terraform, ...) against a host environment: it has no pod and no
-// cluster for the operation to act on. Naming the type in the message is the
-// point — this is the resolution a "this operation does not apply" error must
-// carry per root AGENTS.md § "Smooth, Seamless, No Dead Ends". Checked against
-// ResolvedType rather than the broader !HasPod() so an env whose type predates
-// the Type field (ResolvedType == "", see legacyEnvTypeFromRemoteSnapshot)
-// keeps deploying exactly as it did before host existed, instead of being
-// misreported as a host environment it never was.
+// refuseHostEnvironmentOperation refuses a pod-requiring operation on a host
+// environment. It checks ResolvedType, not !HasPod(), so untyped legacy envs still deploy.
 func refuseHostEnvironmentOperation(operation string, target configpkg.OpenResult) error {
 	if target.EnvConfig.ResolvedType() != configpkg.EnvironmentTypeHost {
 		return nil
@@ -73,20 +66,14 @@ func refuseHostEnvironmentOperation(operation string, target configpkg.OpenResul
 	return fmt.Errorf("%s %s/%s: %s is a host environment — it has no pod and no cluster to %s against", operation, target.Tenant, target.Environment, target.Environment, operation)
 }
 
-// ResolveDeployTargetScope names the tenant/environment a deploy would act on
-// before any spec work, so traces and failure headers can identify the target
-// even when the deploy fails before spec resolution reaches it. Explicit
-// overrides win; otherwise the current scope resolves. Naming the target is
-// diagnostics, never a failure source, so an unresolvable scope degrades to
-// whatever the target already carried.
+// ResolveDeployTargetScope names the target for diagnostics before spec resolution;
+// it never fails, degrading to whatever the target already carried.
 func ResolveDeployTargetScope(store DeployStore, findProjectRoot shared.ProjectFinderFunc, target DeployTarget) (string, string) {
 	tenant := strings.TrimSpace(target.Tenant)
 	environment := strings.TrimSpace(target.Environment)
 	if tenant != "" && environment != "" {
 		return tenant, environment
 	}
-	// A nameless command on purpose: this is diagnostics that degrade quietly
-	// rather than fail, so it has no failure message to name a recovery in.
 	resolved, err := resolveDeployTarget("", false, store, findProjectRoot, nil, nil, nil, target)
 	if err != nil {
 		return tenant, environment
@@ -132,13 +119,8 @@ func NormalizeBuildDeployDependencies(store BuildDeployStore, findProjectRoot sh
 	return store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now
 }
 
-// freezeNow pins now to a single instant so every snapshot version minted while
-// resolving one deploy (or build) shares the same timestamp. Otherwise each
-// image's version calls now() independently, and across a multi-image deploy
-// those timestamps drift apart — the runtime chart's persisted RuntimeVersion
-// can end up differing from the tag actually built and pushed, a phantom version
-// the deploy picker can never offer. freezeNow is idempotent, so applying it at
-// more than one entrypoint on the same call path is safe.
+// freezeNow pins now to one instant so every snapshot version minted in one
+// deploy matches the persisted RuntimeVersion. It is idempotent.
 func freezeNow(now shared.NowFunc) shared.NowFunc {
 	if now == nil {
 		now = time.Now
@@ -182,11 +164,8 @@ func resolveDeployVersionOverride(target DeployTarget, versionOverride string) s
 	return strings.TrimSpace(target.VersionOverride)
 }
 
-// deployResetsDatabase reports whether installing version arms the postgres
-// reset. A snapshot's data is disposable by convention; a released version's
-// is not, so only the version decides — a bool parameter here would let a
-// caller short-circuit it back to unconditional, which is the bug this
-// signature exists to make impossible.
+// deployResetsDatabase arms the postgres reset for snapshots only; it takes no
+// bool so callers cannot force it unconditional.
 func deployResetsDatabase(version string) bool {
 	return strings.Contains(strings.TrimSpace(version), "-snapshot-")
 }
@@ -247,9 +226,6 @@ func resolveDeployContext(findProjectRoot shared.ProjectFinderFunc, resolveKuber
 	}, nil
 }
 
-// tenantOwnsProjectRoot reports whether one of the tenant's envs records the
-// given project root as its local repo path. A tenant whose envs aren't
-// initialized simply doesn't own the root.
 func tenantOwnsProjectRoot(store DeployStore, tenant, cleanProjectRoot string) (bool, error) {
 	envs, err := store.ListEnvConfigs(tenant)
 	if err != nil {

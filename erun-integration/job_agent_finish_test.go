@@ -16,24 +16,9 @@ import (
 )
 
 func testJobAnAgentJobsStartedGateThatFailedGetsOneBoundedResumedTurnThatFixesIt(t *testing.T) {
-	// The supervisor's own wait-for-children mechanism (scenarios above)
-	// already tells the truth once an agent job's own turn
-	// ends while a gate it started fails -- startedJobFailed names it. What
-	// it could not do until now is give the agent itself a real "later" to
-	// act on that: nothing ever re-invoked it. The stubbed "claude" binary
-	// branches on whether its own argv carries --resume: its first turn
-	// starts a failing gate and exits without --resume in its own argv (it
-	// cannot see it -- this is the first turn); erun then resumes the same
-	// session (verified live against a real claude to actually carry
-	// context, see erun-common/AGENTS.md) and hands it the concrete
-	// failure. This resumed turn "fixes" it the same way a real agent would
-	// after a failing gate: it reruns the gate under the same --name with a
-	// fresh --id, which succeeds -- superseding the earlier failing attempt
-	// under that name (the same supersede rule the scenario above locks) --
-	// before it exits 0. Not starting anything new on resume would not
-	// prove a fix: the earlier failed attempt stays the latest (and only)
-	// attempt under its name forever unless something supersedes it, so the
-	// resumed turn has to actually redo the work, not just report success.
+	// An agent's first turn starts a failing gate; erun resumes the session once
+	// with the failure, and the resumed turn reruns the gate under the same name
+	// (superseding the failure), so the outer job succeeds.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	bin := erun.BinaryPath(t)
@@ -86,13 +71,8 @@ esac
 }
 
 func testJobAnAgentJobsStartedGateThatKeepsFailingStopsAtTheReinvocationBound(t *testing.T) {
-	// The safety half of the scenario above: a resumed turn that starts
-	// another failing gate every time must not loop forever. Every turn here
-	// (first and every resumed one) starts a new failing gate under a fresh
-	// id, so the outer job never finds anything to succeed on -- the bound
-	// itself is what has to stop it. ERUN_JOB_MAX_REINVOCATIONS pins the cap
-	// to 1 so the scenario does not need to script and assert an arbitrarily
-	// long chain to prove the bound is real.
+	// A resumed turn that keeps starting failing gates stops at the reinvocation
+	// bound (pinned to 1).
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	bin := erun.BinaryPath(t)
@@ -134,9 +114,6 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 	if err := json.Unmarshal([]byte(statusJSON.Stdout), &payload); err != nil {
 		t.Fatalf("parse job status JSON: %v\n%s", err, statusJSON.Stdout)
 	}
-	// Exactly one reinvocation ran (the pinned cap) even though every turn
-	// kept failing the same way -- proof the bound stopped the chain rather
-	// than the stub running out of ideas on its own.
 	if payload.State != "exited" || payload.Succeeded || payload.StartedJobFailed == "" || payload.ReinvocationCount != 1 {
 		t.Fatalf("expected outer to stop after exactly one reinvocation, still failing, got %+v", payload)
 	}
@@ -146,14 +123,8 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 }
 
 func testJobAnAgentJobThatEndsWithAnUncommittedWorkingTreeIsCheckpointedPushedAndNotReportedAsSuccess(t *testing.T) {
-	// The reproduction this closes: an agent's own turn ends after it edited
-	// files but before it committed them, and the job's exit code alone reads
-	// as a plain success. The agent here is a stubbed "claude" binary (routed
-	// through the ERUN_CLAUDE_BIN seam, same as kubectl/helm elsewhere in this
-	// suite) that just writes an uncommitted file and exits 0 -- standing in
-	// for an agent turn that produced real, uncommitted work. The lane's
-	// working tree and remote are real git repositories, not stubs, so "the
-	// checkpoint commit actually landed on the remote" is an observable fact.
+	// An agent that exits 0 with uncommitted work is checkpointed, pushed to the
+	// real remote, and reported as a failure.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 
@@ -184,20 +155,12 @@ func testJobAnAgentJobThatEndsWithAnUncommittedWorkingTreeIsCheckpointedPushedAn
 	if await.ExitCode == 0 {
 		t.Fatalf("expected a dirty-worktree job to report a failure outcome, got 0:\n%s", await.Combined)
 	}
-	// The checkpoint commit itself reached the real remote -- not stubbed,
-	// not asserted only through the job record.
 	fixture.RunGit(t, remote, "show-ref", "--verify", "--quiet", "refs/heads/feature/lane")
 	golden.Equal(t, "job/an_agent_job_that_ends_with_an_uncommitted_working_tree_is_checkpointed_pushed_and_not_reported_as_success", normalize.Apply(status.Combined+await.Combined))
 }
 
 func testJobAnAgentJobsCleanPushedCloneUnderTheWorkRootIsReclaimedAfterItFinishes(t *testing.T) {
-	// The reproduction this closes: every agent task clones the repo into
-	// /home/erun/work/<name> and nothing ever reclaims it, so the work
-	// directory grows without bound (). A clone under the work
-	// root whose tree is clean and fully pushed has nothing left to lose,
-	// so the supervisor removes it the moment the job that owned it exits
-	// -- proven here against a real git working tree and a real remote,
-	// not just the job record's own claim.
+	// A clean, fully pushed clone under the work root is removed once its job exits.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 
@@ -229,8 +192,6 @@ func testJobAnAgentJobsCleanPushedCloneUnderTheWorkRootIsReclaimedAfterItFinishe
 	if await.ExitCode != 0 {
 		t.Fatalf("expected a clean, fully-pushed job to report success, got %d:\n%s", await.ExitCode, await.Combined)
 	}
-	// The clone itself is gone from disk -- not asserted only through the
-	// job record.
 	if _, err := os.Stat(lane); !os.IsNotExist(err) {
 		t.Fatalf("clone dir still exists after being reported reclaimed: %v", err)
 	}
@@ -238,11 +199,7 @@ func testJobAnAgentJobsCleanPushedCloneUnderTheWorkRootIsReclaimedAfterItFinishe
 }
 
 func testJobAnAgentJobsDirtyDetachedCloneIsKeptAndTheReasonIsNamed(t *testing.T) {
-	// The obvious reclaim is destructive: a detached HEAD with
-	// uncommitted work is exactly the shape the reported environment's
-	// stale clones had (). The supervisor must refuse to remove
-	// it and say why, rather than leaving an operator to rediscover by
-	// hand that a clone still holds real work.
+	// A dirty detached clone under the work root is kept, and the reason is named.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 

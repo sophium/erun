@@ -1,14 +1,7 @@
 import { expect, test } from '../../../fixtures/erunApp.js';
 
-// The `app-notification` event feeds the titlebar's message centre: every
-// notification gets a classified icon-with-count, and its
-// full text/actions live in the review dialog the icon opens. This used to
-// render as a single inline pill; it exists because the idle auto-stop
-// success previously rode the persistent `app-status` channel, which latched
-// the message into that pill long after its cloud context had been
-// restarted elsewhere -- the transient/persistent split (success/info
-// auto-dismiss, warning/error persist) still holds, it just now drives an
-// icon's unread count and a dialog row instead of pill visibility.
+// `app-notification` feeds the titlebar message centre: success/info
+// auto-dismiss into history, warning/error persist as unread.
 
 function emit(
   page: import('@playwright/test').Page,
@@ -34,16 +27,8 @@ test.describe('app-notification message centre', () => {
 
     await expect(app.titlebar.messageCenterIcon('info')).toBeVisible();
 
-    // Auto-dismiss marks it read (unread count -> 0), so the icon disappears
-    // -- but the entry survives in history, so the titlebar still offers a way
-    // into the message centre instead of going fully quiet. WHICH way is not
-    // this spec's to pin: the "Message history" fallback renders only while no
-    // class at all is unread, so a notice another spec left arriving in this
-    // worker's page keeps that class's icon up and the fallback off. Assert
-    // the reachability the spec actually owns, then use the entry point to
-    // read the entry back out of history.
-    // titlebar-message-centre-entry-point.spec.ts drives both titlebar shapes
-    // deterministically in one page.
+    // Auto-dismiss marks it read; another spec's unread notice may hide the
+    // history fallback, so assert only that some entry point remains.
     await expect(app.titlebar.messageCenterIcon('info')).toHaveCount(0);
     await expect(app.titlebar.messageCenterEntryPoint()).toBeVisible();
     await app.titlebar.openMessageCenterFromTitlebar();
@@ -70,11 +55,7 @@ test.describe('app-notification message centre', () => {
     app,
     page,
   }) => {
-    // An orchestrator that launched without the tools for its linked
-    // environments posts a warning here, and the operator must still be able
-    // to read the cause after the session is up. The emit itself is owned by
-    // TestSpawnOrchestratorSignalsUnwiredEnvironments (Go): spawning an
-    // orchestrator needs a real AI harness and PTY, which this harness lacks.
+    // The emit itself is owned by TestSpawnOrchestratorSignalsUnwiredEnvironments (Go).
     const message =
       'Petios started without its environment tools: no linked environment resolved an MCP port. Check its linked environments still exist, then restart the orchestrator.';
     await page.clock.install();
@@ -95,12 +76,7 @@ test.describe('app-notification message centre', () => {
     app,
     page,
   }) => {
-    // A desktop that cannot resolve the skills it ships stops refreshing the
-    // installed copies, and the launch itself looks untroubled -- so the
-    // warning has to stay readable, recovery included. The emit is owned by
-    // TestOrchestratorSkillsReportUnresolvableSource (Go): it fires while an
-    // orchestrator's workspace is prepared, which needs a real AI harness and
-    // PTY this harness deliberately lacks.
+    // The emit itself is owned by TestOrchestratorSkillsReportUnresolvableSource (Go).
     const message =
       'Orchestrator skills were not installed or refreshed: no erun skills source resolved: ' +
       'its build checkout /Users/op/src/erun/erun-skills/skills is not on this machine, and no ' +
@@ -117,26 +93,15 @@ test.describe('app-notification message centre', () => {
     await expect(icon).toBeVisible();
 
     await app.titlebar.openMessageCenter('warning');
-    // The dialog carries the full sentence untruncated -- the message centre
-    // retires the pill's LONG_STATUS_THRESHOLD escalation for
-    // notification-channel messages entirely, so there is no separate
-    // "click to expand" step.
     const row = app.titlebar.messageCenterRow('Orchestrator skills were not');
     await expect(row).toBeVisible();
     await expect(row).toContainText('Set ERUN_SKILLS_DIR');
     await expect(row.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
   });
 
-  // A launch that finds MORE than one linked environment's edge unreachable
-  // used to collapse into one combined notice emitted with no action, so the
-  // orchestrators with the most edges down were told about them with nothing
-  // to click. The backend now posts one env-scoped notice per unreachable edge
-  // (Go: TestWireOrchestratorMCPMultipleUnreachableEnvsAreEachActionable owns
-  // that emit -- launching an orchestrator needs a real AI harness and PTY
-  // this harness deliberately lacks). What is observable here is the half that
-  // made the missing action a defect: each notice renders its own Deploy
-  // control, and the actionless shape renders none -- the frontend's remedy
-  // comes from the payload's action, not from the message naming a fix.
+  // Each unreachable edge posts its own notice with a Deploy action; the
+  // actionless shape renders none. The emit is owned by
+  // TestWireOrchestratorMCPMultipleUnreachableEnvsAreEachActionable (Go).
   test('each unreachable-edge warning carries its own Deploy control', async ({ app, page }) => {
     const recovery =
       'Calls will recover automatically once the edge comes back; if it stays down, deploy or reopen that environment.';
@@ -178,9 +143,7 @@ test.describe('app-notification message centre', () => {
 
   test('payload with empty message is ignored', async ({ app, page }) => {
     const sentinel = 'Sentinel error toast proving the empty payload was processed.';
-    // Events are ordered, so once this error sentinel's icon renders the
-    // empty dispatch has provably been processed -- a real event bounds the
-    // "nothing happened" assertion instead of a sleep.
+    // Events are ordered, so the sentinel bounds the "nothing happened" assertion.
     await emit(page, { kind: 'info', message: '   ' });
     await emit(page, { kind: 'error', message: sentinel });
 
@@ -189,12 +152,7 @@ test.describe('app-notification message centre', () => {
     await expect(app.titlebar.messageCenterHistoryButton()).toHaveCount(0);
   });
 
-  // The notification slot used to be a single `AppNotification | null` value,
-  // so a burst of concurrent failures (e.g. several "Upgrade all" members
-  // failing within milliseconds of each other) silently overwrote one
-  // another -- only the last dispatch survived. Five concurrent errors must
-  // all remain readable: the icon's count reflects every one of them, and
-  // the dialog lists each distinctly rather than any being lost.
+  // Concurrent notifications must not overwrite one another.
   test('five concurrent error notifications all remain readable, none overwritten', async ({
     app,
     page,

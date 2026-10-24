@@ -12,17 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// jobSupervisorContainerRestart asks the Kubernetes API for this pod's own
-// container status, so a job whose supervisor vanished from a still-running
-// pod (job.Hostname equals the pod reconciling it) can report a real
-// container restart -- reason and exit code -- instead of guessing pod
-// replacement. Dispatches to the subprocess or library path per the
-// kubectl-pod-get execution mode (see execution_mode.go).
-//
-// ok is false whenever the answer cannot be trusted: kubectl is unavailable,
-// the API call failed, the named container is missing from the response, or
-// its terminated timestamp does not parse. A caller must never read ok=false
-// as "did not restart" -- only as "could not check".
+// jobSupervisorContainerRestart reports this pod's own container restart.
+// ok=false means "could not check", never "did not restart".
 func jobSupervisorContainerRestart(podName, containerName string, runner shared.OpenKubectlRunnerFunc) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
 	podName = strings.TrimSpace(podName)
 	if podName == "" {
@@ -34,9 +25,7 @@ func jobSupervisorContainerRestart(podName, containerName string, runner shared.
 	return defaultJobSupervisorContainerRestart(podName, containerName, runner)
 }
 
-// defaultJobSupervisorContainerRestart is the subprocess-backed path
-// jobSupervisorContainerRestart dispatches to by default. It reuses the same
-// `kubectl get pod -o json` shape open_runtime_diagnostics.go already parses.
+// defaultJobSupervisorContainerRestart is the kubectl subprocess path.
 func defaultJobSupervisorContainerRestart(podName, containerName string, runner shared.OpenKubectlRunnerFunc) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
 	if runner == nil {
 		return false, "", 0, time.Time{}, false
@@ -55,8 +44,6 @@ func defaultJobSupervisorContainerRestart(podName, containerName string, runner 
 		}
 		terminated := container.LastState.Terminated
 		if terminated == nil {
-			// The pod is real and answered: no restart is recorded for this
-			// container, a definite (not missing) answer.
 			return false, "", 0, time.Time{}, true
 		}
 		parsed, err := time.Parse(time.RFC3339, terminated.FinishedAt)
@@ -68,9 +55,7 @@ func defaultJobSupervisorContainerRestart(podName, containerName string, runner 
 	return false, "", 0, time.Time{}, false
 }
 
-// libraryJobSupervisorContainerRestart is the library-backed alternative to
-// defaultJobSupervisorContainerRestart, resolving the same pod via
-// k8s.io/client-go instead of shelling out to kubectl.
+// libraryJobSupervisorContainerRestart is the client-go path.
 func libraryJobSupervisorContainerRestart(podName, containerName string) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
 	pod, err := kube.LibraryGetPod(podName)
 	if err != nil {
@@ -89,10 +74,7 @@ func libraryJobSupervisorContainerRestart(podName, containerName string) (restar
 	return false, "", 0, time.Time{}, false
 }
 
-// jobLastKnownAliveAt is the anchor a restart's finishedAt must fall at or
-// after to be attributed to this job, rather than a stale restart from long
-// before it started. LastAliveAt is the more precise signal (the supervisor's
-// own last heartbeat); StartedAt is the fallback for a job that never beat.
+// jobLastKnownAliveAt is the earliest time a restart can be attributed to this job.
 func jobLastKnownAliveAt(job shared.EnvironmentJob) time.Time {
 	if !job.LastAliveAt.IsZero() {
 		return job.LastAliveAt

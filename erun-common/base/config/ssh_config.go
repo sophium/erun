@@ -35,10 +35,7 @@ func UpsertDefaultSSHConfig(entry SSHHostEntry) (string, error) {
 	return path, UpsertSSHConfig(path, entry)
 }
 
-// DefaultSSHConfigHasAlias reports whether the default ssh config (~/.ssh/config)
-// already declares a Host block for alias, so a caller can tell an alias name
-// that was merely derived from tenant/environment apart from one that will
-// actually resolve for an ssh client on this host.
+// DefaultSSHConfigHasAlias reports whether ~/.ssh/config declares a Host block for alias.
 func DefaultSSHConfigHasAlias(alias string) (bool, error) {
 	path, err := DefaultSSHConfigPath()
 	if err != nil {
@@ -47,19 +44,11 @@ func DefaultSSHConfigHasAlias(alias string) (bool, error) {
 	return SSHConfigHasAlias(path, alias)
 }
 
-// ParseSSHHostEntries reads every Host block in content, in file order. A
-// block's directives are the ones between its Host line and the next Host
-// line; directives erun does not write are ignored rather than guessed at, so
-// an entry never claims a value the file does not state.
-//
-// A "Host a b" line yields one entry per alias. erun's own writer emits one
-// alias per block, but a hand-edited shared line would otherwise hide one of
-// its names from a caller scanning for aliases nothing claims.
+// ParseSSHHostEntries reads every Host block in file order, one entry per alias.
+// Directives erun does not write are ignored.
 func ParseSSHHostEntries(content string) []SSHHostEntry {
 	lines := splitConfigLines(content)
 	entries := make([]SSHHostEntry, 0, 4)
-	// Every alias on one Host line shares that block's directives, so the
-	// block is a slice rather than the one entry the common case produces.
 	var block []*SSHHostEntry
 	for _, line := range lines {
 		if isHostDirective(line) {
@@ -84,9 +73,6 @@ func ParseSSHHostEntries(content string) []SSHHostEntry {
 	return entries
 }
 
-// applySSHHostDirective sets the one directive erun reads off a Host block. A
-// line erun does not write is ignored rather than stored: an entry carries what
-// the file says, never a guess about what an unknown keyword meant.
 func applySSHHostDirective(entry *SSHHostEntry, key, value string) {
 	switch strings.ToLower(key) {
 	case "hostname":
@@ -104,9 +90,7 @@ func applySSHHostDirective(entry *SSHHostEntry, key, value string) {
 	}
 }
 
-// hostDirectiveAliases returns the aliases a Host line declares. A NegatedName
-// ("!alias") excludes a name rather than declaring one, so it is not an entry
-// of its own.
+// hostDirectiveAliases returns the aliases a Host line declares, skipping negated ("!alias") names.
 func hostDirectiveAliases(line string) []string {
 	fields := strings.Fields(strings.TrimSpace(line))
 	if len(fields) < 2 {
@@ -122,8 +106,6 @@ func hostDirectiveAliases(line string) []string {
 	return aliases
 }
 
-// splitDirective splits one "Key value" config line. Blank lines, comments and
-// a bare "Key" with no value are not directives.
 func splitDirective(line string) (key, value string, ok bool) {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
@@ -142,9 +124,7 @@ func splitDirective(line string) (key, value string, ok bool) {
 	return key, value, true
 }
 
-// ReadDefaultSSHHostEntries parses the default ssh config. A config that does
-// not exist yields no entries and no error -- "nothing is configured" and "the
-// file is empty" are the same statement to every caller.
+// ReadDefaultSSHHostEntries parses the default ssh config; a missing file yields no entries.
 func ReadDefaultSSHHostEntries() ([]SSHHostEntry, error) {
 	path, err := DefaultSSHConfigPath()
 	if err != nil {
@@ -207,10 +187,8 @@ func UpsertSSHConfigContent(existing string, entry SSHHostEntry) string {
 	return strings.TrimRight(strings.Join(trimTrailingBlankLines(updated), "\n"), "\n") + "\n"
 }
 
-// RemoveDefaultSSHConfigAlias drops the Host block for alias from the default
-// ssh config, the inverse of UpsertDefaultSSHConfig. It reports whether a block
-// was actually removed, so a caller can tell "we had written one" apart from
-// "there was nothing of ours to remove".
+// RemoveDefaultSSHConfigAlias drops alias's Host block from the default ssh config
+// and reports whether one was removed.
 func RemoveDefaultSSHConfigAlias(alias string) (bool, error) {
 	path, err := DefaultSSHConfigPath()
 	if err != nil {
@@ -219,11 +197,8 @@ func RemoveDefaultSSHConfigAlias(alias string) (bool, error) {
 	return RemoveSSHConfigAlias(path, alias)
 }
 
-// RemoveSSHConfigAlias removes every Host block in path that declares exactly
-// alias and leaves the rest of the file — other environments' blocks and
-// hand-maintained entries alike — intact. A Host line naming several aliases is
-// left alone: this removes only a block it is certain belongs to alias alone,
-// and the writer emits one alias per block.
+// RemoveSSHConfigAlias removes every Host block naming exactly alias; shared
+// multi-alias Host lines are left alone.
 func RemoveSSHConfigAlias(path, alias string) (bool, error) {
 	path = filepath.Clean(strings.TrimSpace(path))
 	alias = strings.TrimSpace(alias)
@@ -260,8 +235,6 @@ func RemoveSSHConfigAliasContent(existing, alias string) (string, bool) {
 		}
 		removed = true
 		i = skipHostEntry(lines, i+1)
-		// Drop the blank separator that immediately followed the block, so
-		// removal does not leave a double gap where it used to be.
 		if i < len(lines) && strings.TrimSpace(lines[i]) == "" {
 			i++
 		}
@@ -378,10 +351,7 @@ func hostLineHasAlias(line, alias string) bool {
 	return false
 }
 
-// hostLineNamesOnlyAlias reports whether line is a Host directive whose sole
-// alias is alias. Removal uses it rather than hostLineHasAlias so that a shared
-// "Host a b" line — never written by UpsertSSHConfig, and possibly another
-// environment's only remaining block — is never deleted.
+// hostLineNamesOnlyAlias reports whether line is a Host directive whose sole alias is alias.
 func hostLineNamesOnlyAlias(line, alias string) bool {
 	if !isHostDirective(line) {
 		return false

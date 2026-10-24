@@ -9,10 +9,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// TestJobs covers `erun jobs list`/`show`/`start`/`finish`: the platform's
-// record of work in flight, claimed before the work starts rather than
-// reported only once it finishes. It is the host-side counterpart to the
-// environment-scoped `erun exec job` verbs covered in job_test.go.
+// TestJobs covers `erun jobs list`/`show`/`start`/`finish`.
 func TestJobs(t *testing.T) {
 	t.Parallel()
 	t.Run("help", testJobsHelp)
@@ -91,9 +88,6 @@ func testJobsFinishHelp(t *testing.T) {
 	golden.Equal(t, "jobs/finish_help", normalize.Apply(result.Combined))
 }
 
-// Every filter is a distinct dimension of the queue read, so the trace
-// has to name each resolved value rather than letting a silently dropped
-// filter read as "the platform returned nothing".
 func testJobsListDryRunNamesEveryFilter(t *testing.T) {
 	setup := env.New(t)
 	seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
@@ -113,9 +107,8 @@ func testJobsListDryRunNamesEveryFilter(t *testing.T) {
 }
 
 func testJobsListUnknownStatusIsRefusedAsABadArgument(t *testing.T) {
-	// A mistyped --status must fail naming the accepted values. Passing it
-	// through to the platform filter would come back as an empty listing
-	// -- "no jobs" and exit 0 -- indistinguishable from a real empty queue.
+	// Passing an unknown status through would return an empty listing that reads
+	// as a real empty queue.
 	setup := env.New(t)
 	seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
 	result := erun.Run(t, []string{"jobs", "list", "--status", "bogus"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -126,9 +119,6 @@ func testJobsListUnknownStatusIsRefusedAsABadArgument(t *testing.T) {
 }
 
 func testJobsListWithoutAnAliasNamesTheErunPlatform(t *testing.T) {
-	// The counterpart to job_report.go's silent contract: a caller that
-	// asked for this specific read is told it could not be resolved,
-	// rather than being shown an empty queue it would read as real.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"jobs", "list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode == 0 {
@@ -150,9 +140,6 @@ func testJobsListWithAValidStatusAndNoMatchesIsAnEmptyResult(t *testing.T) {
 }
 
 func testJobsListRendersARunningAndAFinishedJob(t *testing.T) {
-	// The row's whole point is the prose summary, the actor and the claim
-	// -- so a run must show a job that claims a scope and names its issue
-	// beside one that claims nothing.
 	setup := env.New(t)
 	server := jobListStubServer(t, []map[string]any{
 		platformJobJSON(map[string]any{
@@ -227,9 +214,7 @@ func testJobsStartDryRun(t *testing.T) {
 	golden.Equal(t, "jobs/start_dry_run", normalize.Apply(result.Combined))
 }
 
-// The three vocabularies below are closed for the same reason: the
-// dashboard groups by them, so a value outside the set is a row it cannot
-// render. Each is refused up front rather than stored.
+// These vocabularies are closed because the dashboard groups by them.
 func testJobsStartRefusesAnUnknownType(t *testing.T) {
 	setup := env.New(t)
 	seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
@@ -296,9 +281,6 @@ func testJobsStartRecordsTheJob(t *testing.T) {
 		normalize.Apply(result.Combined, stubServerRule(server, "<PLATFORM_API>")))
 }
 
-// A refused claim is the coordination primitive's whole payload: the
-// caller has to be told who holds the scope, what they are doing and since
-// when, or "conflict" teaches it nothing it can act on.
 func testJobsStartWithAHeldScopeNamesTheHolder(t *testing.T) {
 	setup := env.New(t)
 	server := jobsAPIServer(t, "sophium/erun#1", nil)
@@ -317,9 +299,7 @@ func testJobsStartWithAHeldScopeNamesTheHolder(t *testing.T) {
 		normalize.Apply(result.Combined, stubServerRule(server, "<PLATFORM_API>")))
 }
 
-// A --environment names a local environment, so the request carries the
-// platform's own id for it. Work that never enters an environment is the
-// real case this resolves to "".
+// Work that never enters an environment resolves to "".
 func testJobsStartResolvesTheNamedEnvironment(t *testing.T) {
 	setup := env.New(t)
 	server := jobsAPIServer(t, "", []map[string]any{
@@ -380,12 +360,7 @@ func testJobsFinishRequiresAJobID(t *testing.T) {
 	golden.Equal(t, "jobs/finish_requires_a_job_id", normalize.Apply(result.Combined))
 }
 
-// RUNNING on a finish is no longer refused locally. It means exactly one
-// thing -- the PLANNED job this names has begun -- and which moves are
-// legal from a job's current status is the platform's to decide: it
-// accepts RUNNING for a plan, treats it as a no-op on a running job, and
-// refuses it on a finished one. Restating that as a local guess about a
-// status this layer cannot read is what would drift.
+// Which status transitions are legal is the platform's decision, not a local guess.
 func testJobsFinishPassesRunningToThePlatform(t *testing.T) {
 	setup := env.New(t)
 	seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
@@ -398,10 +373,6 @@ func testJobsFinishPassesRunningToThePlatform(t *testing.T) {
 	golden.Equal(t, "jobs/finish_passes_running_to_the_platform", normalize.Apply(result.Combined))
 }
 
-// PLANNED is the rung the whole pipeline view is built on: work recorded
-// against its issue before any code exists. The trace has to carry the
-// status it is recording, or a plan silently becomes a claim that
-// something is already running.
 func testJobsStartPlannedDryRunNamesTheStatus(t *testing.T) {
 	setup := env.New(t)
 	seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
@@ -447,9 +418,7 @@ func testJobsFinishClosesTheJob(t *testing.T) {
 		normalize.Apply(result.Combined, stubServerRule(server, "<PLATFORM_API>")))
 }
 
-// The JSON shape is the contract the dashboard and the MCP tools both
-// read, so one scenario asserts it directly rather than only through the
-// human-facing rendering.
+// The JSON shape is the contract the dashboard and MCP tools read.
 func testJobsListJSONIsTheWireShape(t *testing.T) {
 	setup := env.New(t)
 	server := jobListStubServer(t, []map[string]any{

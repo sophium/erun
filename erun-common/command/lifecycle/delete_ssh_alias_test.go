@@ -11,8 +11,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-// deleteSSHConfigStore is a minimal DeleteStore over an in-memory environment
-// list, enough to exercise the local-state teardown RunDeleteEnvironment runs.
 type deleteSSHConfigStore struct {
 	envs map[string][]configpkg.EnvConfig
 }
@@ -55,9 +53,7 @@ func (s *deleteSSHConfigStore) DeleteEnvConfig(tenant, environment string) error
 	return nil
 }
 
-// sandboxSSHConfig points HOME (and XDG, which the port-forward state files
-// use) at a temp dir and returns the ssh config path inside it, so a test never
-// touches the machine's real ~/.ssh/config.
+// sandboxSSHConfig points HOME and XDG at a temp dir and returns the ssh config path.
 func sandboxSSHConfig(t *testing.T) string {
 	t.Helper()
 	homeDir := t.TempDir()
@@ -88,17 +84,11 @@ func readSSHConfig(t *testing.T, path string) string {
 	return string(data)
 }
 
-// The removal itself, including that a sibling env's block and a
-// hand-maintained entry survive it, is pinned end to end through the compiled
-// binary by
-// erun-integration TestDelete/real_run_removes_the_deleted_envs_ssh_config_block.
-// What stays here are the decisions that scenario cannot isolate: the
-// alias-ownership guard, the dry-run preview, and the content-level rules.
+// The end-to-end removal is covered in erun-integration TestDelete.
 
 func TestDeleteEnvironmentKeepsSSHConfigBlockAnotherEnvironmentOwns(t *testing.T) {
 	configPath := sandboxSSHConfig(t)
-	// Two names that sanitize to one alias: deleting dev_1 must not strip the
-	// block that live env dev-1 resolves through.
+	// Two names that sanitize to one alias.
 	alias := open.SSHHostAlias("team", "dev_1")
 	if alias != open.SSHHostAlias("team", "dev-1") {
 		t.Fatalf("expected dev_1 and dev-1 to share an alias, got %q and %q", alias, open.SSHHostAlias("team", "dev-1"))

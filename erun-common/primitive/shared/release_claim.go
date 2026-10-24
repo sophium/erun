@@ -12,56 +12,25 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
-// A release used to have nothing standing in for "I am releasing this
-// version" the way wip:<orchestrator> labels stand in for "I am working this
-// issue": every preflight check (worktree, VERSION, local tag, remote tag,
-// disk headroom) passed correctly for two orchestrators racing the same
-// version, because neither had pushed anything yet. The loser found out ~11
-// minutes later holding a local tag that disagreed with the one the winner
-// had already published.
-//
-// The exclusive activity lease is the existing primitive that already
-// answers this for a worktree (root AGENTS.md's "wip: labels" precedent,
-// generalized): environment-side, visible, and reconciled against its
-// holder. Scoping the claim to the version being released, rather than the
-// whole worktree, means two releases of different versions in the same
-// environment never collide.
+// A version claim stops two releases of the same version racing past preflight before
+// either has pushed. It is scoped to the version, so different versions never collide.
 const (
-	// ReleaseVersionClaimTTL is generous relative to a real release's build
-	// time (multi-arch image builds routinely run past ten minutes) so a
-	// live release is never mistaken for an abandoned one. Renewal keeps a
-	// running release well inside it. A claim whose holder stops renewing —
-	// crashed, cancelled, or its pod replaced — is reclaimed by the
-	// environment that recorded it as soon as that environment can see the
-	// holder is gone; this TTL is the slower path, and the only one left for
-	// a holder in another environment (see releaseRepoClaimHeld).
-	ReleaseVersionClaimTTL = 20 * time.Minute
-	// releaseVersionClaimRenewalInterval keeps the renewal comfortably
-	// inside the TTL, the same margin the job-lease heartbeat uses.
+	// ReleaseVersionClaimTTL outlasts a slow multi-arch build; it is the only reclaim path for
+	// a holder in another environment.
+	ReleaseVersionClaimTTL             = 20 * time.Minute
 	releaseVersionClaimRenewalInterval = ReleaseVersionClaimTTL / 3
 )
 
-// releaseVersionClaimScope names the exclusive lease scope a release of
-// version claims, so two releases of the same version collide and two
-// releases of different versions in the same environment never do.
 func releaseVersionClaimScope(version string) string {
 	return "release-version:" + strings.TrimSpace(version)
 }
 
-// releaseVersionClaimID is unique per attempt (the pid of the process making
-// it), not per version: the exclusive lease treats a second take with the
-// *same* id as this same claim renewing rather than a conflict, so two
-// different releases of the same version must never share one. It stays
-// stable across one release's own renewal ticks because those reuse the pid
-// that made the original claim.
+// releaseVersionClaimID is unique per attempt (pid): the same id would read as a renewal, not a conflict.
 func releaseVersionClaimID(version string, pid int) string {
 	return fmt.Sprintf("release-%s-%d", core.SanitizeForFilename(strings.TrimSpace(version)), pid)
 }
 
-// TakeReleaseVersionClaim is the thin wrapper over the exclusive activity
-// lease that names the claim's shape, kept separate from claimReleaseVersion
-// so the refuse/reclaim behavior can be exercised directly against a
-// controlled clock rather than through a real release run.
+// TakeReleaseVersionClaim takes the version's exclusive lease; separate so it can be tested with a fake clock.
 func TakeReleaseVersionClaim(tenant, environment, version string, holder activity.EnvironmentActivityLeaseHolder, pid int, now time.Time) (activity.EnvironmentActivityLease, error) {
 	return activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant:      tenant,
@@ -77,9 +46,7 @@ func TakeReleaseVersionClaim(tenant, environment, version string, holder activit
 	})
 }
 
-// ReleaseVersionClaimRefusalError turns a raw lease conflict into the
-// operator-facing refusal: it names the version and the holder, and says
-// what to do — wait, or nothing, since a dead holder reclaims itself.
+// ReleaseVersionClaimRefusalError names the version and holder for an operator-facing refusal.
 func ReleaseVersionClaimRefusalError(version string, err error) error {
 	var conflict *activity.EnvironmentActivityLeaseConflictError
 	if !errors.As(err, &conflict) {
@@ -89,21 +56,8 @@ func ReleaseVersionClaimRefusalError(version string, err error) error {
 		strings.TrimSpace(version), conflict.Holder.Holder.String())
 }
 
-// ClaimReleaseVersion takes both claims that stand in for "I am releasing
-// this version" — the local exclusive lease (environment-scoped: keeps this
-// environment from idling out mid-release and is visible to `erun` lease
-// listings) and the repository-global claim on a remote ref (release_repo_claim.go:
-// the one that actually stops two orchestrators driving different
-// environments from racing the same version) — before sync-remote does
-// anything the loser of a race would have to unwind. It returns a release
-// func to defer, which stops renewing and drops both claims; call it whether
-// the release succeeds or fails.
-//
-// The claim only applies inside a runtime pod: injectedRuntimePodIdentity
-// resolves ERUN_TENANT/ERUN_ENVIRONMENT, which only the runtime chart sets.
-// Off-pod (a developer's own laptop) there is exactly one caller by
-// construction, so this is a no-op — refusing a solo release against itself
-// would be a false positive, not a safety net.
+// ClaimReleaseVersion takes the local exclusive lease and the repository-global claim before
+// sync-remote mutates anything, and returns a func that drops both. No-op off-pod.
 func ClaimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) string) (func(), error) {
 	tenant, environment, ok := core.InjectedRuntimePodIdentity(env)
 	if !ok {
@@ -117,15 +71,11 @@ func ClaimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) st
 	holder := activity.EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(env(OrchestratorIDEnvVar)), Tenant: tenant}
 	pid := os.Getpid()
 
-	// The liveness a repository-global claim cannot carry: this environment's
-	// own record of the release, which is reclaimed as soon as the process
-	// holding it is gone. Read before this attempt takes its own local claim
-	// below, so a live local holder it finds is necessarily somebody else's.
+	// Read before taking our own local claim, so a live holder found is somebody else.
 	localHolderAlive := func() bool {
 		held, err := EnvironmentHasLiveReleaseHolder(tenant, environment, spec.Version, time.Now())
 		if err != nil {
-			// A store that cannot be read is not evidence that the holder is
-			// gone: it cannot clear the claim, so the claim stands.
+			// An unreadable store is not evidence the holder is gone.
 			return true
 		}
 		return held
@@ -169,17 +119,8 @@ func ClaimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) st
 	}, nil
 }
 
-// EnvironmentHasLiveReleaseHolder reports whether the environment still holds a
-// live local exclusive claim on version's release scope — by any holder, so the
-// caller must ask before taking its own.
-//
-// This is the one liveness signal a release has that is both local to one
-// environment and real: reading the leases reclaims the ones whose holder
-// process is gone, so a release that was cancelled, that crashed, or whose pod
-// was replaced — none of which run the deferred release that drops their
-// claim — reads as absent rather than as held. A holder this cannot disprove
-// (an unreadable store) is reported as present, so a claim is only ever
-// reclaimed on evidence and never on the absence of an answer.
+// EnvironmentHasLiveReleaseHolder reports whether any holder has a live local claim on version.
+// Reading reclaims dead holders; an unreadable store reports present.
 func EnvironmentHasLiveReleaseHolder(tenant, environment, version string, now time.Time) (bool, error) {
 	held, err := activity.LoadEnvironmentActivityLeases(tenant, environment, now)
 	if err != nil {
@@ -194,9 +135,7 @@ func EnvironmentHasLiveReleaseHolder(tenant, environment, version string, now ti
 	return false, nil
 }
 
-// releaseRepoClaimHandle tracks the repository-global claim's current sha
-// across the renewal goroutine and the release func's cleanup, both of which
-// run concurrently with each other for the whole life of the release.
+// releaseRepoClaimHandle is shared by the renewal goroutine and the cleanup func.
 type releaseRepoClaimHandle struct {
 	mu  sync.Mutex
 	sha string
@@ -214,10 +153,7 @@ func (h *releaseRepoClaimHandle) set(sha string) {
 	h.mu.Unlock()
 }
 
-// renewReleaseClaims is one renewal tick for both claims. The repository
-// claim is best-effort, matching the local lease's own renewal: a failed
-// renewal keeps the last-known sha and tries again next tick rather than
-// tearing down a release over a transient push failure.
+// renewReleaseClaims renews both claims best-effort; a failed renewal retries next tick.
 func renewReleaseClaims(ctx core.Context, spec ReleaseSpec, tenant, environment string, holder activity.EnvironmentActivityLeaseHolder, pid int, repo *releaseRepoClaimHandle) {
 	_, _ = TakeReleaseVersionClaim(tenant, environment, spec.Version, holder, pid, time.Time{})
 
@@ -230,8 +166,7 @@ func renewReleaseClaims(ctx core.Context, spec ReleaseSpec, tenant, environment 
 	}
 }
 
-// releaseRepoClaimIfHeld drops the repository-global claim if this run ever
-// actually took one (an inconclusive remote read leaves repo holding "").
+// releaseRepoClaimIfHeld drops the repository claim if one was taken (an inconclusive read leaves "").
 func releaseRepoClaimIfHeld(ctx core.Context, spec ReleaseSpec, repo *releaseRepoClaimHandle) {
 	if sha := repo.get(); sha != "" {
 		_ = deleteReleaseRepoClaim(ctx, spec.ProjectRoot, spec.Version, sha)

@@ -4,15 +4,10 @@ import (
 	"strings"
 )
 
-// PublishedChartRepoPath is the path segment every published chart lives under,
-// keeping the chart's tag space separate from the image repository of the same
-// name (<registry>/erun-devops), which holds the image tags.
+// PublishedChartRepoPath separates chart tags from the same-named image repository.
 const PublishedChartRepoPath = "charts"
 
-// PublishedDevopsChartOCIRepo is the OCI repository the release flow pushes
-// the canonical runtime chart to. The "/charts" suffix keeps the chart's tag
-// space separate from the image repository of the same name
-// (<registry>/erun-devops), which holds the runtime image tags.
+// PublishedDevopsChartOCIRepo is where the release flow pushes the runtime chart.
 func PublishedDevopsChartOCIRepo(containerRegistry string) string {
 	return "oci://" + strings.TrimSpace(containerRegistry) + "/" + PublishedChartRepoPath
 }

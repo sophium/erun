@@ -10,14 +10,13 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// IdleStopCancelInput selects the env whose armed idle-stop should be cancelled.
+// IdleStopCancelInput selects the env whose armed idle-stop to cancel.
 type IdleStopCancelInput struct {
 	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment should have its pending stop cancelled; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
 	Environment string `json:"environment,omitempty" jsonschema:"environment to cancel; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 }
 
-// IdleStopCancelResult reports the cancel outcome. Cleared is true even when
-// nothing was armed, so it must not be read as proof a pending stop existed.
+// IdleStopCancelResult reports the cancel; Cleared is true even when nothing was armed.
 type IdleStopCancelResult struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
@@ -47,8 +46,7 @@ type IdleStopHistoryInput struct {
 	Environment string `json:"environment,omitempty" jsonschema:"environment to query; defaults to the server environment context, and must match it: this server only acts on its own environment"`
 }
 
-// IdleStopHistoryResult wraps the entries so the MCP schema stays a stable
-// object. Entries are newest-first, capped at common.StopHistoryCap.
+// IdleStopHistoryResult wraps entries (newest first) so the schema stays an object.
 type IdleStopHistoryResult struct {
 	Tenant      string                                 `json:"tenant"`
 	Environment string                                 `json:"environment"`
@@ -73,10 +71,7 @@ func idleStopHistoryTool(runtime shared.RuntimeConfig) func(context.Context, *mc
 	}
 }
 
-// IdleStopRecordInput drives a host-triggered manual stop record. The tool
-// runs in the pod so the entry lands on the shared home PVC alongside the
-// in-pod monitor's auto-stop records, keeping manual and automatic stops in
-// one history.
+// IdleStopRecordInput records a manual stop in the pod, sharing the PVC history with auto-stops.
 type IdleStopRecordInput struct {
 	Tenant           string `json:"tenant,omitempty" jsonschema:"tenant whose environment should have a stop entry recorded; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
 	Environment      string `json:"environment,omitempty" jsonschema:"environment to record against; defaults to the server environment context, and must match it: this server only acts on its own environment"`
@@ -84,8 +79,7 @@ type IdleStopRecordInput struct {
 	CloudContextName string `json:"cloudContextName,omitempty" jsonschema:"cloud context name the stop targeted; informational"`
 }
 
-// IdleStopRecordResult echoes the recorded StoppedAt so the caller can match
-// this row against a later history fetch.
+// IdleStopRecordResult echoes the recorded StoppedAt.
 type IdleStopRecordResult struct {
 	Tenant      string    `json:"tenant"`
 	Environment string    `json:"environment"`
@@ -109,9 +103,7 @@ func idleStopRecordTool(runtime shared.RuntimeConfig) func(context.Context, *mcp
 			Reason:           reason,
 			CloudContextName: strings.TrimSpace(input.CloudContextName),
 		}
-		// Fold an armed idle breakdown into the manual stop so the row shows
-		// both the manual action and what would have auto-fired. No pending
-		// file just means a plain manual stop.
+		// Fold any armed idle breakdown into the manual stop row.
 		if pending, ok, err := activity.LoadEnvironmentStopPending(tenant, environment); err != nil {
 			return nil, IdleStopRecordResult{}, err
 		} else if ok {

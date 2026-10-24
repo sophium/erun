@@ -13,10 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// TerraformStore is the read surface RunTerraform needs to resolve the target
-// scope (default tenant/environment), confirm the environment is configured,
-// and resolve the same kubernetes context every other kubectl-touching
-// command uses for it.
+// TerraformStore is the config surface RunTerraform reads.
 type TerraformStore interface {
 	LoadERunConfig() (configpkg.ERunConfig, string, error)
 	LoadTenantConfig(string) (configpkg.TenantConfig, string, error)
@@ -34,15 +31,12 @@ const (
 	TerraformDestroy TerraformOperation = "destroy"
 )
 
-// TerraformConfirmFunc gates a mutating operation (apply/destroy) after the plan
-// is produced and before it is applied. The operator confirms by restating the
-// environment name — the guard against applying to the wrong env. It is never
-// called for a read-only plan or under dry-run.
+// TerraformConfirmFunc makes the operator restate the environment name before
+// apply/destroy; it is never called for plan or dry-run.
 type TerraformConfirmFunc func(ctx core.Context, environment string) error
 
-// TerraformParams are the inputs to running Terraform against a platform's
-// per-env root. An empty Tenant/Environment resolves the configured default
-// scope.
+// TerraformParams are RunTerraform's inputs; empty Tenant/Environment use the
+// configured default.
 type TerraformParams struct {
 	Tenant      string
 	Environment string
@@ -58,67 +52,39 @@ type TerraformResult struct {
 	Operation   string `json:"operation"`
 	Namespace   string `json:"namespace"`
 	Directory   string `json:"directory"`
-	// RootSource records which candidate the per-env root resolved from:
-	// "configured" (paths.terraform), "repo-root" (terraform-<tenant>/), or
-	// "devops" (<tenant>-devops/terraform-<tenant>/).
-	RootSource string `json:"rootSource,omitempty"`
-	// ConfiguredTerraformBase is the relative paths.terraform override from the
-	// project's .erun/config.yaml when set; empty when the default
-	// terraform-<tenant> base is used. Surfaced so the resolved base is auditable.
+	// RootSource is "configured", "repo-root", or "devops".
+	RootSource              string `json:"rootSource,omitempty"`
 	ConfiguredTerraformBase string `json:"configuredTerraformBase,omitempty"`
 	VarFile                 string `json:"varFile,omitempty"`
-	// WorkDir, StateFile, and DataDir are the durable, per-env home-PVC locations
-	// for Terraform's mutable artifacts — the local-backend state file, the plan
-	// file, and TF_DATA_DIR — kept off the read-only image-baked playbook tree so
-	// state and the init cache survive a runtime pod restart.
+	// WorkDir, StateFile and DataDir live on the home PVC, off the read-only
+	// playbook tree, so state survives a pod restart.
 	WorkDir   string `json:"workDir,omitempty"`
 	StateFile string `json:"stateFile,omitempty"`
 	DataDir   string `json:"dataDir,omitempty"`
-	// EnvType is the env's resolved type, surfaced so the trace can name it next
-	// to StateLocus below instead of leaving a reader to infer where WorkDir
-	// actually came from.
-	EnvType string `json:"envType,omitempty"`
-	// StateLocus describes where WorkDir/StateFile actually resolved from: this
-	// host's own home directory, or the target environment's own runtime pod home
-	// PVC (only when this process is verifiably running inside that pod — see
-	// resolveTerraformTargetEnvironment). Surfaced so the trace never again claims
-	// the home PVC while printing a path that is, in fact, this host's own.
+	EnvType   string `json:"envType,omitempty"`
+	// StateLocus says whether WorkDir is this host's home or the target pod's PVC.
 	StateLocus string `json:"stateLocus,omitempty"`
-	// KubernetesContext is the env's resolved kubectl context — the same one
-	// RFC2136SecretName/RFC2136SecretNamespace below are read from, and the one
-	// every other kubectl call against this env's cluster uses. Surfaced so a
-	// read failure can be diagnosed against the exact context that attempted it.
+	// KubernetesContext is the context the RFC2136 Secret is read from.
 	KubernetesContext string `json:"kubernetesContext,omitempty"`
-	// LockReadonly is set when a baked .terraform.lock.hcl pins providers, so init
-	// runs -lockfile=readonly and never rewrites the read-only playbook tree.
+	// LockReadonly means a baked lock file pins providers, so init never rewrites
+	// the read-only tree.
 	LockReadonly bool `json:"lockReadonly,omitempty"`
-	// LegacyStateInTree flags a pre-relocation terraform.tfstate left in the root;
-	// it is ignored (state now lives at StateFile) and surfaced as a warning.
+	// LegacyStateInTree flags an ignored pre-relocation terraform.tfstate.
 	LegacyStateInTree bool `json:"legacyStateInTree,omitempty"`
-	// RFC2136SecretName and RFC2136SecretNamespace name the Kubernetes Secret
-	// TF_VAR_rfc2136_tsig_secret was read from when the resolved dns01_provider
-	// is "powerdns-rfc2136"; empty otherwise. The secret's value never appears
-	// here or anywhere else erun logs or serializes.
+	// RFC2136SecretName and RFC2136SecretNamespace name the TSIG Secret's source;
+	// its value is never logged or serialized.
 	RFC2136SecretName      string     `json:"rfc2136SecretName,omitempty"`
 	RFC2136SecretNamespace string     `json:"rfc2136SecretNamespace,omitempty"`
 	Commands               [][]string `json:"commands"`
 	RequiresConfirmation   bool       `json:"requiresConfirmation"`
-	// Dispatched is true when this run executed non-interactively inside the
-	// target environment's own runtime pod (via kubectl exec) instead of
-	// running terraform on this machine — see resolveTerraformTargetEnvironment.
-	// Directory/WorkDir/StateFile/DataDir/VarFile/RootSource/LockReadonly are
-	// unset in this case: only the dispatched process, running inside the pod,
-	// resolves those paths.
+	// Dispatched means terraform ran inside the target pod; the path fields are
+	// then unset.
 	Dispatched bool `json:"dispatched,omitempty"`
-	// Stdout and Stderr carry the dispatched terraform invocation's captured
-	// output back to the caller; empty when Dispatched is false; both are
-	// still folded into the returned error when the dispatch itself fails.
+	// Stdout and Stderr carry the dispatched run's output.
 	Stdout string `json:"stdout,omitempty"`
 	Stderr string `json:"stderr,omitempty"`
 }
 
-// terraformRootSource records which candidate location the per-env Terraform
-// root resolved from, so the decision is auditable in the trace and JSON.
 type terraformRootSource string
 
 const (
@@ -127,19 +93,12 @@ const (
 	terraformRootDevops     terraformRootSource = "devops"
 )
 
-// terraformPlanFile holds the plan apply/destroy write and then apply, so the
-// applied changes are exactly the reviewed ones.
+// terraformPlanFile makes apply/destroy apply exactly the reviewed plan.
 const terraformPlanFile = "apply.tfplan"
 
-// RunTerraform resolves and (unless dry-run) runs Terraform against a platform's
-// per-env root. Every command and decision is traced before execution, so a
-// dry-run is a complete, side-effect-free plan of what a real run would do.
-//
-// dispatch is the runner used when the target is a runtime/remote-agent env
-// invoked from off-environment: rather than refusing outright, the run
-// dispatches non-interactively into the env's own runtime pod via kubectl
-// exec, the same primitive erun doctor/outputs/sshd already use. nil defaults
-// to RunRemoteCommand.
+// RunTerraform resolves and, unless dry-run, runs Terraform against a per-env
+// root, tracing everything first. dispatch runs it inside a remote env's own
+// pod; nil defaults to RunRemoteCommand.
 func RunTerraform(ctx core.Context, params TerraformParams, store TerraformStore, confirm TerraformConfirmFunc, dispatch kube.RemoteCommandRunnerFunc) (TerraformResult, error) {
 	if store == nil {
 		store = configpkg.ConfigStore{}
@@ -173,16 +132,9 @@ func RunTerraform(ctx core.Context, params TerraformParams, store TerraformStore
 	return result, nil
 }
 
-// prepareTerraformRFC2136Secret resolves whether this env's dns01_provider
-// needs the RFC2136 TSIG secret and, if so, reads it back from its Kubernetes
-// Secret before anything is traced — the "fail up front" half of the
-// contract, so a missing secret is reported by name instead of surfacing as
-// terraform's own mid-plan precondition after a partial plan is already
-// printed. init never uses a var file, so it is exempt. The returned value is
-// never stored on result (which --output json can serialize); only the
-// Secret's name/namespace ride there. The read targets result.KubernetesContext
-// — the same context every other kubectl call against this env uses — rather
-// than kubectl's own ambient current-context.
+// prepareTerraformRFC2136Secret reads the TSIG secret up front so a missing one
+// is named before any plan output. The value is never stored on result, which
+// --output json serializes.
 func prepareTerraformRFC2136Secret(ctx core.Context, result *TerraformResult) (string, error) {
 	if result.Operation == string(TerraformInit) {
 		return "", nil
@@ -219,10 +171,6 @@ func traceTerraformPlan(ctx core.Context, result TerraformResult, steps []terraf
 			ctx.Trace("terraform: no " + result.Environment + ".tfvars found; planning without -var-file")
 		}
 	}
-	// The plan file and TF_DATA_DIR live beside StateFile, off the read-only
-	// playbook tree; StateLocus names where that durable location actually
-	// resolved from, so the trace can never claim the home PVC while printing a
-	// path that is, in fact, this host's own.
 	ctx.Trace("terraform: state " + result.StateFile + " (" + result.StateLocus + ")")
 	ctx.Trace("terraform: TF_DATA_DIR " + result.DataDir)
 	traceTerraformStateBackend(ctx, result)
@@ -246,14 +194,10 @@ func traceTerraformPlan(ctx core.Context, result TerraformResult, steps []terraf
 	}
 }
 
-// terraformBackendBlockRe matches a `backend "…" {` declaration in a Terraform
-// config file, used to warn when the tree has none.
 var terraformBackendBlockRe = regexp.MustCompile(`(?m)^\s*backend\s+"`)
 
-// traceTerraformStateBackend warns when the tree declares no backend block. Only
-// then does `terraform init -backend-config=path=` persist to plan/apply; without
-// one, Terraform silently keeps state in ./terraform.tfstate inside the (often
-// read-only) playbook tree instead of on the durable home PVC.
+// Without a backend block, -backend-config is ignored and state lands in the
+// read-only playbook tree.
 func traceTerraformStateBackend(ctx core.Context, result TerraformResult) {
 	if terraformTreeHasBackend(result.Directory) {
 		return
@@ -261,9 +205,7 @@ func traceTerraformStateBackend(ctx core.Context, result TerraformResult) {
 	ctx.Trace("terraform: warning: no `backend \"local\"` block in the tree — Terraform keeps state in ./terraform.tfstate inside the playbook tree, not on the PVC; add `backend \"local\" {}` so state persists to " + result.StateFile + " and apply works on a read-only tree")
 }
 
-// terraformTreeHasBackend reports whether any .tf file in the env dir or its base
-// declares a backend block. It follows the env dir's symlinked common.tf and
-// also scans the base directly, matching how the playbook tree is laid out.
+// terraformTreeHasBackend also scans the base, since common.tf is symlinked.
 func terraformTreeHasBackend(dir string) bool {
 	for _, scan := range []string{dir, filepath.Dir(dir)} {
 		entries, err := os.ReadDir(scan)
@@ -286,10 +228,6 @@ func terraformTreeHasBackend(dir string) bool {
 	return false
 }
 
-// traceTerraformInitLock records how init will treat the provider lock: a
-// committed lock keeps init read-only (never rewrites the tree), while its
-// absence means init generates one covering every deploy platform for the
-// operator to commit.
 func traceTerraformInitLock(ctx core.Context, result TerraformResult) {
 	if result.Operation != string(TerraformInit) {
 		return
@@ -301,32 +239,20 @@ func traceTerraformInitLock(ctx core.Context, result TerraformResult) {
 	ctx.Trace("terraform: no .terraform.lock.hcl yet — init will generate it and record provider hashes for " + strings.Join(terraformLockPlatforms, ", ") + "; commit it so read-only envs can init with -lockfile=readonly")
 }
 
-// terraformTarget is the tenant/environment this run targets, resolved once by
-// resolveTerraformTargetEnvironment and shared by both the local-execution path
-// (resolveTerraformPlan) and the off-environment dispatch path (dispatchTerraform)
-// so the two can never resolve a different tenant/environment/context from the
-// same params.
+// terraformTarget is resolved once so local and dispatch paths cannot diverge.
 type terraformTarget struct {
 	Tenant         string
 	Environment    string
 	KubeContext    string
 	EnvType        configpkg.EnvironmentType
 	RemoteWorktree bool
-	// NeedsDispatch is true when the target's terraform state lives on its own
-	// runtime pod's home PVC (RemoteWorktree) and this process is not verifiably
-	// running inside that exact pod — see injectedRuntimePodIdentity below.
+	// NeedsDispatch is true when state lives on the target pod's PVC and this
+	// process is not running in that pod.
 	NeedsDispatch bool
 }
 
-// resolveTerraformTargetEnvironment resolves the tenant and environment the run
-// targets, confirms the environment can host one at all, decides whether this
-// process can see that env's real terraform state directly or must dispatch
-// into its own pod instead, and resolves the kubernetes context this env's
-// kubectl-touching reads (e.g. the RFC2136 TSIG secret) should use — the same
-// context every other kubectl call against this env uses, via the same
-// resolution every other command applies. Confirming the env is configured
-// before its root is derived turns a typo into a named error rather than an
-// opaque "no such directory".
+// resolveTerraformTargetEnvironment confirms the env exists before deriving its
+// root, so a typo is a named error rather than a missing directory.
 func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformStore) (terraformTarget, error) {
 	tenant, environment, err := resolveTerraformScope(store, params)
 	if err != nil {
@@ -341,24 +267,14 @@ func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformSt
 	}
 	envType := envConfig.ResolvedType()
 	remoteWorktree := envConfig.RemoteWorktree()
-	// terraform apply/plan/destroy read back cluster state (e.g. an RFC2136
-	// TSIG secret) and apply/destroy target the runtime pod's own cluster; a
-	// host env has neither. Checked against ResolvedType, not the broader
-	// !HasPod(), so a legacy env with an unresolved type keeps working exactly
-	// as it did before host existed.
+	// A host env has no cluster. ResolvedType, not !HasPod(), keeps legacy untyped
+	// envs working.
 	if envType == configpkg.EnvironmentTypeHost {
 		return terraformTarget{}, fmt.Errorf("terraform %s/%s: %s is a host environment — it has no pod and no cluster to run terraform against", tenant, environment, environment)
 	}
-	// A remote-agent or runtime env's terraform state lives on its own runtime
-	// pod's home PVC, not on whatever machine invoked this process — RemoteWorktree
-	// is the same "worktree/home lives on a remote pod" fact open/delete/list
-	// already key off, so a config change to worktree storage can't drift the two
-	// decisions apart. injectedRuntimePodIdentity is the same ERUN_TENANT/
-	// ERUN_ENVIRONMENT marker deploy's in-pod guard uses; anywhere else — the
-	// host, or a different environment's own pod — dispatchTerraform runs the
-	// same command inside the target's real pod instead rather than resolving
-	// a state path here that looks plausible but was never the real
-	// backend.
+	// A remote env's state lives on its pod's PVC; outside that pod
+	// (ERUN_TENANT/ERUN_ENVIRONMENT), dispatch rather than resolve a plausible but
+	// wrong local path.
 	needsDispatch := false
 	if remoteWorktree {
 		podTenant, podEnvironment, inPod := core.InjectedRuntimePodIdentity(os.Getenv)
@@ -375,22 +291,12 @@ func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformSt
 	}, nil
 }
 
-// requiresTerraformConfirmation reports whether op mutates cloud/cluster state
-// and therefore needs the type-the-environment-name confirmation gate; init and
-// plan are read-only and never prompt.
 func requiresTerraformConfirmation(op TerraformOperation) bool {
 	return op == TerraformApply || op == TerraformDestroy
 }
 
-// dispatchTerraform runs `erun terraform <op>` non-interactively inside the
-// target environment's own runtime pod instead of refusing (the refusal
-// named `erun open` as the remedy, but `erun open` itself needs a TTY, so no
-// script or host orchestrator could ever reach it). It reuses the exact
-// confirm gate the local execution path uses below, so a host-invoked apply/
-// destroy is exactly as far from an unattended mutation as one run locally:
-// plan/init dispatch automatically (read-only), while apply/destroy still
-// requires --confirm-environment (or an interactive terminal that can answer
-// the same prompt) before anything runs.
+// dispatchTerraform runs `erun terraform <op>` in the target pod, behind the
+// same confirm gate as a local run.
 func dispatchTerraform(ctx core.Context, target terraformTarget, params TerraformParams, confirm TerraformConfirmFunc, dispatch kube.RemoteCommandRunnerFunc) (TerraformResult, error) {
 	if len(params.ExtraArgs) > 0 {
 		return TerraformResult{}, fmt.Errorf("terraform %s/%s: extra terraform args are not supported when dispatching %s into %s's own runtime pod from off-environment", target.Tenant, target.Environment, params.Operation, target.Environment)
@@ -438,13 +344,8 @@ func dispatchTerraform(ctx core.Context, target terraformTarget, params Terrafor
 	return dispatched, nil
 }
 
-// terraformDispatchScript builds the `erun terraform` invocation that runs
-// inside the target's own pod. Tenant/environment are always passed by flag
-// (dispatch already has them as resolved, validated strings, regardless of how
-// the outer invocation named them), and --confirm-environment is embedded for
-// apply/destroy only once dispatchTerraform's own confirm gate has already
-// approved target.Environment — the in-pod process has no stdin to prompt on,
-// so it must not need to.
+// terraformDispatchScript embeds --confirm-environment only after the host-side
+// gate approved: the in-pod process has no stdin.
 func terraformDispatchScript(target terraformTarget, op TerraformOperation) string {
 	args := []string{"erun", "terraform", string(op), "--tenant", core.ShellQuote(target.Tenant), "--environment", core.ShellQuote(target.Environment)}
 	if requiresTerraformConfirmation(op) {
@@ -453,8 +354,6 @@ func terraformDispatchScript(target terraformTarget, op TerraformOperation) stri
 	return strings.Join(args, " ")
 }
 
-// terraformEnvTypeLabel renders EnvType for the trace, naming a legacy env with
-// no resolved type explicitly rather than printing an empty string.
 func terraformEnvTypeLabel(envType string) string {
 	if strings.TrimSpace(envType) == "" {
 		return "unresolved"
@@ -462,11 +361,7 @@ func terraformEnvTypeLabel(envType string) string {
 	return envType
 }
 
-// terraformStateLocus names where WorkDir/StateFile actually resolved from. A
-// remote-agent or runtime env only reaches here (see
-// resolveTerraformTargetEnvironment) when this process is verifiably running
-// inside that env's own pod, so its home directory is genuinely the durable
-// home PVC; every other type resolves on whatever machine invoked the command.
+// Remote envs reach here only from inside their own pod, so home is the PVC.
 func terraformStateLocus(remoteWorktree bool) string {
 	if remoteWorktree {
 		return "this environment's own home PVC, resolved from inside its runtime pod — survives pod restarts"
@@ -539,12 +434,8 @@ func validateTerraformOperation(op TerraformOperation) error {
 	}
 }
 
-// resolveTerraformDir resolves the per-env Terraform root. A configured
-// paths.terraform override wins; otherwise erun looks for terraform-<tenant>/ at
-// the project root, then under <tenant>-devops/ — where a tenant that keeps its
-// whole devops footprint together (docker/, k8s/, terraform-<tenant>/) holds it,
-// mirroring how deploy/build discover the -devops dir. Either way erun appends
-// /<environment>.
+// resolveTerraformDir prefers paths.terraform, then terraform-<tenant>/, then
+// <tenant>-devops/terraform-<tenant>/, and appends /<environment>.
 func resolveTerraformDir(projectRoot, tenant, environment, configuredBase string) (dir, varFile string, source terraformRootSource, err error) {
 	if base := configpkg.ResolveProjectPath(projectRoot, configuredBase); base != "" {
 		dir = filepath.Join(base, environment)
@@ -570,11 +461,7 @@ func resolveTerraformDir(projectRoot, tenant, environment, configuredBase string
 	return "", "", "", terraformRootNotFoundError(tenant, environment, "", "")
 }
 
-// resolveTerraformWorkDir is the durable, per-env home-PVC location for
-// Terraform's mutable artifacts — the local-backend state file, the plan file,
-// and TF_DATA_DIR (providers/modules/backend record). It sits beside
-// ~/.erun/outputs, on the /home/erun PVC in a runtime pod, so state and the init
-// cache survive a pod restart while the playbooks stay read-only in the release.
+// resolveTerraformWorkDir sits beside ~/.erun/outputs on the /home/erun PVC.
 func resolveTerraformWorkDir(tenant, environment string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -591,8 +478,6 @@ func detectTerraformVarFile(dir, environment string) string {
 	return ""
 }
 
-// terraformRootNotFoundError explains where erun looked and how to scaffold it,
-// tailoring the hint to whether a paths.terraform override is in effect.
 func terraformRootNotFoundError(tenant, environment, configuredBase, configuredDir string) error {
 	if strings.TrimSpace(configuredBase) != "" {
 		return fmt.Errorf("no Terraform root at %s for %s/%s — the .erun/config.yaml paths.terraform base %q must contain a %s/ dir with its main.tf and %s.tfvars", configuredDir, tenant, environment, strings.TrimSpace(configuredBase), environment, environment)

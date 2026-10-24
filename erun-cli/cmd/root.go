@@ -274,9 +274,7 @@ func (d rootDependencies) optionalPushCommand() *cobra.Command {
 	return pushCmd
 }
 
-// Registered unconditionally: the desktop Redeploy button invokes "erun deploy
-// --version X" from a cwd that may lack a kubernetes deploy context, so the
-// command must exist even where no context resolves.
+// Registered unconditionally: the desktop's Redeploy runs from a cwd that may lack a deploy context.
 func (d rootDependencies) deployCommand() *cobra.Command {
 	return deploy.NewDeployCmd(d.store, d.store.SaveEnvConfig, config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext, deploypkg.ResolveKubernetesDeployContext, time.Now, buildpkg.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
 }

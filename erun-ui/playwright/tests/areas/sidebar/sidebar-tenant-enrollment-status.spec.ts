@@ -17,17 +17,8 @@ interface StubbedResponse {
   error?: string;
 }
 
-// stubRPC intercepts one named method on /__erun_invoke, returning whatever
-// the caller's holder currently points at -- a mutable holder so a test can
-// change what the *next* call returns (driving pending -> declined ->
-// enrolled across live poll cycles), and an optional gate so a test can
-// assert on the pre-response state before releasing it. Mirrors
-// tenant-dashboard-platform-state.spec.ts's stubRPC, scoped to this file per
-// this suite's own no-shared-harness convention. A non-matching call defers
-// via route.fallback(), not route.continue() -- continue() sends the request
-// straight to the real network and ends interception entirely, so a test
-// that calls stubRPC more than once (one method per call) would have its
-// earlier-registered stub bypassed by the later one instead of chained.
+// stubRPC answers one method from a mutable holder, optionally gated. Other
+// calls use route.fallback(), not continue(), so stubs for several methods chain.
 function stubRPC(
   page: import('@playwright/test').Page,
   method: string,
@@ -74,29 +65,8 @@ function stubRPC(
   };
 }
 
-// sidebar-tenant-enrollment-status covers the sidebar's per-tenant platform-
-// enrollment status icon: a third row-kind status glyph, shown once a
-// tenant has at least one local environment and no matching platform
-// registration.
-//
-// The seeded `pw` baseline (fixtures/seedRoot.ts) has no configured 'erun'-
-// type cloud provider alias at all (only an aws and a cloudflare alias), so
-// every one of its envs resolves to 'local-only' on the very first query --
-// no poll wait needed, since ListTenantPlatformEnrollmentStatuses's initial
-// fetch already reports it.
-//
-// pending/declined/enrolled/unknown are driven live below by stubbing
-// ListTenantPlatformEnrollmentStatuses at the __erun_invoke RPC boundary
-// (the same seam tenant-dashboard-platform-state.spec.ts already uses for
-// LoadTenantDashboard) rather than a real platform round trip, and
-// page.clock fastForwards tenantEnrollmentPoll.ts's real 30s poll interval
-// so the pending->declined->enrolled walk doesn't cost real wall-clock time.
-// The per-tenant *classification* logic (which Go branch produces which
-// state) is covered by erun-ui/tenant_platform_invite_requests_test.go; the
-// pure poll-gate/transition helpers are covered by
-// erun-ui/frontend/src/app/tenantEnrollmentPoll.test.ts. This spec is the one
-// place that proves the icon itself actually changes as the underlying state
-// does, live, through a real render.
+// The seeded baseline has no 'erun' alias, so its envs are local-only at once;
+// other states are stubbed, with page.clock driving the 30s poll.
 
 test.describe('sidebar tenant enrollment status icon', () => {
   test('renders a hollow ring for a tenant with local environments and no platform connection', async ({
@@ -105,30 +75,14 @@ test.describe('sidebar tenant enrollment status icon', () => {
     const icon = app.sidebar.tenantEnrollmentStatus(SEED_TENANT);
     await expect(icon).toBeVisible();
     await expect(icon).toHaveAttribute('data-enrollment-state', 'local-only');
-    // The accessible name must name the state in words, never colour alone
-    // (WCAG 1.4.1) -- checked via getByRole so this also proves the control
-    // is exposed as a real button, not a decorative element.
+    // The state must be named in words, not colour alone (WCAG 1.4.1).
     await expect(
       app.page.getByRole('button', { name: `${SEED_TENANT} is not on the hosted platform yet` }),
     ).toBeVisible();
   });
 
-  // Driven through the real Go resolution path -- no RPC stub. A tenant whose
-  // own Manage-tenant selection is AWS-only must never authenticate its
-  // platform reads with a different, unselected erun alias that happens to
-  // exist on the machine.
-  //
-  // The sidebar glyph alone cannot tell the two failure shapes apart: an
-  // unselected-but-configured alias and a selected-but-never-signed-in alias
-  // both render local-only, since ListTenantPlatformEnrollmentStatuses
-  // collapses every non-ready platform state to local-only. The dashboard's
-  // own platform-state heading does not collapse them -- "Connect this
-  // tenant to erunpaas.com" (not-connected, this test's assertion) versus
-  // "Sign in to the erun platform" (not-signed-in, what reaching the wrong,
-  // unsigned-in alias would produce) -- so this test opens the dashboard
-  // rather than reading the icon. erun-ui/tenant_platform_test.go's
-  // TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant covers
-  // the same branch directly against the Go resolution.
+  // Real Go path, no stub. The sidebar glyph collapses both failure shapes to
+  // local-only, so this reads the dashboard heading that distinguishes them.
   test('the dashboard reports not-connected, never sign-in for an unselected alias, when a tenant selected only an AWS alias', async ({
     app,
   }) => {
@@ -161,14 +115,8 @@ test.describe('sidebar tenant enrollment status icon', () => {
   });
 
   test('does not render for a tenant with zero local environments', async ({ app }) => {
-    // A zero-environment tenant never gets a sidebar row at all --
-    // state_handlers.go's stateFromListResult skips it outright ("a tenant
-    // with none has nothing to host yet" per Sidebar.TenantGroup.tsx's own
-    // comment), so there is no row to wait for becoming visible; the
-    // regression this guards is a future change teaching the icon to render
-    // independently of the row itself. Wait on the environments-changed
-    // round trip settling (via a tenant that does have one, the seeded
-    // baseline) rather than a fixed sleep, then assert absence.
+    // A zero-environment tenant has no row; wait on the seeded row's round trip,
+    // then assert the icon is absent.
     const tenant = uniqueEnvironmentName('zero-env-tenant');
     seedTenant(tenant, 'none');
     try {
@@ -230,9 +178,7 @@ test.describe('sidebar tenant enrollment status icon', () => {
 
       await app.reloadEnvironments();
       await app.sidebar.tenantRow(tenant).first().waitFor({ state: 'visible' });
-      // The row exists, but the enrollment status round trip has not
-      // resolved yet -- the icon must render nothing, never one of the
-      // definite states, while that is true.
+      // Until the status resolves the icon must render nothing.
       await expect(app.sidebar.tenantEnrollmentStatus(tenant)).toHaveCount(0);
 
       stub.release();
@@ -284,15 +230,6 @@ test.describe('sidebar tenant enrollment status icon', () => {
     }
   });
 
-  // The sidebar glyph's own half of the tenant-mismatch verdict the dashboard
-  // already renders (TenantPlatformState.tsx): the credential authenticated
-  // and resolved, just to a tenant that is not this row's. The Go test that
-  // produces this state from a real whoami is
-  // tenant_platform_invite_requests_test.go::
-  // TestListTenantPlatformEnrollmentStatusesRefusesAPlatformTenantThatIsNotTheLocalOne;
-  // what this spec proves is that the row renders it as its own state, names
-  // both the tenant the platform answered for and the host that answered, and
-  // offers the dashboard rather than a false enrolment claim.
   test('renders a mismatch, naming the tenant and host that answered, when the platform resolves another tenant', async ({
     app,
     page,
@@ -316,9 +253,7 @@ test.describe('sidebar tenant enrollment status icon', () => {
       await app.reloadEnvironments();
       const icon = app.sidebar.tenantEnrollmentStatus(tenant);
       await expect(icon).toHaveAttribute('data-enrollment-state', 'tenant-mismatch');
-      // The accessible name says what happened, names the platform that
-      // actually answered (never a fixed hostname this machine may not have
-      // talked to), and never claims enrolment for this row.
+      // Names the host that actually answered, never a fixed hostname.
       await expect(
         app.page.getByRole('button', {
           name: `${tenant}'s connection to api.erunpaas.com belongs to the tenant someone-else`,
@@ -329,18 +264,14 @@ test.describe('sidebar tenant enrollment status icon', () => {
       const popover = app.sidebar.tenantEnrollmentStatusPopover();
       await expect(popover).toContainText('Different tenant on api.erunpaas.com');
       await expect(popover).toContainText('someone-else');
-      // And the one action that can actually change this: the dashboard owns
-      // the connect form, so the row does not re-implement it.
+      // The dashboard owns the connect form; the row does not re-implement it.
       await expect(popover.getByRole('button', { name: 'Open the dashboard' })).toBeVisible();
     } finally {
       removeTenant(tenant);
     }
   });
 
-  // nextEnrollmentPollingInterval must not treat 'unknown' (a genuine
-  // round-trip failure) as terminal like 'local-only' and 'enrolled', or a
-  // transient outage never recovers on its own. It must keep polling exactly
-  // like 'pending'/'declined'.
+  // 'unknown' is a round-trip failure, so it must keep polling like 'pending'.
   test('unknown keeps polling rather than going silent, and recovers once the platform answers again', async ({
     app,
     page,
@@ -363,12 +294,7 @@ test.describe('sidebar tenant enrollment status icon', () => {
       stub.respondWith({ data: [{ tenant, state: 'enrolled' }] });
       await page.clock.fastForward(30_000);
 
-      // Proves the poll actually fired again (not merely that the icon
-      // happens to match) -- a terminal 'unknown' would never issue this
-      // second call at all. fastForward only guarantees the fake timer fired;
-      // the route interception that increments `calls` is a real async
-      // round trip through Playwright's own routing layer, so poll for it
-      // rather than reading the counter the instant fastForward resolves.
+      // The stubbed route is a real async round trip, so poll the counter.
       await expect.poll(() => stub.calls()).toBeGreaterThan(callsBeforeWait);
       await expect(icon).toHaveAttribute('data-enrollment-state', 'enrolled');
     } finally {
@@ -389,22 +315,14 @@ test.describe('sidebar tenant enrollment status icon', () => {
 
       await app.reloadEnvironments();
       await app.sidebar.tenantRow(tenant).first().waitFor({ state: 'visible' });
-      // A transport-level failure leaves the query with no data at all --
-      // the icon stays absent, the same as the pre-load state, rather than
-      // falling back to a confident wrong answer.
+      // A transport failure leaves no data, so the icon stays absent.
       await expect(app.sidebar.tenantEnrollmentStatus(tenant)).toHaveCount(0);
     } finally {
       removeTenant(tenant);
     }
   });
 
-  // local-only is excluded from polling since nothing is pending, but the
-  // popover built on that very state offers a sign-in -- a local-only ->
-  // enrolled transition with nothing pending. Sign-in success invalidates the
-  // status rather than waiting on a timer, so
-  // this drives the popover's own sign-in action (not a direct dashboard
-  // open) and asserts the row itself updates with no restart and no manual
-  // refresh.
+  // local-only does not poll, so sign-in success must invalidate the status.
   test('the local-only popover sign-in action turns the icon enrolled without a restart', async ({
     app,
     page,
@@ -438,15 +356,9 @@ test.describe('sidebar tenant enrollment status icon', () => {
         .click();
       await app.tenantDashboard.notSignedInHeading().waitFor({ state: 'visible' });
 
-      // The platform round trip behind the sign-in click is what actually
-      // moved the tenant to enrolled; only now does the stubbed status query
-      // report it.
       enrollment.respondWith({ data: [{ tenant, state: 'enrolled' }] });
       await app.tenantDashboard.signInButton().click();
 
-      // The failure mode is the sidebar dot sitting stale beside a dashboard
-      // that already recovered -- so the assertion that matters is back on
-      // the row, not on the dashboard the operator navigated away from.
       await expect(icon).toHaveAttribute('data-enrollment-state', 'enrolled');
       await expect(
         app.page.getByRole('button', { name: `${tenant} is enrolled in the hosted platform` }),
@@ -456,10 +368,6 @@ test.describe('sidebar tenant enrollment status icon', () => {
     }
   });
 
-  // The one test that drives the whole loop live: pending -> declined ->
-  // enrolled, through the real 30s poll (fastForwarded, never a real wait),
-  // proving the icon itself changes rather than sitting on a stale state
-  // until the operator happens to reopen the app.
   test('pending -> declined -> enrolled: the icon changes live as the state does, and an approval re-fetches', async ({
     app,
     page,
@@ -472,9 +380,7 @@ test.describe('sidebar tenant enrollment status icon', () => {
       const stub = stubRPC(page, 'ListTenantPlatformEnrollmentStatuses', {
         data: [{ tenant, state: 'pending' }],
       });
-      // Installed before this tenant's row (and its own enrollment poll)
-      // ever mounts, so the setInterval tenantEnrollmentPoll.ts creates once
-      // it sees a non-terminal state is the fake one fastForward controls.
+      // Installed before the row mounts so the poll's setInterval uses the fake clock.
       await page.clock.install();
 
       await app.reloadEnvironments();
@@ -490,12 +396,7 @@ test.describe('sidebar tenant enrollment status icon', () => {
       stub.respondWith({ data: [{ tenant, state: 'enrolled' }] });
       await page.clock.fastForward(30_000);
       await expect(icon).toHaveAttribute('data-enrollment-state', 'enrolled');
-      // The approval transition (leaving a non-terminal state and landing on
-      // enrolled) fires a one-shot notification -- proof the row does not
-      // silently sit on a stale "pending" once an operator has approved it
-      // elsewhere; the icon re-fetched and moved on its own. The
-      // notification is a message centre icon, not a pill with visible
-      // text, so open it to read the confirmation.
+      // The approval fires a one-shot notification in the message centre.
       await app.titlebar.openMessageCenter('success');
       await expect(
         app.titlebar.messageCenterRow(`Approved -- you're enrolled in ${tenant}.`),

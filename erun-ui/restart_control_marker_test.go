@@ -13,11 +13,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// TestClaimDesktopControlMarker_RefusesToClobberALiveOwnersRecord is the
-// transient-second-instance case: an instance that cannot own the endpoint
-// must leave the running desktop's record exactly as it found it, because a
-// record that names the running desktop is the only thing a restart trigger
-// has to resolve it by.
 func TestClaimDesktopControlMarker_RefusesToClobberALiveOwnersRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "desktop-control.json")
 	owner := core.DesktopControlMarker{PID: 50193, ControlPort: 56272, StartedAtUnix: 100}
@@ -44,8 +39,6 @@ func TestClaimDesktopControlMarker_RefusesToClobberALiveOwnersRecord(t *testing.
 		t.Fatalf("the live owner's record was overwritten: got %+v, want %+v", got, owner)
 	}
 
-	// The same instance exiting must not take the record with it either: it
-	// never was its own.
 	if err := removeDesktopControlMarker(path, 92201); err != nil {
 		t.Fatalf("removeDesktopControlMarker: %v", err)
 	}
@@ -54,10 +47,6 @@ func TestClaimDesktopControlMarker_RefusesToClobberALiveOwnersRecord(t *testing.
 	}
 }
 
-// TestClaimDesktopControlMarker_AdoptsAStaleRecord is the other half: a record
-// naming a pid that is no longer alive is exactly what a crash leaves behind,
-// and adopting it is what lets the next desktop be discoverable without a
-// manual cleanup.
 func TestClaimDesktopControlMarker_AdoptsAStaleRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "desktop-control.json")
 	stale := core.DesktopControlMarker{PID: 50193, ControlPort: 56272, StartedAtUnix: 100}
@@ -95,16 +84,13 @@ func TestClaimReadRemoveRoundTrip(t *testing.T) {
 	if _, err := core.ReadDesktopControlMarker(path); err == nil {
 		t.Fatal("expected an error reading the record after removal")
 	}
-	// Removing an already-removed record is not an error: shutdown may run
-	// more than once, and the record may never have been written at all.
+	// Removal is idempotent: shutdown may run more than once.
 	if err := removeDesktopControlMarker(path, want.PID); err != nil {
 		t.Fatalf("removeDesktopControlMarker (already gone): %v", err)
 	}
 }
 
-// TestClaimDesktopControlMarker_RefusesAnUnusableRecord keeps a claim from
-// publishing a record no reader could resolve: a record with no live target is
-// worse than none at all, because a trigger reads it as a desktop that exists.
+// A record with no live target reads as an existing desktop, so it is refused.
 func TestClaimDesktopControlMarker_RefusesAnUnusableRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "desktop-control.json")
 	if _, err := claimDesktopControlMarker("", core.DesktopControlMarker{PID: 42, ControlPort: 4242}, neverAlive); err == nil {
@@ -118,9 +104,6 @@ func TestClaimDesktopControlMarker_RefusesAnUnusableRecord(t *testing.T) {
 	}
 }
 
-// TestRemoveDesktopControlMarker_RemovesOnlyItsOwnRecord pins the removal half
-// of ownership: the record belongs to whoever wrote it last, so a shutdown
-// removes its own and nobody else's.
 func TestRemoveDesktopControlMarker_RemovesOnlyItsOwnRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "desktop-control.json")
 	writer := core.DesktopControlMarker{PID: 50193, ControlPort: 56272, StartedAtUnix: 100}
@@ -142,8 +125,7 @@ func TestRemoveDesktopControlMarker_RemovesOnlyItsOwnRecord(t *testing.T) {
 		t.Fatal("expected the writer's own record to be removed")
 	}
 
-	// A record that cannot be read as a marker at all cannot be shown to be
-	// ours, so it is left where it is rather than deleted.
+	// An unparseable record cannot be shown to be ours, so it is kept.
 	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
 		t.Fatalf("stage unreadable record: %v", err)
 	}
@@ -155,13 +137,9 @@ func TestRemoveDesktopControlMarker_RemovesOnlyItsOwnRecord(t *testing.T) {
 	}
 }
 
-// desktopControlCrashHelperEnv turns a re-executed copy of this test binary
-// into the unclean exit this file needs a witness for.
 const desktopControlCrashHelperEnv = "ERUN_TEST_DESKTOP_CONTROL_CRASH_PATH"
 
-// TestDesktopControlCrashHelperProcess is not a test. Re-executed with
-// desktopControlCrashHelperEnv set, it records its own control endpoint and
-// exits without the removal a clean shutdown performs.
+// TestDesktopControlCrashHelperProcess is a re-exec helper, not a test.
 func TestDesktopControlCrashHelperProcess(t *testing.T) {
 	path := os.Getenv(desktopControlCrashHelperEnv)
 	if path == "" {
@@ -174,13 +152,7 @@ func TestDesktopControlCrashHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-// TestDesktopControlMarker_UncleanExitLeavesAStaleRecord is the detection half
-// of ownership, witnessed by a real exited process: a desktop that dies
-// without shutting down must leave its record behind naming the dead pid,
-// because that record is the only thing that tells a later trigger "a desktop
-// ran here and is gone" instead of the indistinguishable "no desktop has ever
-// run". Adopting it afterwards is what keeps the orphaned record from blocking
-// the next launch.
+// A crashed desktop's record must survive so a later trigger can tell "gone" from "never ran".
 func TestDesktopControlMarker_UncleanExitLeavesAStaleRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "desktop-control.json")
 	cmd := exec.Command(os.Args[0], "-test.run=^TestDesktopControlCrashHelperProcess$")
@@ -212,8 +184,6 @@ func TestDesktopControlMarker_UncleanExitLeavesAStaleRecord(t *testing.T) {
 	}
 }
 
-// assertCrashedRecordReadsAsStale checks the record a crash left is refused as
-// stale rather than mistaken for no desktop at all or acted on as live.
 func assertCrashedRecordReadsAsStale(t *testing.T, path string) {
 	t.Helper()
 	posted := false
@@ -234,9 +204,6 @@ func assertCrashedRecordReadsAsStale(t *testing.T, path string) {
 	}
 }
 
-// TestAppClaimRestartControlMarker_RefusesToRepublishAfterShutdown is the
-// stale-record half of the outage: an adoption still in flight when this
-// process exits must not publish an endpoint for a process that is gone.
 func TestAppClaimRestartControlMarker_RefusesToRepublishAfterShutdown(t *testing.T) {
 	markerPath := filepath.Join(t.TempDir(), "state", "desktop-control.json")
 	app := restartControlTestApp(t, markerPath)

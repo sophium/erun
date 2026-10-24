@@ -7,11 +7,7 @@ import (
 	"syscall"
 )
 
-// createNewProcessGroup detaches a child from the console control events the
-// caller's group receives — the closest Windows equivalent to a new session
-// (core.DetachEnvironmentJobSupervisor uses the same flag for the same reason).
-// Without it, closing the console that started `erun open` takes its
-// port-forwards down with it.
+// createNewProcessGroup keeps port-forwards alive when the console that started `erun open` closes.
 const createNewProcessGroup = 0x00000200
 
 func DetachBackgroundProcess(cmd *exec.Cmd) {
@@ -29,9 +25,7 @@ func isSSHDActivityProxyProcess(int) bool {
 	return false
 }
 
-// kubectlPortForwardProcessIDs has no Windows implementation: adopting and
-// sweeping foreign port-forwards by argv is a unix-only feature (see
-// findLocalPortHolder), so the argv sweep is a no-op here.
+// kubectlPortForwardProcessIDs is a no-op: the argv sweep is unix-only.
 func kubectlPortForwardProcessIDs() []int {
 	return nil
 }

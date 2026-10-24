@@ -1,6 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
 
-// Diagnostics console POM.
 export class DebugPanel {
   constructor(public readonly page: Page) {}
 
@@ -9,8 +8,7 @@ export class DebugPanel {
   }
 
   toggleButton(): Locator {
-    // The accessible name changes with open/closed state but always starts
-    // with "Diagnostics", so match the prefix rather than an exact name.
+    // The name varies with state but always starts with "Diagnostics".
     return this.page.getByRole('button', { name: /^Diagnostics\b/ }).first();
   }
 
@@ -22,13 +20,7 @@ export class DebugPanel {
     return (await this.resizeHandle().count()) > 0 && (await this.resizeHandle().isVisible());
   }
 
-  // Converge on the panel's own open/closed state before touching anything
-  // inside it. The toggle click and the panel's render are two separate
-  // steps under React, so an assertion on a tab or pane immediately after
-  // toggle() races that render against its own fixed budget instead of the
-  // panel's — waitFor with no explicit timeout defers to the enclosing
-  // test's own budget instead, the same shape every dialog POM's
-  // waitForOpen/waitForClosed already uses.
+  // Waits on the panel's render, under the test's own budget.
   async waitForOpen(): Promise<void> {
     await this.resizeHandle().waitFor({ state: 'visible' });
   }
@@ -41,9 +33,7 @@ export class DebugPanel {
     return this.page.getByRole('tab', { name });
   }
 
-  // The pane a given tab reveals. The primary tab keeps its slot but renames
-  // itself with the diagnostics context (DebugPanel.tsx's primaryTabLabel), so
-  // the label names both the tab and the pane it shows.
+  // The primary tab renames itself with the context, so the label names tab and pane.
   paneFor(name: 'erun trace' | 'orchestrator' | 'app log' | 'UI trace'): Locator {
     switch (name) {
       case 'orchestrator':
@@ -57,12 +47,7 @@ export class DebugPanel {
     }
   }
 
-  // Converge on the pane the tab reveals, not just on the click. The switch
-  // and the pane's render are two separate steps under React, so an assertion
-  // on anything inside it immediately after the click races that render
-  // against expect's fixed budget instead of the caller's — waitFor with no
-  // explicit timeout defers to the enclosing test's own budget, the same shape
-  // waitForOpen/waitForClosed above use.
+  // Waits on the revealed pane, under the test's own budget.
   async selectTab(name: 'erun trace' | 'orchestrator' | 'app log' | 'UI trace'): Promise<void> {
     await this.tab(name).click();
     await this.paneFor(name).waitFor({ state: 'visible' });
@@ -72,8 +57,6 @@ export class DebugPanel {
     return this.page.getByLabel('erun trace output');
   }
 
-  // The orchestrator context's own identity block (name, status, linked
-  // environments) sits above its app-log tail (orchestratorLogPane()).
   orchestratorPane(): Locator {
     return this.page.getByLabel('orchestrator diagnostics');
   }
@@ -102,8 +85,7 @@ export class DebugPanel {
     return this.page.getByRole('button', { name: 'Clear' });
   }
 
-  // Scope to the erun-trace grid: other "Clear" buttons exist elsewhere
-  // (e.g. the activity panel) when an environment is open.
+  // Other "Clear" buttons exist when an environment is open.
   erunTraceClearButton(): Locator {
     return this.erunTracePane().locator('..').getByRole('button', { name: 'Clear', exact: true });
   }

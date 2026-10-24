@@ -11,10 +11,6 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestRuntimeDeployedHealthCheckPropagatesProbeError locks down that a real
-// probe failure (VPN down, rotated token, unreachable API server) must land
-// on the honest "could not check" branch, not the "not deployed" negative
-// that hands the operator a Deploy button which would fail identically.
 func TestRuntimeDeployedHealthCheckPropagatesProbeError(t *testing.T) {
 	app := &App{
 		deps: erunUIDeps{
@@ -36,9 +32,6 @@ func TestRuntimeDeployedHealthCheckPropagatesProbeError(t *testing.T) {
 	}
 }
 
-// TestRuntimeDeployedHealthCheckReportsNotDeployedOnGenuineNotFound covers the
-// legitimate negative: a real NotFound (no such namespace) still reports "not
-// deployed" with the Deploy fix offered.
 func TestRuntimeDeployedHealthCheckReportsNotDeployedOnGenuineNotFound(t *testing.T) {
 	app := &App{
 		deps: erunUIDeps{
@@ -57,9 +50,6 @@ func TestRuntimeDeployedHealthCheckReportsNotDeployedOnGenuineNotFound(t *testin
 	}
 }
 
-// TestCheckRuntimeDeployedDistinguishesNotFoundFromRealErrors exercises the
-// package-level probe function directly against kubectl's actual message
-// shapes, via the ERUN_KUBECTL_BIN seam.
 func TestCheckRuntimeDeployedDistinguishesNotFoundFromRealErrors(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -88,10 +78,7 @@ func TestCheckRuntimeDeployedDistinguishesNotFoundFromRealErrors(t *testing.T) {
 	}
 }
 
-// stubKubectlForTest replaces the kubectl binary on PATH for the duration of
-// the test with a script that writes stderrMsg and exits exitCode.
-// environment_health.go's kubectlJSON shells out to "kubectl" directly (not
-// through an ERUN_KUBECTL_BIN seam), so the stub must sit on PATH.
+// stubKubectlForTest puts a fake kubectl on PATH, which kubectlJSON calls directly.
 func stubKubectlForTest(t *testing.T, stderrMsg string, exitCode int) {
 	t.Helper()
 	dir := t.TempDir()

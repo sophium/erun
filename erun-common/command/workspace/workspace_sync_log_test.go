@@ -13,8 +13,6 @@ import (
 	"time"
 )
 
-// workspaceSyncTestClock is the injected clock the sync log's cadence is
-// measured against, so a test drives the window rather than waiting it out.
 type workspaceSyncTestClock struct{ at time.Time }
 
 func (c *workspaceSyncTestClock) now() time.Time          { return c.at }
@@ -24,18 +22,13 @@ func (c *workspaceSyncTestClock) start() *workspaceSyncTestClock {
 	return c
 }
 
-// captureWorkspaceSyncPassLog points the default logger at a buffer and swaps
-// in a fresh sink on the given clock for the duration of the test, so what a
-// test reads is only what its own passes produced. Both are process-global
-// state, so both are restored.
+// captureWorkspaceSyncPassLog swaps the process-global logger and sink for the test.
 func captureWorkspaceSyncPassLog(t *testing.T, clock *workspaceSyncTestClock) *bytes.Buffer {
 	t.Helper()
 	var logs bytes.Buffer
 	previousOutput := log.Writer()
 	previousFlags := log.Flags()
 	log.SetOutput(&logs)
-	// Without this the default logger's own timestamp prefix sits between the
-	// test and the line it is asserting on.
 	log.SetFlags(0)
 	sink := newWorkspaceSyncPassSink()
 	sink.now = clock.now
@@ -49,8 +42,6 @@ func captureWorkspaceSyncPassLog(t *testing.T, clock *workspaceSyncTestClock) *b
 	return &logs
 }
 
-// workspaceSyncQuietPass is a pass that changed nothing, which is the shape a
-// steady-state mirror produces every few seconds.
 func workspaceSyncQuietPass(mirror string) *workspaceSyncPassLog {
 	return &workspaceSyncPassLog{
 		params: WorkspaceSyncParams{RemotePath: "/workspace", LocalPath: mirror},
@@ -66,10 +57,7 @@ func newWorkspaceSyncTestSink(clock *workspaceSyncTestClock, lines *[]string) *w
 	return sink
 }
 
-// workspaceSyncLocalStatLine fingerprints a mirror file exactly as the pod's own
-// `stat -c '%s %Y %n'` listing would, so the next pass sees it as unchanged. A
-// no-op passes neither size nor mtime otherwise, and every assertion about
-// silence below would really be asserting about a fetch.
+// workspaceSyncLocalStatLine matches the pod's `stat -c '%s %Y %n'` so the next pass sees no change.
 func workspaceSyncLocalStatLine(t *testing.T, root, path string) string {
 	t.Helper()
 	info, err := os.Stat(filepath.Join(root, filepath.FromSlash(path)))
@@ -79,9 +67,6 @@ func workspaceSyncLocalStatLine(t *testing.T, root, path string) string {
 	return fmt.Sprintf("%d %d %s", info.Size(), info.ModTime().Unix(), path)
 }
 
-// The whole point of the change: a pass that changed nothing says nothing. A
-// full-detail line per pass per mirror is what buried every other subsystem in
-// the desktop log and pushed the retained window under a day.
 func TestSyncWorkspaceOnceANoOpPassLogsNothing(t *testing.T) {
 	clock := (&workspaceSyncTestClock{}).start()
 	logs := captureWorkspaceSyncPassLog(t, clock)
@@ -103,16 +88,13 @@ func TestSyncWorkspaceOnceANoOpPassLogsNothing(t *testing.T) {
 	}
 }
 
-// A pass that moved files is the event the log exists for, and it still carries
-// its full inputs and counts when it appears.
 func TestSyncWorkspaceOnceAFetchedPassLogsItsCounters(t *testing.T) {
 	clock := (&workspaceSyncTestClock{}).start()
 	logs := captureWorkspaceSyncPassLog(t, clock)
 
 	mirror := t.TempDir()
 	archive := writeWorkspaceSyncArchive(t, map[string][]byte{"app/new.go": []byte("new")})
-	// No stat listing, so the one remote path is unknown on the pod's side and
-	// must be fetched — the transfer this asserts the line for.
+	// No stat listing, so the path's remote fingerprint is unknown and it is fetched.
 	stubWorkspaceSyncSSH(t, []string{"app/new.go"}, nil)
 	t.Setenv(workspaceSyncStubArchiveEnv, archive)
 
@@ -129,16 +111,13 @@ func TestSyncWorkspaceOnceAFetchedPassLogsItsCounters(t *testing.T) {
 	}
 }
 
-// A pass that deleted files, or that saw the stale index a deletion comes from,
-// is the second event that must survive the change.
 func TestSyncWorkspaceOnceADeletedPassLogsItsCounters(t *testing.T) {
 	clock := (&workspaceSyncTestClock{}).start()
 	logs := captureWorkspaceSyncPassLog(t, clock)
 
 	mirror := t.TempDir()
 	seedWorkspaceMirror(t, mirror, "app/keep.go", "app/gone.go")
-	// gone.go is still in the pod's index and no longer in its worktree; keep.go
-	// is unchanged, so the pass deletes without fetching.
+	// gone.go is in the index but not the worktree; keep.go is unchanged.
 	stubWorkspaceSyncSSH(t, []string{"app/keep.go", "app/gone.go"}, []string{"app/gone.go"})
 	t.Setenv(workspaceSyncStubStatEnv, workspaceSyncLocalStatLine(t, mirror, "app/keep.go"))
 
@@ -155,9 +134,6 @@ func TestSyncWorkspaceOnceADeletedPassLogsItsCounters(t *testing.T) {
 	}
 }
 
-// Every pass with something of its own to report logs a full line, whatever the
-// kind of something: a transfer, a deletion, a signature, a stale index, or a
-// failure. Nothing in this class is ever folded into an aggregate.
 func TestWorkspaceSyncPassSinkReportsEveryPassThatDidSomething(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -188,8 +164,6 @@ func TestWorkspaceSyncPassSinkReportsEveryPassThatDidSomething(t *testing.T) {
 			if !strings.Contains(lines[0], testCase.want) {
 				t.Fatalf("line %q does not carry %q", lines[0], testCase.want)
 			}
-			// The pass's own inputs ride along with the outcome, which is what
-			// made the line worth keeping at all.
 			if !strings.Contains(lines[0], "remote=4") || !strings.Contains(lines[0], "mirror=4") {
 				t.Fatalf("line %q dropped the pass's inputs", lines[0])
 			}
@@ -197,10 +171,7 @@ func TestWorkspaceSyncPassSinkReportsEveryPassThatDidSomething(t *testing.T) {
 	}
 }
 
-// The liveness line is what keeps a quiet log readable: without it, "the sync
-// loop is running and nothing changed" would be indistinguishable from "the
-// sync loop died". It is emitted on the documented cadence, it covers every
-// mirror the window saw, and it stays bounded — counts, never paths.
+// The liveness line distinguishes a quiet loop from a dead one; it stays bounded.
 func TestWorkspaceSyncPassSinkAggregatesQuietPassesOnItsWindow(t *testing.T) {
 	clock := (&workspaceSyncTestClock{}).start()
 	var lines []string
@@ -225,8 +196,6 @@ func TestWorkspaceSyncPassSinkAggregatesQuietPassesOnItsWindow(t *testing.T) {
 		t.Fatalf("liveness line %q named a mirror; it must stay bounded", lines[0])
 	}
 
-	// The window reopens at the line it just emitted, so the pass right after it
-	// is not reported, and the next window reports only what fell inside it.
 	sink.record(workspaceSyncQuietPass("/mirror/a"))
 	if len(lines) != 1 {
 		t.Fatalf("a pass after the flush logged %q", lines)
@@ -239,9 +208,6 @@ func TestWorkspaceSyncPassSinkAggregatesQuietPassesOnItsWindow(t *testing.T) {
 	}
 }
 
-// A reportable pass is itself proof the loop is alive, so it both reports the
-// quiet passes it stands in for — in the order they happened — and reopens the
-// window, rather than letting the next liveness line land immediately behind it.
 func TestWorkspaceSyncPassSinkFlushesSuppressedPassesInOrderAndReopensTheWindow(t *testing.T) {
 	clock := (&workspaceSyncTestClock{}).start()
 	var lines []string
@@ -261,8 +227,6 @@ func TestWorkspaceSyncPassSinkFlushesSuppressedPassesInOrderAndReopensTheWindow(
 		t.Fatalf("lines = %q, want %q", lines, want)
 	}
 
-	// The window reopened at that line: a quiet pass just inside the next one
-	// stays silent, and the one that ends it counts only what fell inside.
 	clock.advance(workspaceSyncLogWindow - time.Second)
 	sink.record(workspaceSyncQuietPass("/mirror/a"))
 	if len(lines) != 2 {
@@ -276,9 +240,6 @@ func TestWorkspaceSyncPassSinkFlushesSuppressedPassesInOrderAndReopensTheWindow(
 	}
 }
 
-// A mirror whose silence is itself the diagnosis — a workspace that is not a
-// git repo, a worktree listing that could not be read — says so when it enters
-// that state, rather than on every pass or never.
 func TestWorkspaceSyncPassSinkReportsOnlyOnEntryToAStandingQuietState(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -327,9 +288,6 @@ func TestWorkspaceSyncPassSinkReportsOnlyOnEntryToAStandingQuietState(t *testing
 	}
 }
 
-// The aggregate is fed by real passes, not only by the sink's own tests: a
-// desktop loop over a steady-state mirror costs one line per window, and that
-// line still proves how many passes it is standing in for.
 func TestSyncWorkspaceOnceAggregatesNoOpPassesIntoLivenessLines(t *testing.T) {
 	clock := (&workspaceSyncTestClock{}).start()
 	logs := captureWorkspaceSyncPassLog(t, clock)

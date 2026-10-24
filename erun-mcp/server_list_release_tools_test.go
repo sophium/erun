@@ -120,10 +120,7 @@ func assertListEffectiveTarget(t *testing.T, target lifecycle.ListEffectiveTarge
 }
 
 func TestReleaseToolPreview(t *testing.T) {
-	// Resolving the release plan checks whether each image's fingerprint tag
-	// already exists locally (DockerImageExists), even in preview -- a stub
-	// that exits non-zero is read as "not cached yet", the same outcome a real
-	// docker with no cached tag would report.
+	// A failing docker reads as "no cached image tag", even in preview.
 	t.Setenv("ERUN_DOCKER_BIN", "false")
 	projectRoot := createReleaseRuntimeRepo(t, "develop")
 	if err := configpkg.SaveProjectConfig(projectRoot, configpkg.ProjectConfig{}); err != nil {
@@ -219,8 +216,7 @@ func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
 		},
 	}))
 
-	// Pass a version so the version-required gate passes and the test reaches
-	// the repo-root-without-component rejection it actually covers.
+	// A version gets past the version gate to the rejection under test.
 	_, _, err := handler(context.Background(), nil, build.PushInput{Version: "1.0.0"})
 	if err == nil {
 		t.Fatal("expected missing Dockerfile error")
@@ -230,9 +226,7 @@ func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
 	}
 }
 
-// TestPushToolRequiresVersion locks the version-required gate: push is a pure
-// primitive that publishes a built version and never mints one, so the tool
-// must fail before any work when no version is supplied (erun-mcp/AGENTS.md).
+// push publishes a built version and never mints one (erun-mcp/AGENTS.md).
 func TestPushToolRequiresVersion(t *testing.T) {
 	handler := build.PushTool(normalizeRuntimeConfig(sharedpkg.RuntimeConfig{
 		Context: sharedpkg.RuntimeContext{

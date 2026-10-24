@@ -8,27 +8,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// inPodBlindRuntimeOnlySelection reports whether this deploy is running inside
-// the target environment's own runtime pod and still landed on the runtime-only
-// fallback.
-//
-// A runtime pod's config store holds only the projection the chart injects (see
-// `erun doctor --sync-config`), and that projection carries no deploy.components
-// block. An in-pod resolve therefore finds no saved selection and reaches the
-// "runtime chart alone" default for lack of information rather than by choice:
-// the pod cannot tell a selection that is genuinely empty from the one the
-// operator saved on the host. The default is the correct fallback off-pod, where
-// the same resolve reads the operator's own config store.
+// inPodBlindRuntimeOnlySelection reports a runtime-only fallback reached inside
+// the env's own pod, whose projected config has no deploy.components to read.
 func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget config.OpenResult, selected []string, selectionSource string) bool {
 	if selectionSource != deploySelectionSourceDefault || len(selected) > 0 {
 		return false
 	}
-	// Narrow by type: for this type the runtime chart is the whole environment,
-	// so reaching the fallback is a real rollout decision rather than one chart
-	// among others, and it earns the diagnosis below. The other types reach the
-	// same fallback and are refused for it one layer on by the in-pod
-	// runtime-chart guard (guardInPodRuntimeDeploy), so narrowing here leaves no
-	// state unguarded.
+	// Other types reaching this fallback are refused by guardInPodRuntimeDeploy.
 	if resolvedTarget.EnvConfig.ResolvedType() != config.EnvironmentTypeRuntime {
 		return false
 	}
@@ -40,23 +26,8 @@ func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget conf
 		podEnvironment == strings.TrimSpace(resolvedTarget.Environment)
 }
 
-// guardInPodBlindRuntimeOnlySelection refuses a deploy that would roll the
-// runtime chart alone from inside that environment's own runtime pod.
-//
-// Rolling on that fallback upgrades one chart, leaves every component the
-// operator selected on its previous version, and exits 0 — a silent partial
-// upgrade of a production environment. Refusing and naming both
-// remedies is the same fail-closed shape as the sibling in-pod guard
-// (guardInPodRuntimeDeploy) and the saved-selection shadow guard: the
-// deploy is not resolvable from here, so it is not attempted from here.
-//
-// Deliberately narrow: only a runtime environment, only its own pod, and only
-// the empty-selection default. This refusal exists for the fallback that cannot
-// be told apart from a genuinely empty selection; a selection that resolved to
-// something still reaches the runtime chart, and is refused for reading the
-// projection rather than the host store by the sibling guard one layer on
-// (guardInPodRuntimeDeploy). An off-pod resolve reads the operator's own config
-// store and is untouched by either.
+// guardInPodBlindRuntimeOnlySelection refuses that fallback, which would
+// silently upgrade the runtime chart and leave components behind.
 func guardInPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget config.OpenResult, target DeployTarget, selected []string, selectionSource string) error {
 	if !inPodBlindRuntimeOnlySelection(env, resolvedTarget, selected, selectionSource) {
 		return nil

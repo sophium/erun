@@ -12,9 +12,8 @@ import (
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 )
 
-// Every build recorded against a review is RECORDED and carries its version:
-// the platform lands a review MERGED against a plain successful build of the
-// merge commit, and there is no GATE kind for a new build.
+// The platform lands a review MERGED against a plain successful build; there is
+// no GATE kind.
 func TestRunReviewRecordBuildRecordsARecordedBuildWithItsVersion(t *testing.T) {
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,9 +43,7 @@ func TestRunReviewRecordBuildRecordsARecordedBuildWithItsVersion(t *testing.T) {
 	}
 }
 
-// A failed build whose detail is a registry or network signature says nothing
-// about the change, so it is refused for every recorded failure -- the review
-// stays where it is and the remedy is to re-run the build.
+// Infrastructure failures say nothing about the change, so they are refused.
 func TestRunReviewRecordBuildRefusesAKnownInfrastructureFailure(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

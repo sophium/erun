@@ -11,9 +11,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// diskHeadroomRead is one scripted response from a test's fake
-// diskHeadroomFreeSpaceFunc, including the filesystem the fake reports having
-// taken it on.
 type diskHeadroomRead struct {
 	free        uint64
 	total       uint64
@@ -26,8 +23,6 @@ func (r diskHeadroomRead) measurement() shared.DiskHeadroomMeasurement {
 	return shared.DiskHeadroomMeasurement{Free: r.free, Total: r.total, Path: r.path, SharedPaths: r.sharedPaths}
 }
 
-// diskHeadroomCase drives one pass of the decision logic. The floor is pinned
-// by env in the test body, so free-space figures here are relative to it.
 type diskHeadroomCase struct {
 	name          string
 	policy        shared.DiskHeadroomPolicy
@@ -35,19 +30,15 @@ type diskHeadroomCase struct {
 	reads         []diskHeadroomRead
 	reclaimable   uint64
 	reclaimableOK bool
-	// cacheReclaimable is what BuildKit's own build cache reports it can still
-	// free, read only once a prune has already failed to close the gap.
+	// cacheReclaimable is read only once a prune has failed to close the gap.
 	cacheReclaimable   uint64
 	cacheReclaimableOK bool
 	pruneErr           error
 	wantErr            bool
 	wantErrSubstr      string
-	// What the remedy a failure names gets wrong is the whole defect, so the
-	// assertions are on the rendered message: what it must say, and — when the
-	// space is one docker cannot free — what it must not.
-	wantErrContains []string
-	wantErrExcludes []string
-	wantPrune       bool
+	wantErrContains    []string
+	wantErrExcludes    []string
+	wantPrune          bool
 }
 
 const (
@@ -55,8 +46,6 @@ const (
 	diskHeadroomBelow            = diskHeadroomTestFloor - (1 << 30)
 	diskHeadroomAbove            = diskHeadroomTestFloor + (1 << 30)
 
-	// The docker root as this check normally resolves it, and the environment's
-	// own space on it — the two things the reported failure had to tell apart.
 	dockerRootPath          = "/var/lib/docker"
 	dindDockerRootPath      = "/dind/docker"
 	environmentWorkCloneDir = "/home/erun/work"
@@ -84,8 +73,7 @@ func diskHeadroomCases() []diskHeadroomCase {
 				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
 				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
 			},
-			// Unreadable: an unknown figure is not evidence the remedy is inert,
-			// so the docker remedy still stands.
+			// An unknown figure is not evidence the remedy is inert.
 			wantPrune:     true,
 			wantErr:       true,
 			wantErrSubstr: "filling this disk is what evicts the pod running the release",
@@ -95,8 +83,7 @@ func diskHeadroomCases() []diskHeadroomCase {
 			},
 		},
 		{
-			// A build is small enough that proceeding is usually fine, and
-			// refusing every build on a full node blocks the work that clears it.
+			// Refusing every build on a full node blocks the work that clears it.
 			name:        "build still below floor after pruning warns but proceeds",
 			policy:      buildDiskHeadroomPolicy,
 			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomBelow, ok: true}},
@@ -113,10 +100,7 @@ func diskHeadroomCases() []diskHeadroomCase {
 			wantErr:   true,
 		},
 		{
-			// docker system df understated real reclaimable build cache by 4.4x
-			// on a real node: a small-but-nonzero reported figure must not be
-			// read as "the prune can't help" — it is only a lower bound, so the
-			// prune still runs, and here it turns out to close the gap.
+			// docker system df understates reclaimable cache; a nonzero figure is only a lower bound.
 			name:        "reclaimable understated but non-zero: prunes instead of refusing on the stale figure",
 			policy:      shared.ReleaseDiskHeadroomPolicy,
 			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
@@ -124,13 +108,8 @@ func diskHeadroomCases() []diskHeadroomCase {
 			wantPrune: true,
 		},
 		{
-			// Zero here is not the same statement it looks like. A build's
-			// layers are attributed to Images for as long as the images holding
-			// them exist, so this column reads 0B on exactly the store that is
-			// full of them, while the cache still holds tens of gigabytes a
-			// prune would free. The prune is attempted regardless, and
-			// --min-free-space is what keeps that from being a wasted act when
-			// the cache really is empty.
+			// Build layers count as Images while their images exist, so 0B here does not mean
+			// the cache is empty.
 			name:   "a zero reclaimable figure no longer declines the prune",
 			policy: shared.ReleaseDiskHeadroomPolicy,
 			reads: []diskHeadroomRead{
@@ -144,7 +123,6 @@ func diskHeadroomCases() []diskHeadroomCase {
 			wantErrSubstr: "filling this disk is what evicts the pod running the release",
 		},
 		{
-			// A build attempts the same prune and still proceeds.
 			name:        "a build attempts a prune on a zero reclaimable figure and proceeds",
 			policy:      buildDiskHeadroomPolicy,
 			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomBelow, ok: true}},
@@ -152,7 +130,6 @@ func diskHeadroomCases() []diskHeadroomCase {
 			wantPrune: true,
 		},
 		{
-			// An unreadable figure is not a reason to skip the remedy.
 			name:      "an unknown reclaimable figure still prunes",
 			policy:    shared.ReleaseDiskHeadroomPolicy,
 			reads:     []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
@@ -162,22 +139,16 @@ func diskHeadroomCases() []diskHeadroomCase {
 			name:   "dry run: neither reads free space nor prunes",
 			policy: shared.ReleaseDiskHeadroomPolicy,
 			dryRun: true,
-			// Never consumed: dry run must return before the first read.
+			// Never consumed: dry run returns before the first read.
 			reads: []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}},
 		},
 	}
 }
 
-// diskHeadroomRemedyCases are the shortfalls where the remedy, not the
-// decision, is what is under test.
 func diskHeadroomRemedyCases() []diskHeadroomCase {
 	return []diskHeadroomCase{
-		// The reported failure: every docker store on the node already reported
-		// 0 B reclaimable, so the docker remediation the message named could
-		// not free a byte of the space that was actually short — it is held
-		// outside docker, on the same filesystem, by the environment's own
-		// checkouts and caches. The message must say so instead of sending the
-		// operator through the prune it has already measured as a no-op.
+		// The short space is held outside docker on the same filesystem, so the docker
+		// remedy must not be named.
 		{
 			name:   "a shortage docker cannot free drops the docker remedy and names what holds the space",
 			policy: shared.ReleaseDiskHeadroomPolicy,
@@ -211,8 +182,6 @@ func diskHeadroomRemedyCases() []diskHeadroomCase {
 			wantErrExcludes: []string{"docker system prune", "remove unused images"},
 		},
 		{
-			// The space docker's wider remedy can still reach: unused images
-			// are docker's to remove, so the docker remedy still gets named.
 			name:   "a shortage docker's stores can still reach keeps the docker remedy",
 			policy: shared.ReleaseDiskHeadroomPolicy,
 			reads: []diskHeadroomRead{
@@ -230,11 +199,6 @@ func diskHeadroomRemedyCases() []diskHeadroomCase {
 			wantErrExcludes: []string{"held outside docker"},
 		},
 		{
-			// The store the refusal above is rendered on, with BuildKit's own
-			// answer to the question `docker system df` cannot answer: 43.37GB
-			// of cache it can still reclaim, against 28.09GB of "reclaimable
-			// images" whose removal was measured to free none of it. The
-			// refusal has to point at the cache instead.
 			name:   "a shortfall the build cache still holds names the cache, not image removal",
 			policy: shared.ReleaseDiskHeadroomPolicy,
 			reads: []diskHeadroomRead{
@@ -256,9 +220,6 @@ func diskHeadroomRemedyCases() []diskHeadroomCase {
 			wantErrExcludes: []string{"docker system prune", "remove unused images", "held outside docker"},
 		},
 		{
-			// The daemon root is whatever docker reports, not the path this
-			// file's default happens to be: the message names the site the read
-			// was taken at.
 			name:   "the message names the path the read was taken at",
 			policy: shared.ReleaseDiskHeadroomPolicy,
 			reads: []diskHeadroomRead{
@@ -275,10 +236,6 @@ func diskHeadroomRemedyCases() []diskHeadroomCase {
 	}
 }
 
-// TestEnsureDiskHeadroomWith drives the decision logic with injected
-// fakes instead of a real docker daemon, per erun-common/AGENTS.md's
-// dependency-injection-over-globals guidance (mirroring the existing
-// GitCommandRunnerFunc-injection shape ensureReleaseBaseBranchUnmoved uses).
 func TestEnsureDiskHeadroomWith(t *testing.T) {
 	cases := append(diskHeadroomCases(), diskHeadroomRemedyCases()...)
 	for _, tc := range cases {
@@ -340,9 +297,6 @@ func runDiskHeadroomCase(t *testing.T, tc diskHeadroomCase) {
 	}
 }
 
-// assertDiskHeadroomMessage checks the rendered verdict against what the case
-// expects it to say — and, for space docker was measured unable to free, what
-// it must not say.
 func assertDiskHeadroomMessage(t *testing.T, tc diskHeadroomCase, err error) {
 	t.Helper()
 	if tc.wantErr != (err != nil) {

@@ -10,11 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// TestCloudContextPowerErrorClassification pins the actionable-error contract
-// for stop/start failures — a failed Stop once surfaced as a bare "exit
-// status 1" while the instance kept running. The dry-run integration harness
-// cannot produce the real AWS error responses these branches key on, so the
-// contract lives here as a white-box test.
+// The dry-run harness cannot produce these AWS errors, so the contract is tested here.
 func TestCloudContextPowerErrorClassification(t *testing.T) {
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
 	params := CloudContextParams{Name: "petios-ctx"}

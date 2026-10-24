@@ -24,11 +24,8 @@ func testActivityLeaseHelp(t *testing.T) {
 }
 
 func testActivityLeaseTakeHelpNamesWhatAnExclusiveClaimActuallyRefuses(t *testing.T) {
-	// An exclusive take defaults to the "worktree" scope, and a job start
-	// consults only the "environment" scope. Help saying a second agent job
-	// is refused by a worktree claim describes a guard that does not fire:
-	// an orchestrator that takes one over MCP and starts a second job sees
-	// no refusal and reads that silence as protection.
+	// A job start consults only the "environment" scope, so help must not
+	// claim a worktree claim refuses a second job.
 	setup := env.New(t)
 	result := erun.Run(t, []string{"activity", "lease", "take", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 	if result.ExitCode != 0 {
@@ -43,10 +40,7 @@ func testActivityLeaseTakeHelpNamesWhatAnExclusiveClaimActuallyRefuses(t *testin
 }
 
 func testActivityLeaseTakeListAndRelease(t *testing.T) {
-	// The lease lifecycle a wrapper drives: take before the long job, list to
-	// see what is holding the environment, release when it finishes. The
-	// remaining-seconds figure is wall-clock dependent, so normalization
-	// collapses it; the ttl itself is asserted from the JSON below.
+	// The remaining seconds are wall-clock dependent and normalized away.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "gradle-build", "--ttl", "10m"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -59,8 +53,6 @@ func testActivityLeaseTakeListAndRelease(t *testing.T) {
 	golden.Equal(t, "activity/lease_take_list_and_release", normalize.Apply(
 		take.Combined+list.Combined+release.Combined+empty.Combined))
 
-	// The persisted lease is a side effect outside the captured streams, and
-	// its expiry is what bounds the claim, so it is asserted on disk.
 	body, err := os.ReadFile(filepath.Join(setup.CacheHome, "erun", "activity", "team", "dev", "leases", "gradle-build.json"))
 	if !os.IsNotExist(err) {
 		t.Fatalf("expected the released lease file removed, got err %v body %s", err, body)
@@ -68,9 +60,6 @@ func testActivityLeaseTakeListAndRelease(t *testing.T) {
 }
 
 func testActivityLeaseTakeJSONRecordsTheHolderProcess(t *testing.T) {
-	// A wrapper passes its own pid so an abandoned lease is reclaimed rather
-	// than waiting out its ttl. The JSON is the wrapper's contract for
-	// capturing the id it must release.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent run", "--id", "agent-run", "--pid", "4242", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -91,8 +80,6 @@ func testActivityLeaseTakeJSONRecordsTheHolderProcess(t *testing.T) {
 }
 
 func testActivityLeaseTakeRequiresAName(t *testing.T) {
-	// A lease with no name would report the environment busy without saying
-	// why, which is the whole gap this exists to close.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -103,8 +90,6 @@ func testActivityLeaseTakeRequiresAName(t *testing.T) {
 }
 
 func testActivityLeaseTakeExclusiveDryRun(t *testing.T) {
-	// The dry-run trace must show the exclusive claim and its
-	// resolved scope, since that is the decision the command would make.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{
@@ -118,8 +103,6 @@ func testActivityLeaseTakeExclusiveDryRun(t *testing.T) {
 }
 
 func testActivityLeaseTakeExclusiveRefusesASecondHolderAndNamesIt(t *testing.T) {
-	// The collision exclusive mode exists to close: two agent jobs in the
-	// same worktree. The second exclusive take must fail and name the first.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	first := erun.Run(t, []string{
@@ -142,8 +125,6 @@ func testActivityLeaseTakeExclusiveRefusesASecondHolderAndNamesIt(t *testing.T) 
 }
 
 func testActivityLeaseTakeExclusiveAllowsADifferentScopeToCoexist(t *testing.T) {
-	// Two clones of the same repo in one pod is legitimate parallelism,
-	// not a collision - exclusivity must be scoped, not environment-wide.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	first := erun.Run(t, []string{
@@ -179,7 +160,6 @@ func testActivityLeaseReleaseExclusiveRoundTrip(t *testing.T) {
 	if release.ExitCode != 0 {
 		t.Fatalf("release: exit %d: %s", release.ExitCode, release.Combined)
 	}
-	// The scope is free again: a fresh exclusive take on it succeeds.
 	again := erun.Run(t, []string{
 		"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
 		"--name", "job-fix-1250", "--id", "job-fix-1250", "--exclusive",
@@ -190,9 +170,6 @@ func testActivityLeaseReleaseExclusiveRoundTrip(t *testing.T) {
 }
 
 func testActivityLeaseReleaseReportsNotHeldForAnUnknownID(t *testing.T) {
-	// A release that removed nothing must say so, not report the same
-	// "lease released" line as a real release. Nothing was ever taken
-	// under this id.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	result := erun.Run(t, []string{
@@ -205,11 +182,6 @@ func testActivityLeaseReleaseReportsNotHeldForAnUnknownID(t *testing.T) {
 }
 
 func testActivityLeaseReleaseExclusiveWrongScopeReportsNotHeld(t *testing.T) {
-	// The actual reproduction: an exclusive claim released against a scope
-	// it was never taken on (here, a mismatched --scope; the reported bug
-	// omitted --exclusive entirely, which lands on this same "nothing at
-	// this key" outcome) must report NotHeld and must leave the real claim
-	// untouched, not silently report the same success as a real release.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	take := erun.Run(t, []string{
@@ -234,10 +206,6 @@ func testActivityLeaseReleaseExclusiveWrongScopeReportsNotHeld(t *testing.T) {
 }
 
 func testActivityLeaseReleaseExclusiveHeldByAnotherIDNamesTheHolder(t *testing.T) {
-	// A release that could not remove the claim because a different id
-	// holds it must fail and name that holder, exactly as a conflicting
-	// take already does - not quietly report success for a claim it never
-	// touched.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	take := erun.Run(t, []string{
@@ -264,12 +232,7 @@ func testActivityLeaseReleaseExclusiveHeldByAnotherIDNamesTheHolder(t *testing.T
 }
 
 func testActivityStopReadyBlockedByAHeldLease(t *testing.T) {
-	// AC6 of the stop work: an otherwise-idle cloud-managed env that holds a
-	// lease must not be stopped, and the refusal must name the lease so an
-	// operator can see why auto-stop is being deferred. The window is pinned
-	// to a UTC day so the scenario stays on the inside-working-hours arm
-	// whatever time the suite runs; its outside-hours sibling below pins the
-	// other arm.
+	// The window is pinned to a UTC day to stay on the in-hours arm.
 	setup := env.New(t)
 	seedManagedCloudTenantEnvWithIdle(t, setup, "team", "dev", insideWorkingHoursIdleBlock)
 	take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent-run", "--ttl", "1h"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
@@ -287,11 +250,7 @@ func testActivityStopReadyBlockedByAHeldLease(t *testing.T) {
 }
 
 func testActivityStopReadyBlockedByAHeldLeaseOutsideWorkingHours(t *testing.T) {
-	// The lease clause is absolute: outside working hours the quiet signals
-	// stop holding the environment up, but a held lease still does, or an
-	// agent run that starts near the end of the window loses its environment
-	// mid-job. Same refusal, same withheld grace window, other arm of the
-	// working-hours branch.
+	// A held lease blocks stopping even outside working hours.
 	setup := env.New(t)
 	seedManagedCloudTenantEnvWithIdle(t, setup, "team", "dev", outsideWorkingHoursIdleBlock)
 	take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent-run", "--ttl", "1h"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})

@@ -4,8 +4,6 @@ import (
 	"testing"
 )
 
-// TestEmitAppNotificationDropsEmptyMessage locks the contract that a
-// blank or whitespace-only message never surfaces a toast to the frontend.
 func TestEmitAppNotificationDropsEmptyMessage(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{emitFn: emits.fn()}
@@ -17,8 +15,6 @@ func TestEmitAppNotificationDropsEmptyMessage(t *testing.T) {
 	}
 }
 
-// TestEmitAppNotificationCarriesKindAndMessage verifies a non-empty
-// notification reaches the frontend with its kind and message intact.
 func TestEmitAppNotificationCarriesKindAndMessage(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{emitFn: emits.fn()}

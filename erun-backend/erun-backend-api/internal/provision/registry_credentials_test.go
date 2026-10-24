@@ -45,8 +45,6 @@ func TestKubeImagePullSecretCredentials(t *testing.T) {
 		assertCredential(t, NewKubeImagePullSecretCredentials(kube, "erun-prod", []string{"ghcr-pull-encoded"}), "encoded-user", "encoded-token")
 	})
 
-	// An unreadable or irrelevant secret must not end the search: the probe's
-	// contract is to stay inconclusive only when nothing can answer.
 	t.Run("skips absent and unrelated secrets", func(t *testing.T) {
 		credentials := NewKubeImagePullSecretCredentials(kube, "erun-prod", []string{"missing", "elsewhere", "ghcr-pull"})
 		assertCredential(t, credentials, "pull-user", "pull-token")
@@ -72,9 +70,6 @@ func TestKubeImagePullSecretCredentials(t *testing.T) {
 	})
 }
 
-// captureLog redirects the standard logger for the duration of fn and returns
-// what it wrote, so a test can assert on the one place an operator would see
-// why the registry probe stayed unauthenticated.
 func captureLog(t *testing.T, fn func()) string {
 	t.Helper()
 	var buf bytes.Buffer
@@ -86,10 +81,7 @@ func captureLog(t *testing.T, fn func()) string {
 }
 
 func TestKubeImagePullSecretCredentialsLogsAnUnreadableSecretOnce(t *testing.T) {
-	// missing-role stands in for the case where the Secret exists but the
-	// ServiceAccount's Role does not grant "get" on it, so the fake client
-	// (which has no RBAC of its own) is instead given no such secret at all --
-	// the same "cannot read it" outcome the checker sees either way.
+	// The fake client has no RBAC; an absent secret stands in for a forbidden one.
 	kube := fake.NewSimpleClientset()
 	credentials := NewKubeImagePullSecretCredentials(kube, "erun-prod", []string{"missing-role"})
 
@@ -110,9 +102,7 @@ func TestKubeImagePullSecretCredentialsLogsAnUnreadableSecretOnce(t *testing.T) 
 }
 
 func TestKubeImagePullSecretCredentialsDoesNotLogWhenNoSecretsAreConfigured(t *testing.T) {
-	// Empty is the deliberate "no probe configured" state (see
-	// EnvDeployConfig.ImagePullSecrets) -- not a misconfiguration, so it must
-	// stay silent.
+	// Empty is the deliberate "no probe configured" state, so it stays silent.
 	kube := fake.NewSimpleClientset()
 	credentials := NewKubeImagePullSecretCredentials(kube, "erun-prod", nil)
 

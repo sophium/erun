@@ -53,10 +53,7 @@ func writeOrchestratorEntry(ctx core.Context, orchestrator lifecycle.ListOrchest
 	return writeOrchestratorDirectories(ctx, orchestrator.Directories)
 }
 
-// writeOrchestratorAlias prints the erun platform alias this orchestrator
-// declares as its own, and nothing at all when it declares none: the default is
-// this machine's own alias, so an empty line would report a setting the
-// operator never made. Same rule as writeOrchestratorDirectories below.
+// writeOrchestratorAlias prints nothing when unset; the default is not a setting.
 func writeOrchestratorAlias(ctx core.Context, alias string) error {
 	alias = strings.TrimSpace(alias)
 	if alias == "" {
@@ -66,9 +63,6 @@ func writeOrchestratorAlias(ctx core.Context, alias string) error {
 	return err
 }
 
-// writeOrchestratorLaunchSettings prints the gateway, model and effort the
-// orchestrator records, each only when set, by the same rule as
-// writeOrchestratorAlias: unset is the default launch, not a setting.
 func writeOrchestratorLaunchSettings(ctx core.Context, orchestrator lifecycle.ListOrchestratorResult) error {
 	var lines []string
 	if orchestrator.UseGateway {
@@ -88,10 +82,6 @@ func writeOrchestratorLaunchSettings(ctx core.Context, orchestrator lifecycle.Li
 	return nil
 }
 
-// writeOrchestratorDirectories prints the orchestrator's own directories, and
-// nothing at all when it has none: an orchestrator pointed at directories and
-// linking no environment must not read as having no scope, and one with only
-// environments should not grow an empty section.
 func writeOrchestratorDirectories(ctx core.Context, directories []string) error {
 	if len(directories) == 0 {
 		return nil
@@ -107,9 +97,7 @@ func writeOrchestratorDirectories(ctx core.Context, directories []string) error 
 	return nil
 }
 
-// orchestratorEnvRoleLabel renders "undeclared" for an empty role rather than
-// guessing a default -- unset means the operator has not stated a purpose for
-// this link, distinct from either known role.
+// orchestratorEnvRoleLabel renders an empty role as "undeclared", not a default.
 func orchestratorEnvRoleLabel(role config.OrchestratorEnvRole) string {
 	if role == "" {
 		return "undeclared"

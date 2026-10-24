@@ -11,23 +11,14 @@ import (
 	"unicode/utf16"
 )
 
-// ClaudeProgramName is the name the runtime image links to erun
-// (/usr/local/bin/claude -> erun), so a `claude` typed in a pod shell reaches
-// RunClaude instead of Claude Code itself.
+// ClaudeProgramName is the name the runtime image links to erun.
 const ClaudeProgramName = "claude"
 
-// claudeRealEnv overrides where the real Claude Code binary is.
 const claudeRealEnv = "ERUN_CLAUDE_REAL"
 
 const claudeCodePackage = "@anthropic-ai/claude-code"
 
-// claudePassthroughArgs are the explicit-mode flags and subcommands that must
-// reach Claude Code unchanged. The background-session lifecycle (--bg and its
-// agents/attach/stop/respawn/logs/rm subcommands) addresses an instance by its
-// own id, so prepending --continue would resume this directory's conversation
-// instead of the one asked for. Claude Code refuses --session-id beside
-// --continue, and --fork-session, --from-pr and --teleport pick their own
-// conversation.
+// claudePassthroughArgs pick their own conversation, so --continue must not be prepended.
 var claudePassthroughArgs = map[string]bool{
 	"--continue": true, "-c": true, "--resume": true, "-r": true,
 	"--session-id": true, "--fork-session": true, "--from-pr": true, "--teleport": true,
@@ -44,8 +35,6 @@ func IsClaudeInvocation(argv0 string) bool {
 	return filepath.Base(argv0) == ClaudeProgramName
 }
 
-// claudeHost is what RunClaude reads from the process it runs in. Linux wires
-// the real environment and execve (claude_resume_linux.go); tests wire stubs.
 type claudeHost struct {
 	getenv     func(string) string
 	getwd      func() (string, error)
@@ -57,9 +46,7 @@ type claudeHost struct {
 	environ    func() []string
 }
 
-// RunClaude replaces erun with the real Claude Code. A bare `claude` resumes
-// the most recent conversation of the working directory when Claude Code has
-// one, so a fresh terminal in a fresh pod picks up where the last pod left off.
+// RunClaude execs the real Claude Code, resuming the directory's latest conversation by default.
 func RunClaude(args []string) error {
 	host, err := defaultClaudeHost()
 	if err != nil {
@@ -85,14 +72,9 @@ func runClaude(args []string, host claudeHost) error {
 	return host.exec(binary, argv, host.environ())
 }
 
-// claudeNoResumeFlag is erun's own flag, not Claude Code's: it starts a fresh
-// conversation where a bare `claude` would resume, and is removed before the
-// arguments reach Claude Code, which rejects it.
+// claudeNoResumeFlag is erun's own flag and is stripped before Claude Code sees it.
 const claudeNoResumeFlag = "--no-resume"
 
-// claudeResumeArgs prepends --continue unless an argument picks a mode of its
-// own or the directory has no conversation to resume. A flag counts in both
-// its `--name value` and `--name=value` forms.
 func claudeResumeArgs(args []string, home, cwd string, isDir func(string) bool) []string {
 	if kept := withoutArg(args, claudeNoResumeFlag); len(kept) != len(args) {
 		return kept
@@ -122,14 +104,10 @@ func withoutArg(args []string, drop string) []string {
 	return kept
 }
 
-// claudeProjectKeyLimit is the longest project key Claude Code uses verbatim.
 const claudeProjectKeyLimit = 200
 
-// claudeProjectKey names the ~/.claude/projects directory Claude Code keeps a
-// working directory's conversations in, by Claude Code's own rule: every
-// UTF-16 code unit outside [A-Za-z0-9] becomes '-', and a longer key than the
-// limit is cut there and suffixed with '-' and the base-36 absolute value of
-// the path's 32-bit Java-style string hash.
+// claudeProjectKey reproduces Claude Code's ~/.claude/projects directory naming:
+// non-alphanumeric UTF-16 units become '-', long keys get a base-36 Java string hash suffix.
 func claudeProjectKey(cwd string) string {
 	var key strings.Builder
 	var hash int32
@@ -155,10 +133,7 @@ func isASCIIAlnum(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }
 
-// resolveRealClaude finds the Claude Code binary: ERUN_CLAUDE_REAL, else the
-// `claude` bin the npm package declares, under the npm global prefix
-// (NPM_CONFIG_PREFIX, the prefix node runs from, or /usr/local). It never
-// resolves to erun itself, which would exec in a loop.
+// resolveRealClaude never resolves to erun itself, which would exec in a loop.
 func resolveRealClaude(host claudeHost) (string, error) {
 	if path := host.getenv(claudeRealEnv); path != "" {
 		if err := checkRealClaude(host, path); err != nil {
@@ -204,8 +179,7 @@ func claudeNPMPrefixes(host claudeHost) []string {
 	return prefixes
 }
 
-// claudePackageBin reads the `claude` entry of the package's bin field, which
-// is either a path or a map of command names to paths.
+// The package bin field is either a path or a map of command names to paths.
 func claudePackageBin(host claudeHost, pkgDir string) (string, bool) {
 	data, err := host.readFile(filepath.Join(pkgDir, "package.json"))
 	if err != nil {

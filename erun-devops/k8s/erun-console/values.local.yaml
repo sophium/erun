@@ -1,7 +1,3 @@
-# Local-environment overlay. Empty by default, like erun-zitadel's: the
-# external domain, and any cert-manager issuer, come from the platform
-# environment's config at deploy time, not from this overlay. A local deploy
-# still needs console.externalDomain (or platform.baseDomain) set, and the
-# render fails loudly without it.
+# The external domain and issuer come from the platform config at deploy time.
 console:
   ingressClass: traefik

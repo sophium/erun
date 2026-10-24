@@ -12,21 +12,12 @@ interface ReattachRepaintDeps {
   afterRestore: () => void;
 }
 
-// QUIET_WINDOW_MS mirrors the Go side's aiRepaintInputQuiet: how recently input
-// must have arrived for the poller to stand down for one tick. Kept in sync
-// deliberately -- both exist for the same reason: resizing a line mid-edit
-// corrupts the submitted prompt.
+// Kept in sync with the Go side's aiRepaintInputQuiet.
 const QUIET_WINDOW_MS = 1500;
 
-// TerminalReattachRepaint forces a reattached main-screen TUI (Claude) to repaint.
-// dtach hands a reattached client a cleared screen and Claude only redraws on a
-// real geometry change that also resizes the LOCAL xterm — a pty-only WINCH does
-// not reach it (verified live: the tab stays blank until a keypress). The reattach
-// shows the `erun open` bootstrap trace for several seconds before dtach clears it,
-// so this polls: it skips while any content is visible (bootstrap OR a rendered
-// frame) and, once the screen is actually blank, fires one shrink/restore resize
-// cycle. Bash tabs render a prompt on reattach (never blank), so they never trigger
-// it; an already-rendered tab is skipped too.
+// TerminalReattachRepaint forces a reattached TUI to repaint: dtach hands it a
+// cleared screen and only a local xterm resize makes Claude redraw. Once the
+// screen is blank it fires one shrink/restore cycle.
 export class TerminalReattachRepaint {
   private interval = 0;
   private cycling = false;
@@ -50,25 +41,9 @@ export class TerminalReattachRepaint {
     this.lastInputAt = null;
   }
 
-  // noteInput is called for every keystroke the pane receives. The cycle below
-  // is a repaint aid for a screen that is BLANK, and its blankness gate is
-  // sampled once before the shrink (see schedule), so a user who starts typing
-  // after the shrink has begun is invisible to it. That is the reachable window
-  // -- dtach hands a reattached client a cleared screen, so "blank" is exactly
-  // the state a pane is in when someone switches in and types -- and letting
-  // the 650ms restore land mid-line reflows the buffer being edited, which
-  // corrupts the submitted prompt.
-  //
-  // So input finishes any in-flight cycle NOW, restoring the geometry
-  // immediately instead of at the end of the hold -- the restore still has to
-  // happen, it just must not wait. It does NOT disarm the poller: this pane's
-  // only repaint is this poller (an orchestrator's dtach reattach has no other
-  // path back to a visible screen), so permanently disarming it on the first
-  // keystroke left the pane blank for the rest of the session if the screen was
-  // still blank when the user started typing. Recording lastInputAt instead
-  // lets the tick defer through the quiet window and repaint once typing pauses
-  // -- hasVisibleContent() still gates it, so a pane that is already painted is
-  // never touched.
+  // noteInput restores an in-flight cycle immediately, since a reflow mid-edit
+  // corrupts the prompt. It does not disarm the poller (the pane's only repaint
+  // path); the tick defers through the quiet window instead.
   noteInput(): void {
     this.lastInputAt = Date.now();
     const pending = this.restoreTo;
@@ -78,10 +53,7 @@ export class TerminalReattachRepaint {
     }
     this.restoreTo = null;
     if (pending === null) {
-      // No cycle is in flight. Reset cycling defensively: now that input no
-      // longer disarms the poller, a cycling flag left stuck true would
-      // silently block every later repaint -- the same permanent blindness
-      // this change removes, just held in a different variable.
+      // A stuck cycling flag would block every later repaint.
       this.cycling = false;
       return;
     }
@@ -143,9 +115,8 @@ export class TerminalReattachRepaint {
     }, 650);
   }
 
-  // restore undoes the shrink. Reached either from the 650ms hold expiring or
-  // from noteInput cutting the hold short, so it must be safe to run once from
-  // whichever arrives first -- both paths clear restoreTo before calling it.
+  // restore runs from the hold expiring or from noteInput; both clear
+  // restoreTo first, so it runs once per cycle.
   private restore(sessionId: number, cols: number, rows: number): void {
     const term = this.deps.getTerminal();
     const fitAddon = this.deps.getFitAddon();

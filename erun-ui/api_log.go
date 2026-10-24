@@ -26,9 +26,7 @@ func loadAPILog(ctx context.Context, input uiTenantDashboardInput) (string, erro
 
 func loadAPILogFromKubernetes(ctx context.Context, kubernetesContext, tenant, environment string) (string, error) {
 	namespace := config.KubernetesNamespaceName(tenant, environment)
-	// A selector (rather than deployment/<name>) names which replica the log
-	// came from instead of quietly picking one; the API Deployment's
-	// Recreate strategy means a rollout transiently has two pods matching.
+	// A selector names the replica; Recreate rollouts briefly have two matching pods.
 	return kubectlText(ctx, kubernetesContext,
 		"--namespace", namespace,
 		"logs",

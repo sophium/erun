@@ -45,10 +45,8 @@ func testListControlPlanesRealRunReportsAConsoleAheadOfPublished(t *testing.T) {
 func testListControlPlanesRealRunReportsAnUnreachableConsoleAsNotCurrent(t *testing.T) {
 	t.Parallel()
 	setup := env.New(t)
-	// The plane itself is reachable and reports a consoleUrl nothing
-	// listens on -- a plane and its console can go down independently,
-	// and the console must never be reported current just because its
-	// plane is.
+	// The plane is reachable but its console is not; the console must not
+	// inherit the plane's verdict.
 	plane := controlPlaneStub(t, "1.0.247", "http://127.0.0.1:1")
 	registry := controlPlaneRegistryStub(t, "1.0.247")
 	seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
@@ -62,11 +60,8 @@ func testListControlPlanesRealRunReportsAnUnreachableConsoleAsNotCurrent(t *test
 }
 
 func testListControlPlanesRealRunReportsAConsoleServingHTMLAsReachableWithUnknownVersion(t *testing.T) {
-	// A console that answers GET /version.json with 200 text/html (the
-	// SPA's own index.html, served by an nginx fallback that doesn't yet
-	// exact-match the route) must be reported reachable -- it answered
-	// -- with an unknown version and a reason naming the status code
-	// and content type, never reachable=no.
+	// An SPA fallback (200 text/html) answered, so it is reachable with an
+	// unknown version, never reachable=no.
 	t.Parallel()
 	setup := env.New(t)
 	console := versionJSONHTMLFallbackStub(t)
@@ -99,10 +94,6 @@ func testListControlPlanesRealRunReportsAConsoleServingHTMLAsReachableWithUnknow
 		normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(console, "<CONSOLE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
 }
 
-// The docs site is its own surface, not a second view of the console: it
-// is published by its own deploy, so a docs site left behind by that
-// deploy is invisible unless it is compared on its own. Here the plane and
-// its console are both current and only the docs site lags.
 func testListControlPlanesRealRunReportsADocsSiteBehindPublished(t *testing.T) {
 	t.Parallel()
 	setup := env.New(t)
@@ -120,8 +111,7 @@ func testListControlPlanesRealRunReportsADocsSiteBehindPublished(t *testing.T) {
 	if docsLine == "" {
 		t.Fatalf("expected a docs-site entry:\n%s", result.Combined)
 	}
-	// Read the docs entry's own line: the console's line carries the same
-	// verdict text, so matching the whole document would pass on it.
+	// The console's line carries the same verdict text, so match the docs line only.
 	if !strings.Contains(docsLine, "[behind published -- roll it]") {
 		t.Fatalf("expected the docs site to be flagged behind while the plane and console are current:\n%s", docsLine)
 	}
@@ -129,10 +119,7 @@ func testListControlPlanesRealRunReportsADocsSiteBehindPublished(t *testing.T) {
 		normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(console, "<CONSOLE_API>"), stubServerRule(docs, "<DOCS_API>"), stubServerRule(registry, "<REGISTRY_API>")))
 }
 
-// A plane that advertises no docsUrl has no docs site to check, and that
-// has to read as absent rather than as current: reporting a surface erun
-// never reached as up to date is the same fail-open shape as reporting an
-// unreachable console as current.
+// No advertised docsUrl must read as absent, not current.
 func testListControlPlanesRealRunReportsNoDocsSiteWhenThePlaneHasNone(t *testing.T) {
 	t.Parallel()
 	setup := env.New(t)
@@ -163,9 +150,6 @@ func testListControlPlanesRealRunJSONOutputReportsTheDocsSite(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// The console was advertised as empty here, so a "console" key in this
-	// document would be the same absence-reported-as-current mistake one
-	// field over.
 	if strings.Contains(result.Combined, `"console"`) {
 		t.Fatalf("expected no console entry for a plane that advertises none:\n%s", result.Combined)
 	}

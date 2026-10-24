@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// consumedTestStageDockerfileContent is the repository's component shape:
-// build -> test -> dist -> runtime. The `runtime` image takes its artifact from
-// `dist`, which is built FROM test, so the image is only produced once the
-// tests passed, and a version stamp in `dist` leaves `test` cached.
 const consumedTestStageDockerfileContent = "" +
 	"FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build\n" +
 	"RUN go build -o /out/app ./...\n" +

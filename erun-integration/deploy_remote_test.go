@@ -14,17 +14,8 @@ import (
 )
 
 func testDeployDryRunRuntimeEnvUnreachableRepoPathFallsBackToLocalPlan(t *testing.T) {
-	// A runtime env's configured repo path names an in-pod checkout
-	// (e.g. /home/erun/git/frs) that does not exist on the host running this
-	// deploy — the normal case for a runtime env driven from an operator's
-	// laptop. With no deploy.components, selection must still follow the
-	// repo plan rather than drop to the runtime chart alone, so deploy also
-	// tries the project rooted at its own
-	// working directory (which here is exactly where the plan lives, the
-	// normal case for a host sitting inside the tenant checkout), so the
-	// plan's four components are selected without --components. No saved
-	// deploy.components on the env, so this exercises the plan selection
-	// tier specifically, not just a fallback trace.
+	// The env's repo path is an in-pod checkout absent on this host, so deploy
+	// falls back to the project at its cwd to select the plan's components.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	fixture.SeedProjectK8sConfig(t, setup, "environments:\n  dev:\n    k8s:\n      deployments:\n        - team-devops\n        - [erun-backend-postgres, erun-backend-db]\n        - erun-backend-api\n")
@@ -55,12 +46,7 @@ func testDeployDryRunRuntimeEnvUnreachableRepoPathFallsBackToLocalPlan(t *testin
 }
 
 func testDeployDryRunRuntimeEnvMountSourceClonesAtReleaseRef(t *testing.T) {
-	// A runtime env is sourceless by default (worktreeStorage=none). Opting
-	// into MountSource (with a RepoURL) flips its runtime worktree to a PVC
-	// checkout the pod clones at boot: the runtime deploy carries
-	// worktreeStorage=pvc plus repoUrl and repoRef=v<version> (the release
-	// tag), and the trace names the mutable-source decision. This is the
-	// opt-in real-time-patching path; a plain runtime deploy is unaffected.
+	// MountSource opts a sourceless runtime env into a PVC checkout cloned at boot.
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnvNoVersion(t, setup, "team", "dev")
 	envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
@@ -74,10 +60,7 @@ func testDeployDryRunRuntimeEnvMountSourceClonesAtReleaseRef(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	// The ref is the release TAG v<version>, but normalize.Apply collapses
-	// both "1.0.0" and "v1.0.0" to <VERSION>, so the snapshot cannot prove
-	// the "v" prefix survived — assert it on the raw output (the value is
-	// masked by normalization, per erun-integration/AGENTS.md).
+	// Normalization collapses "v1.0.0" to <VERSION>, so check the "v" on raw output.
 	if !strings.Contains(result.Combined, "repoRef=v1.0.0") {
 		t.Fatalf("expected repoRef=v1.0.0 (the release tag) in deploy command; got:\n%s", result.Combined)
 	}
@@ -85,10 +68,7 @@ func testDeployDryRunRuntimeEnvMountSourceClonesAtReleaseRef(t *testing.T) {
 }
 
 func testDeployDryRunRemoteEnvValuesOverlay(t *testing.T) {
-	// A published-chart deploy has no chart directory to host the
-	// operator's values.<env>.yaml overlay; the env config dir's
-	// values.yaml is its home. When present, the deploy traces the
-	// overlay decision and the helm command carries -f.
+	// A published chart has no directory, so the overlay lives in the env config dir.
 	setup := env.New(t)
 	fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 	mustWriteFile(t, filepath.Join(setup.ConfigHome, "erun", "team", "dev", "values.yaml"), "claude:\n  model: test-model\n")

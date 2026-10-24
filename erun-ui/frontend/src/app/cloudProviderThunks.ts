@@ -10,21 +10,15 @@ import { setSidebarCloudAliasBusy } from './slices/sidebarSlice';
 import { setCloudProviders } from './slices/tenantsSlice';
 import type { AppThunk, RootState } from './store';
 
-// Per-alias busy/action state keeps AWS and Cloudflare sidebar rows spinning independently.
+// Per-alias busy state keeps provider rows spinning independently.
 
-// CloudProviderUpdateOutcome distinguishes an update that never ran (the
-// alias was already busy with another action, or was blank) from one that
-// ran and failed. Collapsing both into `false` meant a second click while
-// the first sign-in was still in flight rendered "Sign-in failed" for an
-// attempt that never happened.
+// CloudProviderUpdateOutcome separates an update that never ran (busy or blank
+// alias) from one that failed.
 export type CloudProviderUpdateOutcome =
   | { status: 'success'; provider: UICloudProviderStatus }
   | { status: 'failed'; message: string }
   | { status: 'skipped' };
 
-// loginPrimaryCloudProvider reports whether the sign-in actually succeeded so
-// a caller that needs to react to success (e.g. PlatformErrorAlert's sign-in
-// action re-fetching what failed) can tell that apart from a swallowed error.
 export const loginPrimaryCloudProvider =
   (alias: string): AppThunk<Promise<CloudProviderUpdateOutcome>> =>
   async (dispatch) =>
@@ -34,16 +28,8 @@ export const loginPrimaryCloudProvider =
       ),
     );
 
-// signInAndRecover is PlatformErrorAlert's own "Log in" thunk: sign
-// in, and only once the sign-in itself reports success, run the caller's
-// recovery — re-fetching whatever produced the identity error, or clearing a
-// stale write error so the operator can retry it. A failed sign-in runs no
-// recovery at all, leaving the alert to report the failure itself — with the
-// real reason (CloudProviderUpdateOutcome.message), not a generic "try
-// again" — rather than silently re-rendering the same message and button.
-// Deliberately not added to loginPrimaryCloudProvider itself: that thunk's
-// original caller is the sidebar's own login button, which has no dashboard
-// or dialog to refresh as a side effect of logging in.
+// signInAndRecover runs the caller's recovery only after a successful sign-in;
+// a failure is left for the alert to report with its real reason.
 export const signInAndRecover =
   (alias: string, recover: () => void): AppThunk<Promise<CloudProviderUpdateOutcome>> =>
   async (dispatch) => {
@@ -122,10 +108,7 @@ const updatePrimaryCloudProvider =
       dispatch(setSidebarCloudAliasBusy({ alias, busy: false, action: '' }));
       dispatch(showTerminalMessage(`${provider.alias}: ${provider.status}`));
       if (action === 'login') {
-        // A successful sign-in is exactly the local-only -> enrolled
-        // transition tenantEnrollmentPoll.ts's gate cannot observe on its own
-        // (it polls nothing for local-only, by design) -- invalidate rather
-        // than wait on a timer that never fires for that state.
+        // The enrollment poll does not poll local-only tenants, so invalidate now.
         dispatch(tenantInviteRequestApi.util.invalidateTags(['TenantEnrollment']));
       }
       return { status: 'success', provider };

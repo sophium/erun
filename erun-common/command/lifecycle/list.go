@@ -21,41 +21,27 @@ type ListResult struct {
 	CloudProviders   []cloud.CloudProviderStatus `json:"cloudProviders,omitempty"`
 	Tenants          []ListTenantResult          `json:"tenants,omitempty"`
 	Orchestrators    []ListOrchestratorResult    `json:"orchestrators,omitempty"`
-	// OrphanedSSHAliases are the host's own ~/.ssh/config Host blocks naming an
-	// erun environment alias no configured environment claims. Nothing else in
-	// erun looks at these: `sshd init` writes blocks and env deletion removes
-	// the one it wrote, so a block left by a rename, a deleted environment or a
-	// turned-off sshd survives indefinitely and can start resolving into
-	// whichever environment inherits its local port.
+	// OrphanedSSHAliases are ~/.ssh/config erun Host blocks no configured environment claims;
+	// they can resolve into whichever environment inherits their local port.
 	OrphanedSSHAliases []SSHOrphanedAlias `json:"orphanedSSHAliases,omitempty"`
 }
 
-// ListOrchestratorResult is the read-model view of one persisted
-// OrchestratorConfig for `erun list`.
+// ListOrchestratorResult is the `erun list` view of one OrchestratorConfig.
 type ListOrchestratorResult struct {
 	ID           string                      `json:"id"`
 	Name         string                      `json:"name"`
 	Environments []ListOrchestratorEnvResult `json:"environments,omitempty"`
-	// Alias is the erun platform alias this orchestrator declares as its own,
-	// empty when it declares none. Reported so the value is readable from the
-	// terminal, and not only from the dialog that writes it: a field an
-	// operator can set and cannot read back is the gap the operator-settable
-	// registry exists to catch.
+	// Alias is the erun platform alias this orchestrator declares, if any.
 	Alias string `json:"alias,omitempty"`
-	// UseGateway, Model and Effort are the launch settings as recorded, not as
-	// resolved: an empty Model or Effort reads as the default, which is what the
-	// operator declared.
+	// UseGateway, Model and Effort are as recorded, not resolved; empty means default.
 	UseGateway bool   `json:"useGateway,omitempty"`
 	Model      string `json:"model,omitempty"`
 	Effort     string `json:"effort,omitempty"`
-	// Directories are the orchestrator's own: paths it works in that belong to
-	// no environment at all. Reported so an orchestrator pointed only at
-	// directories does not read as having no scope.
+	// Directories are the orchestrator's own paths outside any environment.
 	Directories []string `json:"directories,omitempty"`
 }
 
-// ListOrchestratorEnvResult is the read-model view of one
-// OrchestratorEnvConfig link, including its (possibly undeclared) Role.
+// ListOrchestratorEnvResult is the `erun list` view of one OrchestratorEnvConfig link.
 type ListOrchestratorEnvResult struct {
 	Tenant      string                        `json:"tenant"`
 	Environment string                        `json:"environment"`
@@ -155,10 +141,7 @@ func ResolveListResult(store ListStore, findProjectRoot shared.ProjectFinderFunc
 	return result, nil
 }
 
-// listOrphanedSSHAliases reports the host's stale erun ssh aliases against the
-// environments just resolved. A config that cannot be read is silence, not a
-// failure: the aliases say something about a file the operator may never have
-// had, and nothing about the environments this command exists to print.
+// An unreadable ssh config is not a failure of this command.
 func listOrphanedSSHAliases(tenants []ListTenantResult) []SSHOrphanedAlias {
 	entries, err := configpkg.ReadDefaultSSHHostEntries()
 	if err != nil {
@@ -335,29 +318,17 @@ type ListEnvironmentResult struct {
 	LocalRepoPath       string                        `json:"localRepoPath,omitempty"`
 	ContainerRegistries configpkg.ContainerRegistries `json:"containerRegistries,omitempty"`
 	RuntimeVersion      string                        `json:"runtimeVersion,omitempty"`
-	// RuntimeVersionLine names which release line RuntimeVersion's number
-	// belongs to. Nil whenever RuntimeVersion itself is empty -- there is
-	// nothing to annotate for an environment that has never deployed.
+	// RuntimeVersionLine is nil when RuntimeVersion is empty.
 	RuntimeVersionLine *deploy.RuntimeVersionLine `json:"runtimeVersionLine,omitempty"`
-	// ErunVersion is the erun version this environment's runtime chart carries
-	// -- see ResolveErunVersion. Nil whenever it cannot be read from config
-	// alone, including whenever RuntimeVersion itself is empty.
+	// ErunVersion is nil when it cannot be read from config alone.
 	ErunVersion *deploy.ErunVersion `json:"erunVersion,omitempty"`
-	// RuntimeImageLineMismatch is set only when the environment's recorded and
-	// last-observed runtime images name different release lines -- see
-	// EnvConfig.RuntimeImageLineMismatch.
+	// RuntimeImageLineMismatch is set only when recorded and observed images name different lines.
 	RuntimeImageLineMismatch *RuntimeImageLineMismatchResult `json:"runtimeImageLineMismatch,omitempty"`
 	RuntimePod               configpkg.RuntimePodResources   `json:"runtimePod,omitempty"`
-	// Sizing is the environment's standing recommendation, derived from the usage
-	// history the in-pod monitor retains. Nil where erun has never observed this
-	// environment — which is every environment seen from a host other than its
-	// own runtime container, since the history is written by the container that
-	// produced it.
+	// Sizing is nil unless this host is the environment's own runtime container, which writes the history.
 	Sizing       *deploy.RuntimeSizingRecommendation `json:"sizing,omitempty"`
 	ManagedCloud bool                                `json:"managedCloud,omitempty"`
-	// Hosted is the platform row this environment corresponds to, when it has
-	// one. Nil means the environment is not marked as hosted, which is the
-	// normal state: most environments never reach the platform.
+	// Hosted is nil unless the environment is marked as hosted.
 	Hosted             *configpkg.HostedEnvironment      `json:"hosted,omitempty"`
 	DisableBuildScript bool                              `json:"disableBuildScript,omitempty"`
 	PlatformAccount    bool                              `json:"platformAccount,omitempty"`
@@ -373,10 +344,7 @@ type ListEnvironmentResult struct {
 	AutoStart          *bool                             `json:"autoStart,omitempty"`
 }
 
-// RuntimeImageLineMismatchResult is the list read-model view of
-// EnvConfig.RuntimeImageLineMismatch, present only when it reports a real
-// disagreement -- an environment with no recorded history, or one whose
-// recorded and observed images agree, has nothing to surface.
+// RuntimeImageLineMismatchResult reports a real recorded-vs-observed line disagreement.
 type RuntimeImageLineMismatchResult struct {
 	RecordedLine string `json:"recordedLine"`
 	ObservedLine string `json:"observedLine"`
@@ -428,9 +396,6 @@ func NewListEnvironmentResult(store ListStore, tenant configpkg.TenantConfig, en
 	}
 }
 
-// listHostedEnvironment returns the env's hosted marker as a pointer, so an
-// environment that carries none reports absent rather than as an all-zero
-// marker a reader would have to know to ignore.
 func listHostedEnvironment(env configpkg.EnvConfig) *configpkg.HostedEnvironment {
 	marker, ok := configpkg.HostedEnvironmentFromConfig(env)
 	if !ok {
@@ -439,10 +404,7 @@ func listHostedEnvironment(env configpkg.EnvConfig) *configpkg.HostedEnvironment
 	return &marker
 }
 
-// listRuntimeVersionLine wraps ResolveRuntimeVersionLine, but only when there
-// is a RuntimeVersion to annotate at all -- an environment that has never
-// deployed has no version, and "undetermined" would misread as "deployed,
-// but the line is unknown" rather than "never deployed".
+// A never-deployed environment has no line, not an "undetermined" one.
 func listRuntimeVersionLine(tenant string, env configpkg.EnvConfig) *deploy.RuntimeVersionLine {
 	if strings.TrimSpace(env.RuntimeVersion) == "" {
 		return nil
@@ -451,8 +413,6 @@ func listRuntimeVersionLine(tenant string, env configpkg.EnvConfig) *deploy.Runt
 	return &line
 }
 
-// listRuntimeImageLineMismatch wraps EnvConfig.RuntimeImageLineMismatch, only
-// surfacing a result when it reports a real disagreement.
 func listRuntimeImageLineMismatch(env configpkg.EnvConfig) *RuntimeImageLineMismatchResult {
 	recordedLine, observedLine, mismatched := env.RuntimeImageLineMismatch()
 	if !mismatched {
@@ -461,10 +421,7 @@ func listRuntimeImageLineMismatch(env configpkg.EnvConfig) *RuntimeImageLineMism
 	return &RuntimeImageLineMismatchResult{RecordedLine: recordedLine, ObservedLine: observedLine}
 }
 
-// EnvironmentRuntimeSizing attaches the standing recommendation when there is
-// one. A read failure is silence rather than an error: every caller of this
-// (`erun list`, `resize`, the `usage` MCP tool) treats sizing as advisory and
-// must not fail over it.
+// EnvironmentRuntimeSizing returns the standing recommendation; sizing is advisory, so read failures are nil.
 func EnvironmentRuntimeSizing(tenant string, env configpkg.EnvConfig) *deploy.RuntimeSizingRecommendation {
 	history, err := deploy.LoadRuntimeUsageHistory(tenant, env.Name)
 	if err != nil {
@@ -496,10 +453,7 @@ func APIURLForListEnvironment(tenant configpkg.TenantConfig, localPorts configpk
 	return fmt.Sprintf("http://127.0.0.1:%d", port)
 }
 
-// listEnvironmentLocalPorts resolves the ports this process should report for
-// one environment: the config-derived allocation, overridden by the chart's
-// injected ERUN_*_PORT values when this process is that environment's own
-// runtime pod -- see overlayInjectedRuntimeLocalPorts.
+// Injected ERUN_*_PORT values override config when this process is the environment's own runtime pod.
 func listEnvironmentLocalPorts(tenant string, env configpkg.EnvConfig, portAllocations map[string]configpkg.EnvironmentLocalPorts) configpkg.EnvironmentLocalPorts {
 	localPorts := portAllocations[configpkg.EnvironmentPortKey(tenant, env.Name)]
 	if env.SSHD.LocalPort > 0 {

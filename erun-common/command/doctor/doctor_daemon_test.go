@@ -18,11 +18,6 @@ func doctorTestContext() core.Context {
 	return core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
 }
 
-// TestResolveDoctorDockerDaemonSelectsTheDaemonHoldingBuildImages pins the
-// daemon-selection seam: which docker daemon a doctor read or prune acts on is
-// decided by the environment, not by a container name fixed in the command.
-// The daemon matters because a prune of the wrong one reclaims nothing this
-// environment's builds can use while still printing docker's own success.
 func TestResolveDoctorDockerDaemonSelectsTheDaemonHoldingBuildImages(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -56,8 +51,6 @@ func TestResolveDoctorDockerDaemonSelectsTheDaemonHoldingBuildImages(t *testing.
 	}
 }
 
-// assertDoctorDaemonDecision checks one resolved daemon against every property
-// the report depends on.
 func assertDoctorDaemonDecision(t *testing.T, daemon DoctorDockerDaemon, wantKind DoctorDockerDaemonKind, wantContainer, wantLabel, wantReason string) {
 	t.Helper()
 	if daemon.Kind != wantKind {
@@ -76,8 +69,7 @@ func assertDoctorDaemonDecision(t *testing.T, daemon DoctorDockerDaemon, wantKin
 	if daemon.Unavailable() != (wantKind == DoctorDockerDaemonNone) {
 		t.Fatalf("Unavailable() = %v for kind %q", daemon.Unavailable(), daemon.Kind)
 	}
-	// A resolved daemon must be reachable through a transport: a container to
-	// exec into, or this machine.
+	// A resolved daemon needs a transport: a container or this machine.
 	if daemon.Container == "" && !daemon.Unavailable() && daemon.Kind != DoctorDockerDaemonHost {
 		t.Fatalf("a pod-hosted daemon needs its container named: %+v", daemon)
 	}
@@ -93,13 +85,8 @@ func assertDoctorDaemonReason(t *testing.T, daemon DoctorDockerDaemon, wantReaso
 	}
 }
 
-// TestDoctorDockerStorageRefusesAnEnvironmentWithNoBuildDaemon reproduces the
-// reported failure's shape: a prune that the environment cannot host. Before
-// the daemon was resolved from the environment, the prune ran against
-// erun-dind whatever the target was, so an environment whose pod carries no
-// sidecar got a prune of a daemon that holds none of its build images -- and
-// with it a docker-reported success that reads as space reclaimed. The
-// requested prune must now fail naming why, and nothing may be dispatched.
+// Pruning a daemon without the build images would report success while
+// reclaiming nothing.
 func TestDoctorDockerStorageRefusesAnEnvironmentWithNoBuildDaemon(t *testing.T) {
 	for _, envType := range []config.EnvironmentType{""} {
 		t.Run("type="+string(envType), func(t *testing.T) {
@@ -128,11 +115,7 @@ func TestDoctorDockerStorageRefusesAnEnvironmentWithNoBuildDaemon(t *testing.T) 
 	}
 }
 
-// TestDoctorHostDaemonToleratesAReadItCannotMake covers the other half of the
-// same transport: reading the daemon's own root can fail on a machine that
-// keeps that root inside the daemon's VM (Docker Desktop), and that failure
-// must not take the daemon's own readings -- the figures an operator can act
-// on -- down with it.
+// A failed root df (daemon root inside Docker Desktop's VM) must not hide the readings.
 func TestDoctorHostDaemonToleratesAReadItCannotMake(t *testing.T) {
 	binDir := t.TempDir()
 	writeDockerStub(t, binDir, localDockerStubScript("Images  21  0  11.32GB  11.32GB (100%)"))
@@ -149,10 +132,8 @@ func TestDoctorHostDaemonToleratesAReadItCannotMake(t *testing.T) {
 	}
 }
 
-// localDockerStubScript is a docker CLI stub that answers the machine-readable
-// store reading and, when given it, the human table; every other docker
-// invocation fails, which is how the df steps behave on a machine whose daemon
-// keeps its root inside a VM.
+// localDockerStubScript answers the store reading and the human table; every
+// other docker invocation fails, like df against a VM-hosted root.
 func localDockerStubScript(formatLines ...string) string {
 	script := []string{
 		`#!/bin/sh`,
@@ -166,9 +147,6 @@ func localDockerStubScript(formatLines ...string) string {
 	return strings.Join(append(script, `  *) exit 1 ;;`, `esac`, `exit 0`), "\n")
 }
 
-// TestDoctorHostDaemonReadFailureIsReportedNotInvented covers the other end: a
-// machine with no reachable docker at all returns an error naming the daemon
-// rather than an empty report that reads like a daemon with nothing in it.
 func TestDoctorHostDaemonReadFailureIsReportedNotInvented(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	req := config.ShellLaunchParams{Tenant: "team", Environment: "local", Type: config.EnvironmentTypeHost}
@@ -185,11 +163,8 @@ func writeDockerStub(t *testing.T, dir, script string) {
 	}
 }
 
-// TestDoctorPruneSummaryTellsAPruneThatFreedNothingFromOneThatReclaimed is the
-// reported failure's own case: the operator followed the documented remedy,
-// read a success, and reclaimed nothing. docker's own "Total reclaimed space"
-// line cannot distinguish that from a real reclaim, so the summary states what
-// the daemon reported before and after, and says plainly when nothing moved.
+// docker's "Total reclaimed space" cannot show a no-op prune, so the summary
+// compares before and after.
 func TestDoctorPruneSummaryTellsAPruneThatFreedNothingFromOneThatReclaimed(t *testing.T) {
 	sidecar := DoctorDockerDaemon{Kind: DoctorDockerDaemonDindSidecar, Label: "the erun-dind sidecar"}
 	readings := map[string]DoctorDockerStore{

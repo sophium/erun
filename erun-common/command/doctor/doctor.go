@@ -60,13 +60,8 @@ func DoctorActionDescription(action DoctorAction) string {
 	}
 }
 
-// RunDoctorInspection reads the environment's docker storage: disk and inode
-// usage at the daemon's root, and what the daemon's own stores reclaim. The
-// daemon is resolved from the environment (ResolveDoctorDockerDaemon) and is
-// named in the result, so the caller can say which daemon every figure below it
-// came from; an environment with no daemon holding build images refuses with
-// DoctorDockerDaemonUnavailableError rather than reading whatever daemon
-// happens to be reachable.
+// RunDoctorInspection reads docker storage on the environment's build daemon,
+// refusing with DoctorDockerDaemonUnavailableError when there is none.
 func RunDoctorInspection(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams) (DoctorInspectionResult, error) {
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Unavailable() {
@@ -79,11 +74,8 @@ func RunDoctorInspection(ctx core.Context, runner diagnosis.RuntimeContainerComm
 	return DoctorInspectionResult{Daemon: daemon, Stdout: result.Stdout, Stderr: result.Stderr}, err
 }
 
-// RunDoctorAction prunes the daemon that actually holds this environment's
-// build images, through the transport that daemon is reachable by. It returns
-// the daemon beside the output so the caller can name it, and the store
-// readings taken around the prune so a prune that freed nothing can be reported
-// as that instead of as a success.
+// RunDoctorAction prunes the environment's build daemon, with store readings
+// around the prune so a no-op prune is reported as one.
 func RunDoctorAction(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, action DoctorAction) (DoctorDockerResult, error) {
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Unavailable() {
@@ -99,11 +91,7 @@ func RunDoctorAction(ctx core.Context, runner diagnosis.RuntimeContainerCommandR
 	return runDoctorDockerSteps(ctx, runner, req, daemon, "doctor-"+string(action), steps)
 }
 
-// waitForDoctorDaemon waits for the pod a pod-hosted daemon lives in to be
-// available before exec'ing into it. A daemon this process reaches directly
-// (the host kind) needs no wait and no cluster: waiting on a deployment a host
-// environment does not have would fail the read for a reason that is not about
-// the daemon at all.
+// waitForDoctorDaemon waits for a pod-hosted daemon; a host daemon needs no cluster.
 func waitForDoctorDaemon(ctx core.Context, req config.ShellLaunchParams, daemon DoctorDockerDaemon) error {
 	if daemon.Kind == DoctorDockerDaemonHost {
 		return nil

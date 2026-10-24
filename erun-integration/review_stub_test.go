@@ -12,11 +12,7 @@ import (
 	"testing"
 )
 
-// reviewAPIStubServer runs a minimal, stateful erun-backend-api double
-// covering every route `erun review` drives, so real-run scenarios exercise
-// platformclient's review request/response handling —
-// including a real create -> list -> show -> comment -> close round trip —
-// rather than only its --dry-run trace branch.
+// reviewAPIStubServer is a stateful erun-backend-api double for every `erun review` route.
 func reviewAPIStubServer(t testing.TB) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -47,7 +43,6 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 	return server
 }
 
-// reviewAPIStub is the state reviewAPIStubServer's handlers share.
 type reviewAPIStub struct {
 	mu          sync.Mutex
 	reviews     map[string]map[string]any
@@ -89,11 +84,7 @@ func (s *reviewAPIStub) createReview(w http.ResponseWriter, r *http.Request) {
 		"name":       body["name"], "targetBranch": body["targetBranch"], "sourceBranch": body["sourceBranch"],
 		"status": "OPEN", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
 	}
-	// A declared issue is echoed the way the real API answers it: the
-	// reference the caller stated, and DECLARED as where it came from.
-	// Nothing here derives one from the source branch -- that is the
-	// real API's job, and a stub inventing it would hide a client that
-	// sent no issueRef at all.
+	// The stub only echoes a declared issueRef; deriving one would hide a client that sent none.
 	if strings.TrimSpace(body["issueRef"]) != "" {
 		review["issueRef"] = body["issueRef"]
 		review["issueRefSource"] = "DECLARED"
@@ -121,8 +112,7 @@ func (s *reviewAPIStub) listReviews(w http.ResponseWriter, r *http.Request) {
 	writeReviewStubJSON(w, out)
 }
 
-// reviewMatchesListQuery applies GET /v1/reviews's equality filters, each
-// ignored when its query parameter is empty.
+// reviewMatchesListQuery applies GET /v1/reviews's equality filters; empty params are ignored.
 func reviewMatchesListQuery(review map[string]any, query url.Values) bool {
 	for _, field := range []string{"repository", "targetBranch", "sourceBranch", "status", "authorUserId"} {
 		if v := query.Get(field); v != "" && review[field] != v {
@@ -188,9 +178,7 @@ func (s *reviewAPIStub) listMergeQueue(w http.ResponseWriter, r *http.Request) {
 	writeReviewStubJSON(w, out)
 }
 
-// advanceMergeQueue mirrors the real backend's own promotion target (READY ->
-// MERGE, never straight to MERGED) so a real-run scenario can drive a review
-// to MERGE and then exercise `review requeue`'s MERGE -> READY recovery path.
+// advanceMergeQueue promotes READY to MERGE, never straight to MERGED, like the real backend.
 func (s *reviewAPIStub) advanceMergeQueue(w http.ResponseWriter, r *http.Request) {
 	if !requireBearer(w, r) {
 		return
@@ -199,9 +187,7 @@ func (s *reviewAPIStub) advanceMergeQueue(w http.ResponseWriter, r *http.Request
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// One MERGE per target branch, the same invariant the real backend
-	// enforces: a branch whose slot is taken refuses with the review
-	// holding it rather than promoting the next one.
+	// One MERGE per target branch: an occupied slot refuses naming its holder.
 	if review := s.occupyingMerge(body["targetBranch"], body["repository"]); review != nil {
 		writeMergeQueueOccupied(w, review)
 		return
@@ -209,8 +195,6 @@ func (s *reviewAPIStub) advanceMergeQueue(w http.ResponseWriter, r *http.Request
 	s.promoteNextReady(w, body["targetBranch"], body["repository"])
 }
 
-// occupyingMerge returns the review already at MERGE for the target branch,
-// or nil when its slot is free.
 func (s *reviewAPIStub) occupyingMerge(targetBranch, repository string) map[string]any {
 	for _, id := range s.reviewOrder {
 		review := s.reviews[id]
@@ -241,8 +225,6 @@ func writeMergeQueueOccupied(w http.ResponseWriter, review map[string]any) {
 	})
 }
 
-// promoteNextReady moves the first READY review for the target branch to
-// MERGE and answers with it, or refuses an empty queue.
 func (s *reviewAPIStub) promoteNextReady(w http.ResponseWriter, targetBranch, repository string) {
 	for _, id := range s.reviewOrder {
 		review := s.reviews[id]
@@ -261,10 +243,7 @@ func (s *reviewAPIStub) promoteNextReady(w http.ResponseWriter, targetBranch, re
 	http.Error(w, "empty queue", http.StatusConflict)
 }
 
-// overrideAdvanceMergeQueue is the CLI plumbing's own concern here (the real
-// unresolved-thread gate and its bypass are covered by erun-backend-api's
-// service tests); this stub only proves the wire round trip and that a blank
-// reason is refused.
+// overrideAdvanceMergeQueue only proves the wire round trip and blank-reason refusal.
 func (s *reviewAPIStub) overrideAdvanceMergeQueue(w http.ResponseWriter, r *http.Request) {
 	if !requireBearer(w, r) {
 		return
@@ -348,9 +327,7 @@ func (s *reviewAPIStub) listBuilds(w http.ResponseWriter, r *http.Request) {
 	writeReviewStubJSON(w, []map[string]any{})
 }
 
-// recordBuild mirrors the real backend's auto-transition: recording a build
-// moves the review straight to READY or FAILED, with no separate PATCH
-// /status call — see erun-docs/docs/collaboration/builds.md.
+// recordBuild moves the review straight to READY or FAILED, like the real backend.
 func (s *reviewAPIStub) recordBuild(w http.ResponseWriter, r *http.Request) {
 	if !requireBearer(w, r) {
 		return
@@ -385,8 +362,7 @@ func (s *reviewAPIStub) recordBuild(w http.ResponseWriter, r *http.Request) {
 	writeReviewStubJSON(w, build)
 }
 
-// writeReviewStubJSON writes v as a handler's JSON body. A failed write has
-// no one left to report to: the client reading the body sees it instead.
+// writeReviewStubJSON ignores write errors; the client sees a broken body instead.
 func writeReviewStubJSON(w http.ResponseWriter, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		return

@@ -12,15 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// RunPushCommand brackets a standalone `erun push` with the `==> Pushing` /
-// `==> Pushed` markers the desktop's activity-queue parser keys off, and
-// starts the step-timing root reported when the bracket closes. Only the
-// standalone push entrypoints route through here: pushes inside `erun build`
-// already sit under the `==> Building` umbrella, and the per-image push
-// executors would fire a marker per image and double-count if bracketed here.
-// op receives the timing-scoped context so the images and charts it pushes
-// attach their own step-timing children; dry-run does no work and skips
-// timing, same as the other three umbrellas.
+// RunPushCommand brackets standalone pushes only with the markers the desktop
+// parses; pushes inside `erun build` already sit under its umbrella.
 func RunPushCommand(ctx core.Context, op func(core.Context) error) (err error) {
 	if ctx.DryRun {
 		return op(ctx)
@@ -55,30 +48,9 @@ func RunDockerPush(ctx core.Context, pushInput shared.DockerPushSpec, push share
 	return push(pushInput.Image.Tag, ctx.Verbosity, ctx.Stdout, ctx.Stderr)
 }
 
-// PreflightRegistryPushAccess refuses a publish that is already known to be
-// impossible, before it spends the build.
-//
-// A release that cannot push otherwise discovers it at the push, after every
-// image has been built for every architecture, and then offers an interactive
-// login that a detached job or an agent run can never answer. The registry
-// credential is knowable up front, so it is checked up front — the same class of
-// upfront refusal as a release whose images are not covered by a build it will
-// publish.
-//
-// Three checks run here, cheapest and most certain first: VerifyGHCRCredentialConfigured
-// answers whether any credential resolves at all -- an environment that has
-// never authenticated to ghcr.io is certain to fail at push, never merely
-// inconclusive. VerifyGHCRPushScope is a per-registry check of a
-// resolved credential's own write:packages scope (cheap, one request per
-// registry). VerifyGHCRCanPushImage/VerifyGHCRCanPushChart is a per-artifact
-// check of whether the registry would actually grant push for that specific
-// repository, including creating it for the first time — a token can have
-// write:packages and still be denied create_package by org policy on a
-// component nothing has ever published before, which the scope check alone
-// cannot see.
-//
-// Skipped in dry-run, which does no work and must keep the integration traces
-// stable.
+// PreflightRegistryPushAccess refuses an impossible publish before the build,
+// which would otherwise end at an interactive login a job cannot answer. The
+// per-artifact check catches org policy denying create_package despite scope.
 func PreflightRegistryPushAccess(ctx core.Context, execution shared.DockerPushExecutionSpec) error {
 	if ctx.DryRun {
 		return nil
@@ -87,10 +59,7 @@ func PreflightRegistryPushAccess(ctx core.Context, execution shared.DockerPushEx
 		checkedRegistries: make(map[string]struct{}, 2),
 		checkedTags:       make(map[string]struct{}, len(execution.Builds)+len(execution.Pushes)),
 	}
-	// A build that pushes inline (buildInput.Push) and a promoted fingerprint
-	// push (execution.pushes) are both real pushes this run will make — the
-	// same union RunDockerPushExecution treats as "will be pushed" just below
-	// this preflight, so both need the same check.
+	// Same union RunDockerPushExecution treats as "will be pushed".
 	for _, buildInput := range execution.Builds {
 		if !buildInput.Push {
 			continue
@@ -115,9 +84,7 @@ func PreflightRegistryPushAccess(ctx core.Context, execution shared.DockerPushEx
 	return nil
 }
 
-// registryPushAccessChecker dedups the two per-image checks preflightRegistryPushAccess
-// runs, so a version with the same tag built for multiple platforms is only
-// checked once.
+// registryPushAccessChecker checks a multi-platform tag once.
 type registryPushAccessChecker struct {
 	checkedRegistries map[string]struct{}
 	checkedTags       map[string]struct{}
@@ -153,7 +120,6 @@ func (c *registryPushAccessChecker) checkRegistryScopeOnce(tag string) error {
 	return registrypkg.VerifyGHCRPushScope(context.Background(), nil, tag)
 }
 
-// PublishComponentCharts packages+pushes then verifies each resolved chart.
 func PublishComponentCharts(ctx core.Context, specs []helm.HelmChartPublishSpec) error {
 	published := make([]string, 0, len(specs))
 	for i, spec := range specs {
@@ -176,12 +142,8 @@ func publishAndVerifyHelmChart(ctx core.Context, spec helm.HelmChartPublishSpec)
 	return helm.VerifyPublishedHelmChart(ctx, spec.OCIRepo, spec.ChartName, spec.Version)
 }
 
-// newPartialChartPublishError reports a chart publish that stopped mid-set. By
-// the time charts publish, the version's images — and, for a release, its git tag
-// and GitHub release — are already public, so aborting here leaves a version whose
-// consumers cannot resolve every chart. The operator needs the exact split to
-// recover, and re-running push is the recovery: publishing a chart already
-// published is harmless.
+// newPartialChartPublishError names the split because images and tags are
+// already public; re-running push recovers.
 func newPartialChartPublishError(failed helm.HelmChartPublishSpec, published []string, remaining []helm.HelmChartPublishSpec, err error) error {
 	notAttempted := make([]string, 0, len(remaining))
 	for _, spec := range remaining {
@@ -203,9 +165,7 @@ func describeChartNames(names []string) string {
 	return strings.Join(names, ", ")
 }
 
-// PackageComponentCharts packages each resolved chart locally (validate + record
-// identity) without publishing — the build-only counterpart of
-// publishComponentCharts.
+// PackageComponentCharts packages each chart locally without publishing.
 func PackageComponentCharts(ctx core.Context, specs []helm.HelmChartPublishSpec) error {
 	for _, spec := range specs {
 		if err := helm.PackageResolvedChart(ctx, spec); err != nil {
@@ -215,11 +175,8 @@ func PackageComponentCharts(ctx core.Context, specs []helm.HelmChartPublishSpec)
 	return nil
 }
 
-// ComponentChartPublishVersion is the release version every component chart
-// publishes at. Version-pinned bases (VersionFromBuildDir, e.g. erun-powerdns,
-// erun-backend-postgres) keep their upstream image pin and are skipped; the
-// always-present, non-pinned runtime (erun-devops) guarantees a match. An empty
-// result lets each chart fall back to its own image version.
+// ComponentChartPublishVersion skips version-pinned bases; empty lets each chart
+// use its own image version.
 func ComponentChartPublishVersion(builds []shared.DockerBuildSpec) string {
 	for _, buildInput := range builds {
 		if buildInput.Image.VersionFromBuildDir {

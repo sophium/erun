@@ -13,11 +13,7 @@ CREATE TABLE contexts (
   kubernetes_context TEXT,
   status TEXT NOT NULL DEFAULT 'provisioning',
   provision_error TEXT,
-  -- Placement capacity (#1112): how many environments this context's cluster
-  -- may host. Per-context rather than a code-level cluster list, so adding a
-  -- cluster to the placement inventory is a POST /v1/contexts call, not a
-  -- deploy. 20 is a reasonable default for a dedicated single-node cluster;
-  -- operator-overridable at context creation.
+  -- Placement capacity, per context so adding a cluster is an API call rather than a deploy.
   max_environments INT NOT NULL DEFAULT 20,
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,

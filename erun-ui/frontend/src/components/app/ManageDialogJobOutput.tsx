@@ -8,9 +8,7 @@ import type { UISelection } from '@/types';
 
 import { ReadEnvironmentJobOutput } from '../../../wailsjs/go/main/App';
 
-// Output is read a page at a time and continued from the offset the previous
-// read returned, so a long-running job's log does not have to be held whole in
-// memory to be readable, and a second read continues rather than repeats.
+// Output is paged from the previous read's offset so a long log is never held whole.
 export function JobOutputView({
   job,
   selection,
@@ -67,8 +65,7 @@ export function JobOutputView({
     );
   }
   if (loaded && text === '') {
-    // Distinct from "not read yet" and from an error: the job genuinely printed
-    // nothing, which for a quiet successful job is the expected case.
+    // Distinct from not-yet-read and from an error: the job printed nothing.
     return (
       <p className="text-[12px] text-muted-foreground" data-testid="manage-jobs-output-empty">
         This job produced no output.

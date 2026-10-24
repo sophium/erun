@@ -7,10 +7,8 @@ import (
 	"testing"
 )
 
-// jobListStubServer answers `erun jobs list`'s own read with the supplied
-// jobs, so a real-run scenario exercises the listing and rendering path end to
-// end rather than only the --dry-run trace branch. A nil slice is a real
-// empty queue, not a missing route.
+// jobListStubServer answers `erun jobs list` with the supplied jobs; a nil
+// slice is a real empty queue.
 func jobListStubServer(t testing.TB, jobs []map[string]any) *httptest.Server {
 	t.Helper()
 	if jobs == nil {
@@ -28,8 +26,7 @@ func jobListStubServer(t testing.TB, jobs []map[string]any) *httptest.Server {
 	return server
 }
 
-// platformJobJSON is one job's wire shape, with every timestamp fixed so a
-// golden records the contract rather than the clock.
+// platformJobJSON is one job's wire shape with fixed timestamps.
 func platformJobJSON(overrides map[string]any) map[string]any {
 	job := map[string]any{
 		"jobId":         "job_01HQ",
@@ -49,12 +46,8 @@ func platformJobJSON(overrides map[string]any) map[string]any {
 	return job
 }
 
-// jobsAPIServer is the jobs-API double `erun jobs` drives for real runs: the
-// queue read, the single-job read, the claim, and the update. Each handler
-// proves the CLI attached the bearer it minted. The claim route answers 409
-// with the JOB_SCOPE_HELD envelope when the request carries a scope the
-// scenario has declared held, so a refused claim is exercised as the
-// structured refusal it is rather than as an opaque conflict.
+// jobsAPIServer is the jobs-API double; the claim route answers 409
+// JOB_SCOPE_HELD for heldScope.
 func jobsAPIServer(t testing.TB, heldScope string, environments []map[string]any) *httptest.Server {
 	t.Helper()
 	if environments == nil {

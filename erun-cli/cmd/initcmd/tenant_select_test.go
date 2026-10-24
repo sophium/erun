@@ -9,8 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// forceStdinSeams pins both halves of the "can this run ask?" question, the way
-// ERUN_FORCE_TTY pins writerIsTerminal for the open guard.
+// forceStdinSeams pins both halves of the "can this run ask?" question.
 func forceStdinSeams(t *testing.T, terminal, hasAnswer bool) {
 	t.Helper()
 	prevTerminal, prevAnswer := shared.StdinIsTerminal, tenantPromptHasAnswer

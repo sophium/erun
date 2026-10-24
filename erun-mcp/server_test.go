@@ -143,18 +143,9 @@ func TestEndpointURL(t *testing.T) {
 	}
 }
 
-// wantRegisteredTools is this module's registered tool surface, asserted by
-// name in TestHTTPHandlerExposesVersionTool: a bare count cannot say which
-// tool appeared or vanished, and its failure message prints unreadable struct
-// pointers. Kept at package scope so the test function stays within funlen.
+// wantRegisteredTools is asserted by name so a failure says which tool changed.
 var wantRegisteredTools = []string{
-	// Sorted. The four exec_* names joined the surface with the exec rename;
-	// diff/raw/write/commit remain as deprecated aliases for one release.
-	// job's five query verbs moved to exec_job_* (job_* remain as deprecated
-	// aliases for one release) and exec_agent joined the surface; job_start's
-	// capability split between exec_raw's wait:false mode and exec_agent, so
-	// it keeps a registered stub that fails, naming both, rather than
-	// disappearing outright.
+	// Sorted. Deprecated aliases and the job_start stub are part of the surface.
 	"activity_lease_list", "activity_lease_release", "activity_lease_take",
 	"ai_sessions",
 	"build", "build_profile", "cloud_clear_aws_credentials", "cloud_init_aws",
@@ -179,11 +170,8 @@ var wantRegisteredTools = []string{
 	"review_unresolve", "services", "terraform", "unexpose", "upgrade", "usage", "version", "whip", "write",
 }
 
-// connectTestMCPSession clears the ambient auth anchors (set when this test
-// runs inside an erun runtime pod, which would otherwise reject the
-// unauthenticated test client) and connects a client session to a freshly
-// built handler, so each caller gets a clean session without repeating the
-// setup and its own defer-cleanup.
+// connectTestMCPSession clears ambient auth anchors, which inside a runtime pod
+// would reject the unauthenticated test client.
 func connectTestMCPSession(t *testing.T, info model.BuildInfo, runtime sharedpkg.RuntimeConfig) *mcp.ClientSession {
 	t.Helper()
 	for _, key := range []string{sharedpkg.EnvMCPTrustedIssuers, sharedpkg.EnvMCPTrustedIssuer, sharedpkg.EnvMCPAudience, sharedpkg.EnvTenant} {
@@ -216,10 +204,6 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
-	// The registered tool set is this module's public surface, so it is asserted
-	// by name against wantRegisteredTools: a bare count cannot say which tool
-	// appeared or vanished, and its failure message prints unreadable struct
-	// pointers.
 	gotTools := make([]string, 0, len(tools.Tools))
 	for _, tool := range tools.Tools {
 		gotTools = append(gotTools, tool.Name)
@@ -239,11 +223,8 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	}
 }
 
-// TestCallingARemovedToolNamesItsReplacement calls job_start over a real MCP
-// round trip: it is registered (TestHTTPHandlerExposesVersionTool's
-// wantRegisteredTools pins that) but has no working handler, so the call must
-// fail as a tool error naming its replacements, not as a protocol-level
-// "unknown tool" that names a problem and no action the caller can take.
+// job_start is a registered stub, so the call must fail as a tool error naming
+// its replacements, not as "unknown tool".
 func TestCallingARemovedToolNamesItsReplacement(t *testing.T) {
 	session := connectTestMCPSession(t, model.BuildInfo{}, sharedpkg.RuntimeConfig{})
 
@@ -291,8 +272,7 @@ func decodeStructuredVersion(t *testing.T, content any) map[string]any {
 	}
 }
 
-// lockedBuffer collects what a logger writes from whichever goroutine serves a
-// request, so a test can read it after the response without racing the write.
+// lockedBuffer is written from the goroutine serving the request.
 type lockedBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -310,17 +290,8 @@ func (b *lockedBuffer) String() string {
 	return b.buf.String()
 }
 
-// TestARefusedToolCallOnAnUnknownSessionIsLogged drives the real edge the way
-// the report did: a tools/call that arrives with no session the edge knows, so
-// the SDK's session-initialization guard refuses it. That refusal is a
-// JSON-RPC error on an HTTP 200, and it is exactly the shape whose absence
-// from a pod log was misread as "the call never arrived".
-//
-// The SDK's own logger has to say so, which is the whole point: with
-// ServerOptions.Logger nil the SDK writes to slog.DiscardHandler and the edge
-// is silent about every refusal it makes. The assertion is on the log line the
-// SDK emits, not on the response, because the response was always correct --
-// it is the visibility that was missing.
+// The refusal is a JSON-RPC error on HTTP 200, so the assertion is on the
+// SDK's log line, not the response.
 func TestARefusedToolCallOnAnUnknownSessionIsLogged(t *testing.T) {
 	for _, key := range []string{sharedpkg.EnvMCPTrustedIssuers, sharedpkg.EnvMCPTrustedIssuer, sharedpkg.EnvMCPAudience, sharedpkg.EnvTenant} {
 		t.Setenv(key, "")

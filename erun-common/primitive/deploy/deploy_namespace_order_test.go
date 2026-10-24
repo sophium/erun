@@ -7,17 +7,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// TestRunHelmDeployEnsuresTheNamespaceBeforeApplyingSecrets proves an ordering
-// the trace could not. RunHelmDeploy traced the namespace ensure first, then
-// applied real kubectl secrets into that namespace -- but the namespace was only
-// created later, by WrapHelmChartDeployerWithNamespaceEnsure around the chart
-// deployer RunHelmDeploy calls at the end. So a first deploy into a freshly
-// provisioned environment failed with "namespaces not found" and every hosted
-// provision broke; an environment that already existed hid it entirely.
-//
-// Swapping the ensure for one that refuses is what makes the order checkable: if
-// it runs first, RunHelmDeploy returns this sentinel; if it runs late -- or not
-// at all, as before -- the secret apply is reached first and the error differs.
+// A refusing ensure makes the order checkable: run first, it returns the
+// sentinel; run late, the secret apply fails differently.
 func TestRunHelmDeployEnsuresTheNamespaceBeforeApplyingSecrets(t *testing.T) {
 	sentinel := errors.New("namespace-ensure-ran-first")
 	var gotNamespace string

@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-// A status filter is operator input, and the listing it narrows is the review
-// queue an operator checks to decide whether anything is waiting on them: a
-// mistyped value must be refused as a bad argument rather than return an empty
-// listing they read as "no reviews".
 func TestNormalizeReviewStatus(t *testing.T) {
 	cases := []struct {
 		name string
@@ -56,9 +52,6 @@ func TestNormalizeReviewStatusNamesTheAcceptedValues(t *testing.T) {
 	}
 }
 
-// The accepted set is one list, not a copy: the backend's stored spellings and
-// the filter's accepted spellings have to be the same vocabulary, or a caller
-// could filter on a status no row can hold (or be refused one that rows do).
 func TestReviewStatusVocabularyIsClosed(t *testing.T) {
 	got := map[string]bool{}
 	for _, status := range ReviewStatuses {

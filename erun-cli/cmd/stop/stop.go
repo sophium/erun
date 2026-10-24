@@ -49,10 +49,7 @@ func NewStopCmd(resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error
 	return cmd
 }
 
-// runStopCommand deliberately does not run the cloud-context preflight every
-// other cluster-touching command wires: that preflight starts a stopped cloud
-// context, and starting a machine in order to stop a pod on it is the opposite
-// of what the operator asked for.
+// runStopCommand skips the cloud-context preflight, which would start a stopped machine just to stop a pod.
 func runStopCommand(ctx core.Context, args []string, overrides sharedpkg.OpenParams, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) error {
 	params, err := shared.ResolveOpenParams(ctx.Command, args, overrides)
 	if err != nil {
@@ -85,15 +82,8 @@ func runStopCommand(ctx core.Context, args []string, overrides sharedpkg.OpenPar
 	return ctx.WriteResult(stopResult)
 }
 
-// stopCommandSummary names the ended sessions as well as the recovery: an
-// operator whose desktop tabs go dark a second after the stop should read that
-// as their own command doing what it said, not as the environment breaking.
-//
-// It also names the platform components the stop leaves running, on both
-// outcomes. Those pods are the ones still visible after a stop, and a leftover
-// pod with no explanation is read as a failed stop; on an already-stopped
-// environment they are the whole explanation for why pressing Stop changed
-// nothing.
+// stopCommandSummary names the ended sessions and the components left running, so
+// neither reads as a failed stop.
 func stopCommandSummary(result lifecycle.StopEnvironmentResult) string {
 	kept := stopCommandKeptComponents(result)
 	if result.AlreadyStopped {
@@ -106,9 +96,7 @@ func stopCommandSummary(result lifecycle.StopEnvironmentResult) string {
 	return fmt.Sprintf("stopped %s/%s%s%s; run `erun open %s %s` to wake it", result.Tenant, result.Environment, sessions, kept, result.Tenant, result.Environment)
 }
 
-// stopCommandKeptComponents renders the components a stop left running, or an
-// empty string when the environment deploys none — a stop on a runtime-only
-// environment has nothing to explain and must not gain a line saying so.
+// stopCommandKeptComponents renders the components left running, or "" when there are none.
 func stopCommandKeptComponents(result lifecycle.StopEnvironmentResult) string {
 	if len(result.RemainingComponents) == 0 {
 		return ""

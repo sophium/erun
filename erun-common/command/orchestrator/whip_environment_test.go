@@ -10,8 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// fakeWhipRunner records every command it was asked to run and answers from a
-// scripted table, so these tests never shell out to a real dtach.
 type fakeWhipRunner struct {
 	calls   [][]string
 	outputs map[string]string
@@ -30,8 +28,7 @@ func (f *fakeWhipRunner) run(name string, args ...string) ([]byte, error) {
 
 func TestEnvironmentWhipSessionAliveReadsMasterPID(t *testing.T) {
 	f := &fakeWhipRunner{outputs: map[string]string{}}
-	// The scan script is generated dynamically (it embeds the socket path), so
-	// stub every "sh -c ..." call with a live master pid regardless of body.
+	// The scan script embeds the socket path, so stub every "sh -c" call.
 	f.outputs["placeholder"] = ""
 	alive, err := environmentWhipSessionAlive(func(name string, args ...string) ([]byte, error) {
 		f.calls = append(f.calls, append([]string{name}, args...))
@@ -60,10 +57,8 @@ func TestEnvironmentWhipSessionAliveFalseWhenNoMaster(t *testing.T) {
 	}
 }
 
-// TestPushEnvironmentWhipNudgeSettleOrder is the settle-write assertion the
-// task calls out explicitly: the nudge text and the carriage return that
-// submits it must be two separate writes, spaced by the settle duration, never
-// coalesced into one — mirroring orchestrator_pacing.go's writeOrchestratorPacingNudge.
+// TestPushEnvironmentWhipNudgeSettleOrder: text and CR must be two writes spaced by the settle,
+// never coalesced.
 func TestPushEnvironmentWhipNudgeSettleOrder(t *testing.T) {
 	f := &fakeWhipRunner{outputs: map[string]string{}}
 	settled := false
@@ -166,11 +161,8 @@ func TestRunLocalEnvironmentWhipNotAliveWhenNoMaster(t *testing.T) {
 	}
 }
 
-// TestWhipEnvironmentStatePathDoesNotCreateDirectory pins the same dry-run
-// purity contract the config tree follows: resolving where the whip nudge
-// bookkeeping lives is a pure read (loadWhipEnvironmentState calls it before
-// RunLocalEnvironmentWhip's own dry-run check) and must not create
-// ~/.cache/erun/whip/<tenant>/<environment>/ as a side effect.
+// TestWhipEnvironmentStatePathDoesNotCreateDirectory: resolving the state path runs before the
+// dry-run check, so it must not create the directory.
 func TestWhipEnvironmentStatePathDoesNotCreateDirectory(t *testing.T) {
 	isolateActivityCache(t)
 	path, err := whipEnvironmentStatePath("acme", "dev")

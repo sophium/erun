@@ -10,40 +10,23 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/env"
 )
 
-// SeedTenantEnvWithSignedInERunPlatformAlias seeds a tenant/environment exactly
-// as SeedTenantEnv does, plus the invoking host's own signed-in erun platform
-// alias: the root config naming it (with the stored-session ref the alias
-// carries) and the refresh token that ref resolves to. That pair is what makes
-// a host a credential source -- an alias with no stored session is deliberately
-// "nothing to give" -- so it is the shape any scenario about provisioning a
-// platform alias into an environment has to start from.
-//
-// The store itself writes the token, so the basename it lands under is the one
-// production will later look for rather than a second copy of that hash.
+// SeedTenantEnvWithSignedInERunPlatformAlias is SeedTenantEnv plus
+// SeedSignedInERunPlatformAlias at a fixed API host.
 func SeedTenantEnvWithSignedInERunPlatformAlias(t testing.TB, setup env.Setup, tenant, environment, alias string) {
 	t.Helper()
 	SeedTenantEnv(t, setup, tenant, environment)
 	SeedSignedInERunPlatformAlias(t, setup, tenant, alias, "https://api.example.test")
 }
 
-// SeedSignedInERunPlatformAlias makes the invoking host a signed-in credential
-// source, without seeding a tenant/environment tree: the root config naming
-// alias on the erun platform at apiURL (with the stored-session ref the alias
-// carries) and the refresh token that ref resolves to.
-//
-// It takes the platform's URL because the two halves have to agree: a scenario
-// that drives what the host does with that alias -- the machine-identity
-// provisioning `erun init` asks for over it, or a platform call made through it
-// -- points both at the stub server it seeded, while a scenario only asserting
-// that a credential was delivered keeps the fixed host.
+// SeedSignedInERunPlatformAlias writes a root config naming alias at apiURL
+// with a stored refresh token, making the host a credential source.
 func SeedSignedInERunPlatformAlias(t testing.TB, setup env.Setup, tenant, alias, apiURL string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", root, err)
 	}
-	// The stored-session reference travels with the alias, exactly as it does in
-	// a real signed-in config: the alias is inert without it.
+	// The alias is inert without its stored-session ref.
 	ref := "erun/refresh/" + alias
 	mustWrite(t, filepath.Join(root, "config.yaml"),
 		"defaulttenant: "+tenant+"\n"+
@@ -62,10 +45,8 @@ func SeedSignedInERunPlatformAlias(t testing.TB, setup env.Setup, tenant, alias,
 	}
 }
 
-// SeedMachineIdentityCredential stores clientSecret under the ref an alias's
-// machine-identity entry names, so a scenario can put a host or an environment
-// on a credential without an `erun init` having minted one. The ref is derived
-// the way erun-common derives it, so the two cannot drift.
+// SeedMachineIdentityCredential stores clientSecret under the alias's
+// machine-identity ref.
 func SeedMachineIdentityCredential(t testing.TB, setup env.Setup, alias, clientSecret string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -78,10 +59,8 @@ func SeedMachineIdentityCredential(t testing.TB, setup env.Setup, alias, clientS
 	}
 }
 
-// SeedMachineIdentityAlias writes the root config naming an erun platform alias
-// that authenticates as a machine identity rather than as a delegated human
-// session: a client-secret reference and no refresh-token reference. It is the
-// shape a pod carries once `erun init` has provisioned its own identity.
+// SeedMachineIdentityAlias writes a root config naming an alias that
+// authenticates as a machine identity (client secret, no refresh token).
 func SeedMachineIdentityAlias(t testing.TB, setup env.Setup, tenant, alias, apiURL, clientID, clientSecret string) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -102,15 +81,9 @@ func SeedMachineIdentityAlias(t testing.TB, setup env.Setup, tenant, alias, apiU
 	SeedMachineIdentityCredential(t, setup, alias, clientSecret)
 }
 
-// SeedHostedRuntimeTenantEnv writes a runtime-type env that is marked as hosted
-// on a platform row, which is the state `erun platform env push` / `pull` act
-// on. The marker's api host, tenant id and environment id are the caller's, so
-// a scenario can point it at the stub server it seeded and prove the marker is
-// compared rather than trusted.
-//
-// The env carries values in both classes on purpose: runtimeversion and
-// deploy.timeout travel, while the repo path, the local port range and the
-// image pull secret name must survive a pull untouched.
+// SeedHostedRuntimeTenantEnv writes a runtime env marked as hosted on the given
+// platform row. It mixes values a pull overwrites (runtimeversion,
+// deploy.timeout) with host-owned ones that must survive it.
 func SeedHostedRuntimeTenantEnv(t testing.TB, setup env.Setup, tenant, environment, apiHost, tenantID, environmentID string, revision int) {
 	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
@@ -126,10 +99,7 @@ func SeedHostedRuntimeTenantEnv(t testing.TB, setup env.Setup, tenant, environme
 		t.Fatalf("mkdir repo %s: %v", repoPath, err)
 	}
 
-	// The root config.yaml is deliberately left alone: a scenario that drives
-	// `erun platform` seeds the platform alias there, and overwriting it would
-	// leave the command with no alias to resolve. Both verbs name the tenant
-	// explicitly, so nothing here depends on a default tenant.
+	// Leave the root config alone: it may hold the scenario's platform alias.
 	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
 		"projectroot: "+repoPath+"\n"+
 			"name: "+tenant+"\n"+
@@ -148,9 +118,7 @@ func SeedHostedRuntimeTenantEnv(t testing.TB, setup env.Setup, tenant, environme
 			"  timeout: 7m\n"+
 			"  components:\n"+
 			"    - host-owned-component\n"+
-			// An unmodelled key: nothing in this binary declares it, so it is
-			// exactly what marshalConfigPreservingUnknownFields exists to keep. A
-			// pull must not drop it.
+			// Unmodelled key that a pull must preserve.
 			"futureunmodelledkey: keep-me\n"+
 			"hosted:\n"+
 			"  apihost: "+apiHost+"\n"+

@@ -5,11 +5,7 @@ import (
 	"testing"
 )
 
-// assertNamesMissingAndRecovery insists a target-resolution error names the
-// missing subject and a concrete recovery ("pass ... explicitly"), not just
-// that an error occurred -- a bare "tenant and environment are required"
-// would pass a plain err != nil check but is exactly the dead end this
-// guards against.
+// assertNamesMissingAndRecovery requires the error to name the missing subject and a recovery.
 func assertNamesMissingAndRecovery(t *testing.T, err error, wantSubject string) {
 	t.Helper()
 	if err.Error() == "tenant and environment are required" || err.Error() == "tenant is required" || err.Error() == "environment is required" {

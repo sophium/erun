@@ -29,8 +29,6 @@ func testPlatformAliasProvider() configpkg.CloudProviderConfig {
 	}
 }
 
-// staticCloudStore is a CloudReadStore holding one already-resolved root config,
-// so alias resolution is exercised without touching the operator's own config.
 type staticCloudStore struct {
 	config configpkg.ERunConfig
 }
@@ -39,20 +37,7 @@ func (s staticCloudStore) LoadERunConfig() (configpkg.ERunConfig, string, error)
 	return s.config, "", nil
 }
 
-// TestProvisionedAliasResolvesInThePod is the reproduction of the reported
-// failure. Before this change an agent pod's root config carried no erun alias
-// and nothing could give it one, so every platform call resolved through
-// newPlatformClientForAlias and aborted with "no erun platform cloud provider
-// alias is configured" before its first network call -- `erun review show` among
-// them, exiting 127, with no remedy reachable from inside the pod.
-//
-// This drives the pod's side for real: the entry init rendered, mounted where
-// the chart mounts it, seeded by the runtime boot into the root config it wrote
-// for an env whose chart injected an infrastructure provider, and the token
-// written at the filename init shipped. It then asserts the pod's own alias
-// resolution gets past the point that used to fail. It is the seam between the
-// two halves -- init's render and the boot's seed -- which neither half's own
-// test can cover.
+// TestProvisionedAliasResolvesInThePod covers the seam between init's render and the boot's seed.
 func TestProvisionedAliasResolvesInThePod(t *testing.T) {
 	boot := newTestRuntimeBoot(t, map[string]string{
 		"ERUN_TENANT": "team", "ERUN_ENVIRONMENT": "dev",
@@ -67,7 +52,6 @@ func TestProvisionedAliasResolvesInThePod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The reported state, asserted rather than assumed.
 	assertUnprovisionedAliasIsUnusable(t, string(unprovisioned))
 
 	if err := syncRuntimePlatformAlias(core.Context{}, boot, nil); err != nil {
@@ -93,10 +77,6 @@ func TestProvisionedAliasResolvesInThePod(t *testing.T) {
 	}
 }
 
-// assertUnprovisionedAliasIsUnusable asserts the reported state rather than
-// assuming it: a pod config carrying an infrastructure provider but no platform
-// alias aborts at alias resolution, with the message and sentinel the report
-// quoted, before any network call.
 func assertUnprovisionedAliasIsUnusable(t *testing.T, document string) {
 	t.Helper()
 	var before configpkg.ERunConfig

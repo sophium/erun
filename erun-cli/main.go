@@ -13,15 +13,8 @@ import (
 	"github.com/sophium/erun/internal"
 )
 
-// platformAliasUnusableExitCode marks a command that could not even resolve
-// a usable erun platform alias (none configured, an incomplete one, the
-// wrong alias type) -- distinct from an ordinary failure so a caller wiring
-// one of these commands into a script, and checking only the exit code, does
-// not mistake "this environment cannot record anything on the platform" for
-// "it tried and failed" or worse, silently believe it succeeded. Continues
-// the sequence job.go's jobAwaitTimeoutExitCode (124) and
-// jobAwaitUnknownExitCode (125) and mcp_call.go's
-// mcpChannelUnreachableExitCode (126) already established.
+// platformAliasUnusableExitCode marks a command that cannot resolve a usable platform
+// alias, so scripts don't read it as an ordinary failure or a success.
 const platformAliasUnusableExitCode = 127
 
 // Seams for the argv[0] dispatch test.
@@ -37,9 +30,7 @@ func main() {
 	}
 }
 
-// run dispatches on the name erun was started as: the runtime image links
-// claude to erun so a bare `claude` resumes the directory's conversation, and
-// that path stays clear of the erun command tree.
+// run dispatches on argv[0]: the runtime image links claude to erun.
 func run(argv []string) int {
 	if len(argv) > 0 && podruntime.IsClaudeInvocation(argv[0]) {
 		return runClaude(argv[1:])
@@ -68,11 +59,7 @@ func runERun() int {
 	return exitCodeFor(err)
 }
 
-// exitCodeFor resolves the process exit code for an already-reported failure.
-// The platform-alias condition keeps its own code; everything else falls through
-// to the code the failure itself carries, defaulting to 1. A tenant-selection
-// refusal is tagged with its own code by the command that produced it, so it can
-// never be read as either of the other two.
+// exitCodeFor resolves the exit code for an already-reported failure, defaulting to 1.
 func exitCodeFor(err error) int {
 	if errors.Is(err, cloud.ErrPlatformAliasUnusable) {
 		return platformAliasUnusableExitCode

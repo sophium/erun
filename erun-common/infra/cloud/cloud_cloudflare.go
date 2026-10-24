@@ -17,24 +17,20 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// cloudflareAPIBaseURLEnv redirects every Cloudflare API call to a mock server
-// in tests. It must be an env var rather than the in-process CloudDependencies
-// override because the desktop runs the wizard as a PTY subprocess the
-// in-process override cannot reach.
+// cloudflareAPIBaseURLEnv redirects Cloudflare API calls in tests; an env var because the
+// desktop runs the wizard as a subprocess.
 const cloudflareAPIBaseURLEnv = "ERUN_CLOUDFLARE_API_BASE_URL"
 
 const defaultCloudflareAPIBaseURL = "https://api.cloudflare.com"
 
-// Kept as paths, not full URLs, so the base-URL test seam can redirect every call.
+// Paths, not URLs, so the base-URL seam applies.
 const (
 	cloudflareTokenVerifyPath = "/client/v4/user/tokens/verify"
 	cloudflareAccountsPath    = "/client/v4/accounts"
 	cloudflareZonesPath       = "/client/v4/zones"
 )
 
-// CloudflareCreateTokenURL is the dashboard page the guided flow points the
-// operator at to mint a scoped token. A browser destination, not an API call,
-// so the base-URL test seam never applies to it.
+// CloudflareCreateTokenURL is the dashboard page for minting a scoped token.
 const CloudflareCreateTokenURL = "https://dash.cloudflare.com/profile/api-tokens"
 
 func cloudflareAPIBaseURL() string {
@@ -44,39 +40,34 @@ func cloudflareAPIBaseURL() string {
 	return defaultCloudflareAPIBaseURL
 }
 
-// CloudSecretStore persists provider secrets (today: Cloudflare API tokens)
-// outside erun-config.yaml, keyed by an opaque ref so the config file carries
-// only the ref, never the secret value.
+// CloudSecretStore keeps provider secrets outside the config, which carries only a ref.
 type CloudSecretStore interface {
 	SaveCloudSecret(ref, value string) error
 	LoadCloudSecret(ref string) (string, error)
 	DeleteCloudSecret(ref string) error
 }
 
-// CloudflareTokenInfo is the subset of Cloudflare's tokens/verify response the
-// alias lifecycle cares about.
+// CloudflareTokenInfo is the used subset of Cloudflare's tokens/verify response.
 type CloudflareTokenInfo struct {
 	ID     string
 	Status string
 }
 
-// CloudflareAccount identifies a Cloudflare account a token can act on.
+// CloudflareAccount is an account a token can act on.
 type CloudflareAccount struct {
 	ID   string
 	Name string
 }
 
-// InitCloudflareCloudProviderParams are the explicit inputs for adding a
-// Cloudflare cloud alias. APIToken is a custom token the operator minted with
-// Zone + DNS edit for delegation, plus any scopes they will use (e.g. Pages).
+// InitCloudflareCloudProviderParams adds a Cloudflare alias; APIToken needs Zone + DNS edit
+// plus any scopes it will use.
 type InitCloudflareCloudProviderParams struct {
 	AccountID string
 	TokenName string
 	APIToken  string
 }
 
-// InitCloudflareCloudProvider verifies a scoped API token, stores it in the
-// secret store, and saves the cloud alias that references it by TokenRef.
+// InitCloudflareCloudProvider verifies and stores the token, then saves the alias by TokenRef.
 func InitCloudflareCloudProvider(ctx core.Context, store CloudStore, params InitCloudflareCloudProviderParams, deps CloudDependencies) (config.CloudProviderConfig, error) {
 	if store == nil {
 		return config.CloudProviderConfig{}, fmt.Errorf("store is required")
@@ -140,21 +131,17 @@ func traceCloudflareInitDryRunPlan(ctx core.Context, deps CloudDependencies, tok
 	ctx.Trace("write cloud provider " + alias)
 }
 
-// VerifyCloudflareAPIToken validates a scoped token so the guided setup can
-// check a pasted token before asking for anything else.
+// VerifyCloudflareAPIToken validates a scoped token.
 func VerifyCloudflareAPIToken(ctx core.Context, token string, deps CloudDependencies) (CloudflareTokenInfo, error) {
 	return NormalizeCloudDependencies(deps).VerifyCloudflareToken(ctx, token)
 }
 
-// ResolveCloudflareAccounts lists the accounts a token can act on, so the
-// guided CLI setup can auto-derive the account id instead of asking for it.
+// ResolveCloudflareAccounts lists the accounts a token can act on.
 func ResolveCloudflareAccounts(ctx core.Context, token string, deps CloudDependencies) ([]CloudflareAccount, error) {
 	return NormalizeCloudDependencies(deps).ListCloudflareAccounts(ctx, token)
 }
 
-// cloudflareProviderConfig mirrors the Cloudflare identity into the generic
-// Username/AccountID fields so generic listing and alias derivation need no
-// Cloudflare special-casing.
+// Mirrors the identity into generic fields so listing needs no Cloudflare special case.
 func cloudflareProviderConfig(alias, accountID, tokenName, tokenRef string) config.CloudProviderConfig {
 	return NormalizeCloudProviderConfig(config.CloudProviderConfig{
 		Alias:     alias,
@@ -186,8 +173,7 @@ func cloudflareCloudProviderTokenStatus(provider config.CloudProviderConfig, dep
 	return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 }
 
-// deleteCloudflareToken is the Cloudflare equivalent of an SSO logout: the alias
-// stays configured but loses its credential until re-initialized.
+// deleteCloudflareToken keeps the alias but drops its credential, like an SSO logout.
 func deleteCloudflareToken(ctx core.Context, provider config.CloudProviderConfig, deps CloudDependencies) error {
 	if provider.Cloudflare == nil || strings.TrimSpace(provider.Cloudflare.TokenRef) == "" {
 		return nil
@@ -266,10 +252,7 @@ func verifyCloudflareTokenAt(url, token string) (CloudflareTokenInfo, error) {
 	return CloudflareTokenInfo{ID: payload.Result.ID, Status: payload.Result.Status}, nil
 }
 
-// defaultListCloudflareAccounts resolves a token's accounts for the guided
-// setup. It tries /accounts first, then falls back to deriving the account from
-// the token's zones — a least-privilege Zone-only token cannot read /accounts
-// but can list its zones.
+// Falls back to the token's zones: a Zone-only token cannot read /accounts.
 func defaultListCloudflareAccounts(ctx core.Context, token string) ([]CloudflareAccount, error) {
 	base := cloudflareAPIBaseURL()
 	accountsURL := base + cloudflareAccountsPath
@@ -403,21 +386,19 @@ func listCloudflareAccountsAt(url, token string) ([]CloudflareAccount, error) {
 	return accounts, nil
 }
 
-// FileCloudSecretStore hashes the ref to a filename so alias punctuation never
-// reaches the filesystem path.
+// FileCloudSecretStore hashes the ref so alias punctuation never reaches the path.
 type FileCloudSecretStore struct {
 	dir string
 }
 
-// NewFileCloudSecretStore returns a CloudSecretStore backed by 0600 files under dir.
+// NewFileCloudSecretStore stores secrets in 0600 files under dir.
 func NewFileCloudSecretStore(dir string) CloudSecretStore {
 	return FileCloudSecretStore{dir: strings.TrimSpace(dir)}
 }
 
 const CloudSecretStoreDirName = "cloud-secrets"
 
-// DefaultCloudSecretStore returns a file-backed CloudSecretStore rooted under
-// the erun config dir.
+// DefaultCloudSecretStore is rooted under the erun config dir.
 func DefaultCloudSecretStore() (CloudSecretStore, error) {
 	dir, err := config.ERunConfigDir()
 	if err != nil {
@@ -426,11 +407,7 @@ func DefaultCloudSecretStore() (CloudSecretStore, error) {
 	return NewFileCloudSecretStore(filepath.Join(dir, CloudSecretStoreDirName)), nil
 }
 
-// CloudSecretFileName is the basename the file store saves a ref's value under.
-// It is split out from path so the one caller that has to *name* the file
-// without writing it -- provisioning a signed-in alias into a fresh pod, which
-// has to tell the pod's entrypoint which file to create -- derives the same
-// name the store itself will later look for.
+// CloudSecretFileName lets pod provisioning name the file the store will later read.
 func CloudSecretFileName(ref string) string {
 	sum := sha256.Sum256([]byte(ref))
 	return hex.EncodeToString(sum[:]) + ".token"

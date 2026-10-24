@@ -16,13 +16,7 @@ import (
 )
 
 func testDeployDryRunUnaffectedByKubectlPodWatchLibraryExecutionMode(t *testing.T) {
-	// Locks the dry-run/audit contract for kubectl-pod-watch: the plan must
-	// stay byte-identical to the subprocess-mode golden
-	// (dry_run_from_devops_cwd), including the "kubectl ... get pods -o
-	// json" trace line, even with execution.modes.kubectl-pod-watch=library,
-	// since tracePodWatchAction only ever renders the trace and the watcher
-	// itself (watchReleasePods -> runKubectlGetPods) never runs until a real
-	// helm upgrade actually starts.
+	// Library mode must not change the dry-run trace: the watcher only runs once helm starts.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -32,14 +26,8 @@ func testDeployDryRunUnaffectedByKubectlPodWatchLibraryExecutionMode(t *testing.
 }
 
 func testDeployRealRunKubectlPodWatchLibraryExecutionModeReachesTheAPIServerDirectly(t *testing.T) {
-	// Proves the library path produces the same observable result as the
-	// subprocess path (a clean rollout logs the same summary line and lets
-	// helm finish) via a real client-go List against a fake API server
-	// instead of shelling out to kubectl. The kubectl stub fails loudly and
-	// distinctively only for the "get pods -o json" argv shape (the
-	// namespace-existence check deploy also runs still succeeds), so a
-	// fallback to the subprocess path for the watch surfaces as a
-	// recognizable failure instead of silently passing.
+	// The kubectl stub fails only for "get pods -o json", so a subprocess
+	// fallback surfaces as a recognizable failure.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -90,11 +78,6 @@ func testDeployRealRunKubectlPodWatchLibraryExecutionModeReachesTheAPIServerDire
 }
 
 func testDeployRealRunPodWatchLogsCleanRollout(t *testing.T) {
-	// Exercises the in-flight pod watcher started by DeployHelmChart.
-	// The kubectl stub returns a pod owned by this helm release with
-	// every container Running+Ready, so the watcher prints a single
-	// status line and lets helm finish naturally. Locks the dry-run
-	// trace's "watching pods" promise to a real-run summary line.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -118,13 +101,7 @@ func testDeployRealRunPodWatchLogsCleanRollout(t *testing.T) {
 }
 
 func testDeployRealRunPodWatchWaitsThroughImagePullBackoff(t *testing.T) {
-	// kubectl stub reports a pod with one container in ImagePullBackOff
-	// whose message is the generic "Back-off pulling image" (no permanent
-	// rejection). A slow/large pull legitimately cycles through this state,
-	// so the watcher must NOT abort: it keeps waiting and lets helm finish.
-	// helm exits 0 quickly to stand in for the pull eventually succeeding.
-	// Proves the "wait while the image is still pulling" contract and the
-	// "Pulling image (...)" status labelling.
+	// A generic "Back-off pulling image" is a slow pull, not a failure: keep waiting.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -151,21 +128,13 @@ func testDeployRealRunPodWatchWaitsThroughImagePullBackoff(t *testing.T) {
 }
 
 func testDeployRealRunReportsADeadlineThatExpiredWhileTheImageWasStillPulling(t *testing.T) {
-	// The reported outage: a cold pull of the runtime image outlasted the
-	// rollout wait, so the rollout was declared failed mid-download -- and
-	// because every runtime chart replaces its pod with the Recreate
-	// strategy, the previous pod was already gone and the environment was
-	// left running nothing at all. helm's own words are the same whether
-	// the rollout failed or was still working, so the fact that has to
-	// reach the operator is the pod watcher's: at the moment the wait
-	// expired, the new pod's image was still downloading.
+	// Runtime charts use Recreate, so a wait expiring mid-pull leaves nothing
+	// running; the operator must learn the image was still downloading.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
 	stubs := setup.Cwd + "/stubs"
 	fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{Stdout: imagePullBackOffPodJSON})
-	// helm outlasts enough polls for the watcher to observe the pull, then
-	// fails the way a rollout whose deadline expired does.
 	fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
 		`sleep 1`,
 		`printf '%s\n' 'Error: UPGRADE FAILED: resource Deployment/team-dev/team-devops not ready. status: InProgress, message: Available: 0/1' >&2`,
@@ -180,11 +149,7 @@ func testDeployRealRunReportsADeadlineThatExpiredWhileTheImageWasStillPulling(t 
 	}
 	out := normalize.Apply(result.Combined)
 	for _, want := range []string{
-		// The image, not only the container: the wait ending mid-pull is
-		// answered by a longer deploy.timeout when the image is genuinely
-		// still downloading, and by deploying the right image when the tag
-		// was never published -- and the container name alone cannot tell
-		// those apart.
+		// Name the image, not just the container: slow pull vs unpublished tag need it.
 		"team-devops-7d4b4c/erun-dind (ghcr.io/sophium/erun-dind:<VERSION>) was still pulling its image",
 		"this is the deploy's own timeout ending the rollout, not a container failure",
 		"the previous pod was already torn down and this environment is running no pod",
@@ -200,11 +165,7 @@ func testDeployRealRunReportsADeadlineThatExpiredWhileTheImageWasStillPulling(t 
 }
 
 func testDeployRealRunPodWatchAbortsOnPermanentImagePullFailure(t *testing.T) {
-	// kubectl stub reports a container in ErrImagePull whose message is a
-	// permanent registry rejection ("manifest unknown") — retrying will
-	// never succeed (typo'd/absent tag, bad auth). helm sleeps so the
-	// watcher fires first and kills it. Proves the "fail fast on a real
-	// failure" half of the pull-aware policy.
+	// "manifest unknown" is permanent, so the watcher must fail fast.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -228,10 +189,6 @@ func testDeployRealRunPodWatchAbortsOnPermanentImagePullFailure(t *testing.T) {
 }
 
 func testDeployRealRunPodWatchAbortsOnCrashloopAfterThreshold(t *testing.T) {
-	// kubectl stub reports a CrashLoopBackOff with restartCount above
-	// the threshold. The watcher kills helm and surfaces the last
-	// terminated message so the user sees why the container is
-	// crashing, not just helm's generic timeout.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -255,13 +212,8 @@ func testDeployRealRunPodWatchAbortsOnCrashloopAfterThreshold(t *testing.T) {
 }
 
 func testDeployRealRunPodWatchWaitsOutTheUnschedulableGracePeriod(t *testing.T) {
-	// kubectl stub reports a pod stuck PodScheduled=False/Unschedulable on
-	// every poll. A brief unschedulable window is normal (the scheduler
-	// re-evaluates on cluster changes), so the watcher must not abort on the
-	// first observation — only once the grace period elapses. The grace is
-	// shrunk via ERUN_DEPLOY_POD_WATCH_UNSCHEDULED_GRACE (the production
-	// default is 30s, too slow for a test) rather than asserting a wall-clock
-	// sleep tied to that default; see resolveUnscheduledGracePeriod.
+	// Brief unschedulability is normal; the 30s grace is shrunk via
+	// ERUN_DEPLOY_POD_WATCH_UNSCHEDULED_GRACE.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -373,9 +325,7 @@ const crashLoopPodJSON = `{
   ]
 }`
 
-// unschedulablePodJSON has no containerStatuses at all: the pod was never
-// admitted to a node, so the only place its failure reason lives is
-// status.conditions.
+// unschedulablePodJSON has no containerStatuses; the reason lives only in status.conditions.
 const unschedulablePodJSON = `{
   "items": [
     {

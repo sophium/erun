@@ -12,8 +12,6 @@ import (
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
-// agentTestApp is an orchestrator test app over a given fake Claude service,
-// recording every PTY launch so a test can see what the desktop attached to.
 type agentLaunches struct {
 	mu       sync.Mutex
 	agentIDs []string
@@ -74,13 +72,6 @@ func argValue(args []string, flag string) string {
 	return ""
 }
 
-// The defect: an orchestrator reopened after the operator's `/clear`
-// resumed the conversation derived from its id -- weeks-old history -- instead
-// of the one it had moved to, because the launch named a conversation and the
-// desktop could only guess which. Here the agent moves to a new conversation
-// under the same agent, the desktop goes away entirely, and a fresh desktop
-// reopens the orchestrator: it must attach to that same agent, and nothing it
-// runs may name a conversation for the agent to resume.
 func TestReopeningAfterAClearAttachesToTheAgentsCurrentConversation(t *testing.T) {
 	agents := newFakeClaudeAgents()
 	app, launches, _ := agentTestApp(t, agents)
@@ -93,8 +84,6 @@ func TestReopeningAfterAClearAttachesToTheAgentsCurrentConversation(t *testing.T
 	agentID := created[0].ID
 	agents.clear(agentID, "b4196e75-0000-4000-8000-000000000000")
 
-	// The desktop restarts: a new process over the same state, holding no
-	// session; the agent is still there.
 	app.shutdown(context.Background())
 	reopened := NewApp(app.deps)
 	t.Cleanup(func() { reopened.shutdown(context.Background()) })
@@ -110,8 +99,6 @@ func TestReopeningAfterAClearAttachesToTheAgentsCurrentConversation(t *testing.T
 	requireCreatedOnceNamingNoConversation(t, agents)
 }
 
-// requireCreatedOnceNamingNoConversation fails unless exactly one agent was
-// created, and nothing in its launch named a conversation for it to resume.
 func requireCreatedOnceNamingNoConversation(t *testing.T, agents *fakeClaudeAgents) {
 	t.Helper()
 	agents.mu.Lock()
@@ -127,8 +114,6 @@ func requireCreatedOnceNamingNoConversation(t *testing.T, agents *fakeClaudeAgen
 	}
 }
 
-// `claude attach <name>` matches part of a name, so the lookup is erun's own
-// exact match: an agent named erun-ui is not the erun orchestrator's.
 func TestAnAgentIsFoundByItsExactNameOnly(t *testing.T) {
 	agents := newFakeClaudeAgents(
 		claudeBackgroundAgent{ID: "11111111", PID: 1, Kind: "background", Name: "erun-ui", SessionID: "s1"},
@@ -149,8 +134,6 @@ func TestAnAgentIsFoundByItsExactNameOnly(t *testing.T) {
 	}
 }
 
-// Claude accepts two agents with the same name, and either could be the
-// orchestrator's; erun reports them rather than picking one.
 func TestTwoAgentsWithTheSameNameAreReportedNotGuessed(t *testing.T) {
 	agents := newFakeClaudeAgents(
 		claudeBackgroundAgent{ID: "11111111", PID: 1, Kind: "background", Name: "erun", SessionID: "s1"},
@@ -174,8 +157,6 @@ func TestTwoAgentsWithTheSameNameAreReportedNotGuessed(t *testing.T) {
 	}
 }
 
-// An agent erun did not create carries launch arguments erun cannot see or
-// change, so it is replaced -- on the conversation it was on, and said out loud.
 func TestAnAgentErunDidNotCreateIsRecreatedOnItsConversation(t *testing.T) {
 	agents := newFakeClaudeAgents(
 		claudeBackgroundAgent{ID: "07d0ffec", PID: 81118, Kind: "background", Name: "erun", SessionID: "186d2cd9-013a-4e0e-98cf-b76294806741"},
@@ -199,9 +180,6 @@ func TestAnAgentErunDidNotCreateIsRecreatedOnItsConversation(t *testing.T) {
 	}
 }
 
-// Moving effort to or from max changes a launch argument, which a background
-// agent only reads when it is created, so a restart recreates it -- on its
-// current, post-clear conversation -- and says so.
 func TestMovingEffortToMaxRecreatesTheAgentOnItsCurrentConversation(t *testing.T) {
 	agents := newFakeClaudeAgents()
 	app, launches, emits := agentTestApp(t, agents)
@@ -230,8 +208,6 @@ func TestMovingEffortToMaxRecreatesTheAgentOnItsCurrentConversation(t *testing.T
 	}
 }
 
-// Everything the settings file carries reaches the agent by stopping it and
-// attaching again: no recreation, no notice, the same agent on the new model.
 func TestARestartAppliesSettingsWithoutRecreatingTheAgent(t *testing.T) {
 	agents := newFakeClaudeAgents()
 	app, _, emits := agentTestApp(t, agents)
@@ -263,8 +239,6 @@ func TestARestartAppliesSettingsWithoutRecreatingTheAgent(t *testing.T) {
 	}
 }
 
-// A running agent keeps what it started with until it restarts, so a desktop
-// that reattaches to it reports the scope it was really started on.
 func TestReattachingARunningAgentReportsTheScopeItStartedWith(t *testing.T) {
 	agents := newFakeClaudeAgents()
 	app, _, _ := agentTestApp(t, agents)
@@ -285,7 +259,6 @@ func TestReattachingARunningAgentReportsTheScopeItStartedWith(t *testing.T) {
 	}
 }
 
-// Stop stops the agent and keeps it; Delete removes it and what erun kept for it.
 func TestStopKeepsTheAgentAndDeleteRemovesIt(t *testing.T) {
 	agents := newFakeClaudeAgents()
 	app, _, _ := agentTestApp(t, agents)
@@ -312,8 +285,6 @@ func TestStopKeepsTheAgentAndDeleteRemovesIt(t *testing.T) {
 	}
 }
 
-// An untrusted orchestrators folder is the operator's to fix, so the refusal
-// names the folder and the exact step, and the open fails instead of attaching.
 func TestAnUntrustedWorkspaceIsReportedWithItsRemedy(t *testing.T) {
 	agents := newFakeClaudeAgents()
 	_, err := parseClaudeAgentCreated("Workspace not trusted. Run `claude` in /Users/op/orchestrators once and accept the trust prompt, then retry.\n",
@@ -335,8 +306,6 @@ func TestAnUntrustedWorkspaceIsReportedWithItsRemedy(t *testing.T) {
 	}
 }
 
-// `claude --bg` may start its background service before naming the agent, so
-// the id is read from wherever the line naming it lands.
 func TestTheCreatedAgentIsReadFromAnyLineOfTheOutput(t *testing.T) {
 	out := "Starting the background service…\nbackgrounded · e4505af2 · erun\n  claude agents             list sessions\n"
 	id, err := parseClaudeAgentCreated(out, nil, "/o")
@@ -348,8 +317,6 @@ func TestTheCreatedAgentIsReadFromAnyLineOfTheOutput(t *testing.T) {
 	}
 }
 
-// The listing mixes interactive sessions in; only background agents are ever an
-// orchestrator's, and a stopped one is told apart by having no process.
 func TestTheAgentListingKeepsBackgroundAgentsOnly(t *testing.T) {
 	agents, err := parseClaudeBackgroundAgents([]byte(`[
 		{"pid":81118,"id":"07d0ffec","kind":"background","sessionId":"186d2cd9","name":"erun"},
@@ -364,9 +331,6 @@ func TestTheAgentListingKeepsBackgroundAgentsOnly(t *testing.T) {
 	}
 }
 
-// An orchestrator created before agents existed has its work in a conversation
-// the earlier scheme chose, so its first agent continues that one: the one the
-// operator attached by hand if any, else the one derived from its id.
 func TestAFirstAgentContinuesTheConversationOfTheEarlierScheme(t *testing.T) {
 	t.Run("derived", func(t *testing.T) {
 		agents := newFakeClaudeAgents()

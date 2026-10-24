@@ -14,8 +14,7 @@ import (
 )
 
 const (
-	// AWS temp creds default to a ~1h TTL; 45 min leaves headroom even when
-	// the pod's SDK caches creds in memory before re-reading the file.
+	// AWS temp creds default to ~1h; 45 min leaves headroom for in-pod SDK caching.
 	credentialRefreshInterval = 45 * time.Minute
 
 	credentialRefreshLeadTime = 5 * time.Minute
@@ -34,10 +33,8 @@ func (a *App) cloudCredentialsRefresherKey(selection uiSelection) string {
 	return strings.TrimSpace(selection.Tenant) + "/" + strings.TrimSpace(selection.Environment)
 }
 
-// startCloudCredentialsRefresherForSelection seeds an env's runtime pod with
-// temporary host credentials on the operator's behalf. Attaching an AWS cloud
-// alias is itself the opt-in, so no separate toggle gates it. Idempotent per
-// selection.
+// startCloudCredentialsRefresherForSelection pushes temporary host credentials to
+// the env's pod; an attached AWS alias is the opt-in. Idempotent per selection.
 func (a *App) startCloudCredentialsRefresherForSelection(selection uiSelection) {
 	selection = normalizeSelection(selection)
 	alias, result, ok := a.resolveCloudCredentialsRefreshTarget(selection)
@@ -73,20 +70,12 @@ func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (strin
 	if err != nil {
 		return "", config.OpenResult{}, false
 	}
-	// Deliberately not gated on env type. Where the worktree lives says nothing
-	// about whose identity the pod should act as, and the pod is in the cluster
-	// for every type — so it can only reach AWS through the profile pushed here,
-	// which the chart wires into AWS_PROFILE whenever an AWS alias is attached.
-	// CloudProviderAlias is the legacy scalar that only ever holds an AWS alias;
-	// non-AWS aliases (Cloudflare) live in CloudProviderAliases, so a
-	// Cloudflare-only env correctly reads empty here. Cloudflare credentials ship
-	// at deploy time via a chart Secret minted by the erun binary, not this timer.
+	// Not gated on env type: every pod reaches AWS only through the profile pushed here.
+	// CloudProviderAlias holds only AWS aliases; Cloudflare ships at deploy time instead.
 	if strings.TrimSpace(envConfig.CloudProviderAlias) == "" {
 		return "", config.OpenResult{}, false
 	}
-	// Defense in depth: even if a Cloudflare alias somehow landed in the scalar,
-	// the strict provider-type gate keeps the AWS-only credential push from
-	// trying to export temporary credentials from a token-based provider.
+	// Defense in depth: never export temporary credentials from a token-based provider.
 	provider, err := cloud.ResolveCloudProvider(a.deps.store, envConfig.CloudProviderAlias)
 	if err != nil || provider.Provider != config.CloudProviderAWS {
 		return "", config.OpenResult{}, false
@@ -101,9 +90,7 @@ func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (strin
 	return envConfig.CloudProviderAlias, result, true
 }
 
-// stopCloudCredentialsRefresherForSelection stops the refresher and clears the
-// in-pod credentials so they do not linger after opt-out. Safe to call when
-// none is running.
+// stopCloudCredentialsRefresherForSelection stops the refresher and clears the in-pod credentials.
 func (a *App) stopCloudCredentialsRefresherForSelection(selection uiSelection) {
 	selection = normalizeSelection(selection)
 	key := a.cloudCredentialsRefresherKey(selection)
@@ -138,8 +125,7 @@ func (a *App) stopAllCloudCredentialsRefreshersLocked() {
 	}
 }
 
-// reconcileCloudCredentialsRefresherForSelection restarts the refresher to match
-// a saved setting so the change takes effect without re-opening the env.
+// reconcileCloudCredentialsRefresherForSelection applies a saved setting without re-opening the env.
 func (a *App) reconcileCloudCredentialsRefresherForSelection(selection uiSelection, enabled bool) {
 	a.stopCloudCredentialsRefresherForSelection(selection)
 	if enabled {

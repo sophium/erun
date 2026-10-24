@@ -16,10 +16,6 @@ type PathResolution =
   | { readonly activatable: true; readonly open: () => Promise<void> }
   | { readonly activatable: false; readonly reason: string };
 
-// This desktop's own opener never resolves a pod path against the host --
-// this branch classifying the tab as host-side means it genuinely runs on the
-// operator's machine (the Local tab, an orchestrator, or the contribute
-// shell), so its own printed paths are real host paths.
 function hostResolution(text: string): PathResolution {
   return {
     activatable: true,
@@ -53,12 +49,8 @@ function resolveMatch(origin: TerminalOrigin, match: PathMatch): Promise<PathRes
   });
 }
 
-// bufferColumnForIndex maps a 0-based string offset from IBufferLine's
-// translateToString(true) back onto a buffer column, mirroring the approach
-// @xterm/addon-web-links's LinkComputer uses internally (that helper is not
-// part of the addon's public API, so this is a single-line-only version --
-// a path that wraps across terminal rows is not matched, a documented
-// limitation).
+// bufferColumnForIndex mirrors addon-web-links' private LinkComputer helper;
+// paths wrapping across rows are not matched.
 function bufferColumnForIndex(terminal: Terminal, line: IBufferLine, index: number): number | null {
   const cell = terminal.buffer.active.getNullCell();
   let consumed = 0;
@@ -100,11 +92,8 @@ function buildLink(
   };
 }
 
-// createPathLinkProvider registers absolute file paths as terminal links,
-// resolved against the tab's own filesystem: a host-side tab opens the path
-// directly, a pod-side tab is mapped onto its environment's host mirror (or
-// left unresolved with a stated reason) -- never resolved against a
-// same-named host file.
+// createPathLinkProvider maps pod-side paths onto the environment's host mirror,
+// never onto a same-named host file.
 export function createPathLinkProvider(
   terminal: Terminal,
   deps: PathLinkProviderDeps,

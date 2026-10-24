@@ -9,17 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
-// computeObserveDrift diffs the live release and the pods it produced against
-// what the env config records, so a caller sees a named disagreement instead
-// of two dumps it must compare by eye. This is the read the orchestrator
-// contract requires before any env-shaping deploy: "read the live release and
-// diff it against the plan".
-//
-// The two empty answers are deliberately different values: a run that read
-// (release non-nil) returns a non-nil, possibly empty slice, which serializes
-// as `[]` and can only mean "compared, nothing disagreed", while a dry run
-// returns nil, which serializes as `null` and means "not determined". See
-// ObserveResult.Drift for why a consumer cannot be left to guess between them.
+// computeObserveDrift diffs the live release and its pods against the env config. It returns
+// non-nil (possibly empty) after a read and nil in dry-run; see ObserveResult.Drift.
 func computeObserveDrift(req config.ShellLaunchParams, release *clusterread.ObservedHelmRelease, pods []ObservedPod) []string {
 	if release == nil {
 		return nil
@@ -28,14 +19,8 @@ func computeObserveDrift(req config.ShellLaunchParams, release *clusterread.Obse
 	findings := []string{}
 	recordedVersion := strings.TrimSpace(req.RuntimeVersion)
 
-	// release.Found is only false when the helm read itself failed (see
-	// ObservedHelmRelease's doc comment); release.Error then distinguishes a
-	// confirmed absence from a read that could not tell — a caller must never
-	// see the same "not found" line for both. Either way, runningImageDrift
-	// and runtimePodDrift below still run: their own inputs (release fields
-	// populated only on a successful read) make them no-ops here today, but
-	// nothing about this branch should stop them from evaluating whatever
-	// they can.
+	// Found is false only when the helm read failed; Error distinguishes confirmed absence from
+	// an unreadable release. The other drift checks still run.
 	switch {
 	case !release.Found && release.Error != "":
 		findings = append(findings, unreadableReleaseDrift(req, release, recordedVersion)...)
@@ -87,12 +72,7 @@ func foundReleaseDrift(req config.ShellLaunchParams, release *clusterread.Observ
 	return findings
 }
 
-// runningImageDrift flags any release-recorded imageOverrides entry whose
-// component name matches a running container by name but not by image — the
-// exact class the runtime chart's own container-naming convention makes
-// possible (a container is named after its imageOverrides key, e.g.
-// "erun-devops"): a helm release can name one image while the cluster runs
-// another, hand-patched one.
+// runningImageDrift flags an imageOverrides entry whose same-named container runs another image.
 func runningImageDrift(release *clusterread.ObservedHelmRelease, pods []ObservedPod) []string {
 	if len(release.ImageOverrides) == 0 {
 		return nil
@@ -126,16 +106,7 @@ func runningImageDrift(release *clusterread.ObservedHelmRelease, pods []Observed
 	return findings
 }
 
-// runtimePodDrift compares the env config's recorded runtime pod sizing
-// against what the release actually rendered. Both sides are the release's
-// own record of intent, not a live cgroup read, so this stays a plain
-// `helm status` comparison rather than reaching into the pod. Unlike deploy,
-// which must resolve a concrete value to pass to helm and so normalizes an
-// unset field to NormalizeRuntimePodResources' package default, a config field
-// left empty here asserts nothing about the environment's shape — the same
-// reasoning the recordedVersion/runtimeImage checks above already apply — so
-// each field compares only when the config actually recorded one, instead of
-// diffing the release against a manufactured default nobody configured.
+// runtimePodDrift compares only fields the env config recorded, never a manufactured default.
 func runtimePodDrift(req config.ShellLaunchParams, release *clusterread.ObservedHelmRelease) []string {
 	if release.RuntimePod == (config.RuntimePodResources{}) {
 		return nil

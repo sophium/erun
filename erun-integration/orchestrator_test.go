@@ -13,25 +13,9 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// TestOrchestrator locks the CLI writers for orchestrator definitions:
-// OrchestratorEnvConfig.Role (`erun orchestrator set-role`), the platform
-// alias (`set-alias`) and the launch settings (`set-gateway`, `set-model`,
-// `set-effort`, see testOrchestratorLaunchSettings). The set-role scenarios
-// cover that writer's dry-run trace, real-run persistence, and error paths,
-// reusing list_test.go's seedOrchestratorsWithEnvRoles so both commands seed
-// and read the same on-disk shape. The desktop dialog's own writer is covered by
-// erun-ui/orchestrator_test.go and erun-ui/playwright/tests/
-// orchestrator-env-role.spec.ts; this suite has no Wails runtime to drive it
-// from.
-//
-// set-role also re-checks the requested role against the linked
-// environment's real type (config.OrchestratorEnvRoleAllowed), the same
-// gate the desktop's link/edit dialog enforces, so every scenario below that
-// reaches the gate seeds a real environment config via
-// fixture.SeedTenantEnv/SeedRuntimeTenantEnv rather than only the
-// orchestrator's own link entry. There is no MCP tool for this operation
-// (grep erun-mcp for "orchestrator" or "set-role" -- neither exists), and none
-// for any other writer here, so there is no second transport to keep in sync.
+// TestOrchestrator locks the orchestrator definition writers (set-role, set-alias, launch
+// settings). set-role re-checks the role against the linked env's real type, so scenarios
+// that reach that gate seed a real environment config.
 func TestOrchestrator(t *testing.T) {
 	t.Parallel()
 	t.Run("help", testOrchestratorHelp)
@@ -140,11 +124,7 @@ func testOrchestratorSetRoleRealRunPersistsAndIsVisibleInList(t *testing.T) {
 	golden.Equal(t, "orchestrator/set_role_real_run_persists_and_is_visible_in_list_erun_list", normalize.Apply(listResult.Combined))
 }
 
-// set_role_real_run_accepts_the_runtime_role locks the third role value
-// on this writer: "runtime" parses and persists exactly like "code" and
-// "build" above. team/dev is a local-agent environment, and
-// OrchestratorEnvRoleAllowed permits any role -- including runtime -- for
-// that type, so the environment-type gate does not block this.
+// team/dev is a local-agent env, which allows any role including runtime.
 func testOrchestratorSetRoleRealRunAcceptsTheRuntimeRole(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -247,14 +227,8 @@ func testOrchestratorSetRoleUnlinkedEnvironmentFails(t *testing.T) {
 	golden.Equal(t, "orchestrator/set_role_unlinked_environment_fails", normalize.Apply(result.Combined))
 }
 
-// set_role_refuses_role_not_allowed_for_the_linked_environments_type locks
-// the environment-type gate on this writer: a runtime-type environment
-// only ever accepts the runtime role (config.OrchestratorEnvRoleAllowed),
-// the same gate the desktop's link/edit dialog enforces, and set-role
-// refuses to walk past it on an already-linked entry. The refusal names
-// the environment's type, the role that was requested, and the escape
-// hatch (set it to runtime instead), the same information the desktop's
-// link-time refusal gives.
+// A runtime-type env accepts only the runtime role; the refusal names the type, the role,
+// and the escape hatch.
 func testOrchestratorSetRoleRefusesRoleNotAllowedForTheLinkedEnvironmentsType(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "frs", "prod")
@@ -282,13 +256,7 @@ func testOrchestratorSetRoleRefusesRoleNotAllowedForTheLinkedEnvironmentsType(t 
 	}
 }
 
-// set_role_refuses_clearing_role_on_a_runtime_type_environment locks the
-// deliberate exception to "clearing must always work": a runtime-type
-// environment has no worktree to review and no in-pod agent to delegate
-// to, so undeclared is exactly as illegal for it as code or build --
-// config.OrchestratorEnvRoleAllowed(runtime, "") is false, the same as
-// for any other non-runtime role. "none" is only ever a clear escape for
-// a type that has one to begin with.
+// A runtime-type env cannot be left undeclared either: "none" is not an escape for it.
 func testOrchestratorSetRoleRefusesClearingRoleOnARuntimeTypeEnvironment(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "frs", "prod")
@@ -308,9 +276,6 @@ func testOrchestratorSetRoleRefusesClearingRoleOnARuntimeTypeEnvironment(t *test
 	golden.Equal(t, "orchestrator/set_role_refuses_clearing_role_on_a_runtime_type_environment", normalize.Apply(result.Combined))
 }
 
-// set_role_real_run_accepts_the_runtime_role_on_a_runtime_type_environment
-// proves the one legal pairing a runtime-type environment has actually
-// still sets -- the gate blocks every *other* role, not this one.
 func testOrchestratorSetRoleRealRunAcceptsTheRuntimeRoleOnARuntimeTypeEnvironment(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "frs", "prod")
@@ -338,18 +303,8 @@ func testOrchestratorSetRoleRealRunAcceptsTheRuntimeRoleOnARuntimeTypeEnvironmen
 	}
 }
 
-// set_role_refuses_the_runtime_role_on_a_host_environment is this gate's
-// other refused-by-type case, and the mirror image of the runtime pair
-// above: a host environment is a directory on this machine with no pod and
-// no cluster at all, so the runtime role -- which means the orchestrator
-// operates the environment directly, deploy, pin, observe -- has nothing to
-// act on, and every one of those verbs refuses a host env outright
-// (config.OrchestratorEnvRoleAllowed(host, runtime) is false). Offering
-// it would promise a relationship the link cannot deliver and the mismatch
-// would surface only later, in the orchestrator session, as an environment
-// tool that never works. The refusal names the type and the escape hatch
-// the same way the runtime-type refusal does, and the persisted role is
-// left untouched.
+// A host env has nothing for the runtime role to operate, so it is refused and the
+// persisted role is untouched.
 func testOrchestratorSetRoleRefusesTheRuntimeRoleOnAHostEnvironment(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedHostTenantEnv(t, setup, "frs", "workstation")
@@ -377,13 +332,7 @@ func testOrchestratorSetRoleRefusesTheRuntimeRoleOnAHostEnvironment(t *testing.T
 	}
 }
 
-// set_role_real_run_accepts_a_non_runtime_role_on_a_host_environment proves
-// the refusal above is specific to the runtime role rather than a blanket
-// "host environments cannot be linked": a host env is a working link that
-// an orchestrator reviews in place, so every other role -- including
-// undeclared -- is legal for it, and the write actually lands. Without this
-// paired with the refusal, a gate that refused *everything* for host would
-// satisfy the refusal test and still be wrong.
+// Pairs with the refusal above so a gate refusing everything for host would fail.
 func testOrchestratorSetRoleRealRunAcceptsANonRuntimeRoleOnAHostEnvironment(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedHostTenantEnv(t, setup, "frs", "workstation")
@@ -411,13 +360,7 @@ func testOrchestratorSetRoleRealRunAcceptsANonRuntimeRoleOnAHostEnvironment(t *t
 	}
 }
 
-// set_role_recovers_a_preexisting_invalid_pairing locks the decision for
-// a config written before this gate existed: role=code persisted against a
-// runtime-type environment, which the desktop's link gate refuses to create
-// but an older config can still carry.
-// The gate does not special-case "already invalid" -- it checks the
-// requested role the same way regardless of what was there before -- so
-// setting a legal role succeeds and clears the bad pairing, with no separate recovery path needed.
+// A pre-gate config may carry role=code on a runtime env; setting a legal role clears it.
 func testOrchestratorSetRoleRecoversAPreexistingInvalidPairing(t *testing.T) {
 	setup := env.New(t)
 	fixture.SeedRuntimeTenantEnv(t, setup, "frs", "prod")
@@ -445,8 +388,6 @@ func testOrchestratorSetRoleRecoversAPreexistingInvalidPairing(t *testing.T) {
 	}
 }
 
-// runOrchestratorScenario runs args, requires the expected outcome, and
-// compares the normalized output against testdata/orchestrator/<name>.txt.
 func runOrchestratorScenario(t *testing.T, setup env.Setup, args []string, succeed bool, name string) {
 	t.Helper()
 	result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -473,16 +414,8 @@ func requireOrchestratorsBlockLacks(t *testing.T, setup env.Setup, unwanted stri
 	}
 }
 
-// orchestratorsBlock returns the root config's top-level "orchestrators:"
-// block, up to the next top-level key.
-//
-// The writers' scenarios assert on what was persisted, and a whole-file
-// substring check cannot tell those assertions apart from other blocks'
-// keys: every set-alias scenario seeds *cloudproviders* entries carrying an
-// `alias:` key of their own, and the gateway catalog the launch-setting
-// scenarios seed carries `defaultmodel:` and `models:`, which a save writes
-// back after the orchestrators. Reading only the orchestrators block is what
-// makes the assertion about the write.
+// orchestratorsBlock returns the top-level "orchestrators:" block, so assertions
+// ignore the `alias:` and model keys that cloudproviders and the gateway catalog also carry.
 func orchestratorsBlock(t testing.TB, setup env.Setup) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))

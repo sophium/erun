@@ -65,12 +65,9 @@ test('a skipped fit is retried and succeeds once the container is measurable aga
     },
   };
 
-  // First attempt: the container is still mid-transition, near-zero.
   assert.equal(safeFit(fitAddon as never), false);
   assert.equal(fitAddon.fitCount, 0);
 
-  // The transition settles at a real size; the next attempt (the same
-  // resize path retrying on the next observed size change) fits normally.
   proposed = { cols: 132, rows: 42 };
   assert.equal(safeFit(fitAddon as never), true);
   assert.equal(fitAddon.fitCount, 1);

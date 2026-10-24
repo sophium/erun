@@ -22,12 +22,7 @@ stringData:
   token: "s3cret"
 `
 
-// The annotation bytes are read back verbatim as the next apply's merge
-// original, so they are a contract with kubectl, not an implementation
-// detail: kubectl records the manifest with sorted keys (it carries an
-// unstructured map, not a typed struct), a forced annotations map, and the
-// trailing newline its serializer appends. Any of those three drifting
-// silently changes every subsequent three-way merge.
+// The annotation is the next merge's original, so its bytes must match kubectl's exactly.
 func TestAnnotatedApplyManifestMatchesKubectlsRecordedBytes(t *testing.T) {
 	document, name, err := decodeSecretManifest(probeSecretManifest)
 	if err != nil {
@@ -54,8 +49,6 @@ func TestAnnotatedApplyManifestMatchesKubectlsRecordedBytes(t *testing.T) {
 	}
 }
 
-// An annotation the manifest carries of its own must survive; only the
-// last-applied key is replaced, exactly as kubectl does it.
 func TestAnnotatedApplyManifestKeepsTheManifestsOwnAnnotations(t *testing.T) {
 	document, _, err := decodeSecretManifest(`apiVersion: v1
 kind: Secret
@@ -85,11 +78,6 @@ type: Opaque
 	}
 }
 
-// The library path is wired only to Secret call sites. A document it cannot
-// identify must be refused, never applied on a guess -- and the two shapes the
-// other apply call sites use (a multi-document manifest, a custom resource)
-// are exactly what would arrive if someone widened the operation without
-// widening the implementation.
 func TestDecodeSecretManifestRefusesWhatItCannotIdentify(t *testing.T) {
 	for name, manifest := range map[string]string{
 		"multi_document_resource_quota": "apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: erun-quota\n---\napiVersion: v1\nkind: LimitRange\nmetadata:\n  name: erun-limits\n",
@@ -106,10 +94,6 @@ func TestDecodeSecretManifestRefusesWhatItCannotIdentify(t *testing.T) {
 	}
 }
 
-// A first apply has no annotation to merge against, so the patch must carry
-// the whole manifest; a re-apply that changes one field must not resend the
-// rest. This is the behaviour that distinguishes a three-way merge from a
-// wholesale replace, which is what a naive Update would have done.
 func TestThreeWaySecretMergePatchSendsOnlyWhatChanged(t *testing.T) {
 	document, _, err := decodeSecretManifest(probeSecretManifest)
 	if err != nil {
@@ -131,9 +115,7 @@ func TestThreeWaySecretMergePatchSendsOnlyWhatChanged(t *testing.T) {
 		Type: corev1.SecretTypeOpaque,
 		Data: map[string][]byte{"token": []byte("s3cret")},
 	}
-	// Re-applying an unchanged manifest against a live object whose recorded
-	// original already carries the annotation still rewrites the annotation
-	// (it now embeds the previous one), but must not touch the label or type.
+	// The annotation is rewritten, but the label and type must not be.
 	patch, err := threeWaySecretMergePatch(live, modified)
 	if err != nil {
 		t.Fatalf("patch: %v", err)
@@ -142,7 +124,6 @@ func TestThreeWaySecretMergePatchSendsOnlyWhatChanged(t *testing.T) {
 		t.Fatalf("an unchanged label must not be resent: %s", patch)
 	}
 
-	// A label change must appear in the patch.
 	changed := strings.Replace(probeSecretManifest, "erun-init", "erun-deploy", 1)
 	changedDocument, _, err := decodeSecretManifest(changed)
 	if err != nil {
@@ -161,9 +142,6 @@ func TestThreeWaySecretMergePatchSendsOnlyWhatChanged(t *testing.T) {
 	}
 }
 
-// The operation defaults to subprocess like every other one on the switch, and
-// doctor must be able to report it -- an operator who flipped it needs
-// confirmation it took, not faith.
 func TestSecretApplyExecutionModeDefaultsToSubprocessAndIsReported(t *testing.T) {
 	if got := configpkg.ExecutionModeFor(configpkg.ERunConfig{}, kubectlSecretApplyExecutionOperation); got != configpkg.ExecutionModeSubprocess {
 		t.Fatalf("got %q, want %q", got, configpkg.ExecutionModeSubprocess)

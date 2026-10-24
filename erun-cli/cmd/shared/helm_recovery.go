@@ -48,18 +48,8 @@ func WrapHelmDeployWithReleaseRecovery(promptRunner PromptRunner, deploy deployp
 	}
 }
 
-// confirmHelmReleaseRecovery answers the one prompt a locked release raises.
-//
-// A reader that went away is not an answer, and it is not a diagnosis either:
-// a caller with no terminal (an orchestrator, a CI job, an agent, the desktop's
-// piped shell) reads stdin at EOF, so letting the prompt's own EOF error
-// replace the pending-release error turned "this release is locked, here is how
-// to clear it" into a bare "EOF" -- a deploy that could not proceed reporting
-// nothing an operator can act on. The pending error is returned instead (the
-// caller re-reports it), with one line naming the step that did not run and how
-// to run it without a prompt. `erun doctor` draws the same distinction for its
-// own recovery prompts (see doctorConfirm); a real prompt failure still
-// propagates.
+// confirmHelmReleaseRecovery answers the locked-release prompt. On EOF it returns the
+// pending error plus a hint, not a bare "EOF"; real prompt failures still propagate.
 func confirmHelmReleaseRecovery(run PromptRunner, pending *deploypkg.HelmReleasePendingOperationError, stderr io.Writer) (bool, error) {
 	prompt := promptui.Prompt{
 		Label:     helmReleaseRecoveryPromptLabel(pending),
@@ -67,7 +57,6 @@ func confirmHelmReleaseRecovery(run PromptRunner, pending *deploypkg.HelmRelease
 		Default:   "y",
 	}
 
-	// Non-interactive / CI callers auto-accept recovery without a TTY.
 	if IsTrueishEnv("ERUN_AUTO_RECOVER_HELM") {
 		return true, nil
 	}
@@ -91,10 +80,7 @@ func confirmHelmReleaseRecovery(run PromptRunner, pending *deploypkg.HelmRelease
 	return strings.EqualFold(strings.TrimSpace(result), "y"), nil
 }
 
-// reportHelmRecoveryPromptUnanswered names the step that did not run and the
-// command that runs it without a prompt. The pending error the caller re-reports
-// carries the same remedy; this line is what tells a reader *why* the recovery
-// they were not asked about is not happening.
+// reportHelmRecoveryPromptUnanswered explains why recovery was skipped and how to run it without a prompt.
 func reportHelmRecoveryPromptUnanswered(stderr io.Writer, pending *deploypkg.HelmReleasePendingOperationError) {
 	if stderr == nil {
 		return

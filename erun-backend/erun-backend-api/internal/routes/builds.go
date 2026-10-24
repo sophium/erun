@@ -16,9 +16,7 @@ import (
 )
 
 type BuildRepository interface {
-	// Get takes the caller's tenant alongside the build id: builds is
-	// tenant-owned and erun_operations' RLS policy is unconditional, so an
-	// id-only lookup would answer an OPERATIONS caller with a stranger's build.
+	// Get is tenant-scoped because erun_operations' RLS policy is unconditional.
 	Get(ctx context.Context, tenantID, buildID string) (model.Build, error)
 	List(ctx context.Context, filter apirepository.BuildFilter) ([]model.Build, error)
 	ListPage(ctx context.Context, filter apirepository.BuildListFilter) (apirepository.BuildPage, error)
@@ -75,20 +73,9 @@ func (r BuildRoutes) createBuild(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusCreated, build)
 }
 
-// requireEnvironment confirms a caller-supplied environmentId names one of
-// the caller's own environments before a build is accepted against it, the
-// same check jobs/ai-sessions/environment-events already run before acting
-// on an environment id. EnvironmentID is empty for a review-linked build
-// that reports no environment, which is a real case rather than an unknown
-// id, so it is let through and the build's own identity rules decide.
-//
-// The lookup is row-level-security scoped, so another tenant's environment
-// id and an id that exists nowhere are both simply not-found and are
-// answered identically. That indistinguishability is the point: the row this
-// build would land in carries the caller's own tenant, so row-level security
-// never objects; without this check a created build versus a refusal on this
-// route would report whether an id existed in *any* tenant, to any tenant
-// user.
+// requireEnvironment refuses an environmentId the caller's tenant cannot see,
+// answering cross-tenant and nonexistent ids identically so the route never
+// reveals whether an id exists. An empty id passes.
 func (r BuildRoutes) requireEnvironment(ctx context.Context, environmentID string) error {
 	if strings.TrimSpace(environmentID) == "" {
 		return nil
@@ -97,11 +84,7 @@ func (r BuildRoutes) requireEnvironment(ctx context.Context, environmentID strin
 	return err
 }
 
-// createUnattachedBuild is POST /v1/builds: an ordinary `erun build`
-// self-reporting outside any review. ReviewID is always cleared
-// regardless of what the body carries -- a review-linked build is reported
-// through the review-nested route above, never through this one, so there is
-// exactly one way to report each kind of build.
+// createUnattachedBuild is POST /v1/builds; ReviewID is always cleared.
 func (r BuildRoutes) createUnattachedBuild(w http.ResponseWriter, req *http.Request) {
 	var build model.Build
 	if err := decodeJSON(req, &build); err != nil {
@@ -125,9 +108,7 @@ func (r BuildRoutes) createUnattachedBuild(w http.ResponseWriter, req *http.Requ
 	writeJSON(w, http.StatusCreated, build)
 }
 
-// normalizeReportedBuildKind defaults an omitted kind to RECORDED and refuses
-// any other: every build is written as RECORDED, and an unrecognized kind is
-// refused rather than silently coerced.
+// normalizeReportedBuildKind defaults an omitted kind to RECORDED and refuses others.
 func normalizeReportedBuildKind(build *model.Build) error {
 	if build.Kind == "" {
 		build.Kind = model.BuildKindRecorded
@@ -143,10 +124,7 @@ type buildsPageResponse struct {
 	NextCursor string        `json:"nextCursor,omitempty"`
 }
 
-// listAllBuilds is GET /v1/builds: the tenant-wide, paginated build history
-// covering both review-linked and unattached builds -- unlike the
-// review-nested list above, which is naturally bounded to one review and
-// stays unpaginated.
+// listAllBuilds is GET /v1/builds, the paginated tenant-wide build history.
 func (r BuildRoutes) listAllBuilds(w http.ResponseWriter, req *http.Request) {
 	filter, err := parseBuildListFilter(req.URL.Query())
 	if err != nil {
@@ -207,9 +185,7 @@ func parseBuildListTime(value string) (time.Time, error) {
 	return parsed, nil
 }
 
-// writeBuildError gives builds.md's documented business codes their exact
-// machine code; every other failure falls through to the generic
-// status-derived code.
+// writeBuildError maps builds.md's documented business codes.
 func writeBuildError(w http.ResponseWriter, req *http.Request, err error) {
 	var invalidCommitID *service.InvalidCommitIDError
 	if errors.As(err, &invalidCommitID) {
@@ -240,8 +216,6 @@ func (r BuildRoutes) getBuild(w http.ResponseWriter, req *http.Request) {
 		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
-	// A build read through this route is always the caller's own, so a
-	// cross-tenant build id answers 404 exactly as an id that names nothing.
 	build, err := r.builds.Get(req.Context(), securityContext.TenantID, req.PathValue("build_id"))
 	if err != nil {
 		writeRepositoryError(w, req, err)

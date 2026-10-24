@@ -17,14 +17,8 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
-// The thread-identity invariants — one root per (commit, file, line), a
-// reply's file must match its root's, only the root's status is settable,
-// only the root's own creator may flip it — live in erun_validate_comments,
-// so they are exercised against a real migrated PostgreSQL rather than a fake
-// that agrees with itself.
+// Thread-identity invariants live in erun_validate_comments, so these run against real PostgreSQL.
 
-// testCommitID is a well-formed 40-character lowercase hex commit ID,
-// matching the format CommentService.PrepareCreate requires.
 const testCommitID = "0123456789abcdef0123456789abcdef01234567"
 
 type commentsFixture struct {
@@ -106,9 +100,6 @@ func (f commentsFixture) createReply(ctx context.Context, parentCommentID, fileP
 	return f.comments.Create(ctx, prepared)
 }
 
-// TestCommentRootCommentsOnSameLineDifferentFilesBothSucceed checks that
-// file_path is part of a comment's identity, so root comments on the same
-// line of different files do not collide.
 func TestCommentRootCommentsOnSameLineDifferentFilesBothSucceed(t *testing.T) {
 	f := commentsDatabase(t)
 
@@ -123,8 +114,6 @@ func TestCommentRootCommentsOnSameLineDifferentFilesBothSucceed(t *testing.T) {
 	}
 }
 
-// TestCommentReplyRecordsOwnAuthor proves a reply's creator_user_id is the
-// replying user, not empty.
 func TestCommentReplyRecordsOwnAuthor(t *testing.T) {
 	f := commentsDatabase(t)
 
@@ -140,9 +129,6 @@ func TestCommentReplyRecordsOwnAuthor(t *testing.T) {
 	}
 }
 
-// TestCommentReplyToDifferentFileIsRefused proves a reply resolves to its
-// root by the full (commit, file, line) address: a reply whose file
-// disagrees with its parent's is refused, not silently attached.
 func TestCommentReplyToDifferentFileIsRefused(t *testing.T) {
 	f := commentsDatabase(t)
 
@@ -155,10 +141,6 @@ func TestCommentReplyToDifferentFileIsRefused(t *testing.T) {
 	}
 }
 
-// TestCommentOnlyRootCreatorCanCloseThread covers three rules at once: the
-// root author can close a thread that contains replies from other users, a
-// reply's own status is not separately settable, and a non-creator cannot
-// close the root either.
 func TestCommentOnlyRootCreatorCanCloseThread(t *testing.T) {
 	f := commentsDatabase(t)
 
@@ -182,8 +164,6 @@ func TestCommentOnlyRootCreatorCanCloseThread(t *testing.T) {
 	}
 }
 
-// TestCommentCreateRequiresNonEmptyBody proves body validation is enforced
-// and surfaces as a client error, not a bare 500.
 func TestCommentCreateRequiresNonEmptyBody(t *testing.T) {
 	f := commentsDatabase(t)
 
@@ -192,9 +172,7 @@ func TestCommentCreateRequiresNonEmptyBody(t *testing.T) {
 	}
 }
 
-// commentsTenantFixture seeds one tenant of tenantType with one user and one
-// review, for the cross-tenant scoping test below, which needs
-// two independent tenants rather than commentsDatabase's single shared one.
+// commentsTenantFixture seeds an independent tenant with one user and one review.
 func commentsTenantFixture(t *testing.T, db *sql.DB, label, tenantType string) (ctx context.Context, comments *repository.CommentRepository, reviewID string) {
 	t.Helper()
 	suffix := time.Now().Format("20060102150405.000000")
@@ -227,10 +205,6 @@ func commentsTenantFixture(t *testing.T, db *sql.DB, label, tenantType string) (
 	return ctx, comments, review.ReviewID
 }
 
-// TestCommentListScopesToTheOperationsCallersOwnTenant pins the failure
-// scenario directly: an OPERATIONS caller's List must not include a stranger
-// tenant's comments even though erun_operations' RLS policy makes them
-// visible too.
 func TestCommentListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)

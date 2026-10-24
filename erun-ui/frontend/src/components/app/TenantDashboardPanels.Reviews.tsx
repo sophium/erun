@@ -1,6 +1,3 @@
-// Reviews and merge-queue panels, split out of TenantDashboardPanels.tsx
-// because that file crossed eslint's 500-line max-lines cap. The two tabs
-// still share PanelBody and TenantDashboardData from the main file.
 import { Button, cn, EmptyState, StatusBadge, TabsContent } from 'erun-kit';
 import { LoaderCircle, Plus } from 'lucide-react';
 import * as React from 'react';
@@ -53,9 +50,6 @@ import {
   ReviewStatusFilterControl,
 } from './TenantDashboardPanels.ReviewFilter';
 
-// ReviewsPanel is the review object's own home: status, branches, and — via
-// each row — its builds, comment threads, and merge-queue position. The
-// merge-queue tab stays a queue-shaped view of the same reviews.
 export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.ReactElement {
   const dispatch = useAppDispatch();
   const reviewFilter = useAppSelector((state) => state.tenantDashboard.reviewFilter);
@@ -97,11 +91,6 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
   );
 }
 
-// ReviewsFilterControls is the Reviews tab's filter row: the authorship chips
-// (answered by the platform) and the status chips (narrowed locally, see
-// ReviewFilterState.statuses for why). Splitting them out keeps ReviewsPanel
-// itself inside eslint's complexity budget, and keeps every filter change in
-// one place.
 function ReviewsFilterControls({
   data,
   reviews,
@@ -136,16 +125,8 @@ function ReviewsFilterControls({
   );
 }
 
-// ReviewsEmptyState keeps "nothing exists yet" and "nothing matches this
-// filter" visually and textually distinct, per the repo's three-empty-states
-// rule — a filtered zero must not read as "this tenant has no reviews".
-//
-// The "nothing exists yet" body names two ways to open a review, so it may
-// only do that for a caller who has both: NewReviewAction renders a permission
-// notice in the button's place otherwise, and the CLI's `erun review create`
-// posts the same route canCreateReview is read from, so a refused caller is
-// refused there too. A caller without the write is pointed at the notice
-// beside this empty state instead of at either route.
+// ReviewsEmptyState keeps "nothing exists" and "nothing matches this filter"
+// distinct, and names create routes only to a caller allowed to use them.
 function ReviewsEmptyState({
   filter,
   canCreateReview,
@@ -192,9 +173,7 @@ function ReviewsEmptyState({
   );
 }
 
-// NewReviewAction degrades by permission: the button renders only when the
-// caller may create a review, and a caller who cannot is told so rather than
-// left to discover it from a failed submit.
+// NewReviewAction renders a permission notice instead of the button when the caller cannot create.
 function NewReviewAction({ data }: { data: TenantDashboardData }): React.ReactElement | null {
   const dispatch = useAppDispatch();
   if (!data) {
@@ -321,9 +300,6 @@ function AdvanceMergeQueueAction({
   );
 }
 
-// The confirm step is its own row so the question reads left-to-right into the
-// two answers, and a failure lands under it rather than shouldering its way
-// into the middle of the sentence.
 function AdvanceMergeQueueConfirm({
   tenant,
   queue,
@@ -365,10 +341,7 @@ function AdvanceMergeQueueConfirm({
   );
 }
 
-// displayReviewAuthor renders "You" for the signed-in user's own reviews,
-// then the resolved tenant-user-directory username, then the raw author id
-// as a last resort — never a bare implementation-facing id when a
-// human name is available.
+// displayReviewAuthor prefers "You", then the directory username, then the raw id.
 function displayReviewAuthor(
   review: UITenantDashboardReview,
   currentUserId: string | undefined,
@@ -383,10 +356,6 @@ function displayReviewAuthor(
   return review.authorUsername?.trim() ?? author;
 }
 
-// ReviewAuthorAvatar is the row's fastest scan key: an initials avatar for
-// the author display name already computed for the row, styled filled for
-// the signed-in user's own reviews so "mine" is recognizable at a glance
-// even before reading the text next to it.
 function ReviewAuthorAvatar({ name }: { name: string }): React.ReactElement {
   const isSelf = name === 'You';
   return (
@@ -402,13 +371,7 @@ function ReviewAuthorAvatar({ name }: { name: string }): React.ReactElement {
   );
 }
 
-// ReviewsTable renders one row per review. The Review column is deliberately
-// the only one DataTable's shared truncate/DataCell treatment doesn't own: it
-// carries the avatar plus a two-line title/metadata stack so the title can
-// dominate the row (larger, heavier, full-strength foreground) while author,
-// branches, updated time, and thread count read as a subordinate second line
-// — a dense grid of equal columns gives the eye nothing to land on. Status and Threads stay their own narrow columns so their badges
-// keep a fixed, predictable width.
+// The Review column bypasses DataCell so its title can dominate a two-line stack.
 function ReviewsTable({
   reviews,
   currentUserId,

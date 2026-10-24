@@ -33,10 +33,7 @@ func TestRoot(t *testing.T) {
 	})
 
 	t.Run("tenant_select_via_stdin", func(t *testing.T) {
-		// Covers the interactive tenant-selection prompt. Seeding two
-		// tenants with no default, plus a cwd outside both project roots,
-		// forces the bare command to fall through to the select prompt,
-		// which only scripted stdin can drive under the non-TTY harness.
+		// Two tenants, no default and a cwd outside both roots force the select prompt.
 		setup := env.New(t)
 		seedTenantWithoutDefault(t, setup, "alpha", "dev")
 		seedTenantWithoutDefault(t, setup, "beta", "dev")
@@ -49,10 +46,7 @@ func TestRoot(t *testing.T) {
 	})
 
 	t.Run("tenant_select_initialize_current_project_via_stdin", func(t *testing.T) {
-		// Covers the select prompt's "Initialize current project" arm.
-		// The cwd is not a git repo, so the bootstrap must stop with the
-		// "erun config is not initialized" guidance rather than initialize;
-		// only scripted stdin can reach this arm.
+		// The cwd is not a git repo, so "Initialize current project" stops with guidance.
 		setup := env.New(t)
 		seedTenantWithoutDefault(t, setup, "alpha", "dev")
 		seedTenantWithoutDefault(t, setup, "beta", "dev")

@@ -9,7 +9,6 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
-// ReconcileBypassToolResult is the reconcile-bypass tool's result.
 type ReconcileBypassToolResult struct {
 	Preview bool                         `json:"preview"`
 	Result  review.ReconcileBypassResult `json:"result,omitempty"`

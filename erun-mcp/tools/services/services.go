@@ -19,16 +19,8 @@ type ServicesInput struct {
 	Verbosity   int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
-// ServicesTool is read-only by construction: RunListEnvironmentServices issues
-// only `kubectl get`, so this tool carries the erun:read capability rather than
-// erun:admin (see mcpReadOnlyTools), unlike expose itself.
-//
-// It exists because expose takes a service name and, until this tool, the MCP
-// surface held nothing that could report one: the name is a derived label
-// resolving to the in-namespace Service <tenant>-<service>, so an agent could
-// act without being able to orient. Each Service comes back with its ports and,
-// when an erun-expose Ingress already fronts it, the public address it has --
-// the same read the desktop's Ports tab renders as its Service picker.
+// ServicesTool lists Services with their ports and any erun-expose public
+// address. It only runs `kubectl get`, so it needs erun:read, not erun:admin.
 func ServicesTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ServicesInput) (*mcp.CallToolResult, expose.EnvironmentServiceList, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ServicesInput) (*mcp.CallToolResult, expose.EnvironmentServiceList, error) {
 		tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)

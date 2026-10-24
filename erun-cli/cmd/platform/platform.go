@@ -12,11 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewPlatformCmd builds `erun platform`, the CLI's client for a hosted erun
-// platform's own control-plane API (erun-backend-api), authenticating with
-// the `erun`-type cloud alias `erun cloud init erun` / `erun cloud login`
-// set up. It gives an operator or agent a native way to exercise a deployed
-// control plane without a browser-obtained token.
+// NewPlatformCmd builds `erun platform`, the client for a hosted platform's control-plane API.
 func NewPlatformCmd(store config.CloudReadStore, promptRunner shared.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
 	cmd := shared.NewCommandGroup(
@@ -189,11 +185,8 @@ func writePlatformTenantList(ctx core.Context, tenants []platformclient.Platform
 	return nil
 }
 
-// tenantUnreachableSuffix flags a tenant whose issuer mapping no token can
-// resolve through. Such a tenant lists exactly like a healthy one, so without
-// this the only way to discover it is a sign-in that lands somewhere else.
-// A nil Resolvable is "not computed", not "reachable", and stays silent rather
-// than accusing every tenant on a read path that never asked.
+// tenantUnreachableSuffix flags a tenant whose issuer mapping no token resolves.
+// A nil Resolvable means "not computed" and stays silent.
 func tenantUnreachableSuffix(tenant platformclient.PlatformTenant) string {
 	if tenant.Resolvable == nil || *tenant.Resolvable {
 		return ""
@@ -201,21 +194,8 @@ func tenantUnreachableSuffix(tenant platformclient.PlatformTenant) string {
 	return " UNREACHABLE (no issuer mapping any token can resolve through)"
 }
 
-// newPlatformIdentityCmd builds `erun platform identity`, the CLI's client
-// for the platform's own IdP administration surface (erun-backend-api's
-// /v1/identity/* routes). Today it covers exactly the operation `platform
-// tenant create` depends on: creating the org an org-scoped tenant mapping
-// needs. Before this, POST /v1/identity/orgs had no CLI, MCP, or desktop
-// surface at all, so the documented tenant-creation flow could produce a
-// tenant with no reachable org value — created, listed, and permanently
-// unauthenticatable.
-// newPlatformTenantRepairOrgMappingCmd fixes a tenant already stuck with an
-// unresolvable (issuer, org) mapping -- created before POST /v1/tenants
-// started refusing an org-scoped mapping with no org value, or left behind
-// when its issuer was converted to org-scoped after it registered. There is
-// no tenant delete endpoint on the platform at all, so this repair (not
-// delete-and-recreate, which is not even possible) is the only way back for
-// a tenant already in that state.
+// newPlatformTenantRepairOrgMappingCmd fixes a tenant with an unresolvable (issuer, org)
+// mapping; the platform has no tenant delete, so repair is the only way back.
 func newPlatformTenantRepairOrgMappingCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	var params platformclient.PlatformRepairTenantIssuerOrgMappingParams
 	cmd := &cobra.Command{

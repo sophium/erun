@@ -1,15 +1,5 @@
-// Command pkgmove moves erun-common's declarations between packages according
-// to a map, rewriting every reference in the module and in the modules that
-// import it.
-//
-//	pkgmove plan  -map packages.map
-//	pkgmove apply -map packages.map -importers ../erun-cli,../erun-mcp,...
-//	pkgmove dump  -map packages.map > refs.tsv
-//
-// plan simulates the map: the import graph it would produce, every cycle with
-// the references that hold it, and the names it would collide. apply rewrites
-// the tree when plan has nothing to report. dump writes every reference
-// between top-level declarations as tab-separated rows, for designing a map.
+// Command pkgmove moves erun-common declarations between packages according
+// to a map, rewriting references in the module and its importers.
 package main
 
 import (
@@ -38,8 +28,7 @@ type options struct {
 	dir       string
 	importers []string
 	limit     int
-	// timingEnv is the timing seam a generated suite redirects, for a module
-	// with no base/core of its own to read it from.
+	// timingEnv names the timing seam for a module with no base/core.
 	timingEnv string
 }
 

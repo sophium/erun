@@ -19,25 +19,18 @@ const McpPortForwardStartupTimeout = 5 * time.Second
 
 type MCPForwarder func(core.Context, config.OpenResult) error
 
-// Aliased rather than redeclared so the shape the CLI writes and the shape the
-// desktop reads cannot drift apart.
+// Aliased so the CLI's and desktop's state shapes cannot drift.
 type McpPortForwardState = kube.PortForwardState
 
-// ReusableRecordedPortForward decides whether the forward already recorded for
-// this environment can be reused, and stops it when it cannot. The listener and
-// the tunnel behind it are separate facts: a forward whose pod was replaced
-// keeps holding the local port and answers nothing through it, so reusing it on
-// the strength of the recorded state alone leaves the environment unreachable
-// with nothing left to notice.
+// ReusableRecordedPortForward reports whether the recorded forward still carries traffic,
+// stopping it otherwise; a forward to a replaced pod still holds the port.
 func ReusableRecordedPortForward(ctx core.Context, kind, logPath string, state, expected McpPortForwardState, localPort int, carriesTraffic func(int) bool) bool {
 	bound := CanConnectLocalPort(localPort)
 	matches := StateMatchesMCPTarget(state, expected)
 	health := kube.ClassifyPortForward(matches, bound, bound && carriesTraffic(localPort))
 	switch health {
 	case kube.PortForwardServing:
-		// A serving forward is reused as-is and keeps writing to the log it
-		// opened when it started, so this touch is the only chance to re-apply
-		// the cap for as long as it stays up.
+		// A reused forward keeps its original log, so re-apply the cap on every touch.
 		RotatePortForwardLogIfOversized(ctx, kind, logPath)
 		return true
 	case kube.PortForwardStale:
@@ -52,12 +45,8 @@ func ReusableRecordedPortForward(ctx core.Context, kind, logPath string, state, 
 	return false
 }
 
-// ReleaseUnreachablePortForward stops a forward that was just started but
-// never became reachable within its startup wait, so a slow or failed
-// kubectl port-forward does not sit bound to the port claiming to be there —
-// the "held but the edge never answers" shape that looks identical to a
-// genuinely stale forward to the next caller. Best-effort: the process may
-// already be gone, and the caller's own error already reports the failure.
+// ReleaseUnreachablePortForward best-effort stops a forward that never became reachable,
+// so it does not hold the port looking stale.
 func ReleaseUnreachablePortForward(ctx core.Context, kind string, process *os.Process, localPort int, cause error) {
 	ctx.Trace(fmt.Sprintf("%s: releasing port-forward for 127.0.0.1:%d — it never became reachable: %s", kind, localPort, strings.TrimSpace(cause.Error())))
 	if process != nil {
@@ -134,21 +123,15 @@ func McpPortForwardTimeoutDetail(logPath string) string {
 	case strings.Contains(value, "connection refused"):
 		return "runtime pod exists but MCP is not accepting connections yet"
 	case isListenConflictText(value):
-		// The bind retry reads this same shape out of the log and waits the
-		// socket out. Reaching here means it did not come free within the
-		// retry window, so the port really is held by something else.
+		// The bind retry already waited this out, so another process really holds the port.
 		return "the local port is held by a listener that is not releasing it; find and stop the process holding it, or free the port"
 	default:
 		return ""
 	}
 }
 
-// stopPortForwardProcess kills pid if, and only if, it is still identifiable
-// as a live kubectl port-forward — isPortForwardProcess re-checks the live
-// process table rather than trusting the caller's record, so a PID the OS
-// has since reused for something else is never touched. found reports
-// whether that identification succeeded (i.e. there was something alive to
-// kill), independent of whether the kill itself errored.
+// stopPortForwardProcess kills pid only if the live process table still shows a kubectl
+// port-forward, so reused PIDs are never touched; found reports that identification.
 func stopPortForwardProcess(pid int) (found bool, err error) {
 	if pid <= 0 {
 		return false, nil

@@ -24,8 +24,6 @@ func initTypeScenarios(t *testing.T) {
 }
 
 func testInitTypeLocalAgentDryRun(t *testing.T) {
-	// --type local-agent is the explicit form of the no-flag default: it
-	// creates the env without any remote-init work.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "local",
@@ -43,8 +41,7 @@ func testInitTypeLocalAgentDryRun(t *testing.T) {
 }
 
 func testInitTypeRemoteAgentDryRun(t *testing.T) {
-	// --type remote-agent is the canonical replacement for --remote and must
-	// produce the same plan as remote_dry_run.
+	// Must produce the same plan as remote_dry_run.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "dev",
@@ -63,9 +60,7 @@ func testInitTypeRemoteAgentDryRun(t *testing.T) {
 }
 
 func testInitTypeRuntimeDryRun(t *testing.T) {
-	// --type runtime feeds downstream chart wiring (worktreeStorage=none);
-	// because runtime envs live in-cluster, init still walks the remote
-	// namespace setup path.
+	// Runtime envs live in-cluster, so init still walks the remote namespace setup.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "prod",
@@ -83,11 +78,7 @@ func testInitTypeRuntimeDryRun(t *testing.T) {
 }
 
 func testInitTypeHostDryRun(t *testing.T) {
-	// A host env has no pod and no cluster at all, so init never asks for a
-	// kubernetes context or a container registry — unlike local-agent and
-	// remote-agent above, which both require one of those flags here or an
-	// interaction prompt fires. Leaving both off and still getting a clean
-	// dry run is a direct behavioral proof of no cluster contact.
+	// With neither a context nor a registry, a clean dry run proves no cluster contact.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "work",
@@ -105,9 +96,6 @@ func testInitTypeHostDryRun(t *testing.T) {
 }
 
 func testInitTypeHostRealRunPersistsConfig(t *testing.T) {
-	// The real run persists exactly a name, type, and local repo path — no
-	// kubernetescontext, containerregistry, or runtimeversion key, since
-	// none of those apply to a type with no pod.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "work",
@@ -121,16 +109,12 @@ func testInitTypeHostRealRunPersistsConfig(t *testing.T) {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "init/type_host_real_run_persists_config", normalize.Apply(result.Combined))
-	// KubernetesContext has no yaml `omitempty`, so it always serializes;
-	// asserting it is empty is the honest form of "unset" for this field.
+	// KubernetesContext has no omitempty, so "unset" serializes as empty.
 	assertEnvConfigContains(t, setup, "team", "work", "type: host", "localrepopath: "+setup.Cwd, `kubernetescontext: ""`)
 	assertEnvConfigLacks(t, setup, "team", "work", "containerregistry", "runtimeversion")
 }
 
 func testInitReinitRetypesALocalAgentEnvToHost(t *testing.T) {
-	// Retyping to host drops the env's pod-oriented fields' relevance but
-	// keeps the same local repo path — it is, after all, the same directory
-	// on the same machine, just with no pod mounting it anymore.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	args := []string{
@@ -149,9 +133,6 @@ func testInitReinitRetypesALocalAgentEnvToHost(t *testing.T) {
 }
 
 func testInitReinitRefusesAHostRetypeWithNoHostRepoPath(t *testing.T) {
-	// The same refusal local-agent gets: retyping to host needs a host
-	// directory, and this run names neither a git repo cwd nor
-	// --project-root, so there is nothing to record.
 	setup := env.New(t)
 	fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 	args := []string{
@@ -170,8 +151,6 @@ func testInitReinitRefusesAHostRetypeWithNoHostRepoPath(t *testing.T) {
 }
 
 func testInitTypeConflictsWithRemote(t *testing.T) {
-	// A --type that disagrees with --remote must error before any side
-	// effect, so the user never ends up with a half-configured env.
 	setup := env.New(t)
 	args := []string{
 		"init", "team", "local",
@@ -199,8 +178,6 @@ func testInitTypeRejectsInvalidValue(t *testing.T) {
 		t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
 	}
 	golden.Equal(t, "init/type_rejects_invalid_value", normalize.Apply(result.Combined))
-	// A validation failure before tenant/environment resolution must leave
-	// no directory behind, dry-run or not.
 	after := snapshotConfigTree(t, setup.ConfigHome)
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("invalid --type mutated the config directory\nbefore: %v\nafter:  %v", before, after)

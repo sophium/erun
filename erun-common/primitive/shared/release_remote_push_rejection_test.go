@@ -55,13 +55,7 @@ func TestParseReleasePushRejections(t *testing.T) {
 	}
 }
 
-// The half-release that must never read as an interrupted release: the version
-// is already public, so the recovery is to name the missing GitHub Release
-// object and the ref that did not land, never to delete the tag and reset a
-// branch that already landed.
 func TestReleasePushRejectedErrorNamesTheHalfReleaseAndNeverThePrePublicationShape(t *testing.T) {
-	// This is the run that published: `erun build --release` reaches the push
-	// with its images and charts verified on the registry.
 	publishedSpec := releasePushTestSpec()
 	publishedSpec.ArtifactsPublished = true
 	cases := []struct {
@@ -92,8 +86,7 @@ func TestReleasePushRejectedErrorNamesTheHalfReleaseAndNeverThePrePublicationSha
 				"reconcile a ref git did not name with its remote",
 				"GitHub Release",
 			},
-			// The bare-instruction slot must never be filled with nothing: an
-			// empty ref makes the recovery command unrunnable.
+			// An empty ref would make the recovery command unrunnable.
 			notIn: []string{"reconcile  with its remote", "is  ."},
 		},
 	}
@@ -116,19 +109,8 @@ func TestReleasePushRejectedErrorNamesTheHalfReleaseAndNeverThePrePublicationSha
 	}
 }
 
-// The reported failure: a release that never built or published anything failed
-// its final push and reported "its images and charts verified on the registry".
-// Nothing in that run wrote to a registry — its own dry run says "source control
-// only; no artifacts were built or published", `erun release --help` states the
-// same contract, and the stage that would have produced an artifact runs after
-// the one that failed.
-//
-// The cost is not the wording. The message is read at the moment an operator is
-// deciding what is left to do, and it answered "only develop and the GitHub
-// Release object" when the entire artifact set was missing, so the publish that
-// version still needed was the one step it told them to skip. A tag with no
-// artifacts behind it is a version no environment can deploy: `erun deploy`
-// installs by reference and never builds.
+// A source-control-only release must not claim artifacts were published; its recovery must
+// name the publish it still owes, since `erun deploy` never builds.
 func TestReleasePushRejectedErrorDoesNotClaimArtifactsASourceControlOnlyReleaseNeverPublished(t *testing.T) {
 	spec := releasePushTestSpec() // ArtifactsPublished stays false: `erun release`.
 	message := ReleasePushRejectedError(spec, []ReleasePushRejection{{Ref: "develop", Reason: "non-fast-forward"}}, errors.New("exit status 1")).Error()
@@ -145,8 +127,6 @@ func TestReleasePushRejectedErrorDoesNotClaimArtifactsASourceControlOnlyReleaseN
 		"do not delete tag v1.4.2",
 	)
 
-	// The same claim is made by the push's two deep recoveries, and they carry
-	// the same obligation: name the publish this run still owes.
 	recoveries := []struct {
 		name    string
 		message string
@@ -160,8 +140,6 @@ func TestReleasePushRejectedErrorDoesNotClaimArtifactsASourceControlOnlyReleaseN
 	}
 }
 
-// And the run that did publish keeps the claim, because for it the claim is
-// true: this is the release's own accounting, not a hedge in every message.
 func TestReleasePushRejectedErrorKeepsTheRegistryClaimForARunThatPublished(t *testing.T) {
 	spec := releasePushTestSpec()
 	spec.ArtifactsPublished = true
@@ -179,9 +157,6 @@ func TestReleasePushRejectedErrorKeepsTheRegistryClaimForARunThatPublished(t *te
 	}
 }
 
-// assertMessageNames and assertMessageOmits keep the per-string loops out of
-// the tests that make several of these claims at once, so a case's list of
-// expectations reads as the claim rather than as iteration.
 func assertMessageNames(t *testing.T, message string, wants ...string) {
 	t.Helper()
 	for _, want := range wants {

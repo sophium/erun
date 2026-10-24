@@ -34,10 +34,6 @@ func writeRuntimeStub(t *testing.T, dir, name, body string) {
 	}
 }
 
-// Running the installed hook command is the check, not finding a string: a
-// command that is installed but does not reach the report verb is the same
-// inertness the hooks exist to end. A session with no environment in scope must
-// report nothing rather than guess one.
 func TestRuntimeAISessionHookCommandReachesTheReportVerb(t *testing.T) {
 	bin := t.TempDir()
 	argvFile := filepath.Join(t.TempDir(), "erun-argv")
@@ -65,8 +61,6 @@ func TestRuntimeAISessionHookCommandReachesTheReportVerb(t *testing.T) {
 	}
 }
 
-// The MCP edge is supervised: a crashed server is restarted with the same flags
-// and the restart is logged, so a crash loop stays visible in the container log.
 func TestRuntimeMCPIsRestartedWhenItExits(t *testing.T) {
 	bin := t.TempDir()
 	record := t.TempDir()
@@ -107,9 +101,7 @@ func TestRuntimeMCPIsRestartedWhenItExits(t *testing.T) {
 	}
 }
 
-// runtimeSourceOrigin builds a bare repository whose default branch has moved
-// past the tag v1.2.3, so a clone that skipped its checkout is visible: it would
-// sit on the later commit instead of the tag's.
+// The default branch moves past v1.2.3 so a skipped checkout is visible.
 func runtimeSourceOrigin(t *testing.T, git, dir string) (origin, tagCommit string) {
 	t.Helper()
 	src := filepath.Join(dir, "src")
@@ -144,14 +136,8 @@ func runtimeSourceOrigin(t *testing.T, git, dir string) (origin, tagCommit strin
 	return origin, tagCommit
 }
 
-// The init reaps every zombie child that is not recorded as owned, so a child
-// the boot runs outside the supervisor can be reaped by the init before os/exec
-// waits for it. The wait then fails with "no child processes": a clone that
-// succeeded reads as failed, its checkout is skipped, and the next boot sees a
-// .git and never checks the release ref out. Every git child the boot runs must
-// therefore be owned for as long as it runs. The stub holds each invocation
-// until the test has looked; supervisor.start records a child as owned in the
-// same critical section that starts it, so taking the lock settles the answer.
+// A git child outside the supervisor can be reaped by the init before os/exec waits,
+// failing with "no child processes". The stub holds each invocation until checked.
 func TestRuntimeBootGitChildrenAreOwnedWhileTheyRun(t *testing.T) {
 	realGit, err := exec.LookPath("git")
 	if err != nil {
@@ -201,9 +187,6 @@ func TestRuntimeBootGitChildrenAreOwnedWhileTheyRun(t *testing.T) {
 	}
 }
 
-// watchRuntimeGitGate releases each git invocation the gate stub holds, after
-// recording whether the supervisor owned it. finish stops the watch and returns
-// how many invocations it saw and the pids that were not owned.
 func watchRuntimeGitGate(supervisor *runtimeSupervisor, gate, pidsFile string) (finish func() (int, []int)) {
 	var unowned []int
 	invocations := 0

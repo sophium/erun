@@ -23,10 +23,7 @@ const (
 	ioctlTIOCGPTN   = 0x80045430 // read the slave's number
 )
 
-// openTestPTY returns the master and slave of a real terminal. The alias
-// confirm's echo suppression is decided by what the answer is read from and
-// what the label is written to both being terminals, and only a pty makes
-// term.IsTerminal true, so this regression cannot be reached through a pipe.
+// openTestPTY returns a real terminal pair; only a pty makes term.IsTerminal true.
 func openTestPTY(t *testing.T) (master, slave *os.File) {
 	t.Helper()
 	masterFD, err := syscall.Open("/dev/ptmx", syscall.O_RDWR|syscall.O_NOCTTY, 0)
@@ -56,25 +53,15 @@ func openTestPTY(t *testing.T) (master, slave *os.File) {
 	return master, slave
 }
 
-// The alias confirm is the one confirmation that runs with both ends on a
-// terminal, and it renders through promptStderr(): an adapter over the real
-// stderr, because promptui takes an io.WriteCloser and must not be able to
-// close the process's own stderr. The terminal echoes the answer
-// (confirmPromptTo's prompt has no Default, so "y" is the whole answer) and its
-// newline, which already terminates the label line -- so the settled line has to
-// be suppressed.
-//
-// A suppression check that only recognizes a bare *os.File sees the adapter
-// instead of the terminal it wraps, never fires, and prints the answer again
-// under a blank line: three rendered lines where the repaint prompt left one.
+// The alias confirm writes through an adapter over stderr; echo suppression must see
+// through it to the terminal, or the settled line prints again.
 func TestSettledPromptSuppressesTheEchoBehindTheAliasConfirmsWriter(t *testing.T) {
 	t.Setenv("ERUN_FORCE_TTY", "1")
 	master, slave := openTestPTY(t)
 	if !term.IsTerminal(int(slave.Fd())) {
 		t.Fatalf("the test pty's slave is not a terminal, so this test cannot reach the echo check")
 	}
-	// Raw mode turns the pty's own echo off, so everything read back from the
-	// master is what the prompt wrote and the render can be counted exactly.
+	// Raw mode disables the pty's echo, so the master reads exactly what the prompt wrote.
 	if _, err := term.MakeRaw(int(slave.Fd())); err != nil {
 		t.Fatalf("make the pty raw: %v", err)
 	}
@@ -94,8 +81,6 @@ func TestSettledPromptSuppressesTheEchoBehindTheAliasConfirmsWriter(t *testing.T
 	if _, err := io.WriteString(master, "y\n"); err != nil {
 		t.Fatalf("type the answer: %v", err)
 	}
-	// The writer is the adapter the alias flow builds, over the terminal the
-	// answer is read from -- the state the report described.
 	ok, err := shared.ConfirmPromptTo(shared.RunPrompt, "add team-dev to ~/.bashrc", nopWriteCloser{slave})
 	if err != nil {
 		t.Fatalf("confirmPromptTo: %v", err)
@@ -103,9 +88,7 @@ func TestSettledPromptSuppressesTheEchoBehindTheAliasConfirmsWriter(t *testing.T
 	if !ok {
 		t.Fatal("answering y must confirm")
 	}
-	// Closing the slave ends the capture: the reader drains what is buffered and
-	// then errors, so the assertion below waits on the copy finishing rather
-	// than on a clock.
+	// Closing the slave drains the reader, so the assertion waits on the copy, not a clock.
 	if err := slave.Close(); err != nil {
 		t.Fatalf("close the pty slave: %v", err)
 	}
@@ -115,9 +98,6 @@ func TestSettledPromptSuppressesTheEchoBehindTheAliasConfirmsWriter(t *testing.T
 	if label := "? add team-dev to ~/.bashrc? [Y/n] "; !strings.Contains(rendered, label) {
 		t.Fatalf("the confirm did not write its label to the alias confirm's writer; captured %q, want it to contain %q", rendered, label)
 	}
-	// The settled line is what the repaint prompt ends on and what the terminal's
-	// echo already covers; printing it is the second and third line of the
-	// report's three.
 	if settled := "add team-dev to ~/.bashrc? y"; strings.Contains(rendered, settled) {
 		t.Fatalf("the confirm printed the settled line %q on top of an answer its own terminal already echoed, so the prompt settles on an extra blank line and a repeated answer:\n%q", settled, rendered)
 	}

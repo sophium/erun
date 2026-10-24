@@ -7,9 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewAdoptWorktreeCmd is run by the runtime chart's adopt-worktree init
-// container, never by an operator: it is the one moment the home volume and
-// the worktree claim are both visible off the live /home/erun path.
+// NewAdoptWorktreeCmd runs only in the runtime chart's adopt-worktree init container.
 func NewAdoptWorktreeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "adopt-worktree LEGACY_DIR CLAIM_DIR",

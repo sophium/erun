@@ -14,17 +14,8 @@ import (
 	"time"
 )
 
-// TestPostOnceWaitsForAForwardThatComesUpAfterStartup is the regression test
-// for the reconnect gap: an MCP client's very first request (its own
-// initialize call) used to fail outright when the local port-forward wasn't
-// up yet at session start, and most MCP clients never repeat that call later
-// in the session, so the environment stayed unreachable for the whole session
-// even after `erun open` brought the forward up moments later. postOnce's
-// bounded wait on a session's first attempt (see
-// awaitLocalMCPEndpointReachable) closes that window: this test starts the
-// session against a port nothing holds yet, brings up a listener on that
-// exact port shortly after the request is already in flight, and asserts the
-// request succeeds instead of failing immediately.
+// A client's initialize is never repeated, so the first request must wait for a forward
+// that comes up moments after the session starts.
 func TestPostOnceWaitsForAForwardThatComesUpAfterStartup(t *testing.T) {
 	port := reserveLoopbackPort(t)
 
@@ -32,8 +23,6 @@ func TestPostOnceWaitsForAForwardThatComesUpAfterStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newMCPSession: %v", err)
 	}
-	// Shrink the bound so a real regression (no wait at all) fails this test
-	// promptly rather than only within the production 20s bound.
 	session.startupWait = 5 * time.Second
 
 	done := make(chan struct{})
@@ -50,9 +39,7 @@ func TestPostOnceWaitsForAForwardThatComesUpAfterStartup(t *testing.T) {
 	_, err = session.postOnce(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
 	elapsed := time.Since(begin)
 
-	// mcpStatusError turns the 401 this handler answers with into
-	// ErrMCPUnauthorized -- that is success for this test's purposes: it proves
-	// the request reached the edge instead of failing on the earlier dial.
+	// A 401 proves the request reached the edge rather than failing to dial.
 	if !errors.Is(err, ErrMCPUnauthorized) {
 		t.Fatalf("expected the request to reach the now-up endpoint (unauthorized), got: %v", err)
 	}
@@ -61,10 +48,6 @@ func TestPostOnceWaitsForAForwardThatComesUpAfterStartup(t *testing.T) {
 	}
 }
 
-// TestPostOnceStillFailsPromptlyWhenNothingEverAnswers guards the other side:
-// an environment that is genuinely not open must not hang forever -- it must
-// still fail with the ordinary unreachable error, just after (at most) the
-// bounded wait, and only on this one first attempt.
 func TestPostOnceStillFailsPromptlyWhenNothingEverAnswers(t *testing.T) {
 	port := reserveLoopbackPort(t)
 
@@ -88,8 +71,6 @@ func TestPostOnceStillFailsPromptlyWhenNothingEverAnswers(t *testing.T) {
 		t.Fatalf("request took %s -- the bounded wait did not bound anything", elapsed)
 	}
 
-	// A second attempt on the same session must not wait again -- only the
-	// first ever attempt gets the startup grace period.
 	begin = time.Now()
 	_, err = session.postOnce(context.Background(), []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`))
 	elapsed = time.Since(begin)
@@ -101,12 +82,7 @@ func TestPostOnceStillFailsPromptlyWhenNothingEverAnswers(t *testing.T) {
 	}
 }
 
-// TestOpenMCPSessionDoesNotWaitForStartup guards the scoping: the typed
-// CLI/desktop path (openMCPSession, behind CallMCPTool/ListMCPTools) already
-// has its own active recovery -- reattaching the port-forward and retrying --
-// so it must not opt into postOnce's passive wait, which would only make an
-// ordinary "not open yet" call slower for no benefit. Only the stdio proxy
-// (RunMCPStdioProxy) should ever wait.
+// Typed callers reattach and retry themselves; only the stdio proxy waits.
 func TestOpenMCPSessionDoesNotWaitForStartup(t *testing.T) {
 	port := reserveLoopbackPort(t)
 
@@ -128,10 +104,7 @@ func TestOpenMCPSessionDoesNotWaitForStartup(t *testing.T) {
 	}
 }
 
-// The two held-port faults reach a caller as different errors, because the
-// remedy each one leads to is the opposite of the other's: a stale forward is
-// re-established, while a target that has not come up yet is waited for, and
-// re-opening the environment behind a working forward does nothing at all.
+// A stale forward is re-established, while an unready target is waited for.
 func TestCallMCPToolNamesAnUnreadyTargetRatherThanAStaleForward(t *testing.T) {
 	port := startDroppingListener(t)
 
@@ -147,8 +120,7 @@ func TestCallMCPToolNamesAnUnreadyTargetRatherThanAStaleForward(t *testing.T) {
 	if !errors.Is(err, ErrMCPTargetNotAnswering) {
 		t.Fatalf("expected an unready target, got: %v", err)
 	}
-	// Callers gate their own recovery on the broad class, so the narrower one
-	// has to stay inside it.
+	// Callers gate recovery on the broad class, so the narrower error must wrap it.
 	if !errors.Is(err, ErrMCPEndpointUnreachable) {
 		t.Fatalf("an unready target is still an unreachable endpoint, got: %v", err)
 	}
@@ -196,23 +168,12 @@ func waitForLocalPortReachable(t *testing.T, port int) {
 	t.Fatalf("server on port %d never became reachable", port)
 }
 
-// mcpEdgeForgettingItsSession stands in for the edge after it has dropped a
-// caller's session: it handshakes normally and hands out a session id, then
-// answers the next tool call the second way a lost session appears on the
-// wire -- HTTP 200 with the SDK's session-initialization guard as the
-// JSON-RPC error, rather than a 404. Only a fresh handshake clears it, which
-// is exactly what the client's recovery has to do about it.
-//
-// A stand-in rather than a real edge because the state being reproduced is one
-// the edge reaches on a timer: the session it was holding has gone, and the
-// caller has no way to tell that from the response alone.
+// mcpEdgeForgettingItsSession answers the call after a handshake with HTTP 200 and the
+// session-initialization error, until the caller handshakes again.
 type mcpEdgeForgettingItsSession struct {
 	handshakes int
 	calls      int
-	// refuseEverySession answers the guard to every call, however many times
-	// the caller handshakes: an edge that is up and serving and will still not
-	// hold a session for this client, which is the shape a caller retrying on
-	// the same message cannot tell from the environment being down.
+	// refuseEverySession answers the guard however often the caller handshakes.
 	refuseEverySession bool
 }
 
@@ -239,10 +200,6 @@ func (e *mcpEdgeForgettingItsSession) serve(w http.ResponseWriter, req *http.Req
 	case "notifications/initialized":
 		w.WriteHeader(http.StatusAccepted)
 	case "tools/list":
-		// The first call after the handshake is the one the edge no longer
-		// has a session for; once the caller has handshaked again, the same
-		// call is answered normally — unless this edge refuses sessions
-		// outright, in which case it never answers anything else.
 		if e.refuseEverySession || e.handshakes < 2 {
 			e.calls++
 			w.Header().Set("Content-Type", "application/json")
@@ -256,11 +213,6 @@ func (e *mcpEdgeForgettingItsSession) serve(w http.ResponseWriter, req *http.Req
 	}
 }
 
-// TestTheClientRecoversWhenTheEdgeAnswersWithTheInitializationGuard is the
-// reported failure: a caller whose session the edge has dropped gets HTTP 200
-// with a JSON-RPC guard error, and the client -- which only ever re-handshaked
-// on a 404 -- surfaced that as the tool failing, permanently, for a session a
-// re-handshake would have replaced in one round trip.
 func TestTheClientRecoversWhenTheEdgeAnswersWithTheInitializationGuard(t *testing.T) {
 	edge := &mcpEdgeForgettingItsSession{}
 	server := httptest.NewServer(http.HandlerFunc(edge.serve))
@@ -286,15 +238,7 @@ func TestTheClientRecoversWhenTheEdgeAnswersWithTheInitializationGuard(t *testin
 	}
 }
 
-// TestALiveEdgeThatRefusesEverySessionIsNotReportedAsAnUnreachableEndpoint pins
-// the classification the operator-facing messages are built on: an edge that
-// answers every call and still never accepts a session is a session loss, and
-// must never be reported the way a port-forward nothing is listening on is.
-//
-// The reported failure was exactly this edge read as that one. An operator told
-// the endpoint is unreachable stops dispatching to an environment whose edge is
-// serving, and every retry says the same thing, so the reading survives being
-// checked.
+// An edge that answers but never accepts a session is a session loss, not an unreachable endpoint.
 func TestALiveEdgeThatRefusesEverySessionIsNotReportedAsAnUnreachableEndpoint(t *testing.T) {
 	edge := &mcpEdgeForgettingItsSession{refuseEverySession: true}
 	server := httptest.NewServer(http.HandlerFunc(edge.serve))
@@ -311,16 +255,12 @@ func TestALiveEdgeThatRefusesEverySessionIsNotReportedAsAnUnreachableEndpoint(t 
 	if !errors.Is(err, ErrMCPSessionLost) {
 		t.Fatalf("a live edge that will not hold a session is a session loss, got: %v", err)
 	}
-	// The distinction the whole fix rests on: the endpoint was reached, and it
-	// answered, so nothing may report it as unreachable.
 	if errors.Is(err, ErrMCPEndpointUnreachable) {
 		t.Fatalf("an edge that answered must not be reported as unreachable, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "answered") {
 		t.Fatalf("the failure has to say the edge answered, got: %v", err)
 	}
-	// Bounded recovery: one re-handshake, then the truth, never a retry loop
-	// against an edge that keeps refusing.
 	if edge.handshakes != 2 {
 		t.Fatalf("expected exactly one recovery handshake, saw %d", edge.handshakes)
 	}

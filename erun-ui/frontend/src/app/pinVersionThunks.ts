@@ -23,20 +23,14 @@ import {
 } from './slices/pinVersionSlice';
 import type { AppThunk } from './store';
 
-// resolvePinTargetForCall maps the dialog's "no explicit choice" sentinel back
-// to '', which is what erun pin (via the Go bindings) has always read as
-// "resolve the latest published stable release" — the sentinel exists only so
-// the Version select has a real, selectable value for that choice.
+// '' is what erun pin reads as "latest stable"; the sentinel exists only so the
+// select has a value for it.
 function resolvePinTargetForCall(target: string): string {
   return target === PIN_LATEST_STABLE_TARGET ? '' : target;
 }
 
-// openPinVersion opens the picker and loads the versions this environment can
-// actually be pinned to, so choosing one is recognition rather than recall. It
-// also checks up front whether this environment's references even have a
-// resolvable local checkout — a sourceless runtime environment has none of
-// its own, and the dialog needs to say so before offering Preview/Apply that
-// can never resolve, not just report it after a failed click.
+// openPinVersion also checks for a resolvable local checkout up front, so a
+// sourceless environment is told before Preview/Apply.
 export const openPinVersion =
   (selection: UISelection): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -57,8 +51,7 @@ export const openPinVersion =
     }
   };
 
-// previewPin resolves the full plan without writing. The dialog always shows it
-// before applying: a re-pin edits files across a repo.
+// previewPin always runs before apply: a re-pin edits files across a repo.
 export const previewPin = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const { selection, target } = getState().pinVersion;
   if (!selection) {
@@ -90,8 +83,6 @@ export const applyPin = (): AppThunk<Promise<void>> => async (dispatch, getState
   }
 };
 
-// revertPin goes back to the version recorded before the last re-pin, which is
-// what makes trying one out cheap.
 export const revertPin = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const { selection } = getState().pinVersion;
   if (!selection) {

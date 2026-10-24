@@ -18,12 +18,8 @@ func NewAISessionRepository(txs *TxManager) *AISessionRepository {
 	return &AISessionRepository{txs: txs}
 }
 
-// Record upserts the last-reported event for one (environment, session):
-// this is the environment's own self-report replacing whatever it last said,
-// mirroring activity.RecordAISessionEvent's local-file "one writer, latest
-// event wins" contract. An event that omits Tool carries the previously
-// reported one forward (COALESCE against the existing row) rather than
-// blanking it, matching activity's previouslyReportedAISessionTool.
+// Record upserts the latest event for one (environment, session); an event
+// without Tool keeps the previously reported one.
 func (r *AISessionRepository) Record(ctx context.Context, event model.AISessionEvent) (model.AISessionEvent, error) {
 	var recorded model.AISessionEvent
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -42,12 +38,8 @@ func (r *AISessionRepository) Record(ctx context.Context, event model.AISessionE
 	return recorded, err
 }
 
-// List returns every recorded session event for one environment, sorted by
-// session id for a stable, diffable listing — the DB-backed twin of
-// activity.LoadAISessionStatuses. Scoped explicitly by tenant_id from the
-// security context rather than left to RLS: erun_operations' policy is
-// unconditional, so an OPERATIONS caller naming another tenant's
-// environmentID would otherwise read that tenant's session events.
+// List returns one environment's session events sorted by session id. tenant_id
+// is filtered explicitly because erun_operations' RLS policy is unconditional.
 func (r *AISessionRepository) List(ctx context.Context, environmentID string) ([]model.AISessionEvent, error) {
 	var events []model.AISessionEvent
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {

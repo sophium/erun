@@ -6,15 +6,9 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// TenantQuota is the per-tenant guardrail row carrying operator-set caps;
-// absent a row, the tenant falls back to the default caps (repository.Default*).
-// MaxCPUMillicores/MaxMemoryMB/MaxStorageGB are a per-environment namespace
-// ceiling: every runtime environment this tenant provisions gets a
-// ResourceQuota/LimitRange capped at these values, identically. MaxTotal*
-// is the separate aggregate tenant-wide budget: since every
-// environment's cap is the same per-environment value, admission projects
-// (existing runtime environment count + 1) * the per-environment cap against
-// MaxTotal* and refuses a create that would exceed it.
+// TenantQuota holds operator-set caps; without a row, repository.Default* apply.
+// Max{CPUMillicores,MemoryMB,StorageGB} cap each environment, and admission
+// refuses a create when (count+1) * that cap exceeds MaxTotal*.
 type TenantQuota struct {
 	bun.BaseModel         `bun:"table:tenant_quotas,alias:tq"`
 	TenantID              string    `json:"tenantId" bun:"tenant_id,pk,scanonly"`

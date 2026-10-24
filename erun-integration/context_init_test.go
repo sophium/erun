@@ -42,11 +42,7 @@ func testContextInitDryRunTracesAWSSecurityGroupAndRunInstances(t *testing.T) {
 }
 
 func testContextInitRealRunReusesDuplicateSecurityGroupAndIngress(t *testing.T) {
-	// Locks two duplicate recoveries in one run: create-security-group
-	// answered InvalidGroup.Duplicate (fall back to a lookup) and
-	// authorize-ingress answered InvalidPermission.Duplicate (reuse the
-	// existing rule). Real-run, not dry-run: both branches key off the
-	// aws CLI's error output.
+	// Real run: both duplicate recoveries key off the aws CLI's error output.
 	setup := env.New(t)
 	seedCloudContextConfig(t, setup, "preexisting")
 	stubs := setup.Cwd + "/stubs"
@@ -79,9 +75,6 @@ func testContextInitRealRunReusesDuplicateSecurityGroupAndIngress(t *testing.T) 
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
 	golden.Equal(t, "context/init_real_run_reuses_duplicate_security_group_and_ingress", normalize.Apply(result.Combined))
-	// Persistence is a side effect outside the captured streams: the
-	// new context must be appended next to the preexisting one with
-	// the recovered security group and the launched instance.
 	raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
 	if err != nil {
 		t.Fatalf("read root config: %v", err)
@@ -99,10 +92,7 @@ func testContextInitRealRunReusesDuplicateSecurityGroupAndIngress(t *testing.T) 
 }
 
 func testContextInitDryRunGeneratesSequentialContextName(t *testing.T) {
-	// Without --context the name derives from account id + region and the
-	// counter advances past the highest existing erun-NNN context: the
-	// seeded erun-001 forces erun-002, and the unrelated "edge" context
-	// covers the non-matching-name skip.
+	// Seeded erun-001 forces erun-002; "edge" covers the non-matching-name skip.
 	setup := env.New(t)
 	seedCloudConfigWithContexts(t, setup,
 		"  - name: erun-001-123456789012-eu-west-2\n"+
@@ -168,11 +158,7 @@ func testContextInitDryRunRejectsUnsupportedDiskType(t *testing.T) {
 }
 
 func testContextInitRealRunRetriesIamConsistencyVisibility(t *testing.T) {
-	// Locks the IAM-consistency retry: a freshly created instance profile
-	// is not yet visible to EC2, so the first run-instances fails with
-	// "Invalid IAM Instance Profile name" and production backs off and
-	// retries. Real-run, not dry-run: the classifier branches on the aws
-	// CLI's error output. Costs one real 2s backoff sleep.
+	// A new instance profile is not yet visible to EC2; costs one real 2s backoff.
 	setup := env.New(t)
 	seedCloudContextConfig(t, setup, "preexisting")
 	stubs := setup.Cwd + "/stubs"
@@ -225,10 +211,6 @@ func testContextInitDryRunExistingSecurityGroupSkipsCreation(t *testing.T) {
 }
 
 func testContextInitRealRunSecurityGroupFailureFails(t *testing.T) {
-	// Locks the non-duplicate security-group failure: a
-	// create-security-group rejection that is not InvalidGroup.Duplicate
-	// must abort the init. Real-run, not dry-run: the classifier branches
-	// on the aws CLI's error output.
 	setup := env.New(t)
 	seedCloudContextConfig(t, setup, "preexisting")
 	stubs := setup.Cwd + "/stubs"
@@ -275,12 +257,7 @@ func testContextInitDryRunGeneratesNameFromUsername(t *testing.T) {
 }
 
 func testContextInitDryRunUnaffectedByKubectlContextConfigureLibraryExecutionMode(t *testing.T) {
-	// Locks the dry-run/audit contract: configureCloudKubeContext only
-	// ever traces the three kubectl config lines and returns before
-	// checking the execution mode, so flipping
-	// execution.modes.kubectl-context-configure to library must not
-	// change dry-run output at all -- reuses
-	// init_dry_run_generates_name_from_username's golden byte-for-byte.
+	// Library mode must not change the dry-run trace; reuses the generate-name golden.
 	setup := env.New(t)
 	root := filepath.Join(setup.ConfigHome, "erun")
 	if err := os.MkdirAll(root, 0o755); err != nil {

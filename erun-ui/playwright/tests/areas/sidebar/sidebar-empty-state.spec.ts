@@ -3,13 +3,8 @@ import type { Page } from '@playwright/test';
 import { test, expect } from '../../../fixtures/erunApp.js';
 import { AppShell } from '../../../pages/index.js';
 
-// The zero-tenant empty state must promise only what the app offers (there is
-// no kubeconfig import), and the sidebar's "+" must not be labelled
-// "...remote environment" for a dialog that offers three env types. Stub a bare
-// LoadState response (zero tenants) rather than the AppShell fixture's
-// seeded baseline, which always carries tenant `pw` — so the route must be
-// registered before the app's own boot navigation, not through the `app`
-// fixture (which opens immediately).
+// Stubs a zero-tenant LoadState; registered before boot because the `app` fixture's seed always has
+// tenant `pw`.
 async function stubEmptyState(page: Page): Promise<void> {
   await page.route('**/__erun_invoke', async (route, request) => {
     const body = JSON.parse(request.postData() ?? '{}') as { method: string };
@@ -36,8 +31,6 @@ test.describe('sidebar empty state (#1217)', () => {
   });
 
   test('the header "+" is labelled for any environment type, not just remote', async ({ app }) => {
-    // Reachable from the seeded baseline: this icon button renders in the
-    // Environments header regardless of tenant count.
     await expect(
       app.page.getByRole('button', { name: 'Initialize new environment' }),
     ).toBeVisible();

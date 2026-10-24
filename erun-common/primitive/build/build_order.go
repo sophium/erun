@@ -61,11 +61,8 @@ var dockerfileFromPattern = regexp.MustCompile(`(?im)^\s*FROM(?:\s+--platform=\S
 
 var dockerfileVersionReferencePattern = regexp.MustCompile(`\$\{?ERUN_VERSION\b`)
 
-// dockerfileConsumesVersion reports whether a Dockerfile resolves any of its own
-// content through ERUN_VERSION — baking it into a compiled binary, or selecting
-// the base tag it builds on. For such an image the version is a build input, so
-// two versions are two artifacts even when every file in the context is byte
-// identical; images that never reference it keep a version-independent identity.
+// dockerfileConsumesVersion reports whether a Dockerfile uses ERUN_VERSION, making
+// the version a build input even for a byte-identical context.
 func dockerfileConsumesVersion(dockerfilePath string) bool {
 	data, err := os.ReadFile(dockerfilePath)
 	if err != nil {
@@ -83,19 +80,14 @@ func dockerfileLocalBaseImageTags(dockerfilePath string, buildsByTag map[string]
 	return tags
 }
 
-// dockerfileBaseImageDep is one sibling build a Dockerfile FROMs, tagged with how
-// the FROM names it. Only a versioned reference can be redirected to a different
-// tag of the same base through the ERUN_VERSION build arg, so callers that must
-// resolve a base the registry does not hold need the distinction; a literal FROM
-// names exactly one tag and offers no such lever.
+// dockerfileBaseImageDep is one sibling build a Dockerfile FROMs. Only a versioned
+// FROM can be redirected to another tag via the ERUN_VERSION build arg.
 type dockerfileBaseImageDep struct {
 	tag       string
 	versioned bool
 }
 
-// dockerfileLocalBaseImageDeps lists the sibling builds a Dockerfile FROMs, in
-// Dockerfile order — the order callers rely on to pick a deterministic build
-// sequence and to name a cascade's trigger.
+// dockerfileLocalBaseImageDeps lists sibling builds a Dockerfile FROMs, in Dockerfile order.
 func dockerfileLocalBaseImageDeps(dockerfilePath string, buildsByTag map[string]shared.DockerBuildSpec) []dockerfileBaseImageDep {
 	data, err := os.ReadFile(dockerfilePath)
 	if err != nil {
@@ -123,14 +115,8 @@ func dockerfileLocalBaseImageDeps(dockerfilePath string, buildsByTag map[string]
 	return dependencies
 }
 
-// markLocalBaseImageBuilds records, on each build whose ${ERUN_VERSION} base this
-// same run produces and does not publish, the base tag it must resolve locally.
-// A local build only ever tags its output per-arch; the plain <registry>/<image>:<version>
-// reference the wrapper's FROM asks for is minted in the registry by push's
-// manifest assembly, so without this a dependent image can never build locally
-// and `erun build` cannot gate a release before any git ref moves. A pushing base
-// is left alone: its plain tag really does exist by the time the dependent builds,
-// published by the base's own push earlier in the dependency order.
+// markLocalBaseImageBuilds marks builds whose ${ERUN_VERSION} base this run builds without
+// publishing: the plain base tag exists only after push's manifest assembly.
 func markLocalBaseImageBuilds(builds []shared.DockerBuildSpec) []shared.DockerBuildSpec {
 	if len(builds) < 2 {
 		return builds

@@ -59,8 +59,7 @@ func runIdleCommand(ctx context.Context, commandCtx core.Context, store config.O
 	return WriteIdleResult(commandCtx, status, jsonOutput)
 }
 
-// WriteIdleResult picks the wire form once, so the documented global
-// --output json and the command's own --json alias cannot diverge.
+// WriteIdleResult keeps --output json and --json from diverging.
 func WriteIdleResult(commandCtx core.Context, status activity.EnvironmentIdleStatus, jsonOutput bool) error {
 	if shared.CommandWantsJSON(commandCtx, jsonOutput) {
 		encoder := json.NewEncoder(commandCtx.Stdout)
@@ -70,9 +69,7 @@ func WriteIdleResult(commandCtx core.Context, status activity.EnvironmentIdleSta
 	return writeIdleStatus(commandCtx, status)
 }
 
-// resolveEnvironmentIdleStatus reads the local store only when this process is
-// the environment being asked about; anywhere else the environment's own edge
-// is the only thing that knows.
+// resolveEnvironmentIdleStatus reads the local store only inside the asked-about environment.
 func resolveEnvironmentIdleStatus(ctx context.Context, commandCtx core.Context, store config.OpenStore, resolveOpen shared.OpenResolver, tenant, environment string) (activity.EnvironmentIdleStatus, bool, error) {
 	if shared.EnvironmentTargetsItself() {
 		status, err := activity.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, time.Now())

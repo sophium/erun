@@ -10,11 +10,6 @@ import {
   summarizeEnvironmentUsageMetrics,
 } from './environmentUsageSummary';
 
-// summarizeEnvironmentUsage is what both the env hover card and the
-// orchestrator card render from, so its fail-soft contract is what has to be
-// right: never a bare 0%/idle-looking figure for "unmeasured", and a stale
-// reading always distinguishable from a fresh one.
-
 test('no snapshot at all reads as not yet observed, not idle', () => {
   const summary = summarizeEnvironmentUsage(undefined, Date.now());
   assert.equal(summary.hasReading, false);
@@ -149,11 +144,6 @@ test('available but neither cpu nor memory readable states so, not a zero', () =
   assert.equal(summary.detail, "This environment's own CPU and memory usage could not be read.");
 });
 
-// summarizeEnvironmentUsageMetrics feeds the environment card's separate CPU
-// and memory rows, each with a decile strip. The property that matters most is
-// the one the joined headline could not express: a measured zero and no reading
-// at all must not arrive at the renderer the same way.
-
 function snapshotWith(
   usage: UIEnvironmentUsageSnapshot['usage'],
   ageSeconds = 0,
@@ -182,10 +172,7 @@ function readable(percentOfLimit: number): UIEnvironmentUsageSnapshot['usage'] {
   };
 }
 
-// readingOf narrows the result to a reading so the assertions below read as
-// plain field access. The narrowing goes through `assert.fail` rather than an
-// `assert.equal(kind, 'reading')` first: `assert.equal`'s own signature narrows
-// the argument, which makes the follow-up guard a tautology to the linter.
+// Narrows via assert.fail: assert.equal's own narrowing makes a guard a lint tautology.
 function readingOf(
   metrics: EnvironmentUsageMetrics,
 ): Extract<EnvironmentUsageMetrics, { kind: 'reading' }> {
@@ -210,10 +197,7 @@ test('a never-sampled environment says so rather than rendering an empty strip',
 });
 
 test('a measured zero is a reading, unlike no reading at all', () => {
-  // The crossed case: both of these describe "nothing is running", and they must
-  // not arrive the same way. A zero carries a percent, so the caller renders an
-  // empty (outlined) strip; the never-sampled env carries none, so it renders
-  // its degraded text and no strip.
+  // A measured zero carries a percent (empty strip); never-sampled carries none.
   const zero = readingOf(
     summarizeEnvironmentUsageMetrics(
       snapshotWith({
@@ -337,13 +321,8 @@ test('a reading older than the sweep interval carries its staleness', () => {
 });
 
 test('a measured zero whose percentage the wire dropped still carries a percent', () => {
-  // The Go side marks these percentage fields `omitempty` and sets
-  // `utilization` unconditionally on every available CPU reading, so a genuine
-  // 0% arrives as `utilization: '0.0%'` with NO `utilizationPercent` key, and a
-  // 0-of-limit memory reading with no `percentOfLimit`. Reading a missing
-  // percentage as "unmeasured" would give the two states the same treatment --
-  // no strip for either -- which is the idle/unmeasured confusion the strip
-  // exists to remove. An available metric with no percentage is a measured zero.
+  // The Go side omits zero percentages (omitempty), so an available metric
+  // without one is a measured zero.
   const metrics = readingOf(
     summarizeEnvironmentUsageMetrics(
       snapshotWith({
@@ -358,16 +337,10 @@ test('a measured zero whose percentage the wire dropped still carries a percent'
   );
   assert.equal(metrics.cpu.percent, 0);
   assert.equal(metrics.memory.percent, 0);
-  // And the figure itself is a zero, not the dash reserved for unmeasured.
   assert.equal(metrics.cpu.value, '0.0%');
   assert.equal(metrics.memory.value, '0%');
 });
 
-// The Builds row is the erun-dind sidecar's reading, and it exists because the
-// runtime container's own CPU cannot answer "is this build working": a release
-// lane spends its time waiting on bounded `erun exec job await` calls, so that
-// figure is near zero whether the build is healthy or wedged. The report was
-// exactly that -- an environment busy holding a release, reading 0.2% CPU.
 test('a build-capable environment actively building reports the sidecar, not just the near-idle runtime', () => {
   const metrics = readingOf(
     summarizeEnvironmentUsageMetrics(
@@ -375,8 +348,6 @@ test('a build-capable environment actively building reports the sidecar, not jus
         tenant: 't',
         environment: 'e',
         available: true,
-        // The runtime container during an active build: near-idle by
-        // construction, and the only figure the card used to draw.
         cpu: { available: true, utilizationPercent: 0.2, utilization: '0.2%' },
         memory: {
           available: true,
@@ -410,12 +381,6 @@ test('a build-capable environment actively building reports the sidecar, not jus
   assert.equal(metrics.builds.caption, 'erun-dind sidecar · 19.4Gi of 20.0Gi');
 });
 
-// A sidecar that declares no cpu.max quota cannot report a percentage, and
-// reporting nothing would put the operator back where they started: a
-// build-capable environment whose only visible CPU figure is the runtime
-// container's near-zero. It has done measurable work, and CPU-seconds is how a
-// container with no ceiling states it -- with no strip, because there is no
-// ceiling to be a fraction of.
 test('a sidecar with no CPU quota reports cumulative CPU-seconds and no strip', () => {
   const metrics = readingOf(
     summarizeEnvironmentUsageMetrics(
@@ -449,14 +414,9 @@ test('a sidecar with no CPU quota reports cumulative CPU-seconds and no strip', 
   assert.equal(metrics.builds.value, '386 CPU-s');
   assert.equal(metrics.builds.suffix, 'no quota');
   assert.equal(metrics.builds.utilization, undefined);
-  // Memory with no ceiling is still a real reading, stated without a limit.
   assert.equal(metrics.builds.caption, 'erun-dind sidecar · 512Mi (no limit)');
 });
 
-// An absent `dind` has two causes, and this is the one that is not a defect:
-// the environment carries no erun-dind sidecar, so there is nothing to report
-// and no Builds row to draw. Rendering the not-read row below here would put a
-// permanent dash on every runtime environment.
 test('an environment that carries no sidecar renders no Builds row', () => {
   const metrics = readingOf(
     summarizeEnvironmentUsageMetrics(snapshotWith(readable(20)), Date.now()),
@@ -464,16 +424,6 @@ test('an environment that carries no sidecar renders no Builds row', () => {
   assert.equal(metrics.builds, undefined);
 });
 
-// The reported defect, and the other half of the distinction above. An absent
-// `dind` is not a zero, but it is also not one state: on an environment that
-// carries the sidecar it means the exec into it failed (an older runtime image,
-// a sidecar mid-restart), and the card rendered that exactly like an
-// environment carrying no sidecar at all -- as nothing. The operator was left
-// with the runtime container's near-idle CPU and memory qualified only by the
-// age caption's "excludes builds" caveat, which reads as idle rather than as
-// unknown, beside an Activity line saying a build was running. `excludesBuilds`
-// is the field that tells the two apart, and the unread state must render where
-// the Builds row would have been -- never as a zero.
 test('a build-capable environment whose sidecar could not be read says so rather than showing no Builds row', () => {
   const metrics = readingOf(
     summarizeEnvironmentUsageMetrics(
@@ -521,9 +471,7 @@ test('an unreadable sidecar CPU reports the reason instead of an idle zero', () 
   assert.equal(metrics.builds.note, 'cpu.stat usage_usec was not readable');
 });
 
-// requestReading is a reading whose pod spec was read: the runtime container
-// declares the chart's fixed 0.25 CPU / 1.0GiB against limits in the tens of
-// GiB, which is exactly the state the card used to render as provisioned.
+// requestReading's container requests far less than its limits.
 function requestReading(): UIEnvironmentUsageSnapshot['usage'] {
   const usage = readable(82);
   usage.requests = {
@@ -532,11 +480,6 @@ function requestReading(): UIEnvironmentUsageSnapshot['usage'] {
   return usage;
 }
 
-// TestEachMetricStatesItsCeilingAndItsReservation is the card half of the
-// reservation reading: `82% of 23.0 GiB` reads as an environment holding 23.0
-// GiB, when the container reserves 1.0GiB and the rest is only what it may
-// grow to under pressure. Naming the ceiling a limit and stating the request
-// beside it is what makes the two distinguishable without arithmetic.
 test('each metric states its ceiling and its reservation', () => {
   const metrics = readingOf(
     summarizeEnvironmentUsageMetrics(snapshotWith(requestReading()), Date.now()),
@@ -545,11 +488,6 @@ test('each metric states its ceiling and its reservation', () => {
   assert.equal(metrics.cpu.suffix, '0.25 CPU requested');
 });
 
-// TestAMissingReservationIsAbsentRatherThanZero covers the state a fabricated
-// zero would misstate: an unread pod spec (an older cluster, kubectl refusing
-// the read) leaves the reservation unstated, while the limits and the usage
-// figures beside it keep rendering. "Could not read the reservation" is not
-// "reserves nothing", and only one of them is true here.
 test('a missing reservation is absent rather than a requested zero', () => {
   const unread = readingOf(
     summarizeEnvironmentUsageMetrics(snapshotWith(readable(82)), Date.now()),
@@ -558,10 +496,6 @@ test('a missing reservation is absent rather than a requested zero', () => {
   assert.equal(unread.cpu.suffix, '');
 });
 
-// TestAnUnreadablePodSpecIsStatedRatherThanSilent is the other half of that
-// distinction: a read that was attempted and failed has a reason to give, and
-// the card's own honesty contract (never a number nobody measured) is what the
-// reason preserves.
 test('an unreadable pod spec is reported by the reader, never as zero', () => {
   const usage = readable(82);
   usage.requests = { runtime: {}, unavailable: 'kubectl get pods: connection refused' };

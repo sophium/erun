@@ -125,16 +125,12 @@ export const updateManageDialog =
       patchManageDialog({
         ...values,
         error: values.error ?? '',
-        // Mark the checklist loading now (not just when the debounced probe
-        // fires) so reopening the picker mid-debounce shows the loading state
-        // for the new version, never the previous version's charts.
+        // Loading now so a reopened picker never shows the previous version's charts.
         ...(versionReset
           ? { versionImage: '', choicesOpen: false, deployComponentsLoading: true }
           : {}),
       }),
     );
-    // A changed deploy version changes which component charts are published, so
-    // re-probe the checklist (debounced against per-keystroke free-text edits).
     if (versionReset) {
       dispatch(scheduleManageDeployComponentsRefresh());
     }
@@ -151,8 +147,6 @@ export const setManageVersionChoicesOpen =
     if (state.manageDialog.busy) {
       return;
     }
-    // The popover is one panel — versions and that version's components — so it
-    // opens on request even before any version suggestion has loaded.
     dispatch(patchManageDialog({ choicesOpen: open }));
   };
 
@@ -162,8 +156,6 @@ export const selectManageVersionSuggestion =
     if (getState().manageDialog.busy) {
       return;
     }
-    // Keep the popover open after a pick so the operator continues to the chosen
-    // version's component checklist in the same panel.
     dispatch(
       patchManageDialog({
         version: suggestion?.version ?? '',
@@ -171,7 +163,6 @@ export const selectManageVersionSuggestion =
         choicesOpen: true,
       }),
     );
-    // Picking a version is discrete, so re-probe the checklist immediately.
     void dispatch(refreshManageDeployComponents());
   };
 
@@ -189,9 +180,8 @@ export const updateManageConfig =
     dispatch(patchManageDialog({ config, error: '' }));
   };
 
-// The AWS alias is also written to the legacy cloudProviderAlias scalar the
-// cloud-context linkage UI still reads, and its resolved cloud context is
-// cleared so a stale link cannot outlive the alias change.
+// Also writes the legacy cloudProviderAlias and clears the resolved cloud context
+// so a stale link cannot outlive the alias.
 export const updateManageCloudAliasSlot =
   (provider: string, alias: string): AppThunk =>
   (dispatch, getState) => {
@@ -278,8 +268,6 @@ export const loadManageConfig = (): AppThunk<Promise<void>> => async (dispatch, 
   if (!dialog.open || !selection) {
     return;
   }
-  // A config reload makes any prior health result stale, so clear it; the
-  // operator re-runs "Check environment" against the freshly loaded config.
   dispatch(
     patchManageDialog({ configLoading: true, error: '', health: null, healthLoading: false }),
   );
@@ -386,9 +374,6 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
         busyAction: '',
         busyTarget: '',
         error: '',
-        // The banner means "the running pod is behind the saved config", so
-        // raise it only when this save changed a pod-shaping field (saving
-        // autoUpgrade/autoStart must not prompt a pod roll).
         pendingRedeploy: nextPendingRedeploy(dialog.pendingRedeploy, priorConfig, displayConfig),
       }),
     );
@@ -407,11 +392,8 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
   }
 };
 
-// applyManageSaveConsequences re-runs what a save invalidates beyond the config
-// it persisted — the version picker, the chart probe, and the AI tabs are all
-// computed from the pre-save values, and nothing else re-reads them while the
-// dialog stays open. Each is gated on the values it actually depends on, so an
-// unrelated save costs no registry round-trip, no re-probe, and no tab churn.
+// applyManageSaveConsequences refreshes what a save invalidates, each gated on the
+// values it depends on.
 const applyManageSaveConsequences =
   (
     selection: UISelection,
@@ -419,30 +401,17 @@ const applyManageSaveConsequences =
     savedConfig: UIEnvironmentConfig,
   ): AppThunk =>
   (dispatch) => {
-    // The picker lists versions from the registries the environment resolves to,
-    // and is otherwise loaded only when the dialog opens. A save that changed
-    // those registries must re-query, or the one the operator just added is
-    // absent from the list AND from the notices — indistinguishable from a
-    // registry erun cannot use, in the one place its effect is read. A missing
-    // prior config cannot be diffed, so re-query: a redundant listing is cheaper
-    // than a silently stale one.
+    // Without a prior config, re-query: a redundant listing beats a stale one.
     if (
       !priorConfig ||
       versionSourceSignature(priorConfig) !== versionSourceSignature(savedConfig)
     ) {
       void dispatch(refreshManageVersionSuggestions(false));
     }
-    // Stating (or clearing) the runtime chart changes which chart a deploy would
-    // install, so the probe behind the panel is re-run rather than left
-    // describing the chart the environment used to ride.
     if ((priorConfig?.runtimeChart ?? '') !== (savedConfig.runtimeChart ?? '')) {
       void dispatch(refreshManageDeployComponents());
     }
-    // A changed Claude launch flag only applies when the AI session's
-    // create-time program runs, so reopen the env's open AI tabs now rather
-    // than leaving a live claude on the stale flags. A save that did not
-    // change the launch signature must not churn tabs, and one that moved the
-    // Claude routing waits for the redeploy that applies it.
+    // Launch flags apply only on session restart; a routing change waits for redeploy.
     if (
       priorConfig &&
       aiSessionLaunchSignature(priorConfig) !== aiSessionLaunchSignature(savedConfig) &&
@@ -469,9 +438,7 @@ const refreshManageVersionSuggestions =
         environmentApi.endpoints.getVersionSuggestions.initiate(selection, { forceRefetch: true }),
       ).unwrap();
     } catch (error) {
-      // A listing the transport could not complete leaves the picker empty, so
-      // say why here rather than letting the rejection escape unhandled and the
-      // empty list read as "this environment has no versions".
+      // Otherwise the empty list reads as "no versions".
       if (!stale()) {
         dispatch(patchManageDialog({ error: readError(error) }));
       }
@@ -485,17 +452,9 @@ const refreshManageVersionSuggestions =
     dispatch(
       patchManageDialog({ versionSuggestions: suggestions, versionSuggestionNotices: notices }),
     );
-    // Only auto-select a default when explicitly asked. Never override a version
-    // the operator picked or typed: the dialog opens at '', so any non-empty
-    // version when this async fetch resolves is a fresh operator action, and an
-    // in-flight suggestions load landing a beat later must not clobber it — doing
-    // so reset the version and collapsed the "Components to deploy" panel back to
-    // its gated hint with no error shown.
+    // Never override a version the operator picked or typed while this was in flight.
     const defaultSuggestion = suggestions[0];
     if (selectDefault && defaultSuggestion) {
       dispatch(selectManageVersionSuggestion(defaultSuggestion));
     }
   };
-
-// The deploy-components thunks (refresh/schedule/toggle/save) live in
-// ./manageDeployComponentsThunks and are re-exported through the barrel.

@@ -14,11 +14,8 @@ import * as React from 'react';
 import { type AISessionStatus, useListAISessionsQuery } from '../app/api/aiSessionsApi';
 import { useListEnvironmentsQuery } from '../app/api/environmentsApi';
 
-// "AI sessions" panel: a minimal read-only view of the busy/idle/awaiting-input
-// status each environment's own AI-tool hooks have last reported. One
-// environment expanded at a time, fetched on demand rather than for every
-// row up front, since most environments in a tenant's list will never have
-// reported a session.
+// Read-only AI session status, fetched on demand for one expanded environment since
+// most never report a session.
 
 const STATE_TONE: Record<string, StatusBadgeTone> = {
   busy: 'in-progress',
@@ -121,10 +118,7 @@ export function AISessionsPanel({
 }: {
   token: string;
   environments: Environment[];
-  // Set once shell/ScopeSelector.tsx points this caller at another tenant;
-  // undefined means "my own tenant" and `environments` above (already
-  // resolved by the parent from GET /v1/config) is shown unchanged, the same
-  // split environments/EnvironmentsPanel.tsx's own row list uses.
+  // Undefined means the caller's own tenant.
   scopeTenantId?: string;
 }): React.ReactElement {
   const scopedEnvironmentsQuery = useListEnvironmentsQuery(

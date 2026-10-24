@@ -8,13 +8,11 @@ import type {
 } from '@/app/slices/orchestratorsSlice';
 import { isClaudeModelToken } from '@/components/app/claudeModels.helpers';
 
-// OrchestratorLaunchChoices mirrors the Go orchestratorLaunchChoices read:
-// what the gateway, model and effort controls can offer on this machine.
+// OrchestratorLaunchChoices mirrors the Go orchestratorLaunchChoices read.
 export interface OrchestratorLaunchChoices {
   gatewayConfigured: boolean;
   gatewayModels: string[];
-  // Catalog entries the gateway cannot drive; never offered, and flagged when
-  // a stored model names one.
+  // Catalog entries the gateway cannot drive; never offered.
   gatewayUndriveableModels: string[];
   gatewayDefaultModel: string;
   defaultModel: string;
@@ -26,23 +24,14 @@ export const ORCHESTRATOR_GATEWAY_FIELD_ID = 'orchestrator-gateway';
 export const ORCHESTRATOR_MODEL_FIELD_ID = 'orchestrator-model';
 export const ORCHESTRATOR_EFFORT_FIELD_ID = 'orchestrator-effort';
 
-// ORCHESTRATOR_LAUNCH_DEFAULT is the pickers' sentinel for an empty setting.
-// Radix's Select.Item rejects an empty-string value, so '' travels as this
-// token and is translated back by orchestratorLaunchValue. It is the same word
-// `erun orchestrator set-model/set-effort` take to clear a setting, and the
-// free-entry model field can still have it typed into it, so every value is
-// passed through orchestratorLaunchValue before it is shown as a choice or
-// sent.
+// ORCHESTRATOR_LAUNCH_DEFAULT stands in for '' (Radix rejects empty values); it is also the CLI's clearing word.
 export const ORCHESTRATOR_LAUNCH_DEFAULT = 'default';
 
-// orchestratorLaunchValue maps the clearing word, in any case and with
-// surrounding blanks, to the empty default, as the CLI does.
+// orchestratorLaunchValue maps the clearing word, in any case, to '' as the CLI does.
 export function orchestratorLaunchValue(raw: string): string {
   return raw.trim().toLowerCase() === ORCHESTRATOR_LAUNCH_DEFAULT ? '' : raw;
 }
 
-// orchestratorLaunchSettingsToSave is what the dialog sends: the clearing word
-// typed as a model or effort never leaves the form as a literal value.
 export function orchestratorLaunchSettingsToSave(
   settings: OrchestratorLaunchSettings,
 ): OrchestratorLaunchSettings {
@@ -57,8 +46,7 @@ export function orchestratorLaunchSelectValue(value: string): string {
   return value === '' ? ORCHESTRATOR_LAUNCH_DEFAULT : value;
 }
 
-// orchestratorLaunchSettingsOf seeds the form from the stored settings, never
-// from the resolved launch, so the defaults stay defaults on save.
+// orchestratorLaunchSettingsOf seeds from stored settings, not the resolved launch, so defaults stay defaults.
 export function orchestratorLaunchSettingsOf(
   editing: OrchestratorInfo | null,
 ): OrchestratorLaunchSettings {
@@ -72,14 +60,11 @@ export function orchestratorLaunchSettingsOf(
 export interface OrchestratorGatewayControl {
   disabled: boolean;
   helper: string;
-  // blocked marks a stored "on" that cannot launch, so it reads as a problem
-  // to resolve rather than as an ordinary description.
+  // A stored "on" that cannot launch.
   blocked: boolean;
 }
 
-// orchestratorGatewayControl decides whether the gateway switch can be used and
-// what it says. With no catalog the switch is disabled, except while it is
-// already on: that value cannot launch, and turning it off is the remedy.
+// orchestratorGatewayControl disables the switch without a catalog, unless it is already on.
 export function orchestratorGatewayControl(
   choices: OrchestratorLaunchChoices | null,
   useGateway: boolean,
@@ -111,8 +96,6 @@ export function orchestratorGatewayControl(
   };
 }
 
-// orchestratorGatewayModelUndriveable reports a stored model the catalog names
-// as one the gateway cannot drive: a launch on it would be refused.
 export function orchestratorGatewayModelUndriveable(
   choices: OrchestratorLaunchChoices | null,
   model: OrchestratorModel,
@@ -120,17 +103,13 @@ export function orchestratorGatewayModelUndriveable(
   return model !== '' && (choices?.gatewayUndriveableModels ?? []).includes(model);
 }
 
-// orchestratorGatewayModelOptions lists the gateway catalog's models plus the
-// default, naming which model the default resolves to. A stored model the
-// catalog does not offer stays visible, flagged with why, so the trigger never
-// renders blank over a value the next save sends back.
+// orchestratorGatewayModelOptions keeps a stored unlisted model visible, flagged.
 export function orchestratorGatewayModelOptions(
   choices: OrchestratorLaunchChoices | null,
   model: OrchestratorModel,
 ): SelectFieldOption[] {
   const models = choices?.gatewayModels ?? [];
-  // A catalog listing no driveable model supplies no default, so the
-  // orchestrator's own default passes through it.
+  // No driveable model means the orchestrator's own default applies.
   const resolved = choices
     ? choices.gatewayDefaultModel !== ''
       ? choices.gatewayDefaultModel
@@ -144,8 +123,7 @@ export function orchestratorGatewayModelOptions(
     ...models.map((id) => ({ value: id, label: id })),
   ];
   if (model !== '' && !models.includes(model)) {
-    // Flagged only once the catalog has been read, so a stored model never
-    // flashes as unlisted while the read is in flight.
+    // Flag only once the catalog is read, to avoid a flash while in flight.
     options.push({ value: model, label: orchestratorUnofferedModelLabel(choices, model) });
   }
   return options;
@@ -163,8 +141,6 @@ function orchestratorUnofferedModelLabel(
     : `${model} (not in the gateway catalog)`;
 }
 
-// orchestratorGatewayModelHelper explains the gateway model picker, and says
-// what to do when the stored model cannot launch through it.
 export function orchestratorGatewayModelHelper(
   choices: OrchestratorLaunchChoices | null,
   model: OrchestratorModel,
@@ -175,8 +151,7 @@ export function orchestratorGatewayModelHelper(
   return "The gateway catalog's models. Default launches on the catalog's default model.";
 }
 
-// orchestratorEffortOptions lists the effort levels plus the default. A stored
-// level this build does not know stays visible, flagged, for the same reason.
+// orchestratorEffortOptions keeps an unknown stored level visible, flagged.
 export function orchestratorEffortOptions(
   choices: OrchestratorLaunchChoices | null,
   effort: OrchestratorEffort,
@@ -198,15 +173,11 @@ export function orchestratorEffortOptions(
   return options;
 }
 
-// orchestratorModelInvalid mirrors the Go launch guard: a model reaches
-// `--model` as one argv token, so it is letters, digits and . _ : / - and
-// cannot start with -.
+// orchestratorModelInvalid mirrors the Go launch guard: one argv token, not starting with -.
 export function orchestratorModelInvalid(model: OrchestratorModel): boolean {
   return model.trim() !== '' && !isClaudeModelToken(model);
 }
 
-// orchestratorModelHelper explains the free-entry model field used off the
-// gateway, where any model this machine's Claude Code accepts can be named.
 export function orchestratorModelHelper(
   choices: OrchestratorLaunchChoices | null,
   model: OrchestratorModel,

@@ -110,11 +110,8 @@ func initCloudContextSecurityGroup(ctx core.Context, deps CloudContextDependenci
 }
 
 func runInitCloudContextInstance(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, params InitCloudContextParams, config *configpkg.CloudContextConfig) (string, error) {
-	// Idempotency: a re-run (a provisioner resuming after a crash, or a
-	// re-issued init) reuses the instance already tagged for this context
-	// instead of launching a duplicate. When the caller derives the admin
-	// token deterministically from the context id, the reused instance's
-	// baked token still matches the re-resolved one.
+	// Reuse an instance already tagged for this context so a re-run does not launch a duplicate;
+	// a deterministically derived admin token still matches the reused instance's baked one.
 	existingID, err := findRunningCloudContextInstance(ctx, deps, provider, config.Region, config.Name)
 	if err != nil {
 		return "", err
@@ -149,8 +146,7 @@ func findRunningCloudContextInstance(ctx core.Context, deps CloudContextDependen
 	if err != nil {
 		return "", err
 	}
-	// Dry-run models a fresh provision so the plan shows the full launch: the
-	// query is traced above for auditability, but its stubbed result is ignored.
+	// Dry-run ignores the stubbed lookup so the plan shows a full launch.
 	if ctx.DryRun {
 		return "", nil
 	}

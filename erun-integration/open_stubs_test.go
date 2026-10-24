@@ -18,9 +18,7 @@ func netDialTimeout(network, address string, timeout time.Duration) (net.Conn, e
 	return net.DialTimeout(network, address, timeout)
 }
 
-// skipIfPortsBusy is a last-resort guard for real-run scenarios: fixtures pin
-// ports to the 26100 range, far from erun's default 17000, so this never
-// fires on a developer machine with a live erun session.
+// skipIfPortsBusy is a last-resort guard; fixtures use the 26100 range, away from erun's 17000.
 func skipIfPortsBusy(t *testing.T, ports ...int) {
 	t.Helper()
 	for _, port := range ports {
@@ -32,30 +30,11 @@ func skipIfPortsBusy(t *testing.T, ports ...int) {
 	}
 }
 
-// openHostOSOverride pins DetectHost() to darwin for the open scenarios that
-// cross a host-OS branch. Two branches need it, and both resolve through
-// core.DetectHost (which honors this seam), so a single canonical OS keeps
-// the Unix-recorded goldens deterministic on any host — including Windows, where
-// they would otherwise diverge:
-//   - the `open --no-shell` setup preamble dialect: POSIX
-//     (`kubectl … >/dev/null && … cd '…'`) on unix vs PowerShell
-//     (`… | Out-Null`, `Set-Location …`) when DetectHost reports windows
-//     (erun-cli/cmd/open.go localShellSetupScript/detectOpenNoShellDialect);
-//   - the adopt-or-conflict port-forward probe (findLocalPortHolder in
-//     erun-cli/cmd/shared/port_forward_adopt.go), which is a no-op unless DetectHost
-//     reports a unix host, so the lsof/ps decision-input stubs only drive it
-//     under this override.
-//
-// It is a deliberate test seam, not a production knob (erun-integration/AGENTS.md
-// § "Platform-dependent goldens"). Baked into the kubectl decision-input helpers
-// below so every scenario that emits the preamble or drives the adopt probe pins
-// it; SHELL-pinned scenarios (zsh/bash/pwsh) are unaffected because the shell
-// name wins over host OS for the dialect.
+// openHostOSOverride pins DetectHost to darwin so the --no-shell preamble dialect and
+// the unix-only adopt probe keep goldens deterministic on any host.
 const openHostOSOverride = "ERUN_HOST_OS_OVERRIDE=darwin"
 
-// stubKubectlNotFound makes the deployment check a deterministic decision
-// input. Without it, dry-run's redeploy branch is driven by whatever kubectl
-// sits on the developer's PATH, leaking its "exit status 1" into the trace.
+// stubKubectlNotFound keeps the developer's own kubectl out of dry-run's redeploy decision.
 func stubKubectlNotFound(t *testing.T, setup env.Setup) []string {
 	t.Helper()
 	stubs := setup.Cwd + "/stubs"
@@ -68,24 +47,15 @@ func stubKubectlNotFound(t *testing.T, setup env.Setup) []string {
 	return append(envVars, openHostOSOverride)
 }
 
-// portForwardStateFile is where production keeps a forward's record: under the
-// config home the tenant config resolves through, on every host.
 func portForwardStateFile(setup env.Setup, kind, tenant, environment string) string {
 	return filepath.Join(setup.ConfigHome, "erun", "portforward", kind, tenant, environment+".json")
 }
 
-// legacyPortForwardStateFile is where an earlier release kept that record on
-// macOS, beside os.UserConfigDir rather than the config home. Production keys
-// that layout on the detected host, so a scenario pins it on any host with
-// openHostOSOverride; the harness's XDG_CONFIG_HOME keeps it apart from the
-// canonical tree.
+// legacyPortForwardStateFile is the old macOS layout beside os.UserConfigDir.
 func legacyPortForwardStateFile(setup env.Setup, kind, tenant, environment string) string {
 	return filepath.Join(setup.Home, "Library", "Application Support", "erun", "portforward", kind, tenant, environment+".json")
 }
 
-// seedLegacyPortForwardRecord writes a record, its log and the log's rotated
-// generation at the legacy layout, each carrying a marker line a scenario can
-// look for after migration.
 func seedLegacyPortForwardRecord(t *testing.T, setup env.Setup, kind, tenant, environment string, localPort int) string {
 	t.Helper()
 	statePath := legacyPortForwardStateFile(setup, kind, tenant, environment)
@@ -110,10 +80,8 @@ func seedLegacyPortForwardRecord(t *testing.T, setup env.Setup, kind, tenant, en
 
 const legacyPortForwardLogMarker = "written before the upgrade"
 
-// writePortForwardState writes the per-env forward record erun itself would
-// have written, so a scenario can start from "erun already established this
-// forward" without a first pass. processID must name a real process: production
-// stops the recorded forward by that PID.
+// writePortForwardState seeds the forward record erun would write; processID must be a
+// real process because production stops the forward by PID.
 func writePortForwardState(t *testing.T, setup env.Setup, kind, tenant, environment string, localPort, processID int) {
 	t.Helper()
 	path := portForwardStateFile(setup, kind, tenant, environment)
@@ -128,18 +96,13 @@ func writePortForwardState(t *testing.T, setup env.Setup, kind, tenant, environm
 	}
 }
 
-// adoptHolder describes one fake TCP port holder the lsof/ps probe stubs
-// present to production's adopt-or-conflict check.
 type adoptHolder struct {
 	port int
 	pid  int
 	argv string
 }
 
-// stubAdoptHolderProbes presents a fake holder per configured port to
-// production's adopt-or-conflict probe; unqueried ports report no holder so
-// sibling-port probes stay silent. It returns nothing — the env vars are
-// already wired by the kubectl helper since the stubs share its directory.
+// stubAdoptHolderProbes fakes a holder per port; other ports report none.
 func stubAdoptHolderProbes(t *testing.T, setup env.Setup, holders ...adoptHolder) {
 	t.Helper()
 	stubs := setup.Cwd + "/stubs"
@@ -177,8 +140,7 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
-// waitForFile polls because the side effects it reads are written by detached
-// subprocesses (Start+Release launchers) that may outlive the erun run.
+// waitForFile polls because detached subprocesses may write after erun exits.
 func waitForFile(t *testing.T, path string, timeout time.Duration) string {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -194,9 +156,7 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) string {
 	}
 }
 
-// stubKubectlGenericError returns an error that does NOT match the NotFound
-// tokens, exercising the "check failed, assuming not deployed" fallback
-// rather than the clean not-deployed branch.
+// stubKubectlGenericError returns a non-NotFound error to hit the "assuming not deployed" fallback.
 func stubKubectlGenericError(t *testing.T, setup env.Setup) []string {
 	t.Helper()
 	stubs := setup.Cwd + "/stubs"
@@ -206,15 +166,10 @@ func stubKubectlGenericError(t *testing.T, setup env.Setup) []string {
 	})
 	stubLsofNoHolder(t, stubs)
 	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
-	// Pin DetectHost so the --no-shell preamble dialect stays POSIX; see
-	// openHostOSOverride.
 	return append(envVars, openHostOSOverride)
 }
 
-// stubKubectlKlogFramedError reproduces a real captured toast verbatim: client-go's klog "Unhandled Error" carrier around the same
-// connection-refused cause stubKubectlGenericError uses, framed with the
-// severity/timestamp/goroutine-id/source-location an operator can never act
-// on.
+// stubKubectlKlogFramedError wraps the connection-refused cause in client-go's klog framing.
 func stubKubectlKlogFramedError(t *testing.T, setup env.Setup) []string {
 	t.Helper()
 	stubs := setup.Cwd + "/stubs"
@@ -227,9 +182,7 @@ func stubKubectlKlogFramedError(t *testing.T, setup env.Setup) []string {
 	return append(envVars, openHostOSOverride)
 }
 
-// stubLsofNoHolder keeps the adopt-or-conflict probe silent in scenarios that
-// don't drive it, so a developer's leftover `kubectl port-forward` on an erun
-// default port can't fire the probe mid-scenario and corrupt the golden.
+// stubLsofNoHolder stops a developer's leftover port-forward from firing the adopt probe.
 func stubLsofNoHolder(t *testing.T, stubsDir string) {
 	t.Helper()
 	fixture.StubBinaryAdvanced(t, stubsDir, "lsof", fixture.StubBinarySpec{
@@ -240,10 +193,7 @@ func stubLsofNoHolder(t *testing.T, stubsDir string) {
 	})
 }
 
-// stubKubectlRunState is stubKubectlNotFound's sibling for the wake path: it
-// pins the runtime run-state read (the decision input for whether `open` must
-// scale a stopped environment back up) instead of the deployment-presence
-// check. Same host-OS override, for the same preamble/adopt-probe reasons.
+// stubKubectlRunState pins the run-state read that decides whether open scales the env back up.
 func stubKubectlRunState(t *testing.T, setup env.Setup, desired, ready int) []string {
 	t.Helper()
 	stubs := setup.Cwd + "/stubs"
@@ -253,19 +203,9 @@ func stubKubectlRunState(t *testing.T, setup env.Setup, desired, ready int) []st
 	return append(envVars, openHostOSOverride)
 }
 
-// stubKubectlRunStateWithFailingWait is stubKubectlRunState's sibling for
-// proving the wake path's kubectl-deployment-wait library dispatch
-// (WaitRuntimeAvailable, stop.go) actually engages: it answers the run-state
-// read like stubKubectlRunState, but fails loudly and distinctively for the
-// "wait --for=condition=Available" argv shape instead of silently succeeding,
-// so a fallback to the subprocess path surfaces as a recognizable failure.
-//
-// It also answers any `port-forward` invocation with a real listener, the
-// same technique fixture.StubKubectlDeployed uses: open --no-shell has no
-// shell to fall back on, so the post-wake MCP/API forwards this
-// scenario's own run depends on must actually become reachable rather than
-// the run timing out waiting on them. Spawned listener PIDs are recorded in
-// stubsDir/portsim-pids so the returned cleanup can reap them.
+// stubKubectlRunStateWithFailingWait fails the `wait --for=condition=Available` argv loudly,
+// proving the library wait is used; port-forwards get real listeners (PIDs in
+// stubsDir/portsim-pids) because --no-shell has no shell to fall back on.
 func stubKubectlRunStateWithFailingWait(t *testing.T, stubsDir string, desired, ready int) {
 	t.Helper()
 	portsim := filepath.ToSlash(fixture.PortSimBinary(t))

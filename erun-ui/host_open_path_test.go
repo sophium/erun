@@ -138,10 +138,7 @@ func TestResolveEnvironmentHostPathMapsOutputsToArtifactMirror(t *testing.T) {
 	}
 }
 
-// A pod path that happens to share a
-// name with a real host file (/etc/hosts is the canonical example) must never
-// resolve to that host file just because it falls outside the recognized pod
-// directories.
+// /etc/hosts must never resolve to the host file.
 func TestResolveEnvironmentHostPathNeverResolvesArbitraryPodPathToHost(t *testing.T) {
 	local := t.TempDir()
 	app := NewApp(erunUIDeps{store: hostWorkspaceStore(local)})

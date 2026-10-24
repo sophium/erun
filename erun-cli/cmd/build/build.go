@@ -72,9 +72,7 @@ func NewBuildCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectF
 	}
 	shared.AddDryRunFlag(cmd)
 	addBuildCommandTargetFlags(cmd, &target)
-	// Only on build. push and release also call addPushCommandTargetFlags, and
-	// their builds stay sequential, so offering the knob there would advertise a
-	// control that does nothing.
+	// Only on build: push and release builds stay sequential.
 	cmd.Flags().IntVarP(&jobs, "jobs", "j", 0, "Build this many images at once (0 resolves from the machine, 1 is sequential). Independent images build concurrently; a FROM dependency still waits for its base.")
 	cmd.AddCommand(newBuildProfileCmd())
 	return cmd
@@ -113,8 +111,6 @@ func runBuildCommand(ctx core.Context, store sharedpkg.DockerStore, findProjectR
 	return ctx.WriteResult(buildrun.NewBuildResult(execution))
 }
 
-// runBuildAndDeploy is --deploy's composed step: resolve the deploy specs, then
-// roll the build out.
 func runBuildAndDeploy(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, target sharedpkg.DockerCommandTarget, execution sharedpkg.BuildExecutionSpec, runBuildScript buildpkg.BuildScriptRunnerFunc, buildWithRetry buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
 	if buildrun.BuildExecutionUsesBuildScript(execution) {
 		return errors.New("build deploy is not supported for project build scripts")
@@ -186,9 +182,7 @@ func pushBuildWithRetry(ctx core.Context, buildDockerImage buildpkg.DockerImageB
 	}
 }
 
-// NewRootPushCmd is the top-level `erun push`. --build is an operator shortcut
-// that builds first; that build→push orchestration deliberately lives in this
-// caller so push itself stays a pure primitive publishing an explicit version.
+// NewRootPushCmd keeps --build orchestration here so push stays a pure primitive.
 func NewRootPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) *cobra.Command {
 	target := sharedpkg.DockerCommandTarget{}
 	var force bool
@@ -359,11 +353,8 @@ func addPushCommandTargetFlags(cmd *cobra.Command, target *sharedpkg.DockerComma
 	_ = cmd.Flags().MarkHidden("environment")
 }
 
-// handleNamespaceAuthError recovers a GHCR create-package or scope-denied push
-// by re-authenticating as the namespace owner, escalating to an interactive
-// `gh auth refresh` when the stored token still lacks the scope. That
-// escalation needs a one-time device code, so in a headless runtime pod it
-// cannot complete and surfaces an actionable error instead.
+// handleNamespaceAuthError re-authenticates as the namespace owner, escalating to
+// `gh auth refresh`, which cannot complete headless (device code).
 func handleNamespaceAuthError(authErr sharedpkg.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
 	if !sharedpkg.IsDockerCreatePackageDenied(authErr.Message) && !buildpkg.IsDockerScopeDenied(authErr.Message) {
 		return false, nil

@@ -21,10 +21,6 @@ func buildDeployFlagScenarios(t *testing.T) {
 }
 
 func testBuildDryRunBuildDeployResolvesDockerTargetDeploySpecs(t *testing.T) {
-	// build --deploy from a docker component dir resolves the deploy target
-	// (project root, environment, tenant) from the cwd, builds and pushes the
-	// image, then rolls out the chart at the explicit --version so both phases
-	// resolve the same deterministic tag.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -39,13 +35,8 @@ func testBuildDryRunBuildDeployResolvesDockerTargetDeploySpecs(t *testing.T) {
 }
 
 func testBuildDryRunBuildDeployErunDevopsComponentResolvesRuntimeImageMemo(t *testing.T) {
-	// When the docker component being built --deploy'd IS the
-	// runtime chart's own erun-devops (true for the "erun" tenant, whose
-	// own devops component is literally named erun-devops), the resolved
-	// spec's image doubles as the runtime-line memo a real deploy would
-	// heal into EnvConfig.RuntimeRunningImage. This locks that resolution
-	// for a non-"team" tenant so the tenant-name-collision case is
-	// exercised too.
+	// When the built component is the tenant's own erun-devops, its image
+	// doubles as the runtime-line memo.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "erun", "dev")
 	fixture.SeedDevopsRepo(t, setup, "erun", "dev")
@@ -60,18 +51,12 @@ func testBuildDryRunBuildDeployErunDevopsComponentResolvesRuntimeImageMemo(t *te
 }
 
 func testBuildDryRunBuildDeployDefaultTenantBreaksProjectTie(t *testing.T) {
-	// Two tenants share the same project root; `build --deploy` (which infers
-	// the tenant from the project) must pick the configured default tenant
-	// instead of erroring on the ambiguity.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
 	fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
 	fixture.SeedGitRepo(t, setup.Cwd)
-	// A second tenant claiming the same project root, with no envs so
-	// it cannot interfere with environment resolution. Named to sort
-	// after "team" so the environment legacy fallback (which walks
-	// tenants alphabetically) resolves team/dev first.
+	// Sorts after "team" so the legacy fallback resolves team/dev first.
 	otherDir := filepath.Join(setup.ConfigHome, "erun", "zz-extra")
 	if err := os.MkdirAll(otherDir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", otherDir, err)
@@ -89,18 +74,13 @@ func testBuildDryRunBuildDeployDefaultTenantBreaksProjectTie(t *testing.T) {
 }
 
 func testBuildDryRunBuildDeployAmbiguousTenantsError(t *testing.T) {
-	// Two tenants share the project root and the default tenant points
-	// elsewhere, so the inferred-tenant deploy must fail with "multiple
-	// tenants are configured for project" rather than guessing.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedDevopsRepo(t, setup, "team", "dev")
 	fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
 	fixture.SeedGitRepo(t, setup.Cwd)
-	// The second tenant genuinely owns the same project root: cwd→tenant
-	// matching is now via each tenant's envs' localRepoPath, so the
-	// other tenant needs an env recording this cwd, not just a bare
-	// tenant-level projectroot, for the ambiguity to hold.
+	// cwd->tenant matching uses envs' localRepoPath, so the other tenant
+	// needs an env recording this cwd.
 	otherEnvDir := filepath.Join(setup.ConfigHome, "erun", "other", "dev")
 	if err := os.MkdirAll(otherEnvDir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", otherEnvDir, err)
@@ -126,9 +106,6 @@ func testBuildDryRunBuildDeployAmbiguousTenantsError(t *testing.T) {
 }
 
 func testBuildBuildDeployWithProjectBuildScriptErrors(t *testing.T) {
-	// --deploy cannot compose with a project build script: the script owns the
-	// whole build and erun cannot know what images it produced, so the command
-	// must fail with a clear error before doing any work.
 	setup := env.New(t)
 	fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 	if err := os.WriteFile(filepath.Join(setup.Cwd, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {

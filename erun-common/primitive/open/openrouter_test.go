@@ -8,12 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// gatewayFixture is the catalog the gateway launch contracts share. It is an
-// ordinary catalog: both listings are driveable, so it says
-// nothing about which models erun refuses. It deliberately names neither the
-// model whose provider refuses a conversation nor any other id erun carries
-// evidence against, so a test built on it exercises the plumbing it means to
-// rather than a refusal that happens to be reached first.
+// gatewayFixture names no model erun refuses, so tests exercise plumbing only.
 func gatewayFixture() *configpkg.OpenRouterConfig {
 	return &configpkg.OpenRouterConfig{
 		BaseURL:      "https://openrouter.ai/api",
@@ -25,9 +20,6 @@ func gatewayFixture() *configpkg.OpenRouterConfig {
 	}
 }
 
-// TestAISessionLaunchGatewayModelAndWindow pins that the catalog's model and its
-// context window reach the launch, and that an environment's own choice wins
-// over the catalog default with its own window.
 func TestAISessionLaunchGatewayModelAndWindow(t *testing.T) {
 	model := func(v string) *string { return &v }
 	gateway := gatewayFixture()
@@ -52,8 +44,6 @@ func TestAISessionLaunchGatewayModelAndWindow(t *testing.T) {
 	}
 }
 
-// TestAISessionLaunchGatewayTypedId pins that an id the catalog does not list is
-// honoured rather than silently replaced, and that no window is invented for it.
 func TestAISessionLaunchGatewayTypedId(t *testing.T) {
 	model := func(v string) *string { return &v }
 	got := AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{DefaultModel: model("vendor/typed-by-hand")}, gatewayFixture(), "team", "dev")
@@ -65,9 +55,6 @@ func TestAISessionLaunchGatewayTypedId(t *testing.T) {
 	}
 }
 
-// TestAISessionLaunchGatewayUndeclaredWindow pins that a catalog entry with no
-// declared window emits no context variable, leaving Claude Code's own
-// assumption in place rather than a made-up value.
 func TestAISessionLaunchGatewayUndeclaredWindow(t *testing.T) {
 	noWindow := &configpkg.OpenRouterConfig{BaseURL: "https://openrouter.ai/api", Models: []configpkg.OpenRouterModel{{ID: "a/b"}}}
 	got := AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, noWindow, "team", "dev")
@@ -79,9 +66,6 @@ func TestAISessionLaunchGatewayUndeclaredWindow(t *testing.T) {
 	}
 }
 
-// TestAISessionLaunchGatewayRemoteControl pins that Remote Control is suppressed
-// under gateway auth: it pairs through the claude.ai relay, which gateway
-// credentials cannot satisfy, so enabling it would fail to pair.
 func TestAISessionLaunchGatewayRemoteControl(t *testing.T) {
 	got := AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, gatewayFixture(), "team", "dev")
 	if strings.Contains(got, "--remote-control") {
@@ -89,10 +73,7 @@ func TestAISessionLaunchGatewayRemoteControl(t *testing.T) {
 	}
 }
 
-// TestAISessionLaunchGatewayCredentialStaysOut pins the property that matters
-// most: the credential never reaches a launch command, whose argv is visible to
-// anything that can list processes. The pod reads it from a Secret erun
-// delivers; neither the value nor the store ref belongs in the launch.
+// The launch argv is visible to any process lister; the pod reads the Secret.
 func TestAISessionLaunchGatewayCredentialStaysOut(t *testing.T) {
 	gated := &configpkg.OpenRouterConfig{
 		BaseURL:      "https://openrouter.ai/api",
@@ -112,8 +93,6 @@ func TestAISessionLaunchGatewayCredentialStaysOut(t *testing.T) {
 	}
 }
 
-// TestAISessionLaunchGatewayUnconfigured pins that an absent or empty catalog
-// leaves the launch exactly as it was before gateways existed.
 func TestAISessionLaunchGatewayUnconfigured(t *testing.T) {
 	withNil := AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev")
 	withEmpty := AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, &configpkg.OpenRouterConfig{}, "team", "dev")
@@ -125,10 +104,6 @@ func TestAISessionLaunchGatewayUnconfigured(t *testing.T) {
 	}
 }
 
-// TestResolveClaudeLaunchModelWithGateway covers gateway-side model resolution:
-// the catalog supplies the default, and an environment's typed id is honoured
-// even though the catalog does not list it — refusing it here would silently
-// launch a different model than the tab shows.
 func TestResolveClaudeLaunchModelWithGateway(t *testing.T) {
 	model := func(v string) *string { return &v }
 	gateway := &configpkg.OpenRouterConfig{BaseURL: "https://x", Models: []configpkg.OpenRouterModel{{ID: "a/b"}, {ID: "c/d"}}}
@@ -153,9 +128,7 @@ func TestResolveClaudeLaunchModelWithGateway(t *testing.T) {
 	}
 }
 
-// reasoningEchoGateway is a catalog whose first entry is declared undriveable:
-// the default an environment would otherwise render as ANTHROPIC_MODEL, and the
-// model an exec agent job would start on.
+// reasoningEchoGateway's first entry, the would-be default, is undriveable.
 func reasoningEchoGateway() *configpkg.OpenRouterConfig {
 	return &configpkg.OpenRouterConfig{
 		BaseURL: "https://openrouter.ai/api",
@@ -166,13 +139,7 @@ func reasoningEchoGateway() *configpkg.OpenRouterConfig {
 	}
 }
 
-// TestAISessionLaunchRefusesAnEnvironmentChoiceThatRequiresReasoningEcho covers
-// the path an already-saved environment takes, which the catalog alone cannot
-// fix: resolveGatewayLaunchModel deliberately honours an environment's own model
-// choice even when the catalog does not list it, so a choice naming a declared
-// listing has to be refused on its own rather than by omission. The launch must
-// carry the driveable default and must not carry the refused id anywhere — not
-// as --model, and not in the subagent/context env prefix built beside it.
+// The refused id must appear nowhere, including the env prefix.
 func TestAISessionLaunchRefusesAnEnvironmentChoiceThatRequiresReasoningEcho(t *testing.T) {
 	model := func(v string) *string { return &v }
 	gateway := reasoningEchoGateway()
@@ -185,32 +152,17 @@ func TestAISessionLaunchRefusesAnEnvironmentChoiceThatRequiresReasoningEcho(t *t
 		t.Fatalf("expected the launch to fall back to the driveable default, got %q", chosen)
 	}
 
-	// The environment's own driveable choice still wins, so the refusal is
-	// scoped to the declared listing rather than to environment choices at all.
 	kept := AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{DefaultModel: model("anthropic/claude-fable-5.1")}, gateway, "team", "dev")
 	if !strings.Contains(kept, "--model anthropic/claude-fable-5.1") {
 		t.Fatalf("expected a driveable environment choice to be honoured, got %q", kept)
 	}
 
-	// An uncurated id stays a supported act: the catalog never declared it, so
-	// nothing here refuses it.
 	uncurated := AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{DefaultModel: model("typed/by-hand")}, gateway, "team", "dev")
 	if !strings.Contains(uncurated, "--model typed/by-hand") {
 		t.Fatalf("expected an uncurated choice to be honoured, got %q", uncurated)
 	}
 }
 
-// TestACatalogDeclaringReasoningEchoStopsAdvertisingAndSelectingIt drives the
-// declaration through the operator's own config, which is the path that actually
-// sets it, and states the defect in the terms the report gives: erun's catalog
-// offered a model its agent lane cannot drive, and the failure surfaced as a
-// conversation refused mid-run rather than as a launch that never happened.
-//
-// This is the reproduction. Before the declaration existed the key parsed as an
-// unknown field and was ignored, so the listing stayed advertised, stayed the
-// resolved default that an environment renders as ANTHROPIC_MODEL, and stayed
-// the model an environment's own saved choice launched — the exact three ways
-// the reported job reached it.
 func TestACatalogDeclaringReasoningEchoStopsAdvertisingAndSelectingIt(t *testing.T) {
 	var config configpkg.ERunConfig
 	if err := yaml.Unmarshal([]byte(`
@@ -246,21 +198,8 @@ openrouter:
 	}
 }
 
-// TestACatalogThatNeverDeclaredReasoningEchoStillRefusesTheKnownModel is the
-// reproduction of the reported failure, and it is deliberately not the declared
-// case above: the operator's catalog names the model with no declaration at all.
-//
-// That is how the catalog is actually produced. The editor seeds an unconfigured
-// catalog from this machine's own Claude Code settings, so a host already running
-// ANTHROPIC_MODEL=deepseek/deepseek-v4.1-flash writes back a default and a model
-// row carrying nothing but an id and a window — and the published configuration
-// reference documents the same catalog. A declaration the operator never typed
-// cannot be the only thing that refuses a model whose wire contract erun knows,
-// or every catalog that predates the declaration keeps the lane on it.
-//
-// Before the known-model set, all three readers of the catalog resolved the
-// listing and the agent lane reached a model its client cannot drive, losing the
-// conversation to a provider refusal twelve to fifteen turns in.
+// Catalogs seeded from Claude Code settings carry no declaration, so erun must
+// know the model itself.
 func TestACatalogThatNeverDeclaredReasoningEchoStillRefusesTheKnownModel(t *testing.T) {
 	var config configpkg.ERunConfig
 	if err := yaml.Unmarshal([]byte(`
@@ -280,7 +219,6 @@ openrouter:
 		t.Fatal("expected a configured catalog")
 	}
 
-	// The catalog still holds the entry; erun is what knows it cannot be driven.
 	if !gateway.HasModel("deepseek/deepseek-v4.1-flash") {
 		t.Fatal("expected the catalog to still list the model it was written with")
 	}
@@ -291,8 +229,6 @@ openrouter:
 		t.Fatalf("ResolveDefaultModel = %q, want a driveable listing rather than ANTHROPIC_MODEL landing on the known-undriveable one", got)
 	}
 
-	// The environment that already saved the choice is the path the catalog
-	// alone cannot cover.
 	model := func(v string) *string { return &v }
 	launch := AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{DefaultModel: model("deepseek/deepseek-v4.1-flash")}, gateway, "team", "dev")
 	if strings.Contains(launch, "deepseek/deepseek-v4.1-flash") {
@@ -302,9 +238,7 @@ openrouter:
 		t.Fatalf("expected the launch to fall back to the driveable default, got %q", launch)
 	}
 
-	// It is refused as an environment choice even where no catalog lists it at
-	// all, because the refusal is a property of the model rather than of a row
-	// somebody remembered to annotate.
+	// The refusal belongs to the model, not to a catalog row.
 	if got := ResolveClaudeLaunchModel(configpkg.EnvironmentClaudeConfig{DefaultModel: model("deepseek/deepseek-v4.1-flash")}, &configpkg.OpenRouterConfig{BaseURL: "https://x"}); got != "" {
 		t.Fatalf("an unlisted known-undriveable choice resolved to %q, want no model at all", got)
 	}

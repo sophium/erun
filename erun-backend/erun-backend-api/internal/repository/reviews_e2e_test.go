@@ -13,10 +13,6 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 )
 
-// Review authorship, reviewer assignment, and the one-live-review-per-branch
-// index all live in SQL (a DB-side default, a join table under RLS, a partial
-// unique index), so they are exercised against a real migrated PostgreSQL
-// rather than a fake that agrees with itself.
 func reviewsDatabase(t *testing.T) (*sql.DB, string) {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -34,10 +30,7 @@ func seedReviewsTenant(t *testing.T, db *sql.DB, label string) string {
 	return seedReviewsTenantOfType(t, db, label, "COMPANY")
 }
 
-// seedReviewsTenantOfType is seedReviewsTenant's general form, for the
-// OPERATIONS-caller scoping regression tests below: erun_operations' RLS
-// policy is unconditional (USING (true)), so only an OPERATIONS-typed tenant
-// can actually exercise the bypass List/ListMergeQueue must guard against.
+// Only an OPERATIONS tenant exercises erun_operations' unconditional RLS policy.
 func seedReviewsTenantOfType(t *testing.T, db *sql.DB, label string, tenantType string) string {
 	t.Helper()
 	var tenantID string
@@ -51,8 +44,7 @@ func seedReviewsTenantOfType(t *testing.T, db *sql.DB, label string, tenantType 
 
 func clearReviewsTenant(t *testing.T, db *sql.DB, tenantID string) {
 	t.Helper()
-	// reviews and builds reference each other (last_*_build_id / review_id), so
-	// the cycle has to be broken before either can be deleted.
+	// reviews and builds reference each other; break the cycle before deleting.
 	if _, err := db.Exec(`
 		UPDATE reviews
 		   SET status = 'CLOSED', last_failed_build_id = NULL, last_ready_build_id = NULL, last_merged_build_id = NULL
@@ -84,17 +76,12 @@ func reviewsContext(tenantID, userID string) context.Context {
 	})
 }
 
-// reviewsContextOfType is reviewsContext's general form, for the
-// OPERATIONS-caller scoping regression tests below.
 func reviewsContextOfType(tenantID, userID, tenantType string) context.Context {
 	return security.WithContext(context.Background(), security.Context{
 		TenantID: tenantID, TenantType: tenantType, ErunUserID: userID,
 	})
 }
 
-// TestReviewAuthorDefaultsToTheAuthenticatedCallerAndIgnoresACallerSuppliedOne
-// is the impersonation guard the issue calls for: erun_current_user_id() —
-// not a client-asserted field — decides who a review's author is.
 func TestReviewAuthorDefaultsToTheAuthenticatedCallerAndIgnoresACallerSuppliedOne(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -121,9 +108,6 @@ func TestReviewAuthorDefaultsToTheAuthenticatedCallerAndIgnoresACallerSuppliedOn
 	}
 }
 
-// TestReviewReviewersCanBeAddedListedAndRemoved proves point 2 of the issue:
-// a review can be directed at more than one person, and removing one leaves
-// the others.
 func TestReviewReviewersCanBeAddedListedAndRemoved(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -168,9 +152,6 @@ func TestReviewReviewersCanBeAddedListedAndRemoved(t *testing.T) {
 	}
 }
 
-// TestReviewReviewerFromAnotherTenantIsRefusedByTheFK is the validation the
-// issue names explicitly: a reviewer must belong to the same tenant as the
-// review.
 func TestReviewReviewerFromAnotherTenantIsRefusedByTheFK(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -196,8 +177,6 @@ func TestReviewReviewerFromAnotherTenantIsRefusedByTheFK(t *testing.T) {
 	}
 }
 
-// TestReviewDiscoveryFiltersAnswerMyReviewsAndReviewsWaitingOnMe is the
-// discovery gap the issue opens with: today only targetBranch is filterable.
 func TestReviewDiscoveryFiltersAnswerMyReviewsAndReviewsWaitingOnMe(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	me := seedReviewsUser(t, db, tenantID, "me")
@@ -218,21 +197,18 @@ func TestReviewDiscoveryFiltersAnswerMyReviewsAndReviewsWaitingOnMe(t *testing.T
 	_, err = reviewers.Create(ctxSomeoneElse, model.ReviewReviewer{ReviewID: theirs.ReviewID, UserID: me})
 	mustNoErr(t, err, "assign me as a reviewer")
 
-	// "my reviews": authored by me, open.
 	myReviews, err := reviews.List(ctxMe, ReviewFilter{AuthorUserID: me, Status: model.ReviewStatusOpen})
 	mustNoErr(t, err, "list my reviews")
 	if len(myReviews) != 1 || myReviews[0].ReviewID != mine.ReviewID {
 		t.Fatalf("authorUserId+status filter returned %+v, want exactly %s", myReviews, mine.ReviewID)
 	}
 
-	// "reviews waiting on me": I am a reviewer.
 	waitingOnMe, err := reviews.List(ctxMe, ReviewFilter{ReviewerUserID: me})
 	mustNoErr(t, err, "list reviews waiting on me")
 	if len(waitingOnMe) != 1 || waitingOnMe[0].ReviewID != theirs.ReviewID {
 		t.Fatalf("reviewerUserId filter returned %+v, want exactly %s", waitingOnMe, theirs.ReviewID)
 	}
 
-	// sourceBranch composes with the existing targetBranch filter.
 	bySourceBranch, err := reviews.List(ctxMe, ReviewFilter{TargetBranch: "main", SourceBranch: "feature/mine"})
 	mustNoErr(t, err, "list by source+target branch")
 	if len(bySourceBranch) != 1 || bySourceBranch[0].ReviewID != mine.ReviewID {
@@ -240,9 +216,6 @@ func TestReviewDiscoveryFiltersAnswerMyReviewsAndReviewsWaitingOnMe(t *testing.T
 	}
 }
 
-// TestOnlyOneLiveReviewPerSourceAndTargetBranch proves point 4: the second
-// review is refused while the first is live, and accepted once the first is
-// MERGED or CLOSED, because branch history must stay unbounded.
 func TestOnlyOneLiveReviewPerSourceAndTargetBranch(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -263,7 +236,6 @@ func TestOnlyOneLiveReviewPerSourceAndTargetBranch(t *testing.T) {
 		t.Fatalf("second review error = %v, want ErrConflict", err)
 	}
 
-	// Closing the first frees the branch pair up for a fresh proposal.
 	first.Status = model.ReviewStatusClosed
 	closed, err := reviews.Update(ctx, first)
 	mustNoErr(t, err, "close first review")
@@ -275,8 +247,6 @@ func TestOnlyOneLiveReviewPerSourceAndTargetBranch(t *testing.T) {
 	})
 	mustNoErr(t, err, "create review after the first closed")
 
-	// A second live review is refused again; merging (rather than closing)
-	// the live one frees the pair the same way.
 	if _, err := reviews.Create(ctx, model.Review{
 		Name: "fourth proposal", TargetBranch: "main", SourceBranch: "feature/duplicate", Status: model.ReviewStatusOpen,
 	}); !errors.Is(err, ErrConflict) {
@@ -298,9 +268,6 @@ func TestOnlyOneLiveReviewPerSourceAndTargetBranch(t *testing.T) {
 	}
 }
 
-// TestReviewTenantIsolation proves a caller from one tenant cannot see or
-// touch another tenant's reviews, the same RLS boundary every tenant-owned
-// table must hold.
 func TestReviewTenantIsolation(t *testing.T) {
 	db, tenantA := reviewsDatabase(t)
 	authorA := seedReviewsUser(t, db, tenantA, "tenant-a-author")
@@ -335,8 +302,6 @@ func TestReviewTenantIsolation(t *testing.T) {
 	}
 }
 
-// openReview is a small helper for the builds.kind tests below: they only
-// need a review to attach a build to, not any particular review workflow.
 func openReview(t *testing.T, reviews *ReviewRepository, ctx context.Context, name, sourceBranch string) model.Review {
 	t.Helper()
 	review, err := reviews.Create(ctx, model.Review{
@@ -346,10 +311,6 @@ func openReview(t *testing.T, reviews *ReviewRepository, ctx context.Context, na
 	return review
 }
 
-// TestReviewListScopesToTheOperationsCallersOwnTenant pins the failure
-// scenario directly: an OPERATIONS caller's List must not include a stranger
-// tenant's reviews even though erun_operations' RLS policy makes them visible
-// too.
 func TestReviewListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	db, strangerTenantID := reviewsDatabase(t)
 	strangerAuthor := seedReviewsUser(t, db, strangerTenantID, "stranger-author")
@@ -370,9 +331,6 @@ func TestReviewListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	}
 }
 
-// TestReviewListMergeQueueScopesToTheOperationsCallersOwnTenant pins the same
-// failure scenario for the merge queue: an OPERATIONS caller's
-// ListMergeQueue must not include a stranger tenant's queued review.
 func TestReviewListMergeQueueScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	db, strangerTenantID := reviewsDatabase(t)
 	strangerAuthor := seedReviewsUser(t, db, strangerTenantID, "stranger-author")
@@ -418,10 +376,6 @@ func TestReviewListMergeQueueScopesToTheOperationsCallersOwnTenant(t *testing.T)
 	}
 }
 
-// TestReviewReviewerListScopesToTheOperationsCallersOwnTenant pins the
-// failure scenario for review reviewers: an OPERATIONS caller's List must
-// not include a stranger tenant's reviewer assignments even though
-// erun_operations' RLS policy makes them visible too.
 func TestReviewReviewerListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	db, strangerTenantID := reviewsDatabase(t)
 	strangerAuthor := seedReviewsUser(t, db, strangerTenantID, "stranger-author")
@@ -449,11 +403,6 @@ func TestReviewReviewerListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	}
 }
 
-// TestReviewRepositoryScopesNameUniquenessToTheRepository is the reported
-// failure against real Postgres: two repositories a tenant serves have
-// branches with the same names and, in a rebased-again workflow, the same
-// squash-merge message, so a name reserved tenant-wide made the second
-// repository's review unopenable for a reason that had nothing to do with it.
 func TestReviewRepositoryScopesNameUniquenessToTheRepository(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -484,23 +433,7 @@ func TestReviewRepositoryScopesNameUniquenessToTheRepository(t *testing.T) {
 	}
 }
 
-// TestReviewClosedReviewReleasesItsName is the reported failure against real
-// Postgres: a review's name is the squash-merge message it will land under, so
-// names are unique per repository only among reviews that can still reach
-// MERGED or did reach it. A CLOSED review never landed, so its name was never
-// used as a merge message and must reserve nothing — re-reviewing a rebased
-// branch under the subject its own commit already carries is an ordinary
-// workflow, and refusing it forced a reworded message for no reason a reader
-// could see.
-//
-// Repository, source branch, and target branch are all held constant across the
-// two creates on purpose: that is the reported reproduction (`erun review
-// close`, then `erun review create` for the same branch with the same name), and
-// the one-live-review-per-branch index has to release the pair for exactly the
-// same reason the name index has to release the name. The first create is kept
-// as an in-test control — it proves the name really was taken while the review
-// was live, so the create after the close is exercising the release rather than
-// a name that was never reserved.
+// The first create is a control proving the name was reserved while live.
 func TestReviewClosedReviewReleasesItsName(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -546,8 +479,7 @@ func TestReviewClosedReviewReleasesItsName(t *testing.T) {
 		t.Fatalf("reopened review status = %q, want %q", reopened.Status, model.ReviewStatusOpen)
 	}
 
-	// The closed review is still there, still CLOSED: releasing the name is not
-	// a delete, and the history a reader finds under it must survive.
+	// Releasing the name is not a delete.
 	stored, err := reviews.Get(ctx, abandoned.ReviewID)
 	mustNoErr(t, err, "read the closed review back")
 	if stored.Status != model.ReviewStatusClosed || stored.Name != message {
@@ -555,9 +487,6 @@ func TestReviewClosedReviewReleasesItsName(t *testing.T) {
 	}
 }
 
-// TestReviewMergeQueueIsPerRepository is the queue half of the same failure:
-// a target branch is not what names a queue, so a repository's own queued
-// reviews are only ever found by naming its identity too.
 func TestReviewMergeQueueIsPerRepository(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")

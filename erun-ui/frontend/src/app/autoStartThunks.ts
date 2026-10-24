@@ -12,10 +12,7 @@ import {
 import { patchTenantEnvironmentAutoStart } from './slices/tenantsSlice';
 import type { AppThunk } from './store';
 
-// The first-time auto-start prompt: openSelection raises it when a remote env
-// with a stopped cloud context has no saved AutoStart choice yet. Confirming a
-// choice re-runs openSelection so it takes effect immediately, without making
-// the operator click the env a second time.
+// Confirming a choice re-runs openSelection so it applies without a second click.
 
 export type AutoStartChoice = 'always' | 'never';
 

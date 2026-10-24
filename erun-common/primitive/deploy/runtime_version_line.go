@@ -7,37 +7,23 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// RuntimeVersionLine names which release line an environment's persisted
-// RuntimeVersion number belongs to. The number alone cannot tell an erun
-// version apart from a tenant's own devops line -- two environments in the
-// same tenant can even ride different lines from each other -- so `erun
-// list` renders this alongside runtime-version rather than the bare number.
+// RuntimeVersionLine names the release line (erun or a tenant's devops line)
+// that a persisted RuntimeVersion number belongs to.
 type RuntimeVersionLine struct {
-	// Line is "erun" for erun's own release line, or the tenant/component
-	// name (e.g. "frs") for a tenant's own devops line. Empty when
-	// Undetermined.
+	// Line is "erun" or the tenant/component name, e.g. "frs".
 	Line string `json:"line,omitempty"`
-	// Image is the registry-qualified image name (no tag) the line's number
-	// refers to, e.g. "ghcr.io/sophium/frs-devops".
+	// Image is registry-qualified, without tag.
 	Image string `json:"image,omitempty"`
-	// Undetermined is true when no deploy has recorded a resolved runtime
-	// image for this environment, so the line genuinely cannot be told from
-	// the persisted config -- callers must render this distinctly rather
-	// than guess a line from the tenant name.
+	// Undetermined: no deploy recorded a runtime image; callers must not guess
+	// a line from the tenant name.
 	Undetermined bool `json:"undetermined,omitempty"`
-	// Disagrees is true when the environment's own Helm release name
-	// (<tenant>-devops) differs from the image's component name while the
-	// image is still erun's own stock image -- legitimate, but the row most
-	// likely to be misread.
+	// Disagrees: the Helm release name differs from erun's stock image name,
+	// which is legitimate but easily misread.
 	Disagrees bool `json:"disagrees,omitempty"`
 }
 
-// ResolveRuntimeVersionLine reports which release line tenant/env's persisted
-// RuntimeVersion belongs to, from the last image a deploy actually recorded
-// for the environment (EnvConfig.RuntimeRunningImage) -- never from tenant or
-// release naming conventions alone (a release named "<tenant>-devops" can run
-// erun's own stock image, and vice versa). Callers should skip rendering this entirely
-// when RuntimeVersion itself is empty -- there is no version to annotate.
+// ResolveRuntimeVersionLine derives the line from the image a deploy recorded,
+// never from naming conventions.
 func ResolveRuntimeVersionLine(tenant string, env config.EnvConfig) RuntimeVersionLine {
 	image := strings.TrimSpace(env.RuntimeRunningImage)
 	if image == "" {
@@ -60,29 +46,16 @@ func ResolveRuntimeVersionLine(tenant string, env config.EnvConfig) RuntimeVersi
 	}
 }
 
-// ErunVersion is the second version number the environment hover card needs
-// beside RuntimeVersionLine: the erun version an environment's runtime chart
-// carries (EnvConfig.RuntimeChart), which can differ from RuntimeVersion
-// whenever the runtime image itself rides a tenant's own release line.
+// ErunVersion is the erun version of the runtime chart, which differs from
+// RuntimeVersion when the image rides a tenant's own line.
 type ErunVersion struct {
 	Version string `json:"version,omitempty"`
-	// SameAsRuntimeVersion is true when the chart states no version of its own
-	// and the runtime image is confirmed on erun's own release line -- the case
-	// where a second, identical-looking number would be redundant rather than
-	// informative.
+	// SameAsRuntimeVersion marks a redundant number: unversioned chart, erun image.
 	SameAsRuntimeVersion bool `json:"sameAsRuntimeVersion,omitempty"`
 }
 
-// ResolveErunVersion resolves EnvConfig.RuntimeChart to the erun version this
-// environment's runtime rides, from config alone -- no live probe, the same
-// "readable from config alone" contract EnvConfig.RuntimeImageLineMismatch
-// relies on. runtimeLine is the RuntimeVersionLine already resolved for the
-// same environment (nil when RuntimeVersion itself is empty); it is what
-// tells this function whether an empty RuntimeChart is safe to read as
-// "follows RuntimeVersion" -- true only once the running image is confirmed
-// on erun's own line -- rather than a guess. Returns nil whenever the erun
-// version cannot be told apart from a guess, per the same "never guess a
-// line" rule RuntimeVersionLine already follows.
+// ResolveErunVersion reads config alone and returns nil rather than guess; an
+// empty RuntimeChart follows RuntimeVersion only on erun's own line.
 func ResolveErunVersion(env config.EnvConfig, runtimeLine *RuntimeVersionLine) *ErunVersion {
 	runtimeVersion := strings.TrimSpace(env.RuntimeVersion)
 	if runtimeVersion == "" {

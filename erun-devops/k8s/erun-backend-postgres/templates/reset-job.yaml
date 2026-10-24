@@ -10,13 +10,8 @@
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $postgresImage := default (printf "%s/erun-backend-postgres:18.3" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
 {{- if $postgresReset }}
-# A disposable-data reset (snapshot deploys only, see deployResetsDatabase in
-# erun-common/deploy.go) rides as a Helm hook Job rather than a step inside
-# the postgres Deployment's own pod spec, so it runs exactly once per deploy
-# and can never fire from an unplanned pod restart. It wipes over the network
-# (DROP/CREATE DATABASE against the running server) instead of touching
-# PGDATA on disk, so it never contends with the running postgres pod for the
-# data PVC and needs no filesystem access of its own.
+# A hook Job so the reset runs once per deploy, never on a pod restart; it
+# wipes over the network so it never contends for the data PVC.
 apiVersion: batch/v1
 kind: Job
 metadata:

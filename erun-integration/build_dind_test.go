@@ -23,14 +23,8 @@ func buildDindScenarios(t *testing.T) {
 }
 
 func testBuildDryRunDockerfileDindArgsResolveConfiguredRuntimeDindPod(t *testing.T) {
-	// A Dockerfile that declares ARG DIND_CPU_LIMIT / ARG
-	// DIND_MEMORY_LIMIT_MIB (the erun-devops Dockerfile's own in-build gate
-	// sizing) must have those ARGs fed from the *building* environment's
-	// actual configured erun-dind sidecar resources
-	// (EnvConfig.RuntimeDindPod), not the Dockerfile's own hardcoded
-	// defaults and never the host's raw node capacity. team/dev's config
-	// sets a non-default runtimedindpod (6 CPU / 24Gi) so the golden can't
-	// be satisfied by accident from the 4-core/20Gi fallback default.
+	// The DIND ARGs come from the env's configured runtimedindpod; the
+	// non-default 6 CPU / 24Gi proves the fallback is not used.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -49,13 +43,7 @@ func testBuildDryRunDockerfileDindArgsResolveConfiguredRuntimeDindPod(t *testing
 }
 
 func testBuildDryRunDockerfileDindArgsDefaultToConservativeConstantWhenUnconfigured(t *testing.T) {
-	// An environment with no configured runtimedindpod must not fall back
-	// to the host node's real CPU/memory capacity -- it must fall back to the same fixed constant the
-	// sidecar's own chart default and the Dockerfile's own ARG default
-	// use, regardless of how large the machine actually running this test
-	// is. The constant's own value is erun-common's rule to decide (it is
-	// sized for a node, not for the host this happens to run on), so it is
-	// read from there rather than restated here.
+	// Unconfigured falls back to erun-common's fixed constant, never the host's capacity.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -74,11 +62,6 @@ func testBuildDryRunDockerfileDindArgsDefaultToConservativeConstantWhenUnconfigu
 }
 
 func testBuildDryRunDockerfileWithoutDindArgsIsUnaffected(t *testing.T) {
-	// A Dockerfile that declares neither ARG must not get either
-	// build-arg, even when the building environment has a configured
-	// runtimedindpod -- the regex-gated detection in
-	// dockerfileConsumesDindCPULimit/dockerfileConsumesDindMemoryLimit
-	// must not fire for an unrelated Dockerfile.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -96,15 +79,8 @@ func testBuildDryRunDockerfileWithoutDindArgsIsUnaffected(t *testing.T) {
 }
 
 func testBuildDryRunDockerfileCgroupParentAppliesInsideInjectedRuntimePod(t *testing.T) {
-	// DIND_CPU_LIMIT (above) only fixes derivations *inside* the image --
-	// the RUN-instruction containers themselves still escape the sidecar's
-	// kubelet-declared CPU limit as sibling cgroups. Inside an injected
-	// runtime pod (ERUN_TENANT/ERUN_ENVIRONMENT set, the same marker
-	// inInjectedRuntimePod already uses elsewhere), every docker build must
-	// carry --cgroup-parent so its RUN containers nest under the cgroup
-	// `erun dind-entrypoint` mirrors this sidecar's own live cpu.max into.
-	// Applies regardless of whether the Dockerfile declares DIND_CPU_LIMIT at
-	// all, since the OS-level escape is not specific to that ARG.
+	// RUN containers otherwise escape the sidecar's CPU limit as sibling
+	// cgroups, so in-pod builds carry --cgroup-parent regardless of ARGs.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)
@@ -127,10 +103,6 @@ func testBuildDryRunDockerfileCgroupParentAppliesInsideInjectedRuntimePod(t *tes
 }
 
 func testBuildDryRunDockerfileCgroupParentAbsentOutsideInjectedRuntimePod(t *testing.T) {
-	// A bare host build (no ERUN_TENANT/ERUN_ENVIRONMENT injected)
-	// has no dind sidecar limit to escape, so it must not carry
-	// --cgroup-parent -- forcing one would throttle a developer's own
-	// machine for a problem that does not exist there.
 	setup := env.New(t)
 	fixture.SeedTenantEnv(t, setup, "team", "dev")
 	fixture.SeedGitRepo(t, setup.Cwd)

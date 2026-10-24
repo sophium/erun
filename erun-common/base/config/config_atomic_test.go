@@ -11,9 +11,6 @@ import (
 	"time"
 )
 
-// TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders pins that a
-// reader racing a stream of WriteFileAtomic writes (which every Save*Config
-// routes through) only ever sees one complete write's content, never a mix.
 func TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -47,8 +44,7 @@ func TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders(t *testing
 		for !done.Load() {
 			data, err := os.ReadFile(path)
 			if err != nil {
-				// A rename mid-open can race ENOENT on some filesystems; that
-				// is not the defect under test (a torn/partial document is).
+				// ENOENT during a rename is not the defect under test.
 				continue
 			}
 			if !bytes.Equal(data, valueA) && !bytes.Equal(data, valueB) {
@@ -67,11 +63,7 @@ func TestWriteFileAtomicNeverExposesPartialContentToConcurrentReaders(t *testing
 	}
 }
 
-// TestLoadConfigFileRetriesATornReadThenSucceeds pins that a reader hitting a
-// torn read (a zero-length file) recovers rather than failing. It heals the
-// file via configReadRetryObserved on the first retry instead of racing a real
-// writer goroutine against loadConfigFile's wall-clock budget, which flakes
-// under CPU contention.
+// The file is healed via configReadRetryObserved rather than a racing writer, which flakes under load.
 func TestLoadConfigFileRetriesATornReadThenSucceeds(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -103,10 +95,6 @@ func TestLoadConfigFileRetriesATornReadThenSucceeds(t *testing.T) {
 	}
 }
 
-// TestLoadConfigFileGenuinelyCorruptFileStillFails proves the retry budget
-// does not mask a real corruption: a file that never becomes valid YAML must
-// still surface ErrConfigCorrupted, and within a bounded time rather than
-// retrying forever.
 func TestLoadConfigFileGenuinelyCorruptFileStillFails(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -127,10 +115,6 @@ func TestLoadConfigFileGenuinelyCorruptFileStillFails(t *testing.T) {
 	}
 }
 
-// TestLoadConfigFileMissingFileReturnsNotInitializedImmediately confirms a
-// missing file is treated as a real absence, not a torn read, and is never
-// retried -- retrying it would only slow down every ordinary "not yet
-// initialized" path (e.g. ListEnvConfigs skipping an unconfigured entry).
 func TestLoadConfigFileMissingFileReturnsNotInitializedImmediately(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -148,18 +132,9 @@ func TestLoadConfigFileMissingFileReturnsNotInitializedImmediately(t *testing.T)
 	}
 }
 
-// TestLoadConfigFileUnreadablePathReturnsRealErrorNotNotInitialized covers a
-// read failure that is not a real absence -- a permission error, a path that is
-// a directory, or any other os.ReadFile failure that is not os.IsNotExist.
-// Reporting it as ErrNotInitialized would tell the operator to run `erun init`
-// for a problem `erun init` cannot fix; it must surface as the real error
-// instead.
 func TestLoadConfigFileUnreadablePathReturnsRealErrorNotNotInitialized(t *testing.T) {
 	dir := t.TempDir()
-	// A directory at the config path fails os.ReadFile for a reason other
-	// than "the file doesn't exist" -- a portable way to exercise this
-	// without depending on permission enforcement (which differs when a
-	// test runs as root).
+	// A directory fails os.ReadFile without relying on permissions, which root ignores.
 	path := filepath.Join(dir, "config.yaml")
 	if err := os.Mkdir(path, 0o755); err != nil {
 		t.Fatalf("seed directory at config path: %v", err)

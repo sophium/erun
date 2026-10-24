@@ -10,19 +10,9 @@ import (
 	"syscall"
 )
 
-// platformSessionProcesses builds this host's process table. ps supplies the
-// pids and their states -- columns that are sound here -- and getsid(2)
-// supplies the session each process is in.
-//
-// The session cannot come from ps's own sess column on Darwin, nor from the
-// sysctl table ps reads to fill it: the kernel's user-visible kinfo_proc has no
-// member to carry a session id (e_sess is left as a kernel pointer), so
-// `ps -o sess` prints 0 for every process, and a scan keyed on that column
-// reports a job that backgrounded work into a fresh process group as having
-// left nothing behind. getsid(2) is the source that can answer: Darwin looks
-// the named pid up and returns its session id without the same-session
-// restriction POSIX permits and Linux enforces, so it works for a session the
-// caller is not in.
+// platformSessionProcesses takes pids and states from ps and sessions from
+// getsid(2): Darwin's `ps -o sess` prints 0 for every process, and Darwin's
+// getsid works across sessions.
 func platformSessionProcesses() ([]SessionProcess, bool) {
 	out, err := exec.Command("ps", "-axo", "pid=,ppid=,pgid=,stat=").Output()
 	if err != nil {
@@ -32,8 +22,7 @@ func platformSessionProcesses() ([]SessionProcess, bool) {
 	for index, proc := range procs {
 		sid, err := syscall.Getsid(proc.Pid)
 		if err != nil {
-			// Exited between the two reads; the next pass of the scan's settle
-			// loop sees it gone rather than reading a session it never had.
+			// Exited between reads; the settle loop's next pass sees it gone.
 			continue
 		}
 		procs[index].session = sid
@@ -41,10 +30,8 @@ func platformSessionProcesses() ([]SessionProcess, bool) {
 	return procs, true
 }
 
-// parsePSProcessTable reads ps's pid, ppid, pgid and stat columns into a table
-// whose session ids the caller fills in. Unlike the session column, ppid and
-// pgid are real columns here, so they need no second source. A row whose pid,
-// ppid or pgid will not parse is dropped rather than guessed at.
+// parsePSProcessTable reads pid, ppid, pgid and stat; sessions are filled in by
+// the caller. Unparseable rows are dropped.
 func parsePSProcessTable(out []byte) []SessionProcess {
 	var procs []SessionProcess
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))

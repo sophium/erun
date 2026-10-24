@@ -88,11 +88,7 @@ func testExecDiffIncludesUntrackedFiles(t *testing.T) {
 }
 
 func testExecDiffFilesMatchTreeOrder(t *testing.T) {
-	// The diff panel renders Files while the changed-files list renders
-	// Tree, so Files must come out in the tree's directory-grouped leaf
-	// order, not git's raw order; the two diverge when an untracked file
-	// (last in git order) sits in a directory whose first entry is a
-	// tracked change.
+	// Files must follow the tree's directory-grouped leaf order, not git's raw order.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	if err := os.MkdirAll(filepath.Join(setup.Cwd, "dir"), 0o755); err != nil {
@@ -162,12 +158,7 @@ func testExecDiffScopeAllTracesReviewBase(t *testing.T) {
 }
 
 func testExecDiffScopeCurrentCommittedChangeStillReportsReviewCommits(t *testing.T) {
-	// Regression: the panel's default "current" scope only ever diffs
-	// uncommitted local edits, so a clean worktree right after a commit
-	// correctly shows an empty diff -- but the caller must still be able
-	// to tell that apart from "nothing to review at all". ReviewCommits
-	// is computed from base..HEAD regardless of scope, so it must stay
-	// populated here even though scope=current's own diff is empty.
+	// ReviewCommits comes from base..HEAD regardless of scope, so it stays populated on a clean worktree.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
@@ -194,10 +185,7 @@ func testExecDiffScopeCurrentCommittedChangeStillReportsReviewCommits(t *testing
 }
 
 func testExecDiffScopeCurrentDefaultIncludesStagedChanges(t *testing.T) {
-	// Bug: scope=current used to run a bare `git diff` (worktree vs
-	// index), which misses a staged-but-uncommitted change entirely --
-	// exactly the state right after `git add`. It must diff against HEAD
-	// instead so staged edits show up alongside unstaged ones.
+	// scope=current diffs against HEAD so staged edits show up.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	mustWriteFile(t, filepath.Join(setup.Cwd, "README.md"), "# test\nstaged edit\n")
@@ -216,10 +204,7 @@ func testExecDiffScopeCurrentDefaultIncludesStagedChanges(t *testing.T) {
 }
 
 func testExecDiffScopeCurrentExplicitMatchesDefaultForStagedChanges(t *testing.T) {
-	// The CLI's implicit default (no --scope flag at all, ResolveGitDiff)
-	// and an explicit --scope=current (ResolveGitDiffWithOptions) are two
-	// different code paths that must resolve staged changes the same way
-	// rather than silently diverging.
+	// The implicit default and explicit --scope=current take different code paths.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	mustWriteFile(t, filepath.Join(setup.Cwd, "README.md"), "# test\nstaged edit\n")
@@ -238,9 +223,7 @@ func testExecDiffScopeCurrentExplicitMatchesDefaultForStagedChanges(t *testing.T
 }
 
 func testExecDiffScopeCurrentNoCommitsYetStillDiffsStagedChanges(t *testing.T) {
-	// A repo with no commits at all has no HEAD to diff against;
-	// scope=current must fall back to the index-only form rather than
-	// erroring out on a missing HEAD.
+	// With no HEAD, scope=current falls back to the index-only diff.
 	setup := env.New(t)
 	fixture.RunGit(t, setup.Cwd, "init", "-q", "-b", "main")
 	fixture.RunGit(t, setup.Cwd, "config", "user.email", "test@example")
@@ -376,11 +359,7 @@ func testExecDiffSelectedCommitWithoutScopeErrors(t *testing.T) {
 }
 
 func testExecDiffSelectedCommitOptionShapedRefused(t *testing.T) {
-	// exec_diff is a read-scoped capability: git reads a value starting
-	// with "-" as an option rather than a revision, so a selectedCommit in
-	// that shape must be refused before it ever reaches git's argv. Stub
-	// git to fail loudly so the assertion proves the refusal happens
-	// before any git invocation, not just that the command errors.
+	// An option-shaped selectedCommit must be refused before git runs; the stub git fails loudly to prove it.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	stubs := setup.Cwd + "/stubs"
@@ -397,9 +376,6 @@ func testExecDiffSelectedCommitOptionShapedRefused(t *testing.T) {
 }
 
 func testExecDiffSelectedCommitMalformedRevisionErrors(t *testing.T) {
-	// A revision that is not option-shaped but does not resolve to any
-	// commit (typo, unknown ref) must fail with a clear message naming the
-	// value, not git's raw "fatal: ..." text.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	result := erun.Run(t, []string{"exec", "diff", "--scope=commit", "--selected-commit=not-a-real-commit"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -410,9 +386,6 @@ func testExecDiffSelectedCommitMalformedRevisionErrors(t *testing.T) {
 }
 
 func testExecDiffScopeCommitResolvesAbbreviatedCommit(t *testing.T) {
-	// The fix resolves selectedCommit to a full sha via `git rev-parse
-	// --verify` before it reaches the diff argv, so an abbreviated hash
-	// must still produce the same diff and echo the resolved full sha.
 	setup := env.New(t)
 	fixture.SeedGitRepo(t, setup.Cwd)
 	mustWriteFile(t, filepath.Join(setup.Cwd, "second.txt"), "second\n")

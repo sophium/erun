@@ -23,11 +23,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The documented global --output json promises "structured result on stdout for
-// orchestrators". A command that answers it with its human text report succeeds
-// and returns prose, so a consumer piping into jq cannot tell a wrong spelling
-// from a right one. Every command with a structured form owes that form to
-// --output json, whether or not it also carries its own --json alias.
+// Every command with a structured form must emit it for --output json, not just for its own --json alias.
 func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 	leases := []activity.EnvironmentActivityLease{{
@@ -85,11 +81,6 @@ func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 	}
 }
 
-// A command growing its own --json flag is how idle came to answer the
-// documented global flag with prose while the structured document it wanted
-// existed behind a different switch. Declaring each alias keeps that from
-// recurring silently, and asking whether --output json reaches it is the
-// reviewable question at the moment the flag is added.
 func TestEveryJSONFlagIsADeclaredOutputAlias(t *testing.T) {
 	root := CommandTreeForAudit()
 	var undeclared []string
@@ -111,8 +102,7 @@ func TestEveryJSONFlagIsADeclaredOutputAlias(t *testing.T) {
 		undeclared)
 }
 
-// commandCarryingOutput adapts the render seams that read a Context out of the
-// command's own flags, so they can be exercised from the same table.
+// commandCarryingOutput adapts render seams that read a Context from the command's flags.
 func commandCarryingOutput(ctx core.Context) *cobra.Command {
 	cmd := &cobra.Command{Use: "status"}
 	cmd.Flags().String("output", string(ctx.Output), "")
@@ -128,8 +118,7 @@ func walkCommandTree(cmd *cobra.Command, fn func(*cobra.Command)) {
 	}
 }
 
-// commandTreePath returns a command's path below the root, matching the keys in
-// command_tree.go's declaration maps (e.g. "activity lease list").
+// commandTreePath returns a command's path below the root, matching command_tree.go's keys.
 func commandTreePath(root, cmd *cobra.Command) string {
 	return strings.TrimSpace(strings.TrimPrefix(cmd.CommandPath(), root.Name()))
 }

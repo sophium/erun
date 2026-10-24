@@ -33,9 +33,7 @@ import {
 } from '@/components/app/OrchestratorDialog.Launch.helpers';
 import type { OrchestratorLaunchForm } from '@/components/app/OrchestratorDialog.Launch.hooks';
 
-// OrchestratorLaunchFields renders the gateway switch, the model and the
-// effort. A session fixes all three when it launches, so a change to a running
-// orchestrator takes effect on its next restart.
+// OrchestratorLaunchFields: changes take effect on the session's next restart.
 export function OrchestratorLaunchFields({
   launch,
   disabled,
@@ -86,9 +84,7 @@ export function OrchestratorLaunchFields({
   );
 }
 
-// OrchestratorGatewayField is the gateway switch. Its explanation is tied to the
-// checkbox rather than rendered beside it, because it is also where a stored
-// "on" that cannot launch is reported.
+// OrchestratorGatewayField ties its explanation to the checkbox, which also reports a blocked "on".
 function OrchestratorGatewayField({
   checked,
   control,
@@ -154,9 +150,7 @@ function OrchestratorGatewayField({
   );
 }
 
-// OrchestratorGatewayModelField is the model through the gateway: a pick from
-// the catalog. A stored model the gateway cannot drive is marked invalid here,
-// before a save, because the launch would refuse it.
+// OrchestratorGatewayModelField flags an undriveable stored model before save.
 function OrchestratorGatewayModelField({
   choices,
   model,
@@ -209,8 +203,7 @@ function OrchestratorGatewayModelField({
   );
 }
 
-// OrchestratorModelInput is the model off the gateway: this machine's own
-// Claude Code accepts any model id, so it is typed, with empty as the default.
+// OrchestratorModelInput is free-text: off the gateway any model id is accepted.
 function OrchestratorModelInput({
   choices,
   model,

@@ -22,15 +22,9 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
-// This file exercises the registry token endpoint against the *real*
-// BearerTokenVerifier and the *real* mcptoken.Signer — the same components a
-// deployed instance wires — because this endpoint is the security boundary of
-// the whole hosted-registry feature and deserves proof against production
-// code, not a hand-rolled stub of it.
+// These tests use the real BearerTokenVerifier and mcptoken.Signer because this
+// endpoint is a security boundary.
 
-// stubTenantResolver maps exactly one issuer to one tenant, and rejects every
-// other issuer — standing in for the database-backed resolver so these tests
-// do not need PostgreSQL to prove the HTTP-layer contract.
 type stubTenantResolver struct {
 	issuer string
 	tenant model.Tenant
@@ -43,10 +37,6 @@ func (s stubTenantResolver) ResolveTenantByIssuer(_ context.Context, claims secu
 	return s.tenant, nil
 }
 
-// testHarness wires a registrytoken.Handler behind httptest with a real
-// desktop-style file:// issuer as the trusted erun-api issuer, a real
-// mcptoken.Signer as the registry token signer, and a tenant resolver fixed to
-// tenant "frs".
 type testHarness struct {
 	server         *httptest.Server
 	apiPrivatePEM  []byte
@@ -153,8 +143,6 @@ func decodeAccess(t *testing.T, resp *http.Response) []mcptoken.RegistryAccessSc
 	return claims.Access
 }
 
-// TestValidTenantScopeIsGranted proves the golden path: a valid tenant token
-// requesting its own repository scope is granted exactly that scope.
 func TestValidTenantScopeIsGranted(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.close()
@@ -172,9 +160,7 @@ func TestValidTenantScopeIsGranted(t *testing.T) {
 	}
 }
 
-// TestCrossTenantScopeGrantsNothing is the exact security boundary the issue
-// calls out: a valid tenant-A token requesting tenant-B's repository scope
-// still authenticates (200), but is granted nothing.
+// A cross-tenant scope request still authenticates (200) but is granted nothing.
 func TestCrossTenantScopeGrantsNothing(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.close()
@@ -191,7 +177,6 @@ func TestCrossTenantScopeGrantsNothing(t *testing.T) {
 	}
 }
 
-// TestExpiredTokenIsRejected proves an expired erun-api token is rejected.
 func TestExpiredTokenIsRejected(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.close()
@@ -205,10 +190,6 @@ func TestExpiredTokenIsRejected(t *testing.T) {
 	}
 }
 
-// TestWrongAudienceTokenIsRejected proves a token minted for a different
-// capability (here, an MCP-audience token) is rejected as the Basic password —
-// it must not be usable to mint a registry token just because it was signed by
-// the same trusted issuer.
 func TestWrongAudienceTokenIsRejected(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.close()
@@ -222,8 +203,6 @@ func TestWrongAudienceTokenIsRejected(t *testing.T) {
 	}
 }
 
-// TestUnknownIssuerIsRejected proves a token signed by a key the verifier does
-// not trust is rejected, even though it is otherwise well-formed.
 func TestUnknownIssuerIsRejected(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.close()
@@ -254,8 +233,6 @@ func TestUnknownIssuerIsRejected(t *testing.T) {
 	}
 }
 
-// TestMissingCredentialsIsRejected proves the endpoint refuses a request with
-// no Basic auth at all, rather than falling through to an anonymous grant.
 func TestMissingCredentialsIsRejected(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.close()
@@ -266,9 +243,6 @@ func TestMissingCredentialsIsRejected(t *testing.T) {
 	}
 }
 
-// TestMissingServiceParameterIsRejected proves a request with no `service`
-// parameter is rejected before anything is signed — there is no registry
-// service to scope the token's audience to.
 func TestMissingServiceParameterIsRejected(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.close()

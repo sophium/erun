@@ -17,17 +17,10 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// list_control_planes_test.go covers `erun list --control-planes`:
-// every configured erun-hosted control plane's deployed version, compared
-// against the newest version erun's own registry has actually published.
-// route-check proves a route is reachable on a plane already assumed to be
-// current; --tenant's version drift compares environments against each
-// other with no registry baseline. Neither answers "is this plane running
-// the latest published release" -- this is that check.
+// Covers `erun list --control-planes`: each control plane's deployed version
+// against the newest version the registry has published.
 
-// controlPlaneRegistryStub serves the DockerHub tag-list shape
-// resolveDockerHubRuntimeRegistryVersionsAt expects, reporting latest as the
-// single highest version in tags.
+// controlPlaneRegistryStub serves the DockerHub tag-list shape.
 func controlPlaneRegistryStub(t testing.TB, tags ...string) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -42,15 +35,8 @@ func controlPlaneRegistryStub(t testing.TB, tags ...string) *httptest.Server {
 	return server
 }
 
-// controlPlaneStub serves GET /v1/platform reporting version, standing in
-// for a deployed control plane. An optional consoleURL is reported as the
-// response's consoleUrl field -- the console discovery mechanism: a plane and
-// its console are never configured as separate aliases, so the console
-// version check finds its target here, the same call that reports the
-// plane's own version. Reports its own listener address as apiUrl, the same
-// as a real erun-backend-api reporting its own configured PlatformAPIURL --
-// this is what lets the duplicate-alias collapsing key on it instead
-// of falling back to DNS in the common single-alias case.
+// controlPlaneStub serves GET /v1/platform reporting version, an optional
+// consoleUrl, and its own listener address as apiUrl.
 func controlPlaneStub(t testing.TB, version string, consoleURL ...string) *httptest.Server {
 	t.Helper()
 	console := ""
@@ -60,15 +46,8 @@ func controlPlaneStub(t testing.TB, version string, consoleURL ...string) *httpt
 	return controlPlaneStubWithDocs(t, version, console, "")
 }
 
-// controlPlaneStubWithDocs is controlPlaneStub plus the documentation site the
-// plane advertises. It is the same discovery mechanism one field over: the
-// plane's own GET /v1/platform names where its docs site is, exactly as it
-// names where its console is, so the docs version check finds its target in
-// the same call that reports the plane's own version.
-//
-// An empty docsURL models a plane that advertises none -- an older platform,
-// or one deployed with no docs URL -- which must read as no docs site rather
-// than as one that is up to date.
+// controlPlaneStubWithDocs is controlPlaneStub plus an advertised docsUrl;
+// empty means the plane advertises none.
 func controlPlaneStubWithDocs(t testing.TB, version, consoleURL, docsURL string) *httptest.Server {
 	t.Helper()
 	var server *httptest.Server
@@ -81,26 +60,17 @@ func controlPlaneStubWithDocs(t testing.TB, version, consoleURL, docsURL string)
 		}
 		_, _ = fmt.Fprintf(w, `{"version":"%s","apiUrl":"%s","consoleUrl":"%s","docsUrl":"%s"}`, version, apiURL, consoleURL, docsURL)
 	})
-	// Assigned before Start so the handler's read of server has a
-	// happens-before edge to it; see erun-integration/AGENTS.md.
+	// Assigned before Start so the handler's read of server is ordered after it;
+	// see erun-integration/AGENTS.md.
 	server = httptest.NewUnstartedServer(mux)
 	server.Start()
 	t.Cleanup(server.Close)
 	return server
 }
 
-// TestControlPlaneStubAssignsItsServerBeforeItServes is the same pin as
-// TestGithubRulesetStubServerAssignsItsURLBeforeItServes, one stub over:
-// controlPlaneStubWithDocs' /v1/platform handler reads the captured server to
-// report its own listener address as apiUrl, and assigning that variable from
-// httptest.NewServer's return leaves the read unordered against it. Its
-// ordering half needs -race, which no gated venue runs for this module -- see
-// that test's comment for the gate and the exact command.
-//
-// The probe's client is a process of its own for the reason recorded there: an
-// in-process client's own netpoll round trip orders the two accesses and hides
-// the pair. Both requests are asserted, so the probe cannot pass by never
-// reaching the read.
+// TestControlPlaneStubAssignsItsServerBeforeItServes needs -race for its ordering
+// half. The probe client is its own process because an in-process round trip
+// would order the accesses and hide the race.
 func TestControlPlaneStubAssignsItsServerBeforeItServes(t *testing.T) {
 	curl, err := osexec.LookPath("curl")
 	if err != nil {
@@ -118,12 +88,8 @@ func TestControlPlaneStubAssignsItsServerBeforeItServes(t *testing.T) {
 	}
 }
 
-// controlPlaneStubAt is like controlPlaneStub but reports identityAPIURL as
-// its own self-declared /v1/platform apiUrl instead of its own listener
-// address -- modeling a backend reachable through more than one
-// hostname/alias that always reports the same canonical apiUrl regardless of
-// which alias a client dialed. Passing another stub's own URL as
-// identityAPIURL simulates two configured aliases resolving to one backend.
+// controlPlaneStubAt is controlPlaneStub reporting identityAPIURL as its
+// apiUrl, modeling one backend reachable through several aliases.
 func controlPlaneStubAt(t testing.TB, identityAPIURL, version string, consoleURL ...string) *httptest.Server {
 	t.Helper()
 	console := ""
@@ -140,10 +106,7 @@ func controlPlaneStubAt(t testing.TB, identityAPIURL, version string, consoleURL
 	return server
 }
 
-// versionJSONStub serves GET /version.json reporting version, standing in for
-// a deployed version surface -- a console (erun-devops/docker/erun-console's
-// own static file) or a documentation site publishing the same file, both
-// stamped from ERUN_VERSION at image build time.
+// versionJSONStub serves GET /version.json reporting version.
 func versionJSONStub(t testing.TB, version string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -156,10 +119,7 @@ func versionJSONStub(t testing.TB, version string) *httptest.Server {
 	return server
 }
 
-// versionJSONHTMLFallbackStub serves GET /version.json with a 200 text/html SPA
-// index page instead of the expected JSON document -- the deployed nginx
-// `try_files $uri $uri/ /index.html` fallback for a route it doesn't yet
-// exact-match, reproduced here rather than assumed from reading the code.
+// versionJSONHTMLFallbackStub serves /version.json as the nginx SPA index.html fallback.
 func versionJSONHTMLFallbackStub(t testing.TB) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -173,18 +133,9 @@ func versionJSONHTMLFallbackStub(t testing.TB) *httptest.Server {
 	return server
 }
 
-// seedControlPlaneConfig writes one config.yaml carrying both the erun-type
-// cloud provider aliases (each pointed at its own plane stub, or at an
-// address nothing listens on to model an unreachable plane) and the
-// registry override -- both sections live in the same file, so they must be
-// written together rather than via the single-purpose helpers list_test.go
-// and pin_test.go already use for each half alone. A plain map is fine here
-// because no scenario using it configures more than one alias; a scenario
-// that needs an ordered, multi-alias list (the duplicate-alias
-// collapsing, where which alias is configured first decides which one
-// becomes the collapsed plane's primary entry) uses
-// seedControlPlaneConfigOrdered instead, since Go map iteration order is
-// randomized.
+// seedControlPlaneConfig writes aliases and the registry override into one
+// config.yaml. Map order is random, so multi-alias scenarios use
+// seedControlPlaneConfigOrdered.
 func seedControlPlaneConfig(t testing.TB, setup env.Setup, planes map[string]string, registryURL string) {
 	t.Helper()
 	ordered := make([]controlPlaneAliasSeed, 0, len(planes))
@@ -194,8 +145,6 @@ func seedControlPlaneConfig(t testing.TB, setup env.Setup, planes map[string]str
 	seedControlPlaneConfigOrdered(t, setup, ordered, registryURL)
 }
 
-// controlPlaneAliasSeed is one configured erun-type cloud provider alias for
-// seedControlPlaneConfigOrdered.
 type controlPlaneAliasSeed struct {
 	Alias  string
 	APIURL string
@@ -234,11 +183,6 @@ func TestListControlPlanes(t *testing.T) {
 
 	t.Run("combined_with_tenant_errors", testListControlPlanesCombinedWithTenantErrors)
 
-	// Every other platform-touching command (`jobs list`, `platform whoami`,
-	// ...) accepts --erun-alias to narrow its work to one configured alias,
-	// but --control-planes rejected it outright and unconditionally probed
-	// every configured erun-hosted alias instead.
-
 	t.Run("erun_alias_requires_control_planes", testListControlPlanesErunAliasRequiresControlPlanes)
 
 	t.Run("erun_alias_unconfigured_errors", testListControlPlanesErunAliasUnconfiguredErrors)
@@ -273,12 +217,6 @@ func TestListControlPlanes(t *testing.T) {
 
 	t.Run("real_run_json_output", testListControlPlanesRealRunJSONOutput)
 
-	// --fail-on-drift is the opt-in that lets this reporting
-	// command's own finding be wired into a gate -- without it this whole
-	// file's scenarios are right that the command always exits 0
-	// (erun-cli/AGENTS.md § "Exit-Code Contract: Reporting Commands Vs
-	// Gating Checks").
-
 	t.Run("fail_on_drift_behind_published_exits_non_zero", testListControlPlanesFailOnDriftBehindPublishedExitsNonZero)
 
 	t.Run("fail_on_drift_up_to_date_exits_zero", testListControlPlanesFailOnDriftUpToDateExitsZero)
@@ -291,14 +229,8 @@ func TestListControlPlanes(t *testing.T) {
 
 	t.Run("fail_on_drift_dry_run_never_fails", testListControlPlanesFailOnDriftDryRunNeverFails)
 
-	// Two configured aliases that resolve to the same backend must
-	// be reported as one plane, not two -- pointing two aliases at one plane
-	// is legitimate configuration, but reporting it as two double-counts
-	// drift an operator would only ever act on once. Identity is keyed on
-	// each alias's own self-declared GET /v1/platform apiUrl (see
-	// controlPlaneBackendIdentity in erun-common); controlPlaneStubAt models
-	// two distinct listeners that both report that same canonical apiUrl,
-	// the same as one real backend answering on two hostnames/ingresses.
+	// Aliases resolving to one backend (same self-declared apiUrl) are reported
+	// as one plane.
 
 	t.Run("real_run_two_aliases_sharing_a_backend_collapse_into_one_plane", testListControlPlanesRealRunTwoAliasesSharingABackendCollapseIntoOnePlane)
 
@@ -306,23 +238,14 @@ func TestListControlPlanes(t *testing.T) {
 
 	t.Run("real_run_json_output_two_aliases_sharing_a_backend_does_not_double_count", testListControlPlanesRealRunJSONOutputTwoAliasesSharingABackendDoesNotDoubleCount)
 
-	// Identity must never be guessed from DNS/host alone when neither
-	// alias's GET /v1/platform self-reports an apiUrl (an older platform,
-	// modeled via controlPlaneStubAt with an empty identityAPIURL). Both
-	// stubs listen on 127.0.0.1 with different ports, so a DNS-based identity
-	// would merge two distinct backends; these must stay two backends.
+	// Without a self-reported apiUrl, identity must not be guessed from DNS/host.
 
 	t.Run("real_run_two_aliases_with_no_self_declared_identity_stay_separate", testListControlPlanesRealRunTwoAliasesWithNoSelfDeclaredIdentityStaySeparate)
 
 	t.Run("real_run_json_output_two_aliases_with_no_self_declared_identity_stay_separate", testListControlPlanesRealRunJSONOutputTwoAliasesWithNoSelfDeclaredIdentityStaySeparate)
 
-	// A plane's own discovery document can name an apiUrl that is not this
-	// backend. A textually different apiUrl is common and benign (the
-	// collapsing scenarios above model exactly that), so the check resolves
-	// both hostnames and flags only an address this plane's own host shares
-	// nothing with. These scenarios drive it with literal addresses -- the
-	// configured stub's loopback listener against the reserved, never-routed
-	// 2001:db8::/32 documentation prefix -- so no DNS stub is needed.
+	// Only an apiUrl whose address shares nothing with the plane's host is flagged.
+	// 2001:db8::/32 is never routed, so no DNS stub is needed.
 
 	t.Run("real_run_flags_a_foreign_advertised_apiurl", testListControlPlanesRealRunFlagsAForeignAdvertisedAPIURL)
 
@@ -447,9 +370,7 @@ func testListControlPlanesRealRunReportsAPlaneBehindPublished(t *testing.T) {
 func testListControlPlanesRealRunReportsAPlaneAheadOfPublished(t *testing.T) {
 	t.Parallel()
 	setup := env.New(t)
-	// The plane runs a build newer than anything the registry has ever
-	// published -- a more alarming condition than routine drift, and
-	// reported distinctly from "behind" rather than folded into it.
+	// Newer than anything published is reported distinctly from "behind".
 	plane := controlPlaneStub(t, "1.0.999")
 	registry := controlPlaneRegistryStub(t, "1.0.247")
 	seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
@@ -487,10 +408,7 @@ func testListControlPlanesRealRunReportsAnUnreachablePlaneAsNotCurrent(t *testin
 	t.Parallel()
 	setup := env.New(t)
 	registry := controlPlaneRegistryStub(t, "1.0.247")
-	// 127.0.0.1:1 refuses the connection immediately (the same
-	// unreachable-registry trick pin_test.go's
-	// seedUnreachableRuntimeRegistry uses), modeling a plane that never
-	// answers -- it must never be reported current.
+	// 127.0.0.1:1 refuses immediately; an unreachable plane is never current.
 	seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": "http://127.0.0.1:1"}, registry.URL)
 
 	result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})

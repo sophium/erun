@@ -9,12 +9,8 @@ import (
 	"strings"
 )
 
-// platformSessionProcesses builds this host's process table from /proc, where
-// everything the session, process-group and descendant scans need is always
-// available: field 3 of /proc/<pid>/stat is the state, field 5 is the process
-// group and field 6 is the session. Reading them is also what makes those
-// scans independent of ps here -- the session column ps populates on Linux is
-// empty on Darwin, and this is the source that answers on both.
+// platformSessionProcesses builds the table from /proc/<pid>/stat (state,
+// process group, session).
 func platformSessionProcesses() ([]SessionProcess, bool) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
@@ -28,14 +24,12 @@ func platformSessionProcesses() ([]SessionProcess, bool) {
 		}
 		stat, err := os.ReadFile("/proc/" + entry.Name() + "/stat")
 		if err != nil {
-			// Exited while the table was being read, or not visible under a
-			// hidepid mount. Either way there is nothing to compare.
+			// Exited, or hidden by a hidepid mount.
 			continue
 		}
 		proc, ok := parseProcStat(stat)
 		if !ok || proc.Pid != pid {
-			// The entry no longer describes the pid that was listed, so the
-			// pid may have been reused since; it is not this row's process.
+			// The pid may have been reused since it was listed.
 			continue
 		}
 		procs = append(procs, proc)
@@ -43,11 +37,8 @@ func platformSessionProcesses() ([]SessionProcess, bool) {
 	return procs, true
 }
 
-// parseProcStat reads the pid, state, parent, process group and session out of
-// one /proc/<pid>/stat. The command name is the only field that may itself
-// contain spaces and parentheses, so the pid is everything before the first
-// '(' and the fields that follow are everything after the last ')': state
-// first, then ppid, process group, and session.
+// parseProcStat reads /proc/<pid>/stat. The command name may contain spaces and
+// parentheses, so fields are taken after the last ')'.
 func parseProcStat(stat []byte) (SessionProcess, bool) {
 	open := bytes.IndexByte(stat, '(')
 	closing := bytes.LastIndexByte(stat, ')')

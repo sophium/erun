@@ -14,9 +14,7 @@ import (
 
 var CurrentHostOS = func() core.HostOS { return core.DetectHost().OS }
 
-// StdinIsTerminal decides whether open may safely block on an interactive
-// shell. A var (like currentHostOS above) so tests can force the TTY branch
-// via ERUN_FORCE_TTY, the same seam writerIsTerminal already honors.
+// StdinIsTerminal is a var so tests can force the TTY branch.
 var StdinIsTerminal = func() bool { return WriterIsTerminal(os.Stdin) }
 
 func ResolveOpenArgs(command string, args []string, resolveOpen func(shared.OpenParams) (config.OpenResult, error)) (shared.OpenParams, config.OpenResult, error) {

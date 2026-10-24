@@ -11,51 +11,33 @@ import (
 	"time"
 )
 
-// commandWaitDelay bounds how long Wait()/Output()/Run() will wait for a
-// finished process's stdout/stderr to reach EOF before force-closing the pipes
-// and returning. Without it, a leaked pipe write-end — an endpoint-security
-// agent or a grandchild that inherited the handle, common on Windows — keeps
-// Wait blocked forever even though the process is already dead, hanging deploys,
-// reconnects, and the pod-watch drain. It only ever triggers after the process
-// exits, so a legitimately long-running command is unaffected.
+// commandWaitDelay bounds the post-exit pipe drain: a leaked write handle (common
+// on Windows) would otherwise block Wait forever after the process died.
 const commandWaitDelay = 10 * time.Second
 
-// Command wraps exec.Command, honoring an ERUN_<NAME>_BIN override so tests
-// can redirect a named binary to a stub without a live toolchain or account.
-// On Windows it also suppresses the stray console window that a console child
-// of the windowless desktop app would otherwise flash (see HideConsoleWindow).
+// Command wraps exec.Command, honoring an ERUN_<NAME>_BIN override, and hides the
+// console window on Windows.
 func Command(name string, args ...string) *exec.Cmd {
 	cmd := NewExecCommand(name, args...)
 	HideConsoleWindow(cmd)
-	// Bound the post-exit I/O drain so a leaked pipe handle can't wedge Wait
-	// forever (see commandWaitDelay). Interactive tab shells build their command
-	// via newExecCommand directly and deliberately skip this.
+	// Interactive tab shells use newExecCommand directly and skip this bound.
 	cmd.WaitDelay = commandWaitDelay
 	return cmd
 }
 
-// BoundCommandWait applies the same post-exit I/O-drain bound as Command to a
-// cmd built elsewhere (e.g. the desktop's exec.CommandContext calls that stream
-// a child's stdout/stderr). Call it right after constructing such a cmd so a
-// leaked pipe handle can't wedge Wait()/CombinedOutput() forever on Windows.
+// BoundCommandWait applies commandWaitDelay to a cmd built elsewhere.
 func BoundCommandWait(cmd *exec.Cmd) {
 	if cmd != nil {
 		cmd.WaitDelay = commandWaitDelay
 	}
 }
 
-// DesktopAppName is the installed file name of the desktop binary, and so the
-// string a `pkill -f` aimed at that binary carries. Nothing erun writes into a
-// process's command line may contain it — see RemoteAppSessionSocketDir.
+// DesktopAppName is the desktop binary name that `pkill -f` matches; nothing erun
+// writes into a command line may contain it (see RemoteAppSessionSocketDir).
 const DesktopAppName = "erun-app"
 
-// DesktopAppCommand builds the command that launches the ERun desktop app
-// (erun-app). On macOS an `.app` bundle must launch via `open -n <bundle>` (a
-// fresh instance; forwarded args go after `--args`); elsewhere the binary is
-// spawned directly, with argv[0] set to "ERun" on macOS for a stable process
-// name. It lives here, transport-neutral, so both `erun app` (CLI) and the
-// desktop app's own self-restart build the launch identically without the
-// desktop importing erun-cli.
+// DesktopAppCommand builds the desktop app launch; macOS bundles go through
+// `open -n <bundle> --args`. Shared by `erun app` and the desktop's self-restart.
 func DesktopAppCommand(goos, executable string, args []string) *exec.Cmd {
 	if goos == "darwin" && filepath.Ext(executable) == ".app" {
 		openArgs := []string{"-n", executable}
@@ -72,10 +54,7 @@ func DesktopAppCommand(goos, executable string, args []string) *exec.Cmd {
 	return cmd
 }
 
-// CommandContext is Command for a child whose lifetime is bound to ctx. A
-// cancellable command still has to resolve through the ERUN_<NAME>_BIN seam,
-// otherwise it silently reaches for whatever the host happens to have installed
-// and cannot be exercised without that toolchain.
+// CommandContext is Command bound to ctx.
 func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd := newExecCommandContext(ctx, name, args...)
 	HideConsoleWindow(cmd)
@@ -99,8 +78,7 @@ func NewExecCommand(name string, args ...string) *exec.Cmd {
 	if strings.ContainsAny(name, "/\\") {
 		return exec.Command(name, args...)
 	}
-	// Derive the override var from the base tool name so a Windows .exe suffix
-	// (erun-app.exe) resolves to the same ERUN_ERUN_APP_BIN seam as erun-app.
+	// Strip .exe so erun-app.exe resolves to the same ERUN_ERUN_APP_BIN override.
 	base := strings.TrimSuffix(name, ".exe")
 	envName := "ERUN_" + strings.ToUpper(strings.ReplaceAll(base, "-", "_")) + "_BIN"
 	if override := strings.TrimSpace(os.Getenv(envName)); override != "" {
