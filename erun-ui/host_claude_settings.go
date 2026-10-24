@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // uiHostGatewayDefaults is the gateway the operator's own Claude Code is already
@@ -38,7 +38,7 @@ type uiHostGatewayDefaults struct {
 // offer, which is the ordinary case rather than a failure. A file that is
 // present but unreadable is reported, because that is a real fault worth seeing.
 func (a *App) LoadHostGatewayDefaults() (uiHostGatewayDefaults, error) {
-	env, err := eruncommon.HostClaudeSettingsEnv()
+	env, err := deploy.HostClaudeSettingsEnv()
 	if err != nil {
 		return uiHostGatewayDefaults{}, err
 	}

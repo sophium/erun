@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // The MCP platform tools resolve their alias through the same shared resolver
@@ -87,7 +87,7 @@ func TestCLIKeepsItsAliasRemedyWording(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &listToolStore{toolConfig: config.ERunConfig{CloudProviders: tc.providers}}
-			_, err := eruncommon.ResolveERunPlatformAlias(store, "")
+			_, err := shared.ResolveERunPlatformAlias(store, "")
 			if err == nil {
 				t.Fatal("expected the unresolvable-alias error, got none")
 			}

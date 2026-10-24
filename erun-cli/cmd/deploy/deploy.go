@@ -7,11 +7,14 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
-func NewDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
-	target := common.DeployTarget{}
+func NewDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
+	target := deploy.DeployTarget{}
 	var components []string
 	var useCurrent bool
 	var erunAlias string
@@ -63,7 +66,7 @@ func NewDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			// target, so name them up front: the per-env trace log and every
 			// `==> ...` line must identify the env even when the deploy fails
 			// before spec resolution names it.
-			tenant, environment := common.ResolveDeployTargetScope(store, findProjectRoot, deployTarget)
+			tenant, environment := deploy.ResolveDeployTargetScope(store, findProjectRoot, deployTarget)
 			var closeEnvTrace func()
 			ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, tenant, environment)
 			defer closeEnvTrace()
@@ -100,25 +103,25 @@ func deployFailedTrace(tenant, environment string, err error) string {
 	return fmt.Sprintf("==> Deploy failed: %s", err.Error())
 }
 
-func runDeploy(ctx core.Context, store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, deployHelmChart common.HelmChartDeployerFunc, deployTarget common.DeployTarget) error {
-	deploySpecs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
+func runDeploy(ctx core.Context, store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, deployHelmChart deploy.HelmChartDeployerFunc, deployTarget deploy.DeployTarget) error {
+	deploySpecs, err := deploy.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 	if err != nil {
 		ctx.Trace("deploy: spec resolution failed: " + err.Error())
 		return err
 	}
 	ctx.Trace(fmt.Sprintf("deploy: resolved %d spec(s)", len(deploySpecs)))
-	if err := common.RunDeploySpecs(ctx, deploySpecs, deployHelmChart); err != nil {
+	if err := deploy.RunDeploySpecs(ctx, deploySpecs, deployHelmChart); err != nil {
 		return err
 	}
-	if err := common.PersistRuntimeVersionFromDeploySpecs(ctx, deploySpecs, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion); err != nil {
+	if err := deploy.PersistRuntimeVersionFromDeploySpecs(ctx, deploySpecs, saveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion); err != nil {
 		return err
 	}
 	shared.NoticeStaleRuntimePortForwards(ctx, deploySpecs)
 	return nil
 }
 
-func NewK8sDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
-	target := common.DeployTarget{}
+func NewK8sDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
+	target := deploy.DeployTarget{}
 	cmd := &cobra.Command{
 		Use:           "deploy COMPONENT",
 		Short:         "Deploy a component Helm chart",
@@ -127,14 +130,14 @@ func NewK8sDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSav
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := shared.WithCloudContextPreflight(shared.CommandContext(cmd), store)
-			deploySpec, err := common.ResolveDeploySpec(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")
+			deploySpec, err := deploy.ResolveDeploySpec(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")
 			if err != nil {
 				return err
 			}
-			if err := common.RunDeploySpec(ctx, deploySpec, deployHelmChart); err != nil {
+			if err := deploy.RunDeploySpec(ctx, deploySpec, deployHelmChart); err != nil {
 				return err
 			}
-			return common.PersistRuntimeVersionFromDeploySpecs(ctx, []common.DeploySpec{deploySpec}, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion)
+			return deploy.PersistRuntimeVersionFromDeploySpecs(ctx, []deploy.DeploySpec{deploySpec}, saveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
 		},
 	}
 	shared.AddDryRunFlag(cmd)
@@ -142,7 +145,7 @@ func NewK8sDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSav
 	return cmd
 }
 
-func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget) {
+func addDeployCommandTargetFlags(cmd *cobra.Command, target *deploy.DeployTarget) {
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Version to install by reference (produced by `erun build`/`erun push`); fails if that version's image is absent")
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Deploy for a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Deploy for a specific environment; requires --tenant")

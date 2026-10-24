@@ -5,15 +5,15 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
-func NewExposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func NewExposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
 	var targetIP string
 	var backendService string
 	var servicePort int
@@ -105,7 +105,7 @@ type exposeCommandArgs struct {
 	erunAlias                                                                    string
 }
 
-func runExposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot common.ProjectFinderFunc, a exposeCommandArgs) error {
+func runExposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot sharedpkg.ProjectFinderFunc, a exposeCommandArgs) error {
 	servicesZone := strings.TrimSpace(a.servicesZone)
 	platformNamespace := strings.TrimSpace(a.platformNamespace)
 	// --services-zone/--platform-namespace supply what a project checkout would

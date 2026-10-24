@@ -6,10 +6,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/infra/mcp"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // WhipNow is the desktop's own operator-triggered whip pass -- the control
@@ -126,7 +127,7 @@ func (a *App) whipEnvironmentsNow(ctx context.Context, want map[string]struct{})
 // distinction jobsReachability (environment_jobs.go) already draws.
 func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment string) orchestrator.WhipResult {
 	id := tenant + "/" + environment
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{Tenant: tenant, Environment: environment})
 	if err != nil {
 		return orchestrator.WhipResult{
 			Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},

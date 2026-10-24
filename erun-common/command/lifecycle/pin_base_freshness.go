@@ -7,6 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // A pin plan is only as current as the checkout it was resolved from. Every
@@ -124,7 +125,7 @@ func pinBaseTrackingRef(ctx core.Context, projectRoot, branch string) (ref, remo
 	}
 	// Detached: origin/HEAD names the remote's default branch, which is the only
 	// ref left that can say whether this checkout is behind the remote at all.
-	if _, resolved, err := eruncommon.GitResolvedRef(ctx, projectRoot, "origin/HEAD"); err != nil || !resolved {
+	if _, resolved, err := shared.GitResolvedRef(ctx, projectRoot, "origin/HEAD"); err != nil || !resolved {
 		return "", "", false
 	}
 	return "origin/HEAD", strings.TrimPrefix(pinBaseRemoteHeadBranch(ctx, projectRoot), "origin/"), true

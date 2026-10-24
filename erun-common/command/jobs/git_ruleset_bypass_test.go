@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // assertBypassReported holds the report to what an operator needs: which remote
@@ -61,7 +61,7 @@ func installBypassNoticeHook(t *testing.T, remote, ref string) {
 func TestReleaseClaimPushReportsAGitHubRulesetBypass(t *testing.T) {
 	repo := newAgentJobTestRepo(t)
 	remote := newBareRemoteForTest(t, repo)
-	ref := eruncommon.ReleaseRepoClaimRef("1.4.2")
+	ref := shared.ReleaseRepoClaimRef("1.4.2")
 	installBypassNoticeHook(t, remote, ref)
 
 	var out bytes.Buffer
@@ -71,7 +71,7 @@ func TestReleaseClaimPushReportsAGitHubRulesetBypass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve the commit the claim push names: %v", err)
 	}
-	if err := eruncommon.GitPushCreateRef(ctx, repo, "origin", strings.TrimSpace(string(sha)), ref); err != nil {
+	if err := shared.GitPushCreateRef(ctx, repo, "origin", strings.TrimSpace(string(sha)), ref); err != nil {
 		t.Fatalf("a bypass is not a failure, so it must not be reported as an error: %v", err)
 	}
 	assertBypassReported(t, out.String(), ref)

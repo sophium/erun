@@ -14,6 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/doctor"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"gopkg.in/yaml.v3"
 )
 
@@ -278,13 +279,13 @@ func TestSyncRuntimeRegistryCredentialAddsOnlyMissingHosts(t *testing.T) {
 func writePlatformAliasSecret(t *testing.T, boot runtimeBoot) configpkg.CloudProviderConfig {
 	t.Helper()
 	provider := testPlatformAliasProvider()
-	entry, err := eruncommon.RenderPlatformAliasEntry(provider)
+	entry, err := deploy.RenderPlatformAliasEntry(provider)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeAssetFile(t, boot.platformAliasEntryPath(), entry)
-	writeAssetFile(t, filepath.Join(boot.platformAliasDir, eruncommon.PlatformAliasSecretFileKey), cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef))
-	writeAssetFile(t, filepath.Join(boot.platformAliasDir, eruncommon.PlatformAliasSecretTokenKey), "refresh-token-value")
+	writeAssetFile(t, filepath.Join(boot.platformAliasDir, deploy.PlatformAliasSecretFileKey), cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef))
+	writeAssetFile(t, filepath.Join(boot.platformAliasDir, deploy.PlatformAliasSecretTokenKey), "refresh-token-value")
 	return provider
 }
 

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // This repository squash-merges every branch. That means the *normal* end
@@ -30,9 +30,9 @@ func withFakeWorkHome(t *testing.T) (home, root string) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir work root: %v", err)
 	}
-	original := eruncommon.WorkCloneUserHomeDir
-	eruncommon.WorkCloneUserHomeDir = func() (string, error) { return home, nil }
-	t.Cleanup(func() { eruncommon.WorkCloneUserHomeDir = original })
+	original := shared.WorkCloneUserHomeDir
+	shared.WorkCloneUserHomeDir = func() (string, error) { return home, nil }
+	t.Cleanup(func() { shared.WorkCloneUserHomeDir = original })
 	return home, root
 }
 

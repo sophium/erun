@@ -6,11 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/mcp"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // The desktop writes into the job store — Investigate starts a job there — and
@@ -140,7 +141,7 @@ func (a *App) CancelEnvironmentJob(input uiCancelJobInput) (uiEnvironmentJob, er
 // cannot see, so that case is reported as unreachable rather than read as
 // empty.
 func (a *App) jobsReachability(tenant, environment string) (config.OpenResult, bool, error) {
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      tenant,
 		Environment: environment,
 	})
@@ -173,7 +174,7 @@ func (a *App) wrapJobMCPErr(result config.OpenResult, err error) error {
 // of a finished job is usually its whole output.
 const defaultJobOutputPageBytes = 65536
 
-func environmentJobsToUI(jobs []eruncommon.EnvironmentJob) []uiEnvironmentJob {
+func environmentJobsToUI(jobs []shared.EnvironmentJob) []uiEnvironmentJob {
 	out := make([]uiEnvironmentJob, 0, len(jobs))
 	for _, job := range jobs {
 		out = append(out, environmentJobToUI(job))
@@ -192,7 +193,7 @@ func jobOutputToUI(page jobspkg.EnvironmentJobOutput) uiEnvironmentJobOutput {
 	}
 }
 
-func environmentJobToUI(job eruncommon.EnvironmentJob) uiEnvironmentJob {
+func environmentJobToUI(job shared.EnvironmentJob) uiEnvironmentJob {
 	out := uiEnvironmentJob{
 		ID:        job.ID,
 		Name:      job.Name,

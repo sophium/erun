@@ -2,11 +2,8 @@ package eruncommon
 
 import (
 	"os"
-	"strings"
 	"testing"
 	"time"
-
-	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // heavyDualStreamScript is a shell one-liner that writes well over 64KB (the
@@ -33,62 +30,6 @@ func runWithHangGuard(t *testing.T, timeout time.Duration, fn func() error) erro
 	case <-time.After(timeout):
 		t.Fatalf("hung: did not complete within %s", timeout)
 		return nil
-	}
-}
-
-// TestRunDockerBuildOnceDrainsHeavyOutputConcurrently reproduces the build
-// deadlock directly against runDockerBuildOnce, using a stub "docker"
-// (ERUN_DOCKER_BIN) that writes far more than one pipe buffer's worth on both
-// stdout and stderr. Before the fix, the VerbosityDebug branch wired a single
-// shared bytes.Buffer into two independently-built io.MultiWriters (one per
-// stream), which os/exec's same-writer dedup does not recognize as identical
-// -- so two copier goroutines wrote the same *bytes.Buffer with no
-// synchronization. Runs at both the default and VerbosityDebug branch since
-// the two used to build the wiring differently.
-func TestRunDockerBuildOnceDrainsHeavyOutputConcurrently(t *testing.T) {
-	stub := writeExecutableScript(t, heavyDualStreamScript)
-	t.Setenv("ERUN_DOCKER_BIN", stub)
-
-	for _, verbosity := range []int{core.VerbosityInfo, core.VerbosityDebug} {
-		var stdout, stderr strings.Builder
-		err := runWithHangGuard(t, 20*time.Second, func() error {
-			_, err := runDockerBuildOnce([]string{"build"}, ".", "tag", false, verbosity, &stdout, &stderr)
-			return err
-		})
-		if err != nil {
-			t.Fatalf("verbosity %d: runDockerBuildOnce: %v", verbosity, err)
-		}
-		if verbosity >= core.VerbosityDebug {
-			if !strings.Contains(stdout.String(), "out-1 ") {
-				t.Errorf("verbosity %d: stdout missing its own content", verbosity)
-			}
-			if !strings.Contains(stderr.String(), "err-1 ") {
-				t.Errorf("verbosity %d: stderr missing its own content", verbosity)
-			}
-		}
-	}
-}
-
-// TestRunDockerPushOnceDrainsHeavyOutputConcurrently is the same
-// reproduction against runDockerPushOnce, which -- unlike
-// runDockerBuildOnce -- built the racy double-MultiWriter wiring
-// unconditionally rather than only at VerbosityDebug.
-func TestRunDockerPushOnceDrainsHeavyOutputConcurrently(t *testing.T) {
-	stub := writeExecutableScript(t, heavyDualStreamScript)
-	t.Setenv("ERUN_DOCKER_BIN", stub)
-
-	var stdout, stderr strings.Builder
-	err := runWithHangGuard(t, 20*time.Second, func() error {
-		return runDockerPushOnce("tag", core.VerbosityDebug, &stdout, &stderr)
-	})
-	if err != nil {
-		t.Fatalf("runDockerPushOnce: %v", err)
-	}
-	if !strings.Contains(stdout.String(), "out-1 ") {
-		t.Error("stdout missing its own content")
-	}
-	if !strings.Contains(stderr.String(), "err-1 ") {
-		t.Error("stderr missing its own content")
 	}
 }
 

@@ -12,9 +12,10 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // runDeployOrchestration is the desktop's deploy. The desktop is barred from the
@@ -124,7 +125,7 @@ func (a *App) maybeStartDeployOrchestration(selection uiSelection, force bool) (
 	if a.ctx == nil || selection.Tenant == "" || selection.Environment == "" {
 		return startSessionResult{}, false
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

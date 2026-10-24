@@ -4,10 +4,10 @@ import (
 	"fmt"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 func NewSSHDActivator(runRemoteCommand kube.RemoteCommandRunnerFunc) shared.SSHDActivator {
@@ -15,7 +15,7 @@ func NewSSHDActivator(runRemoteCommand kube.RemoteCommandRunnerFunc) shared.SSHD
 		if !result.EnvConfig.SSHD.Enabled {
 			return nil
 		}
-		if err := common.ValidateSSHDTarget(result); err != nil {
+		if err := open.ValidateSSHDTarget(result); err != nil {
 			return err
 		}
 
@@ -37,7 +37,7 @@ func NewSSHDActivator(runRemoteCommand kube.RemoteCommandRunnerFunc) shared.SSHD
 // executes, and this block is prose (`SSH:`, `host:`, ...) that eval would run
 // as commands. stderr is not the fallback: the alias does not capture it, and
 // keeping it quiet there is deliberate, so a piped run simply omits the block.
-func emitSSHDConnectionInfo(ctx core.Context, info common.SSHConnectionInfo) error {
+func emitSSHDConnectionInfo(ctx core.Context, info open.SSHConnectionInfo) error {
 	if ctx.Stdout == nil || !shared.WriterIsTerminal(ctx.Stdout) {
 		return nil
 	}

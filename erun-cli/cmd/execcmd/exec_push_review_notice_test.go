@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	common "github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // The push itself is stubbed at the git layer so the whole command body runs:
@@ -86,7 +86,7 @@ func execPushNoticePushDependencies(branch string) gitx.PushWorkingTreeBranchDep
 	}
 }
 
-func execPushNoticeFinder(projectRoot string) common.ProjectFinderFunc {
+func execPushNoticeFinder(projectRoot string) shared.ProjectFinderFunc {
 	return func() (string, string, error) { return "tenant", projectRoot, nil }
 }
 

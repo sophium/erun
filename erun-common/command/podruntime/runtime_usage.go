@@ -10,6 +10,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // `kubectl top` needs a metrics-server add-on that clusters like orbstack
@@ -173,7 +175,7 @@ func RunRuntimeUsage(ctx core.Context, runner eruncommon.RuntimeContainerCommand
 	var dindResult kube.RemoteCommandResult
 	var dindErr error
 	if usesDind {
-		dindResult, dindErr = eruncommon.RunTracedRuntimeContainerCommand(ctx, runner, req, eruncommon.RuntimeDindContainerName, "usage-dind", script)
+		dindResult, dindErr = eruncommon.RunTracedRuntimeContainerCommand(ctx, runner, req, build.RuntimeDindContainerName, "usage-dind", script)
 	}
 	// Read after the execs so a dry run's trace lists the actions in the order
 	// they would run, and never fails the call: a pod spec that cannot be read
@@ -228,7 +230,7 @@ func applyRetainedUsageWarnings(usage config.RuntimeUsage) config.RuntimeUsage {
 // retainedMemoryUsageWarnings is the decision itself, pure so the judgement
 // about what survives a restart is testable without a container or a history
 // file.
-func retainedMemoryUsageWarnings(memory config.RuntimeMemoryUsage, history eruncommon.RuntimeUsageHistory) []string {
+func retainedMemoryUsageWarnings(memory config.RuntimeMemoryUsage, history deploy.RuntimeUsageHistory) []string {
 	// Both warnings are a percentage of the limit, so a reading that could not
 	// supply one has nothing to be scored against.
 	if memory.Unavailable != "" || memory.Unlimited || memory.LimitBytes <= 0 {
@@ -508,7 +510,7 @@ func runtimeBuildThrottleWarnings(dind *config.RuntimeDindUsage) []string {
 // two verdicts cannot share a floor, and runtimeThrottleIsMaterial for why
 // they must still share a ratio.
 func runtimeBuildThrottleIsStarvation(throttled, periods int64) bool {
-	return periods >= runtimeBuildThrottleMinPeriods && float64(throttled) >= float64(periods)*eruncommon.RuntimeSizingThrottleRatio
+	return periods >= runtimeBuildThrottleMinPeriods && float64(throttled) >= float64(periods)*deploy.RuntimeSizingThrottleRatio
 }
 
 // runtimeMemoryUsageWarnings takes a scope label ("" for the runtime
@@ -519,10 +521,10 @@ func runtimeBuildThrottleIsStarvation(throttled, periods int64) bool {
 func runtimeMemoryUsageWarnings(scope string, memory config.RuntimeMemoryUsage) []string {
 	var warnings []string
 	if memory.Unavailable == "" && !memory.Unlimited && memory.LimitBytes > 0 {
-		if memory.PercentOfLimit >= eruncommon.RuntimeUsageMemoryWarnPercent {
+		if memory.PercentOfLimit >= deploy.RuntimeUsageMemoryWarnPercent {
 			warnings = append(warnings, fmt.Sprintf(
 				"%smemory is at %.0f%% of its %s limit (warns at %.0f%%)",
-				scope, memory.PercentOfLimit, core.FormatMebibytes(memory.LimitBytes), eruncommon.RuntimeUsageMemoryWarnPercent))
+				scope, memory.PercentOfLimit, core.FormatMebibytes(memory.LimitBytes), deploy.RuntimeUsageMemoryWarnPercent))
 		}
 		if memory.PeakObserved {
 			peakPercent := 100 * float64(memory.PeakBytes) / float64(memory.LimitBytes)

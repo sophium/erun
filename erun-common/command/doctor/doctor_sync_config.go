@@ -10,6 +10,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // In-pod config reconciliation (`erun doctor --sync-config`).
@@ -57,7 +58,7 @@ type ConfigSyncInspection struct {
 	Tenant      string
 	Environment string
 	HasInjected bool
-	Injected    eruncommon.InjectedRuntimeConfig
+	Injected    shared.InjectedRuntimeConfig
 	Drift       []ConfigDriftField
 }
 
@@ -83,7 +84,7 @@ func ResolveRuntimeConfigHome(homeDir string) string {
 // comparison — the injected projection carries no LocalRepoPath, so comparing
 // it would flag spurious drift on every legacy pod config.
 func InspectRuntimeConfigSync(configHome string, env func(string) string) (ConfigSyncInspection, error) {
-	injected, ok := eruncommon.ResolveInjectedRuntimeConfig(env)
+	injected, ok := shared.ResolveInjectedRuntimeConfig(env)
 	inspection := ConfigSyncInspection{
 		ConfigHome:  configHome,
 		Tenant:      injected.Tenant,
@@ -161,7 +162,7 @@ func envConfigDrift(injected, onDisk configpkg.EnvConfig, raw map[string]any) []
 	return drift
 }
 
-func rootConfigDrift(injected eruncommon.InjectedRuntimeConfig, onDisk configpkg.ERunConfig) []ConfigDriftField {
+func rootConfigDrift(injected shared.InjectedRuntimeConfig, onDisk configpkg.ERunConfig) []ConfigDriftField {
 	var drift []ConfigDriftField
 	for _, provider := range injected.Providers {
 		existing, found := eruncommon.FindCloudProvider(onDisk.CloudProviders, provider.Alias)
@@ -241,13 +242,13 @@ func RunRuntimeConfigSync(ctx core.Context, inspection ConfigSyncInspection) err
 	if !ctx.DryRun {
 		_ = configpkg.WriteEnvConfigBackupIfDue(envPath, configpkg.TimeNow)
 	}
-	if err := writeRuntimeYAML(ctx, envPath, eruncommon.OverlayInjectedEnvConfig(onDiskEnv, injected.Env)); err != nil {
+	if err := writeRuntimeYAML(ctx, envPath, shared.OverlayInjectedEnvConfig(onDiskEnv, injected.Env)); err != nil {
 		return err
 	}
 	return reconcileRuntimeRootConfig(ctx, inspection.ConfigHome, injected)
 }
 
-func reconcileRuntimeRootConfig(ctx core.Context, configHome string, injected eruncommon.InjectedRuntimeConfig) error {
+func reconcileRuntimeRootConfig(ctx core.Context, configHome string, injected shared.InjectedRuntimeConfig) error {
 	if len(injected.Providers) == 0 && len(injected.Contexts) == 0 {
 		return nil
 	}

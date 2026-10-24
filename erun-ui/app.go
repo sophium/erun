@@ -22,6 +22,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -63,7 +65,7 @@ type projectConfigStore interface {
 
 type erunUIDeps struct {
 	store                  erunUIStore
-	findProjectRoot        eruncommon.ProjectFinderFunc
+	findProjectRoot        shared.ProjectFinderFunc
 	resolveCLIPath         func() string
 	resolveBuildInfo       func() model.BuildInfo
 	resolveImageRegistry   func(context.Context, string, string) (registry.RuntimeRegistryVersions, error)
@@ -105,7 +107,7 @@ type erunUIDeps struct {
 	execCommit               func(ctx context.Context, endpoint, bearer, branch, message string) (gitx.CommitWorkingTreeResult, error)
 	execPush                 func(ctx context.Context, endpoint, bearer, branch, remote string) (gitx.PushWorkingTreeBranchResult, error)
 	loadIdleStatus           func(context.Context, string, string) (activity.EnvironmentIdleStatus, error)
-	loadEnvironmentJobs      func(context.Context, string, string) ([]eruncommon.EnvironmentJob, error)
+	loadEnvironmentJobs      func(context.Context, string, string) ([]shared.EnvironmentJob, error)
 	readEnvironmentJobOutput func(context.Context, string, string, jobs.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, error)
 	cancelEnvironmentJob     func(context.Context, string, string, jobs.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error)
 	whipEnvironment          func(context.Context, string, string, string, string) (orchestrator.WhipResult, error)
@@ -448,7 +450,7 @@ func withDefaultOrchestratorLaunchDeps(deps erunUIDeps) erunUIDeps {
 		deps.claudeAgents = newDefaultClaudeAgents()
 	}
 	if deps.resolveGatewayCredential == nil {
-		deps.resolveGatewayCredential = eruncommon.ResolveGatewayCredential
+		deps.resolveGatewayCredential = deploy.ResolveGatewayCredential
 	}
 	return deps
 }

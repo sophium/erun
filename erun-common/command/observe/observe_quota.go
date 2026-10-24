@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // ObservedResourceQuota pairs a namespace's ResourceQuota cap with what is
@@ -69,9 +69,9 @@ type limitRangeLimitEntry struct {
 }
 
 func fetchObservedResourceQuotas(args []string) ([]ObservedResourceQuota, error) {
-	raw, stderr, err := eruncommon.RunObserveKubectl(args)
+	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
-		return nil, fmt.Errorf("observe: get resourcequota: %w", eruncommon.KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("observe: get resourcequota: %w", deploy.KubectlErrorMessage(err, stderr))
 	}
 	var list resourceQuotaList
 	if err := json.Unmarshal(raw, &list); err != nil {
@@ -85,9 +85,9 @@ func fetchObservedResourceQuotas(args []string) ([]ObservedResourceQuota, error)
 }
 
 func fetchObservedLimitRanges(args []string) ([]ObservedLimitRange, error) {
-	raw, stderr, err := eruncommon.RunObserveKubectl(args)
+	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
-		return nil, fmt.Errorf("observe: get limitrange: %w", eruncommon.KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("observe: get limitrange: %w", deploy.KubectlErrorMessage(err, stderr))
 	}
 	var list limitRangeList
 	if err := json.Unmarshal(raw, &list); err != nil {

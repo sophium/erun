@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // ObservedHelmRelease is the runtime helm release's own record of what should
@@ -107,10 +108,10 @@ func splitHelmChartNameVersion(chart string) (name, version string, ok bool) {
 func FetchObservedHelmRelease(args, listArgs []string, releaseName, namespace string) *ObservedHelmRelease {
 	raw, stderr, err := runObserveHelm(args)
 	if err != nil {
-		if isHelmReleaseNotFound(stderr) {
+		if deploy.IsHelmReleaseNotFound(stderr) {
 			return &ObservedHelmRelease{Name: releaseName}
 		}
-		return &ObservedHelmRelease{Name: releaseName, Error: observeHelmReadErrorMessage(releaseName, namespace, stderr, err)}
+		return &ObservedHelmRelease{Name: releaseName, Error: deploy.ObserveHelmReadErrorMessage(releaseName, namespace, stderr, err)}
 	}
 	var status helmStatusOutput
 	if jsonErr := json.Unmarshal(raw, &status); jsonErr != nil {
@@ -143,7 +144,7 @@ func FetchObservedHelmRelease(args, listArgs []string, releaseName, namespace st
 func populateObservedChartFields(release *ObservedHelmRelease, listArgs []string, releaseName, namespace string) {
 	raw, stderr, err := runObserveHelm(listArgs)
 	if err != nil {
-		release.Error = appendObserveHelmReleaseError(release.Error, "could not determine chart/appVersion: "+observeHelmReadErrorMessage(releaseName, namespace, stderr, err))
+		release.Error = appendObserveHelmReleaseError(release.Error, "could not determine chart/appVersion: "+deploy.ObserveHelmReadErrorMessage(releaseName, namespace, stderr, err))
 		return
 	}
 	var entries []helmListEntry
@@ -188,27 +189,6 @@ func runObserveHelm(args []string) (stdout []byte, stderr string, err error) {
 	cmd.Stderr = &errBuf
 	out, runErr := cmd.Output()
 	return out, strings.TrimSpace(errBuf.String()), runErr
-}
-
-func isHelmReleaseNotFound(stderr string) bool {
-	return strings.Contains(strings.ToLower(stderr), "release: not found")
-}
-
-// observeHelmReadErrorMessage classifies a failed helm read into an actionable
-// message: an orchestrator reading "the release cannot be read" with no reason
-// has nowhere to go, per root AGENTS.md's "Smooth, Seamless, No Dead Ends".
-func observeHelmReadErrorMessage(releaseName, namespace, stderr string, err error) string {
-	lower := strings.ToLower(stderr)
-	switch {
-	case strings.Contains(lower, "forbidden") || strings.Contains(lower, "unauthorized"):
-		return fmt.Sprintf("observe: not authorized to read helm release %q in namespace %q (%s) — helm release state is stored as Secrets, so the caller's kubeconfig needs read access to Secrets in this namespace", releaseName, namespace, stderr)
-	case strings.Contains(strings.ToLower(err.Error()), "executable file not found"):
-		return "observe: helm is not installed or not on PATH — install helm to let observe read the runtime release"
-	case stderr != "":
-		return fmt.Sprintf("observe: could not read helm release %q in namespace %q: %s", releaseName, namespace, stderr)
-	default:
-		return fmt.Sprintf("observe: could not read helm release %q in namespace %q: %v", releaseName, namespace, err)
-	}
 }
 
 // findNestedStringMap searches values for a key whose value is a map of

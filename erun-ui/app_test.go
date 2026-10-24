@@ -28,6 +28,9 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
+	openpkg "github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
@@ -2741,7 +2744,7 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 		},
 	})
 
-	names := func(components []eruncommon.DeployableComponent) []string {
+	names := func(components []deploypkg.DeployableComponent) []string {
 		out := make([]string, 0, len(components))
 		for _, component := range components {
 			out = append(out, component.Name)
@@ -2815,7 +2818,7 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 		},
 	})
 
-	names := func(components []eruncommon.DeployableComponent) []string {
+	names := func(components []deploypkg.DeployableComponent) []string {
 		out := make([]string, 0, len(components))
 		for _, component := range components {
 			out = append(out, component.Name)
@@ -3478,7 +3481,7 @@ func equalStringSlices(a, b []string) bool {
 }
 
 func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
-	projectRoot := eruncommon.RemoteWorktreePathForRepoName("frs")
+	projectRoot := openpkg.RemoteWorktreePathForRepoName("frs")
 	rootConfig := &configpkg.ERunConfig{
 		CloudContexts: []configpkg.CloudContextConfig{{
 			Name:               "team-context",
@@ -5296,7 +5299,7 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
 
-	result, err := eruncommon.ResolveOpen(store, eruncommon.OpenParams{Tenant: "erun", Environment: "remote"})
+	result, err := openpkg.ResolveOpen(store, shared.OpenParams{Tenant: "erun", Environment: "remote"})
 	if err != nil {
 		t.Fatalf("ResolveOpen failed: %v", err)
 	}
@@ -5344,7 +5347,7 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusStopped)
 
-	result, err := eruncommon.ResolveOpen(store, eruncommon.OpenParams{Tenant: "erun", Environment: "remote"})
+	result, err := openpkg.ResolveOpen(store, shared.OpenParams{Tenant: "erun", Environment: "remote"})
 	if err != nil {
 		t.Fatalf("ResolveOpen failed: %v", err)
 	}

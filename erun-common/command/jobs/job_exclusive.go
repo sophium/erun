@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func environmentJobExclusiveLeaseID(id string) string {
-	return eruncommon.EnvironmentJobExclusiveLeasePrefix + id
+	return shared.EnvironmentJobExclusiveLeasePrefix + id
 }
 
 // heldEnvironmentExclusivityClaim reports the claim currently holding the whole
@@ -21,7 +21,7 @@ func environmentJobExclusiveLeaseID(id string) string {
 // deliberate: that read is also what reclaims an expired or orphaned claim, so
 // the answer here can never be a claim nobody holds any more.
 func heldEnvironmentExclusivityClaim(tenant, environment string, now time.Time) (activity.EnvironmentActivityLease, bool) {
-	claims := eruncommon.HeldEnvironmentExclusivityClaims(tenant, environment, now, environmentExclusivityHoldsWholeEnvironment)
+	claims := shared.HeldEnvironmentExclusivityClaims(tenant, environment, now, environmentExclusivityHoldsWholeEnvironment)
 	if len(claims) == 0 {
 		return activity.EnvironmentActivityLease{}, false
 	}
@@ -43,7 +43,7 @@ func startingEnvironmentJobID(params StartEnvironmentJobParams) string {
 	if id := strings.TrimSpace(params.StartedByJobID); id != "" {
 		return id
 	}
-	return eruncommon.CurrentEnvironmentJobID()
+	return shared.CurrentEnvironmentJobID()
 }
 
 // resolveEnvironmentJobExclusivity decides what this start does about the
@@ -79,14 +79,14 @@ func resolveEnvironmentJobExclusivity(ctx core.Context, dir string, params Start
 		return true, nil
 	}
 	if parent := startingEnvironmentJobID(params); parent != "" {
-		if holderJobID, ok := eruncommon.EnvironmentJobIDFromExclusiveLeaseID(holder.ID); ok &&
-			eruncommon.EnvironmentJobIsSelfOrDescendantOf(dir, parent, holderJobID) {
+		if holderJobID, ok := shared.EnvironmentJobIDFromExclusiveLeaseID(holder.ID); ok &&
+			shared.EnvironmentJobIsSelfOrDescendantOf(dir, parent, holderJobID) {
 			ctx.Trace(fmt.Sprintf("job: %s is held exclusively by job %s, which started this work; running under that claim rather than taking a second one", params.Environment, holderJobID))
 			return false, nil
 		}
 	}
 	ctx.Trace(fmt.Sprintf("job: refusing to start %s, %s holds %s exclusively", params.ID, holder.ID, params.Environment))
-	return false, eruncommon.EnvironmentExclusivityConflict(fmt.Sprintf("job %q", params.ID), params.Tenant, params.Environment, holder, params.Exclusive, now)
+	return false, shared.EnvironmentExclusivityConflict(fmt.Sprintf("job %q", params.ID), params.Tenant, params.Environment, holder, params.Exclusive, now)
 }
 
 // takeEnvironmentJobExclusivityClaim takes the claim at start time rather than
@@ -121,7 +121,7 @@ func takeEnvironmentJobExclusivityClaim(params StartEnvironmentJobParams, now ti
 // initiator.
 func environmentJobHolder(tenant string) activity.EnvironmentActivityLeaseHolder {
 	return activity.EnvironmentActivityLeaseHolder{
-		Orchestrator: strings.TrimSpace(os.Getenv(eruncommon.OrchestratorIDEnvVar)),
+		Orchestrator: strings.TrimSpace(os.Getenv(shared.OrchestratorIDEnvVar)),
 		Tenant:       tenant,
 	}
 }
@@ -143,7 +143,7 @@ func environmentJobExclusivityTakeError(params StartEnvironmentJobParams, err er
 	if !errors.As(err, &conflict) {
 		return err
 	}
-	return eruncommon.EnvironmentExclusivityConflict(fmt.Sprintf("job %q", params.ID), params.Tenant, params.Environment, conflict.Holder, true, now)
+	return shared.EnvironmentExclusivityConflict(fmt.Sprintf("job %q", params.ID), params.Tenant, params.Environment, conflict.Holder, true, now)
 }
 
 // DescribeExclusiveJobStartVersionSkew is describeExclusiveClaimVersionSkew

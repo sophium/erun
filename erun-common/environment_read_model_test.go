@@ -6,6 +6,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // TestResolveEnvironmentLifecycleStateUnknownIsNotAFalseNegative is the
@@ -131,7 +132,7 @@ func TestAssembleEnvironmentReadModelUnrefreshedCloudContextIsUnknownNotStopped(
 func TestAssembleEnvironmentReadModelDeployFailedFromHealth(t *testing.T) {
 	entry := ListEnvironmentResult{Name: "dev", Type: config.EnvironmentTypeRemoteAgent}
 	idle := &activity.EnvironmentIdleStatus{StopEligible: false}
-	resolvedHealth := ResolveEnvironmentHealth(RootConfigInspection{}, DeployDiagnosisResult{HelmStatus: "STATUS: pending-upgrade"})
+	resolvedHealth := ResolveEnvironmentHealth(RootConfigInspection{}, deploy.DeployDiagnosisResult{HelmStatus: "STATUS: pending-upgrade"})
 	health := &resolvedHealth
 
 	model := AssembleEnvironmentReadModel("acme", entry, nil, idle, health)
@@ -139,7 +140,7 @@ func TestAssembleEnvironmentReadModelDeployFailedFromHealth(t *testing.T) {
 	if model.State != EnvironmentLifecycleDeployFailed {
 		t.Fatalf("want deploy-failed, got %s", model.State)
 	}
-	if model.Health.RecommendedRecovery != DeployRecoveryClearPendingHelm {
+	if model.Health.RecommendedRecovery != deploy.DeployRecoveryClearPendingHelm {
 		t.Fatalf("want clear-pending-helm recommendation, got %s", model.Health.RecommendedRecovery)
 	}
 }

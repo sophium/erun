@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // ListRemoteAppSessions reports the persistent desktop sessions running in the
@@ -52,5 +52,5 @@ func (a *App) endRemoteAppSession(selection uiSelection, sessionID string) {
 	ctx, cancel := context.WithTimeout(a.backgroundContext(), 10*time.Second)
 	defer cancel()
 	_, _ = a.execInRuntimePod(ctx, selection,
-		eruncommon.RemoteAppSessionEndScript(selection.Tenant, selection.Environment, sessionID))
+		open.RemoteAppSessionEndScript(selection.Tenant, selection.Environment, sessionID))
 }

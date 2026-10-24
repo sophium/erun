@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // One erun version is written down in several places in a tenant repo — the
@@ -304,8 +304,8 @@ func ownLineChartStatement(chart string) *runtimeImageStatement {
 	if chart == "" {
 		return nil
 	}
-	reference, _ := eruncommon.SplitChartReferenceVersion(chart)
-	name := eruncommon.ChartName(reference)
+	reference, _ := deploy.SplitChartReferenceVersion(chart)
+	name := deploy.ChartName(reference)
 	if name == "" || name == config.DevopsComponentName {
 		return nil
 	}
@@ -324,8 +324,8 @@ func defaultDeployImageStatement(tenant string, env config.EnvConfig) *runtimeIm
 	if strings.TrimSpace(env.RuntimeImage) != "" || strings.TrimSpace(env.RuntimeRunningImage) != "" {
 		return nil
 	}
-	chartReference, _ := eruncommon.SplitChartReferenceVersion(strings.TrimSpace(env.RuntimeChart))
-	name := eruncommon.DefaultDeployRuntimeImageBareName(tenant, eruncommon.ChartName(chartReference))
+	chartReference, _ := deploy.SplitChartReferenceVersion(strings.TrimSpace(env.RuntimeChart))
+	name := deploy.DefaultDeployRuntimeImageBareName(tenant, deploy.ChartName(chartReference))
 	if name == "" || name == config.DevopsComponentName {
 		return nil
 	}
@@ -379,14 +379,14 @@ func resolveRuntimeVersionAndImagePinSites(tenant, environment, target string, e
 	if image == "" {
 		return sites, skipped
 	}
-	_, version, ok := eruncommon.SplitImageTag(image)
+	_, version, ok := deploy.SplitImageTag(image)
 	if !ok {
 		return sites, skipped
 	}
 	// Only the stock erun-devops image's tag is an erun version; a tenant's own
 	// <tenant>-devops image rides the tenant's own release line, and rewriting
 	// its tag to an erun version would name a tag that line never publishes.
-	if !eruncommon.RuntimeImageIsStockDevops(image) {
+	if !deploy.RuntimeImageIsStockDevops(image) {
 		skipped = append(skipped, "runtimeimage "+image+" is not the stock erun-devops image; its tag rides the tenant's own release line, not erun's, so pin leaves it alone")
 		return sites, skipped
 	}
@@ -414,8 +414,8 @@ func resolveRuntimeChartPinSite(chart, target string) (*PinSite, string) {
 	if chart == "" {
 		return nil, ""
 	}
-	reference, chartVersion := eruncommon.SplitChartReferenceVersion(chart)
-	chartName := eruncommon.ChartName(reference)
+	reference, chartVersion := deploy.SplitChartReferenceVersion(chart)
+	chartName := deploy.ChartName(reference)
 	if chartName != config.DevopsComponentName {
 		reason := "names " + chartName + ", not the stock " + config.DevopsComponentName + " chart, so it rides its own release line"
 		if chartName == "" {

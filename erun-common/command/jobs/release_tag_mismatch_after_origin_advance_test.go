@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // A release tags locally as part of its recoverable, pre-publish stages
@@ -24,7 +24,7 @@ func TestCanSkipExistingReleaseTagDiagnosesLeftoverLocalTagAfterOriginAdvances(t
 	// publishing anything outward (tag never pushed).
 	writeAndCommit(t, repo, "release-stamp.txt", "v1.0.246\n", "chore: release 1.0.246")
 	runGitForTest(t, repo, "tag", "-a", "v1.0.246", "-m", "v1.0.246")
-	tagCommit, ok, err := eruncommon.GitResolvedRef(newTestClaimContext(), repo, "v1.0.246^{}")
+	tagCommit, ok, err := shared.GitResolvedRef(newTestClaimContext(), repo, "v1.0.246^{}")
 	if err != nil || !ok {
 		t.Fatalf("resolve tag commit: ok=%v err=%v", ok, err)
 	}
@@ -40,7 +40,7 @@ func TestCanSkipExistingReleaseTagDiagnosesLeftoverLocalTagAfterOriginAdvances(t
 	// pushed, so it drops out of main's history from this checkout's view.
 	runGitForTest(t, repo, "fetch", "-q", "origin", "main")
 	runGitForTest(t, repo, "reset", "-q", "--hard", "origin/main")
-	headCommit, ok, err := eruncommon.GitResolvedRef(newTestClaimContext(), repo, "HEAD")
+	headCommit, ok, err := shared.GitResolvedRef(newTestClaimContext(), repo, "HEAD")
 	if err != nil || !ok {
 		t.Fatalf("resolve HEAD: ok=%v err=%v", ok, err)
 	}
@@ -48,8 +48,8 @@ func TestCanSkipExistingReleaseTagDiagnosesLeftoverLocalTagAfterOriginAdvances(t
 		t.Fatalf("expected HEAD to have moved past the tagged commit")
 	}
 
-	spec := eruncommon.ReleaseSpec{Version: "1.0.246", Branch: "main"}
-	skip, err := eruncommon.CanSkipExistingReleaseTag(newTestClaimContext(), spec, repo, "v1.0.246", gitx.GitCommandRunner)
+	spec := shared.ReleaseSpec{Version: "1.0.246", Branch: "main"}
+	skip, err := shared.CanSkipExistingReleaseTag(newTestClaimContext(), spec, repo, "v1.0.246", gitx.GitCommandRunner)
 	if err == nil {
 		t.Fatalf("expected a mismatch error (skip=%v), got none", skip)
 	}

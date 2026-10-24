@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // These are erun#1768's pattern applied to the release tag-replay helpers:
@@ -12,7 +14,7 @@ import (
 // stderr here means that message never carries it either.
 func TestGitCommitSubjectIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: bad object deadbeef", 128)
-	_, err := gitCommitSubject(t.TempDir(), "deadbeef")
+	_, err := shared.GitCommitSubject(t.TempDir(), "deadbeef")
 	if err == nil {
 		t.Fatal("expected an error for a failing git invocation")
 	}
@@ -23,7 +25,7 @@ func TestGitCommitSubjectIncludesGitStderr(t *testing.T) {
 
 func TestFindCommitsBySubjectInRangeIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: bad revision 'FETCH_HEAD..HEAD'", 128)
-	_, err := findCommitsBySubjectInRange(t.TempDir(), "FETCH_HEAD..HEAD", "some subject")
+	_, err := shared.FindCommitsBySubjectInRange(t.TempDir(), "FETCH_HEAD..HEAD", "some subject")
 	if err == nil {
 		t.Fatal("expected an error for a failing git invocation")
 	}
@@ -34,7 +36,7 @@ func TestFindCommitsBySubjectInRangeIncludesGitStderr(t *testing.T) {
 
 func TestGitTagAnnotationSubjectIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: unable to resolve refs/tags/v1.0.0", 128)
-	_, err := gitTagAnnotationSubject(t.TempDir(), "v1.0.0")
+	_, err := shared.GitTagAnnotationSubject(t.TempDir(), "v1.0.0")
 	if err == nil {
 		t.Fatal("expected an error for a failing git invocation")
 	}

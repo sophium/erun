@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // activityRecoveryResult carries a recovery action's outcome to the
@@ -28,7 +28,7 @@ func (a *App) RecoverPendingHelmRelease(id string) activityRecoveryResult {
 		return *errResult
 	}
 	var stdout, stderr bytes.Buffer
-	err := eruncommon.ClearHelmReleasePendingOperation(eruncommon.HelmReleaseRecoveryParams{
+	err := deploy.ClearHelmReleasePendingOperation(deploy.HelmReleaseRecoveryParams{
 		ReleaseName:       strings.TrimSpace(entry.Release),
 		Namespace:         strings.TrimSpace(entry.Namespace),
 		KubernetesContext: strings.TrimSpace(entry.KubernetesContext),

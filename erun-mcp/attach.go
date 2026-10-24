@@ -13,9 +13,9 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // The MCP transport (erun-mcp/server.go's mcp.NewStreamableHTTPHandler) is
@@ -73,8 +73,8 @@ type attachControlMessage struct {
 // value: AISessionAttachOutcomeUnknown is a real, sent value here, never
 // silently upgraded to Ended.
 type attachOutcomeMessage struct {
-	Type    string                            `json:"type"`
-	Outcome eruncommon.AISessionAttachOutcome `json:"outcome"`
+	Type    string                      `json:"type"`
+	Outcome open.AISessionAttachOutcome `json:"outcome"`
 }
 
 // registerAttachHandler wires the WebSocket attach edge into mux at path
@@ -151,7 +151,7 @@ func attachInitialSize(r *http.Request) (cols, rows int) {
 func runAttachSession(conn *websocket.Conn, runtime RuntimeConfig, session string, cols, rows int) {
 	defer func() { _ = conn.Close() }()
 
-	socket := eruncommon.RemoteAppSessionSocketPath(runtime.Context.Tenant, runtime.Context.Environment, session)
+	socket := open.RemoteAppSessionSocketPath(runtime.Context.Tenant, runtime.Context.Environment, session)
 	// The CLI's own shell path (open.go's remoteShellLaunchLines) always
 	// mkdir -p's this directory itself before reusing this same script
 	// builder, and nothing in the runtime image's boot creates it: it is
@@ -167,16 +167,16 @@ func runAttachSession(conn *websocket.Conn, runtime RuntimeConfig, session strin
 	// same as a real rival claiming the socket).
 	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
 		log.Printf("erun-mcp attach: creating session directory for %q: %v", session, err)
-		sendAttachOutcome(conn, eruncommon.AISessionAttachOutcomeUnknown)
+		sendAttachOutcome(conn, open.AISessionAttachOutcomeUnknown)
 		return
 	}
-	script := strings.Join(eruncommon.RemoteAppSessionAttachLines(socket, attachRedraw, attachDefaultLaunchCommand), "\n")
+	script := strings.Join(open.RemoteAppSessionAttachLines(socket, attachRedraw, attachDefaultLaunchCommand), "\n")
 	cmd := exec.Command("sh", "-c", script)
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 	if err != nil {
 		log.Printf("erun-mcp attach: starting session %q: %v", session, err)
-		sendAttachOutcome(conn, eruncommon.AISessionAttachOutcomeUnknown)
+		sendAttachOutcome(conn, open.AISessionAttachOutcomeUnknown)
 		return
 	}
 	defer func() { _ = ptmx.Close() }()
@@ -210,7 +210,7 @@ func pumpPTYToWebSocket(conn *websocket.Conn, ptmx *os.File, cmd *exec.Cmd, done
 		}
 	}
 	exitCode, known := attachExitCode(cmd)
-	sendAttachOutcome(conn, eruncommon.ResolveAISessionAttachOutcome(exitCode, known))
+	sendAttachOutcome(conn, open.ResolveAISessionAttachOutcome(exitCode, known))
 	// A WS->PTY pump still blocked waiting for client input has nothing more
 	// coming: the session ended on its own (taken over, deploy-reattach, or
 	// the program exited) and the client may never send another byte, so it
@@ -246,7 +246,7 @@ func applyAttachControlMessage(ptmx *os.File, raw []byte) {
 	_ = pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(msg.Cols), Rows: uint16(msg.Rows)})
 }
 
-func sendAttachOutcome(conn *websocket.Conn, outcome eruncommon.AISessionAttachOutcome) {
+func sendAttachOutcome(conn *websocket.Conn, outcome open.AISessionAttachOutcome) {
 	payload, err := json.Marshal(attachOutcomeMessage{Type: "outcome", Outcome: outcome})
 	if err != nil {
 		return

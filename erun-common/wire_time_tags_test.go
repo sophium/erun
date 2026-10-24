@@ -8,6 +8,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // wireTimeOmitzeroRoots are the JSON roots a machine consumer actually reads:
@@ -21,11 +24,11 @@ var wireTimeOmitzeroRoots = []any{
 	activity.EnvironmentActivityLease{},
 	activity.EnvironmentStopPending{},
 	activity.EnvironmentStopHistoryEntry{},
-	EnvironmentJob{},
+	shared.EnvironmentJob{},
 	model.AISessionStatus{},
-	RuntimeUsageHistory{},
-	HostCredentialsRefresh{},
-	HostCredentialsStatus{},
+	deploy.RuntimeUsageHistory{},
+	cloud.HostCredentialsRefresh{},
+	cloud.HostCredentialsStatus{},
 }
 
 // TestWireTimeFieldsOmitZeroNotOmitEmpty guards the whole class rather than the

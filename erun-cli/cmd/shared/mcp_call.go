@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"time"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/sophium/erun/internal"
 )
 
@@ -82,7 +82,7 @@ type McpEdgeTarget struct {
 	Endpoint    string
 }
 
-func ResolveMCPEdgeTarget(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams) (McpEdgeTarget, error) {
+func ResolveMCPEdgeTarget(ctx core.Context, resolveOpen OpenResolver, params shared.OpenParams) (McpEdgeTarget, error) {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return McpEdgeTarget{}, err

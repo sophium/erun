@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // syncConfigTestEnv returns the env lookup a runtime pod's chart-injected
@@ -40,7 +41,7 @@ func syncConfigTestEnv(overrides map[string]string) func(string) string {
 // on-disk config by construction instead of via a second, driftable copy of
 // the rule.
 func TestInjectedCloudContextNameDefaultsToKubernetesContext(t *testing.T) {
-	injected, ok := eruncommon.ResolveInjectedRuntimeConfig(syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": ""}))
+	injected, ok := shared.ResolveInjectedRuntimeConfig(syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": ""}))
 	if !ok {
 		t.Fatalf("ResolveInjectedRuntimeConfig ok = false, want true")
 	}
@@ -57,7 +58,7 @@ func TestInjectedCloudContextNameDefaultsToKubernetesContext(t *testing.T) {
 // registered via `erun context init`) must still see that exact name, not the
 // kubernetes-context default.
 func TestInjectedCloudContextNameExplicitUnchanged(t *testing.T) {
-	injected, ok := eruncommon.ResolveInjectedRuntimeConfig(syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": "my-cloud-context"}))
+	injected, ok := shared.ResolveInjectedRuntimeConfig(syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": "my-cloud-context"}))
 	if !ok {
 		t.Fatalf("ResolveInjectedRuntimeConfig ok = false, want true")
 	}

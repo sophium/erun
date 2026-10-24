@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func TestEnvironmentJobThatExitsCleanlyStillSucceeds(t *testing.T) {
@@ -39,8 +39,8 @@ func TestEnvironmentJobThatExitsCleanlyStillSucceeds(t *testing.T) {
 	if !job.Succeeded {
 		t.Fatalf("job with no abandoned work did not report success: %+v", job)
 	}
-	if job.State != eruncommon.EnvironmentJobStateExited {
-		t.Fatalf("State = %q, want %q", job.State, eruncommon.EnvironmentJobStateExited)
+	if job.State != shared.EnvironmentJobStateExited {
+		t.Fatalf("State = %q, want %q", job.State, shared.EnvironmentJobStateExited)
 	}
 }
 
@@ -85,7 +85,7 @@ func TestEnvironmentJobThatEndsWhileAJobItStartedIsStillRunningIsNotReportedAsSu
 	const parentID = "outer"
 	const childID = "gate"
 
-	dir, err := eruncommon.EnvironmentJobDir(tenant, environment)
+	dir, err := shared.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestEnvironmentJobThatEndsWhileAJobItStartedIsStillRunningIsNotReportedAsSu
 	// A pid of this test process itself reads as alive for as long as the test
 	// runs, which is what keeps the seeded child's state at "running" through
 	// the parent's own finish check below without needing a real process.
-	child := eruncommon.EnvironmentJob{
+	child := shared.EnvironmentJob{
 		ID:             childID,
 		Name:           childID,
 		State:          EnvironmentJobStateRunning,
@@ -125,8 +125,8 @@ func TestEnvironmentJobThatEndsWhileAJobItStartedIsStillRunningIsNotReportedAsSu
 	if parent.Succeeded {
 		t.Fatalf("job reported success (state=%q, exitCode=%v) even though a job it started was still running: %+v", parent.State, parent.ExitCode, parent)
 	}
-	if parent.State != eruncommon.EnvironmentJobStateGateIncomplete {
-		t.Fatalf("State = %q, want %q", parent.State, eruncommon.EnvironmentJobStateGateIncomplete)
+	if parent.State != shared.EnvironmentJobStateGateIncomplete {
+		t.Fatalf("State = %q, want %q", parent.State, shared.EnvironmentJobStateGateIncomplete)
 	}
 	if !strings.Contains(parent.Reason, childID) {
 		t.Fatalf("Reason %q does not name the still-running job %q", parent.Reason, childID)
@@ -147,7 +147,7 @@ func TestEnvironmentJobHandoffDoesNotBlockItsParentsSuccess(t *testing.T) {
 	const parentID = "outer"
 	const childID = "released-work"
 
-	dir, err := eruncommon.EnvironmentJobDir(tenant, environment)
+	dir, err := shared.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestEnvironmentJobHandoffDoesNotBlockItsParentsSuccess(t *testing.T) {
 	// Alive for the test's whole life, same as the seeded child above -- the
 	// point under test is that Handoff excludes it regardless of how long it
 	// runs, not that it happens to finish quickly.
-	child := eruncommon.EnvironmentJob{
+	child := shared.EnvironmentJob{
 		ID:             childID,
 		Name:           childID,
 		State:          EnvironmentJobStateRunning,
@@ -188,8 +188,8 @@ func TestEnvironmentJobHandoffDoesNotBlockItsParentsSuccess(t *testing.T) {
 	if !parent.Succeeded {
 		t.Fatalf("a handed-off job that is still running blocked its parent's success: %+v", parent)
 	}
-	if parent.State != eruncommon.EnvironmentJobStateExited {
-		t.Fatalf("State = %q, want %q", parent.State, eruncommon.EnvironmentJobStateExited)
+	if parent.State != shared.EnvironmentJobStateExited {
+		t.Fatalf("State = %q, want %q", parent.State, shared.EnvironmentJobStateExited)
 	}
 }
 
@@ -208,7 +208,7 @@ func TestEnvironmentJobThatStartedAFinishedButFailedJobIsNotReportedAsSuccess(t 
 	const parentID = "outer"
 	const childID = "gate"
 
-	dir, err := eruncommon.EnvironmentJobDir(tenant, environment)
+	dir, err := shared.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
@@ -216,10 +216,10 @@ func TestEnvironmentJobThatStartedAFinishedButFailedJobIsNotReportedAsSuccess(t 
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
 	failedCode := 1
-	child := eruncommon.EnvironmentJob{
+	child := shared.EnvironmentJob{
 		ID:             childID,
 		Name:           childID,
-		State:          eruncommon.EnvironmentJobStateExited,
+		State:          shared.EnvironmentJobStateExited,
 		StartedAt:      time.Now(),
 		EndedAt:        time.Now(),
 		ExitCode:       &failedCode,
@@ -247,8 +247,8 @@ func TestEnvironmentJobThatStartedAFinishedButFailedJobIsNotReportedAsSuccess(t 
 	if parent.Succeeded {
 		t.Fatalf("job reported success even though a job it started (and waited for) failed: %+v", parent)
 	}
-	if parent.State != eruncommon.EnvironmentJobStateExited {
-		t.Fatalf("State = %q, want %q -- this job's own process still exited cleanly, only the started job it waited for failed", parent.State, eruncommon.EnvironmentJobStateExited)
+	if parent.State != shared.EnvironmentJobStateExited {
+		t.Fatalf("State = %q, want %q -- this job's own process still exited cleanly, only the started job it waited for failed", parent.State, shared.EnvironmentJobStateExited)
 	}
 	if !strings.Contains(parent.StartedJobFailed, childID) {
 		t.Fatalf("StartedJobFailed %q does not name the failed job %q", parent.StartedJobFailed, childID)
@@ -302,11 +302,11 @@ func TestAHandedOffJobIsExcludedFromItsParentsLeftoverScan(t *testing.T) {
 	const tenant = "handoff-leftover-contract"
 	const environment = "handoff-test"
 	const parent = "parent-job"
-	dir, err := eruncommon.EnvironmentJobDir(tenant, environment)
+	dir, err := shared.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
-	seeded := []eruncommon.EnvironmentJob{
+	seeded := []shared.EnvironmentJob{
 		{ID: "held", Name: "held", State: EnvironmentJobStateRunning, PID: 4242, StartedByJobID: parent},
 		{ID: "released", Name: "released", State: EnvironmentJobStateRunning, PID: 4243, StartedByJobID: parent, Handoff: true},
 		{ID: "elsewhere", Name: "elsewhere", State: EnvironmentJobStateRunning, PID: 4244, StartedByJobID: "someone-else", Handoff: true},

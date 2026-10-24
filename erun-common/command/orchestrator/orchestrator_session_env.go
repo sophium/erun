@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 const (
@@ -24,7 +25,7 @@ const (
 // test takes it from the script instead.
 func OrchestratorSessionEnvVars() []string {
 	return []string{
-		eruncommon.OrchestratorIDEnvVar,
+		shared.OrchestratorIDEnvVar,
 		DesktopSessionEnvVar,
 		eruncommon.RuntimeOutputsDirEnvVar,
 	}

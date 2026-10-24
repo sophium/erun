@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // LoadDeployComponents powers the Runtime tab's "Components to deploy" checklist
@@ -25,13 +25,13 @@ func (a *App) LoadDeployComponents(selection uiSelection) (uiDeployComponents, e
 	if err := errMissingTenantOrEnvironment("load deploy components", tenant, environment); err != nil {
 		return uiDeployComponents{}, err
 	}
-	components, err := eruncommon.ResolveDeployableComponents(
+	components, err := deploy.ResolveDeployableComponents(
 		a.deps.store,
 		a.deps.findProjectRoot,
 		nil,
 		nil,
 		nil,
-		eruncommon.DeployTarget{Tenant: tenant, Environment: environment},
+		deploy.DeployTarget{Tenant: tenant, Environment: environment},
 	)
 	if err != nil {
 		return uiDeployComponents{}, err
@@ -54,10 +54,10 @@ func (a *App) LoadDeployComponents(selection uiSelection) (uiDeployComponents, e
 
 // runtimeIsLocalChart reports whether the runtime item is backed by a chart in the
 // worktree, in which case no registry has a say in what installs.
-func runtimeIsLocalChart(components []eruncommon.DeployableComponent) bool {
+func runtimeIsLocalChart(components []deploy.DeployableComponent) bool {
 	for _, component := range components {
 		if component.Runtime {
-			return component.Source != eruncommon.DeployComponentSourcePublished
+			return component.Source != deploy.DeployComponentSourcePublished
 		}
 	}
 	return false
@@ -70,7 +70,7 @@ func runtimeIsLocalChart(components []eruncommon.DeployableComponent) bool {
 // decides which charts exist — and always keeps the runtime item, whose chart
 // exists at every deployable version (a genuinely missing one surfaces at deploy
 // time as PublishedChartNotFoundError, not here).
-func (a *App) filterDeployComponentsByChartAvailability(tenant, environment, version string, components []eruncommon.DeployableComponent) []eruncommon.DeployableComponent {
+func (a *App) filterDeployComponentsByChartAvailability(tenant, environment, version string, components []deploy.DeployableComponent) []deploy.DeployableComponent {
 	env, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
 	if err != nil {
 		return components
@@ -98,9 +98,9 @@ func (a *App) filterDeployComponentsByChartAvailability(tenant, environment, ver
 		probe = append(probe, runtimeChart)
 	}
 	available := a.publishedComponentChartAvailability(tenant, environment, version, probe)
-	resolvedRuntimeChart := eruncommon.ResolvedRuntimeChartName(tenant, available[runtimeChart])
+	resolvedRuntimeChart := deploy.ResolvedRuntimeChartName(tenant, available[runtimeChart])
 
-	filtered := make([]eruncommon.DeployableComponent, 0, len(components))
+	filtered := make([]deploy.DeployableComponent, 0, len(components))
 	for _, component := range components {
 		if component.Runtime {
 			component.PublishedChart = resolvedRuntimeChart

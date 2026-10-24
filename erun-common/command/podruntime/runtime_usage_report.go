@@ -3,6 +3,7 @@ package podruntime
 import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // A usage reading and the sizing advice it implies are two answers to one
@@ -28,7 +29,7 @@ type RuntimeUsageReport struct {
 	config.RuntimeUsage
 	// Sizing is nil only when there is nothing observed to reason from at all,
 	// or when the history could not be read -- silence, never a guess.
-	Sizing *eruncommon.RuntimeSizingRecommendation `json:"sizing,omitempty"`
+	Sizing *deploy.RuntimeSizingRecommendation `json:"sizing,omitempty"`
 }
 
 // ResolveRuntimeUsageReport pairs a just-taken reading with the recommendation
@@ -41,7 +42,7 @@ func ResolveRuntimeUsageReport(tenant string, env config.EnvConfig, usage config
 	if err != nil {
 		return report
 	}
-	recommendation, ok := eruncommon.RecommendRuntimeSizing(eruncommon.RuntimeSizingParams{
+	recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{
 		History: history,
 		Ceiling: env.NamespaceQuota,
 		Live:    &usage,

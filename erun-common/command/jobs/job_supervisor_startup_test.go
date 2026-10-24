@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // A supervisor that ends before it registers anything leaves no record behind,
@@ -80,7 +80,7 @@ func startAgainstADyingSupervisor(t *testing.T, id, mode string) (string, error)
 	t.Setenv(jobAliveSupervisorHelperEnvNameEnv, testSupervisorStartupEnvironment)
 	t.Setenv(jobAliveSupervisorHelperIDEnv, id)
 
-	dir, err := eruncommon.EnvironmentJobDir(testSupervisorStartupTenant, testSupervisorStartupEnvironment)
+	dir, err := shared.EnvironmentJobDir(testSupervisorStartupTenant, testSupervisorStartupEnvironment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestEnvironmentJobStartNamesWhyASupervisorDiedBeforeRegistering(t *testing.
 	// Pre-registration is the scope these cases cover, and it is the reason the
 	// start error has to carry the cause at all: with no record written, nothing
 	// `job status` or `job await` reads can supply it later.
-	if _, readErr := eruncommon.ReadEnvironmentJob(filepath.Join(dir, id+".json")); readErr == nil {
+	if _, readErr := shared.ReadEnvironmentJob(filepath.Join(dir, id+".json")); readErr == nil {
 		t.Fatal("this supervisor registered a record; the case is meant to cover the path that never got that far")
 	}
 }

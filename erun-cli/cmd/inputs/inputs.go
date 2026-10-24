@@ -6,6 +6,8 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -49,12 +51,12 @@ func newInputsUploadCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runInputsUploadCommand(ctx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams, localPath, remotePath string, run common.RuntimeInputUploadRunner) error {
+func runInputsUploadCommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, localPath, remotePath string, run common.RuntimeInputUploadRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
-	req := common.ShellLaunchParamsFromResult(result)
+	req := cloud.ShellLaunchParamsFromResult(result)
 	out, err := common.UploadRuntimeInput(ctx, req, common.UploadRuntimeInputParams{LocalPath: localPath, RemotePath: remotePath}, run)
 	if err != nil {
 		return err

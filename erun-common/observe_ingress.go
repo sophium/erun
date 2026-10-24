@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // ObservedIngress is one Ingress's routed hosts and the TLS secret backing
@@ -67,9 +69,9 @@ type ingressItem struct {
 // too, so "observe:" here would name a command its caller never ran.
 // RunObservation prefixes its own name onto what it gets back.
 func FetchObservedIngresses(args []string) ([]ObservedIngress, error) {
-	raw, stderr, err := RunObserveKubectl(args)
+	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
-		return nil, fmt.Errorf("get ingress: %w", KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("get ingress: %w", deploy.KubectlErrorMessage(err, stderr))
 	}
 	var list ingressList
 	if err := json.Unmarshal(raw, &list); err != nil {

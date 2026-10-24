@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // hostRepoPathFixture is one value a caller might be handed as a host-machine
@@ -50,7 +50,7 @@ func TestInitRetypeRefusesTheSamePaths(t *testing.T) {
 		state := &bootstrapRunState{
 			tenant:  "acme",
 			envName: "dev",
-			params:  eruncommon.BootstrapInitParams{ProjectRoot: tc.path},
+			params:  open.BootstrapInitParams{ProjectRoot: tc.path},
 			// A project already detected, so the empty fixture reaches init's
 			// refusal instead of falling through to a project search that needs a
 			// real working directory to run in.

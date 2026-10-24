@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -23,10 +23,10 @@ import (
 // It edits the source of truth and stops there. Realizing the new version —
 // terraform apply, deploy — stays a separate explicit step, so changing a pin is
 // never a rollout by accident.
-func NewPinCmd(prepareContext func(core.Context) core.Context, resolveOpen func(common.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func NewPinCmd(prepareContext func(core.Context) core.Context, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
 	var version string
 	var latest, revert, list bool
-	target := common.OpenParams{}
+	target := sharedpkg.OpenParams{}
 
 	cmd := &cobra.Command{
 		Use:   "pin [TENANT] [ENVIRONMENT]",
@@ -112,7 +112,7 @@ func orNone(value string) string {
 	return value
 }
 
-func runPinCommand(ctx context.Context, cmdCtx core.Context, result config.OpenResult, request pinRequest, saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot common.ProjectFinderFunc) error {
+func runPinCommand(ctx context.Context, cmdCtx core.Context, result config.OpenResult, request pinRequest, saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot sharedpkg.ProjectFinderFunc) error {
 	projectRoot, viaCwdFallback, err := resolvePinProjectRoot(result, listEnvConfigs, findProjectRoot)
 	if err != nil {
 		return err
@@ -243,7 +243,7 @@ func resolvePinRegistryVersions(ctx context.Context) (registry.RuntimeRegistryVe
 // at all. viaCwdFallback reports which of those two ways the root was found,
 // so the caller can annotate the plan instead of presenting an unverified
 // tree as if it were known-good.
-func resolvePinProjectRoot(result config.OpenResult, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot common.ProjectFinderFunc) (string, bool, error) {
+func resolvePinProjectRoot(result config.OpenResult, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot sharedpkg.ProjectFinderFunc) (string, bool, error) {
 	if path := strings.TrimSpace(result.RepoPath); path != "" && !result.RemoteRepo() {
 		return path, false, nil
 	}

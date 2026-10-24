@@ -11,6 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // The reproduction this closes: `erun build --release` ran its
@@ -51,10 +52,10 @@ func refuseReleaseDiskHeadroom(t *testing.T, root string) {
 	t.Setenv("ERUN_DOCKER_BIN", releaseDiskResidueStubDocker(t, root))
 	t.Setenv("ERUN_DF_BIN", writeExecutableScript(t, `echo "Filesystem     1024-blocks     Used Available Capacity Mounted on"
 echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
-	t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+	t.Setenv(shared.ReleaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
 	// The cache ceiling above the floor is a separate reading. Leaving the
 	// volume unset keeps it out of the way so the floor is what refuses.
-	t.Setenv(dockerVolumeBytesEnv, "")
+	t.Setenv(shared.DockerVolumeBytesEnv, "")
 }
 
 // gitTagsForTest lists the repository's tags, one per line, or "" when it has
@@ -108,22 +109,22 @@ func TestRefusedReleaseDiskPreflightLeavesNoStampCommitAndNoTag(t *testing.T) {
 	// the headroom preflight at all. Publish must never be reached — a refusal
 	// that got as far as the build is a different defect from this one.
 	published := false
-	publisher := ReleasePublisher{
+	publisher := shared.ReleasePublisher{
 		Publish: func(core.Context) error { published = true; return nil },
 		Verify:  func(core.Context) error { return nil },
 	}
 
-	spec := ReleaseSpec{
+	spec := shared.ReleaseSpec{
 		ProjectRoot: repo,
 		Branch:      "main",
 		Version:     version,
-		Mode:        ReleaseModeStable,
-		Stages: []ReleaseStage{
-			newReleaseStage(repo, []ReleaseFileUpdate{{Path: versionPath, Content: version + "\n"}}, version, ReleaseModeStable),
+		Mode:        shared.ReleaseModeStable,
+		Stages: []shared.ReleaseStage{
+			shared.NewReleaseStage(repo, []shared.ReleaseFileUpdate{{Path: versionPath, Content: version + "\n"}}, version, shared.ReleaseModeStable),
 		},
 	}
 
-	err := runClaimedReleaseSpec(ctx, spec, gitx.GitCommandRunner, nil, &publisher)
+	err := shared.RunClaimedReleaseSpec(ctx, spec, gitx.GitCommandRunner, nil, &publisher)
 	if err == nil {
 		t.Fatalf("expected the headroom preflight to refuse; the repository now holds tags %q", gitTagsForTest(t, repo))
 	}
@@ -182,17 +183,17 @@ func TestReleaseDiskPreflightRunsBeforeTheReleaseStageIsEntered(t *testing.T) {
 	refuseReleaseDiskHeadroom(t, t.TempDir())
 
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
-	spec := ReleaseSpec{
+	spec := shared.ReleaseSpec{
 		ProjectRoot: repo,
 		Branch:      "main",
 		Version:     "1.0.301",
-		Mode:        ReleaseModeStable,
-		Stages: []ReleaseStage{
-			newReleaseStage(repo, nil, "1.0.301", ReleaseModeStable),
+		Mode:        shared.ReleaseModeStable,
+		Stages: []shared.ReleaseStage{
+			shared.NewReleaseStage(repo, nil, "1.0.301", shared.ReleaseModeStable),
 		},
 	}
 
-	if err := runClaimedReleaseSpec(ctx, spec, gitx.GitCommandRunner, nil, nil); err != nil {
+	if err := shared.RunClaimedReleaseSpec(ctx, spec, gitx.GitCommandRunner, nil, nil); err != nil {
 		t.Fatalf("a release with no publisher marks source control only and must not be refused for disk, got %v", err)
 	}
 	if tags := gitTagsForTest(t, repo); !strings.Contains(tags, "v1.0.301") {
@@ -200,11 +201,11 @@ func TestReleaseDiskPreflightRunsBeforeTheReleaseStageIsEntered(t *testing.T) {
 	}
 	runGitForTest(t, repo, "tag", "-d", "v1.0.301")
 
-	publisher := ReleasePublisher{
+	publisher := shared.ReleasePublisher{
 		Publish: func(core.Context) error { t.Fatal("the publish ran despite the refusal"); return nil },
 		Verify:  func(core.Context) error { return nil },
 	}
-	if err := runClaimedReleaseSpec(ctx, spec, gitx.GitCommandRunner, nil, &publisher); err == nil {
+	if err := shared.RunClaimedReleaseSpec(ctx, spec, gitx.GitCommandRunner, nil, &publisher); err == nil {
 		t.Fatal("expected the disk-headroom preflight to refuse a build-and-publish release")
 	}
 	if tags := gitTagsForTest(t, repo); tags != "" {

@@ -12,9 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // contributeAppForward is the per-env kubectl port-forward that bridges the
@@ -119,7 +120,7 @@ var spawnContributeAppForwardCmd = func(ctx context.Context, args []string) (*ex
 }
 
 func (a *App) startContributeAppForward(ctx context.Context, selection uiSelection) (*contributeAppForward, []string, int, error) {
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

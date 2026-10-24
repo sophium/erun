@@ -10,7 +10,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -23,12 +26,12 @@ func quietOutputsContext() core.Context {
 }
 
 func listAgentOutputsViaRuntime(result config.OpenResult, params jobs.RuntimeOutputsParams) (jobs.RuntimeOutputsListResult, error) {
-	req := eruncommon.ShellLaunchParamsFromResult(result)
+	req := cloud.ShellLaunchParamsFromResult(result)
 	return jobs.ResolveRuntimeOutputs(quietOutputsContext(), req, params, kube.RunRemoteCommand)
 }
 
 func downloadAgentOutputViaRuntime(result config.OpenResult, params jobs.RuntimeOutputDownloadParams) (jobs.RuntimeOutputResult, error) {
-	req := eruncommon.ShellLaunchParamsFromResult(result)
+	req := cloud.ShellLaunchParamsFromResult(result)
 	return jobs.DownloadRuntimeOutput(quietOutputsContext(), req, params, kube.RunRemoteCommand)
 }
 
@@ -38,7 +41,7 @@ func (a *App) ListAgentOutputs(selection uiSelection) (jobs.RuntimeOutputsListRe
 	if err := errMissingTenantOrEnvironment("list agent outputs", selection.Tenant, selection.Environment); err != nil {
 		return jobs.RuntimeOutputsListResult{}, err
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -63,7 +66,7 @@ func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, e
 	if a.ctx == nil {
 		return "", fmt.Errorf("application context is not ready")
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

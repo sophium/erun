@@ -7,16 +7,17 @@ import (
 	"strings"
 	"time"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 type SSHDActivator func(core.Context, config.OpenResult) error
 
 var (
-	waitForSSHDRemoteDeployment    = common.WaitForShellDeployment
+	waitForSSHDRemoteDeployment    = open.WaitForShellDeployment
 	sleepBeforeSSHDRemoteExecRetry = time.Sleep
 )
 
@@ -35,8 +36,8 @@ func SyncRemoteSSHDKey(ctx core.Context, result config.OpenResult, runRemoteComm
 		publicKeyPath = "<no-public-key>"
 		publicKey = "<placeholder-public-key>"
 	}
-	req := common.ShellLaunchParamsFromResult(result)
-	script := common.BuildRemoteAuthorizedKeysSyncScript(publicKey)
+	req := cloud.ShellLaunchParamsFromResult(result)
+	script := open.BuildRemoteAuthorizedKeysSyncScript(publicKey)
 	for attempt := 1; attempt <= sshdRemoteExecMaxAttempts; attempt++ {
 		output, err := kube.RunTracedRemoteCommand(ctx, runRemoteCommand, req, "remote-ssh-authorized-keys", script)
 		if err == nil {

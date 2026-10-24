@@ -8,8 +8,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // The job tools are the host-side half of the job surface. An orchestrator
@@ -20,11 +20,11 @@ import (
 
 // JobResult is the handle plus whatever is known about the job right now.
 type JobResult struct {
-	Tenant      string                    `json:"tenant"`
-	Environment string                    `json:"environment"`
-	Job         eruncommon.EnvironmentJob `json:"job"`
-	Trace       []string                  `json:"trace,omitempty"`
-	Executed    bool                      `json:"executed"`
+	Tenant      string                `json:"tenant"`
+	Environment string                `json:"environment"`
+	Job         shared.EnvironmentJob `json:"job"`
+	Trace       []string              `json:"trace,omitempty"`
+	Executed    bool                  `json:"executed"`
 }
 
 // JobAttachInput registers work the caller started another way.
@@ -79,7 +79,7 @@ const jobCommandPreviewChars = 240
 // previewJobForStatus returns job unchanged, or a copy with its command
 // collapsed to an identifying prefix when it exceeds the preview bound. It
 // never mutates the record a caller reads back from job_output or job_cancel.
-func previewJobForStatus(job eruncommon.EnvironmentJob) eruncommon.EnvironmentJob {
+func previewJobForStatus(job shared.EnvironmentJob) shared.EnvironmentJob {
 	if preview, truncated := previewCommand(job.Command); truncated {
 		job.Command = preview
 	}
@@ -108,10 +108,10 @@ type JobStatusInput struct {
 // selected one job: Job already carries that record, and echoing it twice in
 // one payload buys nothing.
 type JobStatusResult struct {
-	Tenant      string                      `json:"tenant"`
-	Environment string                      `json:"environment"`
-	Job         *eruncommon.EnvironmentJob  `json:"job,omitempty"`
-	Jobs        []eruncommon.EnvironmentJob `json:"jobs"`
+	Tenant      string                  `json:"tenant"`
+	Environment string                  `json:"environment"`
+	Job         *shared.EnvironmentJob  `json:"job,omitempty"`
+	Jobs        []shared.EnvironmentJob `json:"jobs"`
 }
 
 func jobStatusTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobStatusInput) (*mcp.CallToolResult, JobStatusResult, error) {
@@ -120,7 +120,7 @@ func jobStatusTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 		if err != nil {
 			return nil, JobStatusResult{}, err
 		}
-		result := JobStatusResult{Tenant: tenant, Environment: environment, Jobs: []eruncommon.EnvironmentJob{}}
+		result := JobStatusResult{Tenant: tenant, Environment: environment, Jobs: []shared.EnvironmentJob{}}
 		now := time.Now()
 		if strings.TrimSpace(input.ID) != "" {
 			job, err := jobspkg.LoadEnvironmentJob(tenant, environment, input.ID, now)

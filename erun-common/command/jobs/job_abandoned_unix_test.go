@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // An agent job that backgrounds its gate and exits reports nothing -- the
@@ -60,8 +60,8 @@ func TestEnvironmentJobThatBackgroundsWorkAndExitsIsNotReportedAsSuccess(t *test
 	if job.Succeeded {
 		t.Fatalf("job reported success (state=%q, exitCode=%v) even though it left a background process running: %+v", job.State, job.ExitCode, job)
 	}
-	if job.State != eruncommon.EnvironmentJobStateAbandoned {
-		t.Fatalf("State = %q, want %q", job.State, eruncommon.EnvironmentJobStateAbandoned)
+	if job.State != shared.EnvironmentJobStateAbandoned {
+		t.Fatalf("State = %q, want %q", job.State, shared.EnvironmentJobStateAbandoned)
 	}
 }
 
@@ -101,8 +101,8 @@ func TestEnvironmentJobThatBackgroundsWorkIntoAFreshProcessGroupIsNotReportedAsS
 	if job.Succeeded {
 		t.Fatalf("job reported success (state=%q, exitCode=%v) even though it left a background process running outside its own process group: %+v", job.State, job.ExitCode, job)
 	}
-	if job.State != eruncommon.EnvironmentJobStateAbandoned {
-		t.Fatalf("State = %q, want %q", job.State, eruncommon.EnvironmentJobStateAbandoned)
+	if job.State != shared.EnvironmentJobStateAbandoned {
+		t.Fatalf("State = %q, want %q", job.State, shared.EnvironmentJobStateAbandoned)
 	}
 }
 
@@ -152,8 +152,8 @@ func TestEnvironmentJobThatBackgroundsWorkIntoItsOwnSessionIsNotReportedAsSucces
 	if job.Succeeded {
 		t.Fatalf("job reported success (state=%q, exitCode=%v) even though it left a background process running in a session of its own: %+v", job.State, job.ExitCode, job)
 	}
-	if job.State != eruncommon.EnvironmentJobStateAbandoned {
-		t.Fatalf("State = %q, want %q", job.State, eruncommon.EnvironmentJobStateAbandoned)
+	if job.State != shared.EnvironmentJobStateAbandoned {
+		t.Fatalf("State = %q, want %q", job.State, shared.EnvironmentJobStateAbandoned)
 	}
 }
 

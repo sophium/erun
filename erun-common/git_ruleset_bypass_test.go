@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // gitHubBypassNotice is the stderr a real `git push` to a protected branch
@@ -81,9 +82,9 @@ func releaseBypassPushRunner(stderrText string) gitx.GitCommandRunnerFunc {
 func TestReleaseReportsAGitHubRulesetBypassOnItsBranchPush(t *testing.T) {
 	var out bytes.Buffer
 	ctx := releaseBypassTestContext(&out)
-	stage := newPushReleaseStage(t.TempDir(), config.ReleaseConfig{MainBranch: "main", DevelopBranch: "develop"}, false)
+	stage := shared.NewPushReleaseStage(t.TempDir(), config.ReleaseConfig{MainBranch: "main", DevelopBranch: "develop"}, false)
 
-	err := runReleaseCommand(ctx, releasePushTestSpec(), stage, stage.GitCommands[0], releaseBypassPushRunner(gitHubBypassNotice))
+	err := shared.RunReleaseCommand(ctx, releasePushTestSpec(), stage, stage.GitCommands[0], releaseBypassPushRunner(gitHubBypassNotice))
 	if err != nil {
 		t.Fatalf("a bypass is not a failure, so it must not be reported as an error: %v", err)
 	}
@@ -97,9 +98,9 @@ func TestReleaseReportsAGitHubRulesetBypassOnItsBranchPush(t *testing.T) {
 func TestReleaseReportsAGitHubRulesetBypassOnTheVersionTagPush(t *testing.T) {
 	var out bytes.Buffer
 	ctx := releaseBypassTestContext(&out)
-	stage := newPushReleaseTagStage(t.TempDir(), "1.4.2")
+	stage := shared.NewPushReleaseTagStage(t.TempDir(), "1.4.2")
 
-	err := runReleaseCommand(ctx, releasePushTestSpec(), stage, stage.GitCommands[0], releaseBypassPushRunner(tagBypassNotice))
+	err := shared.RunReleaseCommand(ctx, releasePushTestSpec(), stage, stage.GitCommands[0], releaseBypassPushRunner(tagBypassNotice))
 	if err != nil {
 		t.Fatalf("a bypass is not a failure, so it must not be reported as an error: %v", err)
 	}
@@ -112,10 +113,10 @@ func TestReleaseReportsAGitHubRulesetBypassOnTheVersionTagPush(t *testing.T) {
 func TestReleasePushStaysSilentWhenNoRuleWasBypassed(t *testing.T) {
 	var out bytes.Buffer
 	ctx := releaseBypassTestContext(&out)
-	stage := newPushReleaseStage(t.TempDir(), config.ReleaseConfig{MainBranch: "main", DevelopBranch: "develop"}, false)
+	stage := shared.NewPushReleaseStage(t.TempDir(), config.ReleaseConfig{MainBranch: "main", DevelopBranch: "develop"}, false)
 
 	ordinary := "To github.com:sophium/erun.git\n   46e01916..ae29151f  main -> main\n"
-	if err := runReleaseCommand(ctx, releasePushTestSpec(), stage, stage.GitCommands[0], releaseBypassPushRunner(ordinary)); err != nil {
+	if err := shared.RunReleaseCommand(ctx, releasePushTestSpec(), stage, stage.GitCommands[0], releaseBypassPushRunner(ordinary)); err != nil {
 		t.Fatalf("push: %v", err)
 	}
 	if got := out.String(); strings.Contains(got, "bypassing") {

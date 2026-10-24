@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // powerDNSConfigDir holds the PowerDNS backend config and DB password, so the
@@ -28,7 +28,7 @@ func powerDNSExecPrefix(kubernetesContext, platformNamespace, powerDNSDeployment
 	}
 	deployment := strings.TrimSpace(powerDNSDeployment)
 	if deployment == "" {
-		deployment = eruncommon.TenantResourcePrefix("") + "-powerdns"
+		deployment = shared.TenantResourcePrefix("") + "-powerdns"
 	}
 	return append(args, "-n", platformNamespace, "exec", "deploy/"+deployment, "--",
 		"pdnsutil", "--config-dir="+powerDNSConfigDir)

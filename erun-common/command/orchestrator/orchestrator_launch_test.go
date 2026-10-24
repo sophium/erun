@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/ai"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 func orchestratorLaunchTestCatalog() *config.OpenRouterConfig {
@@ -192,13 +192,13 @@ func TestValidateOrchestratorLaunchSettingsAllowsAnEchoModelOffTheGateway(t *tes
 func TestClaudeConfiguredModelIgnoresAModelThatIsFlagSyntax(t *testing.T) {
 	for _, model := range []string{"--dangerously-skip-permissions", "-p", "-"} {
 		value := model
-		if got := eruncommon.ClaudeConfiguredModel(config.EnvironmentClaudeConfig{DefaultModel: &value}); got != "" {
+		if got := open.ClaudeConfiguredModel(config.EnvironmentClaudeConfig{DefaultModel: &value}); got != "" {
 			t.Fatalf("claudeConfiguredModel(%q) = %q, want it ignored", model, got)
 		}
 	}
 	for _, model := range []string{"opus", "claude-opus-5-5", "vendor/model-v1.2:beta"} {
 		value := model
-		if got := eruncommon.ClaudeConfiguredModel(config.EnvironmentClaudeConfig{DefaultModel: &value}); got != model {
+		if got := open.ClaudeConfiguredModel(config.EnvironmentClaudeConfig{DefaultModel: &value}); got != model {
 			t.Fatalf("claudeConfiguredModel(%q) = %q, want it kept", model, got)
 		}
 	}
@@ -230,7 +230,7 @@ func TestResolveOrchestratorLaunchNeverLaunchesAnUnsafeCatalogModel(t *testing.T
 		t.Fatalf("ModelIDs() = %v, want only the safe id offered", got)
 	}
 	// The environment lane resolves its fallback through the same catalog.
-	if got := eruncommon.ResolveGatewayLaunchModel(config.EnvironmentClaudeConfig{}, catalog); got != "vendor/safe-model" {
+	if got := open.ResolveGatewayLaunchModel(config.EnvironmentClaudeConfig{}, catalog); got != "vendor/safe-model" {
 		t.Fatalf("resolveGatewayLaunchModel = %q, want the first safe catalog model", got)
 	}
 }

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // pastedFileDir reuses the generic Codex attachments dir; it predates this
@@ -55,7 +55,7 @@ func savePastedFileToRuntime(params pastedFileSaveParams) (string, error) {
 }
 
 func buildPastedFileCopyCommand(result config.OpenResult, remoteDir, remotePath string) (string, []string, string) {
-	shellParams := eruncommon.ShellLaunchParamsFromResult(result)
+	shellParams := cloud.ShellLaunchParamsFromResult(result)
 	release := config.RuntimeReleaseName(result.Tenant)
 	script := fmt.Sprintf("mkdir -p %s && base64 -d > %s", shellQuote(remoteDir), shellQuote(remotePath))
 

@@ -6,9 +6,10 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 var errMissingDeployVersion = errors.New("deploy requires a version: it installs a published version by reference (produced by `build` then `push`) and never builds — set the version input")
@@ -45,14 +46,14 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 			findProjectRoot := func() (string, string, error) {
 				return runtimeFindProjectRoot(runtime.Context, workDir)
 			}
-			resolveBuildContext := func() (eruncommon.DockerBuildContext, error) {
-				return eruncommon.DockerBuildContextAtDir(workDir)
+			resolveBuildContext := func() (shared.DockerBuildContext, error) {
+				return shared.DockerBuildContextAtDir(workDir)
 			}
-			resolveDeployContext := func() (eruncommon.KubernetesDeployContext, error) {
-				return eruncommon.KubernetesDeployContextAtDir(workDir), nil
+			resolveDeployContext := func() (shared.KubernetesDeployContext, error) {
+				return deploy.KubernetesDeployContextAtDir(workDir), nil
 			}
 
-			target := eruncommon.DeployTarget{
+			target := deploy.DeployTarget{
 				Tenant:               strings.TrimSpace(runtime.Context.Tenant),
 				Environment:          strings.TrimSpace(runtime.Context.Environment),
 				RepoPath:             workDir,
@@ -73,24 +74,24 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 
 			component := strings.TrimSpace(input.Component)
 			if component != "" {
-				execution, err := eruncommon.ResolveDeploySpec(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target, component, strings.TrimSpace(input.Version))
+				execution, err := deploy.ResolveDeploySpec(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target, component, strings.TrimSpace(input.Version))
 				if err != nil {
 					return err
 				}
-				if err := eruncommon.RunDeploySpec(runCtx, execution, runtime.DeployHelmChart); err != nil {
+				if err := deploy.RunDeploySpec(runCtx, execution, runtime.DeployHelmChart); err != nil {
 					return err
 				}
-				return eruncommon.PersistRuntimeVersionFromDeploySpecs(runCtx, []eruncommon.DeploySpec{execution}, runtime.Store.SaveEnvConfig, eruncommon.ResolveDeployedHelmReleaseVersion)
+				return deploy.PersistRuntimeVersionFromDeploySpecs(runCtx, []deploy.DeploySpec{execution}, runtime.Store.SaveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
 			}
 
-			executions, err := eruncommon.ResolveCurrentDeploySpecs(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target)
+			executions, err := deploy.ResolveCurrentDeploySpecs(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target)
 			if err != nil {
 				return err
 			}
-			if err := eruncommon.RunDeploySpecs(runCtx, executions, runtime.DeployHelmChart); err != nil {
+			if err := deploy.RunDeploySpecs(runCtx, executions, runtime.DeployHelmChart); err != nil {
 				return err
 			}
-			return eruncommon.PersistRuntimeVersionFromDeploySpecs(runCtx, executions, runtime.Store.SaveEnvConfig, eruncommon.ResolveDeployedHelmReleaseVersion)
+			return deploy.PersistRuntimeVersionFromDeploySpecs(runCtx, executions, runtime.Store.SaveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
 		})
 		envelope, err := runJobEnvelope(runtime, "deploy", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err

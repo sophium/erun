@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/sophium/erun/erun-common"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // These lock the spawn decision by what it produces, not by what it logs: a
@@ -346,7 +346,7 @@ func TestRunningInvestigationIsVisibleAsAnEnvironmentJob(t *testing.T) {
 	assertContainsAll(t, "job output", string(output), info.ID, "lifetime bound", "report:")
 }
 
-func soleEnvironmentJob(t *testing.T, tenant, environment string) eruncommon.EnvironmentJob {
+func soleEnvironmentJob(t *testing.T, tenant, environment string) shared.EnvironmentJob {
 	t.Helper()
 	jobs, err := jobspkg.LoadEnvironmentJobs(tenant, environment, time.Now())
 	if err != nil {

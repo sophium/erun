@@ -3,10 +3,10 @@ package erunmcp
 import (
 	"fmt"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // writeDoctorGitPushAccess is the MCP counterpart of the CLI's
@@ -20,7 +20,7 @@ import (
 // confirmed the cluster is unreachable (diagnosis.ClusterUnreachable), this
 // reports the same skip instead of paying its own kubectl exec timeout to
 // rediscover it.
-func writeDoctorGitPushAccess(runCtx core.Context, target config.OpenResult, req config.ShellLaunchParams, diagnosis eruncommon.DeployDiagnosisResult) error {
+func writeDoctorGitPushAccess(runCtx core.Context, target config.OpenResult, req config.ShellLaunchParams, diagnosis deploy.DeployDiagnosisResult) error {
 	if !target.EnvConfig.RemoteWorktree() {
 		return nil
 	}

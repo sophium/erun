@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // workCloneRemoveAll is the seam a test overrides to simulate a removal
@@ -99,7 +100,7 @@ func DecideWorkCloneReclaim(ctx core.Context, dir string) WorkCloneReclaimDecisi
 // remote-tracking ref, since a detached commit is unreachable (and therefore
 // as good as lost) the moment nothing else points at it.
 func decideDetachedWorkCloneReclaim(ctx core.Context, dir string, decision WorkCloneReclaimDecision) WorkCloneReclaimDecision {
-	sha, ok, err := eruncommon.GitResolvedRef(ctx, dir, "HEAD")
+	sha, ok, err := shared.GitResolvedRef(ctx, dir, "HEAD")
 	if err != nil || !ok {
 		decision.Reason = "detached HEAD and its commit could not be resolved"
 		return decision
@@ -170,7 +171,7 @@ func findSquashMergeCommit(ctx core.Context, dir, branch string) (sha, defaultBr
 		return "", "", false
 	}
 	defaultRef := "origin/" + defaultBranch
-	if _, exists, err := eruncommon.GitResolvedRef(ctx, dir, defaultRef); err != nil || !exists {
+	if _, exists, err := shared.GitResolvedRef(ctx, dir, defaultRef); err != nil || !exists {
 		return "", "", false
 	}
 
@@ -206,7 +207,7 @@ func resolveDefaultBranchForMerge(ctx core.Context, dir, remote string) (string,
 		return def, true
 	}
 	for _, candidate := range []string{"main", "master", "develop"} {
-		if _, ok, err := eruncommon.GitResolvedRef(ctx, dir, remote+"/"+candidate); err == nil && ok {
+		if _, ok, err := shared.GitResolvedRef(ctx, dir, remote+"/"+candidate); err == nil && ok {
 			return candidate, true
 		}
 	}
@@ -240,7 +241,7 @@ func gitMergeBase(ctx core.Context, dir, a, b string) (string, bool) {
 }
 
 func gitTreeHash(ctx core.Context, dir, rev string) (string, bool) {
-	sha, ok, err := eruncommon.GitResolvedRef(ctx, dir, rev+"^{tree}")
+	sha, ok, err := shared.GitResolvedRef(ctx, dir, rev+"^{tree}")
 	if err != nil || !ok {
 		return "", false
 	}
@@ -299,15 +300,15 @@ func gitRemoteRefContainingCommit(ctx core.Context, dir, sha string) (string, bo
 // caller set Dir to. Restricted to Kind == EnvironmentJobKindAgent, the kind
 // the actual problem is about; a command job's Dir is routinely the runtime
 // repo itself, and this never even inspects a command job's Dir.
-func reclaimAgentJobWorkClone(job eruncommon.EnvironmentJob) (reclaimed bool, reason string) {
-	if job.Kind != EnvironmentJobKindAgent || job.State != eruncommon.EnvironmentJobStateExited {
+func reclaimAgentJobWorkClone(job shared.EnvironmentJob) (reclaimed bool, reason string) {
+	if job.Kind != EnvironmentJobKindAgent || job.State != shared.EnvironmentJobStateExited {
 		return false, ""
 	}
 	dir := strings.TrimSpace(job.Dir)
 	if dir == "" {
 		return false, ""
 	}
-	root, err := eruncommon.WorkCloneRoot("")
+	root, err := shared.WorkCloneRoot("")
 	if err != nil || !isUnderWorkRoot(root, dir) {
 		return false, ""
 	}

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // orchestrator_alias.go is the CLI's writer for OrchestratorConfig.Alias, the
@@ -65,7 +65,7 @@ func ValidateOrchestratorAlias(store OrchestratorAliasStore, alias string) error
 	if alias == "" {
 		return nil
 	}
-	_, err := eruncommon.ResolveERunPlatformAlias(store, alias)
+	_, err := shared.ResolveERunPlatformAlias(store, alias)
 	return err
 }
 

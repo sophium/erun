@@ -12,8 +12,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -100,7 +100,7 @@ func newAppRestartCmd() *cobra.Command {
 func runAppRestartCommand(ctx core.Context, orchestratorID string) error {
 	id := strings.TrimSpace(orchestratorID)
 	if id == "" {
-		id = strings.TrimSpace(os.Getenv(eruncommon.OrchestratorIDEnvVar))
+		id = strings.TrimSpace(os.Getenv(sharedpkg.OrchestratorIDEnvVar))
 	}
 	ctx.Trace(fmt.Sprintf("app restart: orchestrator=%q", id))
 	markerPath := core.DefaultDesktopControlMarkerPath()

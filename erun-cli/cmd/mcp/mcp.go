@@ -10,10 +10,10 @@ import (
 	"strconv"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/mcp"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +31,7 @@ type mcpLaunchContext struct {
 	Namespace         string
 }
 
-func NewMCPCmd(resolveOpen func(common.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error, launchMCP shared.MCPLauncher) *cobra.Command {
+func NewMCPCmd(resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error, launchMCP shared.MCPLauncher) *cobra.Command {
 	host := defaultMCPHost
 	port := defaultMCPPort
 	path := defaultMCPPath

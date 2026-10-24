@@ -13,7 +13,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/podruntime"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // runtime_usage.go wires the desktop's Runtime tab to the same reader
@@ -57,14 +60,14 @@ func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selec
 	if store == nil {
 		return uiRuntimeUsage{}, fmt.Errorf("configuration store is unavailable")
 	}
-	result, err := eruncommon.ResolveOpen(store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
 		return uiRuntimeUsage{}, err
 	}
-	req := eruncommon.ShellLaunchParamsFromResult(result)
+	req := cloud.ShellLaunchParamsFromResult(result)
 
 	ctx, cancel := context.WithTimeout(parent, runtimeUsageTimeout)
 	defer cancel()

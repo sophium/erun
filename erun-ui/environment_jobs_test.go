@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // isolateJobsCache points the job store at a temp dir for one test, so a test
@@ -59,9 +59,9 @@ func TestLoadEnvironmentJobsReadsThroughAReachablePodEdge(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		loadEnvironmentJobs: func(_ context.Context, endpoint, _ string) ([]eruncommon.EnvironmentJob, error) {
+		loadEnvironmentJobs: func(_ context.Context, endpoint, _ string) ([]shared.EnvironmentJob, error) {
 			gotEndpoint = endpoint
-			return []eruncommon.EnvironmentJob{
+			return []shared.EnvironmentJob{
 				{ID: "finish-1350", Name: "Finish #1350 desktop jobs surface", State: jobspkg.EnvironmentJobStateRunning},
 			}, nil
 		},
@@ -148,7 +148,7 @@ func TestLoadEnvironmentJobsFallsBackToLocalWhenNotOpen(t *testing.T) {
 // A missing outcome must never be readable as a successful zero, and an agent
 // that has not emitted must never render a made-up progress row.
 func TestJobToUIKeepsAbsentOutcomesAbsent(t *testing.T) {
-	running := environmentJobToUI(eruncommon.EnvironmentJob{
+	running := environmentJobToUI(shared.EnvironmentJob{
 		ID: "j1", Name: "build", State: "running", Kind: "command",
 		StartedAt: time.Unix(1700000000, 0),
 	})
@@ -166,7 +166,7 @@ func TestJobToUIKeepsAbsentOutcomesAbsent(t *testing.T) {
 	}
 
 	code := 0
-	exited := environmentJobToUI(eruncommon.EnvironmentJob{
+	exited := environmentJobToUI(shared.EnvironmentJob{
 		ID: "j2", State: "exited", ExitCode: &code,
 		StartedAt: time.Unix(1700000000, 0), EndedAt: time.Unix(1700000042, 0),
 	})

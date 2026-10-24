@@ -3,8 +3,8 @@ package podruntime
 import (
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // TestRuntimeImageLineMismatch pins the static half of erun#1754: comparing
@@ -86,8 +86,8 @@ func TestResolveErunVersion(t *testing.T) {
 	cases := []struct {
 		name        string
 		env         config.EnvConfig
-		runtimeLine *eruncommon.RuntimeVersionLine
-		want        *eruncommon.ErunVersion
+		runtimeLine *deploy.RuntimeVersionLine
+		want        *deploy.ErunVersion
 	}{
 		{
 			name: "never deployed: no runtime version to annotate",
@@ -97,19 +97,19 @@ func TestResolveErunVersion(t *testing.T) {
 		{
 			name:        "stock image confirmed on erun's own line, no chart override: coincides with runtime version",
 			env:         config.EnvConfig{RuntimeVersion: "1.0.239"},
-			runtimeLine: &eruncommon.RuntimeVersionLine{Line: "erun"},
-			want:        &eruncommon.ErunVersion{Version: "1.0.239", SameAsRuntimeVersion: true},
+			runtimeLine: &deploy.RuntimeVersionLine{Line: "erun"},
+			want:        &deploy.ErunVersion{Version: "1.0.239", SameAsRuntimeVersion: true},
 		},
 		{
 			name:        "tenant's own line, chart explicitly states erun's version",
 			env:         config.EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350", RuntimeChart: "oci://ghcr.io/sophium/erun-devops:1.0.239"},
-			runtimeLine: &eruncommon.RuntimeVersionLine{Line: "petios"},
-			want:        &eruncommon.ErunVersion{Version: "1.0.239"},
+			runtimeLine: &deploy.RuntimeVersionLine{Line: "petios"},
+			want:        &deploy.ErunVersion{Version: "1.0.239"},
 		},
 		{
 			name:        "no resolved image recorded, chart empty: never guess the pairing",
 			env:         config.EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350"},
-			runtimeLine: &eruncommon.RuntimeVersionLine{Undetermined: true},
+			runtimeLine: &deploy.RuntimeVersionLine{Undetermined: true},
 			want:        nil,
 		},
 		{
@@ -120,14 +120,14 @@ func TestResolveErunVersion(t *testing.T) {
 		{
 			name:        "chart stated with no version of its own: cannot read a number from config alone",
 			env:         config.EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350", RuntimeChart: "oci://ghcr.io/sophium/erun-devops"},
-			runtimeLine: &eruncommon.RuntimeVersionLine{Line: "petios"},
+			runtimeLine: &deploy.RuntimeVersionLine{Line: "petios"},
 			want:        nil,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := eruncommon.ResolveErunVersion(tc.env, tc.runtimeLine)
+			got := deploy.ResolveErunVersion(tc.env, tc.runtimeLine)
 			if (got == nil) != (tc.want == nil) {
 				t.Fatalf("ResolveErunVersion() = %+v, want %+v", got, tc.want)
 			}

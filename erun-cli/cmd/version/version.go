@@ -9,11 +9,11 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -150,7 +150,7 @@ func resolveRegistryVersionsForVersionCommand(ctx context.Context, commandCtx co
 	return versions
 }
 
-func ResolveVersionCommandBuildInfo(findProjectRoot common.ProjectFinderFunc) (VersionCommandInfo, error) {
+func ResolveVersionCommandBuildInfo(findProjectRoot sharedpkg.ProjectFinderFunc) (VersionCommandInfo, error) {
 	info := VersionCommandInfo{Build: shared.CurrentBuildInfo()}
 
 	buildDir, err := os.Getwd()
@@ -166,7 +166,7 @@ func ResolveVersionCommandBuildInfo(findProjectRoot common.ProjectFinderFunc) (V
 		projectRoot = ""
 	}
 
-	version, _, versionFilePath, err := common.ResolveDockerBuildVersion(buildDir, projectRoot, "")
+	version, _, versionFilePath, err := sharedpkg.ResolveDockerBuildVersion(buildDir, projectRoot, "")
 	if err != nil {
 		if errors.Is(err, shared.ErrVersionFileNotFound) {
 			return info, nil

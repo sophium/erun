@@ -12,6 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/workspace"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // hostOpenCommand and hostRevealCommand return the OS opener invocation for a
@@ -142,7 +144,7 @@ func (a *App) ResolveEnvironmentHostPath(selection uiSelection, podPath string) 
 			"no matching file has synced to this environment's outputs yet",
 		), nil
 	}
-	podRoot := eruncommon.RemoteShellWorktreePath(eruncommon.ShellLaunchParamsFromResult(result))
+	podRoot := open.RemoteShellWorktreePath(cloud.ShellLaunchParamsFromResult(result))
 	if rel, ok := relUnderPodDir(cleanPodPath, podRoot); ok {
 		return resolveHostMirrorPath(
 			"mirror",

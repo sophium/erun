@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/setup"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 type InitInput struct {
@@ -79,7 +79,7 @@ func initToolExecute(runtime RuntimeConfig, input InitInput) (func(bool, io.Writ
 		ctx := runtimeCallContext(preview, input.Verbosity, nil, traceSink, traceSink)
 		ctx.KubernetesContextPreflight = cloud.CloudContextPreflight(runtime.Store, cloud.CloudContextDependencies{})
 
-		params := eruncommon.BootstrapInitParams{
+		params := open.BootstrapInitParams{
 			Tenant:                   tenant,
 			SelectedTenant:           strings.TrimSpace(input.SelectedTenant),
 			InitializeCurrentProject: input.InitializeCurrentProject,
@@ -118,7 +118,7 @@ func initToolExecute(runtime RuntimeConfig, input InitInput) (func(bool, io.Writ
 			// (rather than repeating "!= local-agent" here) keeps host correctly
 			// reporting false instead of inheriting the old exclusion's wrong
 			// answer for it.
-			params.Remote = (eruncommon.BootstrapInitParams{Type: envType}).RemoteWorktree()
+			params.Remote = (open.BootstrapInitParams{Type: envType}).RemoteWorktree()
 		} else {
 			params.Remote = input.Remote
 		}

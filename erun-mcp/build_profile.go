@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/primitive/build"
 )
 
 type BuildProfileInput struct {
@@ -24,8 +24,8 @@ type BuildProfileInput struct {
 // rawJSONSchemaOverrides already widens json.RawMessage to accept any JSON
 // for exactly this reason (see EnvironmentJob.Result).
 type BuildProfileResult struct {
-	Records []eruncommon.TimingRecordSummary `json:"records,omitempty"`
-	Record  json.RawMessage                  `json:"record,omitempty"`
+	Records []build.TimingRecordSummary `json:"records,omitempty"`
+	Record  json.RawMessage             `json:"record,omitempty"`
 }
 
 const buildProfileMCPCommandName = "build"
@@ -33,13 +33,13 @@ const buildProfileMCPCommandName = "build"
 func buildProfileTool() func(context.Context, *mcp.CallToolRequest, BuildProfileInput) (*mcp.CallToolResult, BuildProfileResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input BuildProfileInput) (*mcp.CallToolResult, BuildProfileResult, error) {
 		if input.ID == "" {
-			records, err := eruncommon.ListTimingRecords(buildProfileMCPCommandName, input.Limit)
+			records, err := build.ListTimingRecords(buildProfileMCPCommandName, input.Limit)
 			if err != nil {
 				return nil, BuildProfileResult{}, err
 			}
 			return nil, BuildProfileResult{Records: records}, nil
 		}
-		record, err := eruncommon.LoadTimingRecord(buildProfileMCPCommandName, input.ID)
+		record, err := build.LoadTimingRecord(buildProfileMCPCommandName, input.ID)
 		if err != nil {
 			return nil, BuildProfileResult{}, err
 		}

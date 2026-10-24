@@ -14,6 +14,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/doctor"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	jetbrainsconfig "github.com/sophium/erun/internal/jetbrainsconfig"
 	"github.com/spf13/cobra"
 )
@@ -42,7 +45,7 @@ type jetBrainsGatewayDoctorRepair struct {
 	idePath     string
 }
 
-func NewDoctorCmd(resolveOpen func(common.OpenParams) (config.OpenResult, error), configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloud.CloudContextDependencies, promptRunner shared.PromptRunner) *cobra.Command {
+func NewDoctorCmd(resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloud.CloudContextDependencies, promptRunner shared.PromptRunner) *cobra.Command {
 	options := doctorOptions{}
 	cmd := &cobra.Command{
 		Use:   "doctor [tenant] [environment]",
@@ -99,7 +102,7 @@ func NewDoctorCmd(resolveOpen func(common.OpenParams) (config.OpenResult, error)
 	return cmd
 }
 
-func runDoctorCommand(ctx core.Context, resolveOpen func(common.OpenParams) (config.OpenResult, error), configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloud.CloudContextDependencies, promptRunner shared.PromptRunner, options doctorOptions, args []string) error {
+func runDoctorCommand(ctx core.Context, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloud.CloudContextDependencies, promptRunner shared.PromptRunner, options doctorOptions, args []string) error {
 	// In-pod invocations target remote-init recovery instead; the host root
 	// config the checks below would inspect does not exist in the pod.
 	if config.IsInRuntimeEnvironment(os.Getenv) {
@@ -114,7 +117,7 @@ func runDoctorCommand(ctx core.Context, resolveOpen func(common.OpenParams) (con
 		return err
 	}
 
-	params, err := common.OpenParamsForArgs(args)
+	params, err := open.OpenParamsForArgs(args)
 	if err != nil {
 		return err
 	}
@@ -158,7 +161,7 @@ func runDoctorForTarget(ctx core.Context, configStore config.ConfigStore, prompt
 	}
 	// The erun-level gateway catalog arrives on the resolved target, so the
 	// diagnosis judges the same routing the AI launch uses.
-	req := common.ShellLaunchParamsFromResult(result)
+	req := cloud.ShellLaunchParamsFromResult(result)
 	diagnosis, err := runDeployDiagnosis(ctx, req)
 	if err != nil {
 		return err
@@ -185,7 +188,7 @@ func runDoctorForTarget(ctx core.Context, configStore config.ConfigStore, prompt
 // one sequence because they share a shape -- each states one fact about the
 // environment as deployed, and none of them mutates anything -- and they are
 // grouped here rather than inlined so the section list stays a list.
-func reportDeployDiagnosisSections(ctx core.Context, configStore config.ConfigStore, result config.OpenResult, diagnosis common.DeployDiagnosisResult) error {
+func reportDeployDiagnosisSections(ctx core.Context, configStore config.ConfigStore, result config.OpenResult, diagnosis deploy.DeployDiagnosisResult) error {
 	sections := []func() error{
 		func() error { return reportRuntimeImageRegistryMismatch(ctx, result) },
 		func() error { return reportRuntimeImageLineMismatch(ctx, result) },
@@ -229,7 +232,7 @@ func reportProjectConfigTracked(ctx core.Context, result config.OpenResult) erro
 // runDoctorPostSyncActions runs the JetBrains Gateway repair and then the
 // remaining cleanup actions, unless the JetBrains repair was the only action
 // requested. It is the tail of runDoctorCommand's diagnosis sequence.
-func runDoctorPostSyncActions(ctx core.Context, promptRunner shared.PromptRunner, result config.OpenResult, req config.ShellLaunchParams, diagnosis common.DeployDiagnosisResult, options doctorOptions) error {
+func runDoctorPostSyncActions(ctx core.Context, promptRunner shared.PromptRunner, result config.OpenResult, req config.ShellLaunchParams, diagnosis deploy.DeployDiagnosisResult, options doctorOptions) error {
 	repairedJetBrains, err := runSelectedJetBrainsGatewayRepair(ctx, promptRunner, result, options)
 	if err != nil {
 		return err
@@ -303,7 +306,7 @@ func validateDoctorRecoveryFlags(options doctorOptions) error {
 // aborting with a raw exec error — unless the daemon is this machine's own,
 // which a host environment's is: that one needs neither the pod nor the
 // cluster, so an unreachable cluster says nothing about it.
-func runDoctorCleanupActions(ctx core.Context, promptRunner shared.PromptRunner, result config.OpenResult, req config.ShellLaunchParams, diagnosis common.DeployDiagnosisResult, options doctorOptions) error {
+func runDoctorCleanupActions(ctx core.Context, promptRunner shared.PromptRunner, result config.OpenResult, req config.ShellLaunchParams, diagnosis deploy.DeployDiagnosisResult, options doctorOptions) error {
 	daemon := doctor.ResolveDoctorDockerDaemon(req)
 	if err := runDeployRecoveryActions(ctx, promptRunner, req, options, diagnosis); err != nil {
 		return err
@@ -437,8 +440,8 @@ const deployDiagnosisGuidance = "If the release is stuck pending or an image fai
 // reader sees why a deploy failed before deciding on the destructive recovery
 // actions. It runs under --dry-run too: the flag withholds mutations, not
 // reads, and this diagnosis is the whole reason an operator reaches for it.
-func runDeployDiagnosis(ctx core.Context, req config.ShellLaunchParams) (common.DeployDiagnosisResult, error) {
-	diagnosis := common.RunDeployDiagnosis(ctx, req)
+func runDeployDiagnosis(ctx core.Context, req config.ShellLaunchParams) (deploy.DeployDiagnosisResult, error) {
+	diagnosis := deploy.RunDeployDiagnosis(ctx, req)
 	if err := writeDeployDiagnosis(ctx, diagnosis); err != nil {
 		return diagnosis, err
 	}
@@ -451,7 +454,7 @@ func runDeployDiagnosis(ctx core.Context, req config.ShellLaunchParams) (common.
 // runDeployRecoveryActions runs the selected helm-level recovery. The actions
 // mutate the live release, so prompts are gated on an unhealthy diagnosis —
 // `erun doctor` never offers rollback on a healthy env.
-func runDeployRecoveryActions(ctx core.Context, promptRunner shared.PromptRunner, req config.ShellLaunchParams, options doctorOptions, diagnosis common.DeployDiagnosisResult) error {
+func runDeployRecoveryActions(ctx core.Context, promptRunner shared.PromptRunner, req config.ShellLaunchParams, options doctorOptions, diagnosis deploy.DeployDiagnosisResult) error {
 	actions, err := selectedDeployRecoveryActions(ctx, promptRunner, req, options, diagnosis, ctx.DryRun)
 	if err != nil {
 		return err
@@ -480,17 +483,17 @@ func runDeployRecoveryActions(ctx core.Context, promptRunner shared.PromptRunner
 // win, else the interactive path offers a single confirm for the one recovery
 // that fits the diagnosis — clearing a pending lock and rolling back are
 // alternative fixes, and running both is wrong.
-func selectedDeployRecoveryActions(ctx core.Context, promptRunner shared.PromptRunner, req config.ShellLaunchParams, options doctorOptions, diagnosis common.DeployDiagnosisResult, dryRun bool) ([]common.DeployRecoveryAction, error) {
+func selectedDeployRecoveryActions(ctx core.Context, promptRunner shared.PromptRunner, req config.ShellLaunchParams, options doctorOptions, diagnosis deploy.DeployDiagnosisResult, dryRun bool) ([]deploy.DeployRecoveryAction, error) {
 	if options.clearPendingHelm {
-		return []common.DeployRecoveryAction{common.DeployRecoveryClearPendingHelm}, nil
+		return []deploy.DeployRecoveryAction{deploy.DeployRecoveryClearPendingHelm}, nil
 	}
 	if options.rollback {
-		return []common.DeployRecoveryAction{common.DeployRecoveryRollback}, nil
+		return []deploy.DeployRecoveryAction{deploy.DeployRecoveryRollback}, nil
 	}
 	if dryRun || promptRunner == nil {
 		return nil, nil
 	}
-	action, ok := common.RecommendedDeployRecovery(diagnosis)
+	action, ok := deploy.RecommendedDeployRecovery(diagnosis)
 	if !ok {
 		return nil, nil
 	}
@@ -501,10 +504,10 @@ func selectedDeployRecoveryActions(ctx core.Context, promptRunner shared.PromptR
 	if !confirmed {
 		return nil, nil
 	}
-	return []common.DeployRecoveryAction{action}, nil
+	return []deploy.DeployRecoveryAction{action}, nil
 }
 
-func writeDeployDiagnosis(ctx core.Context, diagnosis common.DeployDiagnosisResult) error {
+func writeDeployDiagnosis(ctx core.Context, diagnosis deploy.DeployDiagnosisResult) error {
 	if strings.TrimSpace(diagnosis.HelmStatus) != "" {
 		if _, err := fmt.Fprintf(ctx.Stdout, "== Helm release status ==\n%s\n\n", diagnosis.HelmStatus); err != nil {
 			return err
@@ -608,7 +611,7 @@ func jetBrainsGatewayDoctorRepairForResult(result config.OpenResult) (jetBrainsG
 	if err != nil {
 		return jetBrainsGatewayDoctorRepair{}, false, nil
 	}
-	info := common.SSHConnectionInfoForResult(result)
+	info := open.SSHConnectionInfoForResult(result)
 	configID := jetbrainsconfig.StableConfigID(info.HostAlias)
 	projectPath := strings.TrimSpace(info.WorkspacePath)
 	recent, found, err := jetbrainsconfig.FindRecentProject(optionsDir, configID, projectPath)

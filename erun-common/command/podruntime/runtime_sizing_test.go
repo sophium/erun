@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 const (
@@ -17,9 +17,9 @@ const (
 
 // usageHistory builds a history with the aggregates a recommendation reads, plus
 // a sample count and window, without running the sampler.
-func usageHistory(window time.Duration, samples int, latest config.RuntimeUsage) eruncommon.RuntimeUsageHistory {
+func usageHistory(window time.Duration, samples int, latest config.RuntimeUsage) deploy.RuntimeUsageHistory {
 	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	history := eruncommon.RuntimeUsageHistory{FirstObservedAt: start, LastObservedAt: start.Add(window)}
+	history := deploy.RuntimeUsageHistory{FirstObservedAt: start, LastObservedAt: start.Add(window)}
 	for i := 0; i < samples; i++ {
 		history.Samples = append(history.Samples, latest)
 	}
@@ -29,7 +29,7 @@ func usageHistory(window time.Duration, samples int, latest config.RuntimeUsage)
 	return history
 }
 
-func verdictFor(t *testing.T, recommendation eruncommon.RuntimeSizingRecommendation, resource string) eruncommon.RuntimeSizingVerdict {
+func verdictFor(t *testing.T, recommendation deploy.RuntimeSizingRecommendation, resource string) deploy.RuntimeSizingVerdict {
 	t.Helper()
 	for _, verdict := range recommendation.Verdicts {
 		if verdict.Resource == resource {
@@ -37,15 +37,15 @@ func verdictFor(t *testing.T, recommendation eruncommon.RuntimeSizingRecommendat
 		}
 	}
 	t.Fatalf("no %s verdict in %+v", resource, recommendation.Verdicts)
-	return eruncommon.RuntimeSizingVerdict{}
+	return deploy.RuntimeSizingVerdict{}
 }
 
 type memoryDirectionCase struct {
 	name           string
-	history        eruncommon.RuntimeUsageHistory
+	history        deploy.RuntimeUsageHistory
 	ceiling        config.NamespaceResourceQuota
-	wantAction     eruncommon.RuntimeSizingAction
-	wantConfidence eruncommon.RuntimeSizingConfidence
+	wantAction     deploy.RuntimeSizingAction
+	wantConfidence deploy.RuntimeSizingConfidence
 	wantSuggested  string
 }
 
@@ -55,7 +55,7 @@ func runMemoryDirectionCases(t *testing.T, cases []memoryDirectionCase) {
 	t.Helper()
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			recommendation, ok := eruncommon.RecommendRuntimeSizing(eruncommon.RuntimeSizingParams{History: testCase.history, Ceiling: testCase.ceiling})
+			recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: testCase.history, Ceiling: testCase.ceiling})
 			if !ok {
 				t.Fatal("expected a recommendation")
 			}
@@ -88,41 +88,41 @@ func TestRecommendRuntimeSizingRaisesMemory(t *testing.T) {
 	runMemoryDirectionCases(t, []memoryDirectionCase{
 		{
 			name: "peak at 95 percent of limit raises on high confidence",
-			history: func() eruncommon.RuntimeUsageHistory {
+			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
 				h.ObservedPeakMemoryBytes = 2*testGi - 100*testMi
 				return h
 			}(),
-			wantAction:     eruncommon.RuntimeSizingRaise,
-			wantConfidence: eruncommon.RuntimeSizingConfidenceHigh,
+			wantAction:     deploy.RuntimeSizingRaise,
+			wantConfidence: deploy.RuntimeSizingConfidenceHigh,
 			wantSuggested:  "3072Mi",
 		},
 		{
 			// One kill is enough, and it outranks a comfortable-looking peak:
 			// the allocation that was refused never reached memory.peak.
 			name: "a single oom kill raises even though the peak looks comfortable",
-			history: func() eruncommon.RuntimeUsageHistory {
+			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(time.Minute, 2, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
 				h.ObservedPeakMemoryBytes = 512 * testMi
 				h.ObservedOOMKills = 1
 				return h
 			}(),
-			wantAction:     eruncommon.RuntimeSizingRaise,
-			wantConfidence: eruncommon.RuntimeSizingConfidenceHigh,
+			wantAction:     deploy.RuntimeSizingRaise,
+			wantConfidence: deploy.RuntimeSizingConfidenceHigh,
 			wantSuggested:  "3072Mi",
 		},
 		{
 			// The quota counts every container in the pod, so a raise above what
 			// it can admit is a size Kubernetes would refuse to schedule.
 			name: "a raise is bounded by the namespace quota",
-			history: func() eruncommon.RuntimeUsageHistory {
+			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 20 * testGi}})
 				h.ObservedOOMKills = 2
 				return h
 			}(),
 			ceiling:        config.NamespaceResourceQuota{CPU: "8", Memory: "32Gi", Storage: "80Gi"},
-			wantAction:     eruncommon.RuntimeSizingRaise,
-			wantConfidence: eruncommon.RuntimeSizingConfidenceHigh,
+			wantAction:     deploy.RuntimeSizingRaise,
+			wantConfidence: deploy.RuntimeSizingConfidenceHigh,
 			wantSuggested:  "12288Mi",
 		},
 	})
@@ -137,34 +137,34 @@ func TestRecommendRuntimeSizingShrinksOrWithholdsMemory(t *testing.T) {
 	runMemoryDirectionCases(t, []memoryDirectionCase{
 		{
 			name: "peak at 20 percent lowers to the headroom multiple",
-			history: func() eruncommon.RuntimeUsageHistory {
+			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
 				h.ObservedPeakMemoryBytes = 2 * testGi
 				return h
 			}(),
-			wantAction:     eruncommon.RuntimeSizingLower,
-			wantConfidence: eruncommon.RuntimeSizingConfidenceLow,
+			wantAction:     deploy.RuntimeSizingLower,
+			wantConfidence: deploy.RuntimeSizingConfidenceLow,
 			wantSuggested:  "3072Mi",
 		},
 		{
 			name: "a short window recommends nothing",
-			history: func() eruncommon.RuntimeUsageHistory {
+			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(time.Hour, 100, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
 				h.ObservedPeakMemoryBytes = 1 * testGi
 				return h
 			}(),
-			wantAction: eruncommon.RuntimeSizingUnknown,
+			wantAction: deploy.RuntimeSizingUnknown,
 		},
 		{
 			// A day of wall time holding a handful of readings watched almost
 			// nothing. The span alone is not coverage.
 			name: "a long window with too few samples recommends nothing",
-			history: func() eruncommon.RuntimeUsageHistory {
+			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, 4, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
 				h.ObservedPeakMemoryBytes = 1 * testGi
 				return h
 			}(),
-			wantAction: eruncommon.RuntimeSizingUnknown,
+			wantAction: deploy.RuntimeSizingUnknown,
 		},
 		{
 			name: "no limit is reported as unmeasurable, not as zero",
@@ -172,16 +172,16 @@ func TestRecommendRuntimeSizingShrinksOrWithholdsMemory(t *testing.T) {
 				CPU:    config.RuntimeCPUUsage{QuotaCores: 1},
 				Memory: config.RuntimeMemoryUsage{Unavailable: "memory.max was not readable"},
 			}),
-			wantAction: eruncommon.RuntimeSizingUnknown,
+			wantAction: deploy.RuntimeSizingUnknown,
 		},
 		{
 			name: "a peak just under the raise margin holds rather than shrinking",
-			history: func() eruncommon.RuntimeUsageHistory {
+			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
 				h.ObservedPeakMemoryBytes = 8 * testGi
 				return h
 			}(),
-			wantAction: eruncommon.RuntimeSizingHold,
+			wantAction: deploy.RuntimeSizingHold,
 		},
 	})
 }
@@ -192,22 +192,22 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 
 	cases := []struct {
 		name          string
-		history       eruncommon.RuntimeUsageHistory
-		wantAction    eruncommon.RuntimeSizingAction
+		history       deploy.RuntimeUsageHistory
+		wantAction    deploy.RuntimeSizingAction
 		wantSuggested string
 	}{
 		{
 			// The false-positive check the issue names: frs/local's measured
 			// 425/308631 throttled periods must not grow the environment.
 			name: "a 0.14 percent throttle ratio does not raise cpu",
-			history: func() eruncommon.RuntimeUsageHistory {
+			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 1}, Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
 				h.ObservedPeriods = 308631
 				h.ObservedThrottledPeriods = 425
 				h.ObservedPeakCPUMilli = 200
 				return h
 			}(),
-			wantAction: eruncommon.RuntimeSizingHold,
+			wantAction: deploy.RuntimeSizingHold,
 		},
 		{
 			// The same ratio on a quota roomy enough that the busiest-interval
@@ -216,50 +216,50 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 			// frs/local case above cannot prove this on its own, because a
 			// one-core quota leaves no room to shrink into either way.
 			name: "sub-threshold throttling disqualifies a shrink",
-			history: func() eruncommon.RuntimeUsageHistory {
+			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 4}, Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
 				h.ObservedPeriods = 308631
 				h.ObservedThrottledPeriods = 425
 				h.ObservedPeakCPUMilli = 200
 				return h
 			}(),
-			wantAction: eruncommon.RuntimeSizingHold,
+			wantAction: deploy.RuntimeSizingHold,
 		},
 		{
 			name: "a sustained throttle ratio raises cpu",
-			history: func() eruncommon.RuntimeUsageHistory {
+			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 2}, Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
 				h.ObservedPeriods = 100000
 				h.ObservedThrottledPeriods = 12000
 				h.ObservedPeakCPUMilli = 1900
 				return h
 			}(),
-			wantAction:    eruncommon.RuntimeSizingRaise,
+			wantAction:    deploy.RuntimeSizingRaise,
 			wantSuggested: "3",
 		},
 		{
 			// erun/build's real shape: twelve cores, not one throttled period,
 			// and a busiest interval well under half the quota.
 			name: "an unthrottled quota well above the busiest interval lowers cpu",
-			history: func() eruncommon.RuntimeUsageHistory {
+			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 12}, Memory: config.RuntimeMemoryUsage{LimitBytes: 23 * testGi}})
 				h.ObservedPeriods = 376556
 				h.ObservedThrottledPeriods = 0
 				h.ObservedPeakCPUMilli = 4567
 				return h
 			}(),
-			wantAction:    eruncommon.RuntimeSizingLower,
+			wantAction:    deploy.RuntimeSizingLower,
 			wantSuggested: "10",
 		},
 		{
 			name: "too few scheduling periods recommends nothing",
-			history: func() eruncommon.RuntimeUsageHistory {
+			history: func() deploy.RuntimeUsageHistory {
 				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 1}, Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
 				h.ObservedPeriods = 500
 				h.ObservedPeakCPUMilli = 100
 				return h
 			}(),
-			wantAction: eruncommon.RuntimeSizingUnknown,
+			wantAction: deploy.RuntimeSizingUnknown,
 		},
 		{
 			name: "no quota is reported as unmeasurable",
@@ -267,13 +267,13 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 				Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi},
 				CPU:    config.RuntimeCPUUsage{Unavailable: "cpu.max reports no quota (unlimited or not readable); utilisation needs a quota to measure against"},
 			}),
-			wantAction: eruncommon.RuntimeSizingUnknown,
+			wantAction: deploy.RuntimeSizingUnknown,
 		},
 	}
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			recommendation, ok := eruncommon.RecommendRuntimeSizing(eruncommon.RuntimeSizingParams{History: testCase.history})
+			recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: testCase.history})
 			if !ok {
 				t.Fatal("expected a recommendation")
 			}
@@ -305,21 +305,21 @@ func TestRecommendRuntimeSizingNeverShrinksBelowHeadroom(t *testing.T) {
 					peak := int64(float64(limit) * fraction)
 					history := usageHistory(window, samples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: limit}, CPU: config.RuntimeCPUUsage{QuotaCores: 4}})
 					history.ObservedPeakMemoryBytes = peak
-					recommendation, ok := eruncommon.RecommendRuntimeSizing(eruncommon.RuntimeSizingParams{History: history})
+					recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history})
 					if !ok {
 						t.Fatal("expected a recommendation")
 					}
 					verdict := verdictFor(t, recommendation, "memory")
-					if verdict.Action != eruncommon.RuntimeSizingLower {
+					if verdict.Action != deploy.RuntimeSizingLower {
 						continue
 					}
 					suggestedMi, err := config.ParseKubernetesMemoryToMi(verdict.Suggested)
 					if err != nil {
 						t.Fatalf("unparseable suggestion %q: %v", verdict.Suggested, err)
 					}
-					floor := int64(float64(peak) * eruncommon.RuntimeSizingMemoryHeadroom)
+					floor := int64(float64(peak) * deploy.RuntimeSizingMemoryHeadroom)
 					if suggestedMi*testMi < floor {
-						t.Fatalf("limit=%d peak=%d: suggested %s is below %.0fx the observed peak", limit, peak, verdict.Suggested, eruncommon.RuntimeSizingMemoryHeadroom)
+						t.Fatalf("limit=%d peak=%d: suggested %s is below %.0fx the observed peak", limit, peak, verdict.Suggested, deploy.RuntimeSizingMemoryHeadroom)
 					}
 					if suggestedMi*testMi >= limit {
 						t.Fatalf("limit=%d peak=%d: shrink to %s is not smaller than the current limit", limit, peak, verdict.Suggested)
@@ -340,12 +340,12 @@ func TestRecommendRuntimeSizingAnyOOMKillRaises(t *testing.T) {
 				history := usageHistory(window, samples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: limit}, CPU: config.RuntimeCPUUsage{QuotaCores: 4}})
 				history.ObservedPeakMemoryBytes = int64(float64(limit) * peakFraction)
 				history.ObservedOOMKills = 1
-				recommendation, ok := eruncommon.RecommendRuntimeSizing(eruncommon.RuntimeSizingParams{History: history})
+				recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history})
 				if !ok {
 					t.Fatal("expected a recommendation")
 				}
 				verdict := verdictFor(t, recommendation, "memory")
-				if verdict.Action != eruncommon.RuntimeSizingRaise || verdict.Confidence != eruncommon.RuntimeSizingConfidenceHigh {
+				if verdict.Action != deploy.RuntimeSizingRaise || verdict.Confidence != deploy.RuntimeSizingConfidenceHigh {
 					t.Fatalf("window=%s samples=%d peak=%.2f: got %q/%q, want raise/high", window, samples, peakFraction, verdict.Action, verdict.Confidence)
 				}
 			}
@@ -354,7 +354,7 @@ func TestRecommendRuntimeSizingAnyOOMKillRaises(t *testing.T) {
 }
 
 func TestRecommendRuntimeSizingWithoutHistoryStaysSilent(t *testing.T) {
-	if _, ok := eruncommon.RecommendRuntimeSizing(eruncommon.RuntimeSizingParams{}); ok {
+	if _, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{}); ok {
 		t.Fatal("an environment erun has never observed must get silence, not a guess")
 	}
 }
@@ -365,7 +365,7 @@ func TestRecommendRuntimeSizingWithoutHistoryStaysSilent(t *testing.T) {
 // failure that would under-size an environment.
 func TestAppendRuntimeUsageSampleRetainsPeakAcrossARestart(t *testing.T) {
 	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	history := eruncommon.RuntimeUsageHistory{}
+	history := deploy.RuntimeUsageHistory{}
 	history = AppendRuntimeUsageSample(history, config.RuntimeUsage{
 		Memory: config.RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 6 * testGi, OOMKills: 1},
 		CPU:    config.RuntimeCPUUsage{UsageUsec: 1_000_000, Periods: 5000, ThrottledPeriods: 10},
@@ -393,11 +393,11 @@ func TestAppendRuntimeUsageSampleRetainsPeakAcrossARestart(t *testing.T) {
 	// And the recommender must size from the retained peak, not the live one:
 	// 6Gi of 8Gi is within the raise margin, while the post-restart 1Gi would
 	// look like a shrink candidate.
-	recommendation, ok := eruncommon.RecommendRuntimeSizing(eruncommon.RuntimeSizingParams{History: history})
+	recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history})
 	if !ok {
 		t.Fatal("expected a recommendation")
 	}
-	if verdict := verdictFor(t, recommendation, "memory"); verdict.Action != eruncommon.RuntimeSizingRaise {
+	if verdict := verdictFor(t, recommendation, "memory"); verdict.Action != deploy.RuntimeSizingRaise {
 		t.Fatalf("memory action = %q, want raise from the retained peak (reason: %s)", verdict.Action, verdict.Reason)
 	}
 }
@@ -410,7 +410,7 @@ func TestAppendRuntimeUsageSampleRetainsPeakAcrossARestart(t *testing.T) {
 // push that sample out of the window entirely.
 func TestAppendRuntimeUsageSampleBoundsTheWindow(t *testing.T) {
 	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	history := AppendRuntimeUsageSample(eruncommon.RuntimeUsageHistory{}, config.RuntimeUsage{
+	history := AppendRuntimeUsageSample(deploy.RuntimeUsageHistory{}, config.RuntimeUsage{
 		Memory: config.RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 7 * testGi},
 		CPU:    config.RuntimeCPUUsage{UsageUsec: 900_000_000, Periods: 90000},
 	}, base)

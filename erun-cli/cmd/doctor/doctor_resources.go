@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/podruntime"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // doctorResourceInterval is the CPU sample window the resources section reads
@@ -38,7 +38,7 @@ const doctorResourceInterval = time.Second
 // healthy environment: an environment whose pod was just replaced has no
 // retained history to reason from, and one whose counters cannot be read at all
 // is exactly the case where saying nothing would read as saying it is fine.
-func reportDoctorResources(ctx core.Context, req config.ShellLaunchParams, result config.OpenResult, diagnosis common.DeployDiagnosisResult) error {
+func reportDoctorResources(ctx core.Context, req config.ShellLaunchParams, result config.OpenResult, diagnosis deploy.DeployDiagnosisResult) error {
 	if diagnosis.ClusterUnreachable {
 		return reportPodSkippedUnreachable(ctx, "Resources")
 	}
@@ -95,14 +95,14 @@ func writeDoctorResourcesNotObserved(ctx core.Context, usage config.RuntimeUsage
 // retained usage history, which is readable only from inside its own runtime
 // pod. A verdict that suggests nothing ("hold", or insufficient evidence) gets
 // no next action, because there is nothing to apply.
-func writeDoctorResizeNextAction(ctx core.Context, result config.OpenResult, sizing *common.RuntimeSizingRecommendation) error {
+func writeDoctorResizeNextAction(ctx core.Context, result config.OpenResult, sizing *deploy.RuntimeSizingRecommendation) error {
 	if sizing == nil {
 		return nil
 	}
 	flags := make([]string, 0, 2)
 	for _, verdict := range sizing.Verdicts {
 		switch verdict.Action {
-		case common.RuntimeSizingRaise, common.RuntimeSizingLower:
+		case deploy.RuntimeSizingRaise, deploy.RuntimeSizingLower:
 		default:
 			continue
 		}

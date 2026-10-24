@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/build"
 )
 
 // The suite must leave the operator's real timing history byte-for-byte
@@ -49,7 +50,7 @@ func TestWriteTimingRecordWritesToTheResolvedDirectory(t *testing.T) {
 	if got := filepath.Dir(path); got != dir {
 		t.Fatalf("record written to %q, want it inside the resolved directory %q", got, dir)
 	}
-	record, err := loadTimingRecordFile(path)
+	record, err := build.LoadTimingRecordFile(path)
 	if err != nil {
 		t.Fatalf("load written record: %v", err)
 	}

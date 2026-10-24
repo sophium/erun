@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // repoRootForDockerignoreTest returns the repo root.
@@ -37,7 +40,7 @@ func TestRootDockerignoreExcludesDocsBuildArtifacts(t *testing.T) {
 		t.Fatalf("read root .dockerignore: %v", err)
 	}
 	// An empty base anchors the root .dockerignore the same way real docker does.
-	set := parseIgnoreData(data, "")
+	set := shared.ParseIgnoreData(data, "")
 
 	excludedDirs := []string{
 		"erun-docs/node_modules",
@@ -45,11 +48,11 @@ func TestRootDockerignoreExcludesDocsBuildArtifacts(t *testing.T) {
 		"erun-docs/.docusaurus",
 	}
 	for _, dir := range excludedDirs {
-		if !set.matches(dir, true) {
+		if !set.Matches(dir, true) {
 			t.Errorf("root .dockerignore must exclude %q from the build context (regenerated in-image by the erun-docs Dockerfile)", dir)
 		}
 		// docker walks the tree, so files beneath the directory must drop too.
-		if !set.matches(dir+"/index.js", false) {
+		if !set.Matches(dir+"/index.js", false) {
 			t.Errorf("root .dockerignore must exclude files under %q", dir)
 		}
 	}
@@ -61,7 +64,7 @@ func TestRootDockerignoreExcludesDocsBuildArtifacts(t *testing.T) {
 		"erun-docs/docs/intro.md",
 	}
 	for _, path := range kept {
-		if set.matches(path, false) {
+		if set.Matches(path, false) {
 			t.Errorf("root .dockerignore must NOT exclude %q (the erun-docs Dockerfile copies it)", path)
 		}
 	}
@@ -82,7 +85,7 @@ func TestRootDockerignoreMirrorsNestedGitignoresUnderCopiedModules(t *testing.T)
 	if err != nil {
 		t.Fatalf("read root .dockerignore: %v", err)
 	}
-	set := parseIgnoreData(data, "")
+	set := shared.ParseIgnoreData(data, "")
 
 	excludedDirs := []string{
 		"erun-ui/build/bin",
@@ -95,7 +98,7 @@ func TestRootDockerignoreMirrorsNestedGitignoresUnderCopiedModules(t *testing.T)
 		"erun-devops/e2e/console/playwright-report",
 	}
 	for _, dir := range excludedDirs {
-		if !set.matches(dir, true) {
+		if !set.Matches(dir, true) {
 			t.Errorf("root .dockerignore must exclude %q (mirrors a nested .gitignore entry)", dir)
 		}
 	}
@@ -111,7 +114,7 @@ func TestRootDockerignoreMirrorsNestedGitignoresUnderCopiedModules(t *testing.T)
 		"erun-console/src/app/.env.local",
 	}
 	for _, path := range excludedFiles {
-		if !set.matches(path, false) {
+		if !set.Matches(path, false) {
 			t.Errorf("root .dockerignore must exclude %q (mirrors a nested .gitignore entry)", path)
 		}
 	}
@@ -125,7 +128,7 @@ func TestRootDockerignoreMirrorsNestedGitignoresUnderCopiedModules(t *testing.T)
 		"erun-devops/e2e/console/tests/console.spec.ts",
 	}
 	for _, path := range kept {
-		if set.matches(path, false) {
+		if set.Matches(path, false) {
 			t.Errorf("root .dockerignore must NOT exclude %q (the erun-devops Dockerfile copies it)", path)
 		}
 	}
@@ -144,14 +147,14 @@ func TestRootDockerignoreExcludesDesktopMacOSBuildOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read root .dockerignore: %v", err)
 	}
-	set := parseIgnoreData(data, "")
+	set := shared.ParseIgnoreData(data, "")
 	for _, dir := range []string{"erun-ui/ERun.app", "erun-ui/darwin"} {
-		if !set.matches(dir, true) {
+		if !set.Matches(dir, true) {
 			t.Errorf("root .dockerignore must exclude %q from the build context", dir)
 		}
 	}
 	for _, path := range []string{"erun-ui/main.go", "erun-ui/darwin_cgo_flags.go", "erun-ui/app_activation_darwin.go"} {
-		if set.matches(path, false) {
+		if set.Matches(path, false) {
 			t.Errorf("root .dockerignore must NOT exclude %q (the erun-ui package builds it)", path)
 		}
 	}
@@ -169,11 +172,11 @@ func assertFingerprintSkipsDesktopMacOSBuildOutputs(t *testing.T, dockerignore [
 	writeComponentTreeFile(t, context, "erun-ui/main.go", "package main\n")
 	writeComponentTreeFile(t, context, "erun-ui/ERun.app/Contents/MacOS/erun-app", "binary")
 	writeComponentTreeFile(t, context, "erun-ui/darwin/erun-app", "binary")
-	ignored, err := loadContextIgnoreSet(context, []string{"erun-ui"})
+	ignored, err := build.LoadContextIgnoreSet(context, []string{"erun-ui"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, err := collectFingerprintFiles(context, []string{"erun-ui"}, ignored)
+	files, err := build.CollectFingerprintFiles(context, []string{"erun-ui"}, ignored)
 	if err != nil {
 		t.Fatal(err)
 	}

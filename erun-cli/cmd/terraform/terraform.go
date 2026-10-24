@@ -6,14 +6,14 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/terraform"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
-func NewTerraformCmd(store terraform.TerraformStore, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func NewTerraformCmd(store terraform.TerraformStore, findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "terraform",
 		Short: "Run a platform's per-env Terraform from the right folder automatically",
@@ -61,7 +61,7 @@ func NewTerraformCmd(store terraform.TerraformStore, findProjectRoot common.Proj
 	return cmd
 }
 
-func newTerraformOperationCmd(store terraform.TerraformStore, findProjectRoot common.ProjectFinderFunc, op terraform.TerraformOperation, use, short, long, example string) *cobra.Command {
+func newTerraformOperationCmd(store terraform.TerraformStore, findProjectRoot sharedpkg.ProjectFinderFunc, op terraform.TerraformOperation, use, short, long, example string) *cobra.Command {
 	var tenantFlag, environmentFlag, confirmEnvironment string
 	cmd := &cobra.Command{
 		Use:          use,
@@ -83,7 +83,7 @@ func newTerraformOperationCmd(store terraform.TerraformStore, findProjectRoot co
 	return cmd
 }
 
-func runTerraformCommand(ctx core.Context, store terraform.TerraformStore, findProjectRoot common.ProjectFinderFunc, op terraform.TerraformOperation, args []string, tenantFlag, environmentFlag, confirmEnvironment string) error {
+func runTerraformCommand(ctx core.Context, store terraform.TerraformStore, findProjectRoot sharedpkg.ProjectFinderFunc, op terraform.TerraformOperation, args []string, tenantFlag, environmentFlag, confirmEnvironment string) error {
 	if findProjectRoot == nil {
 		findProjectRoot = config.FindProjectRoot
 	}

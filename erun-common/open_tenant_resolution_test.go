@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // openTenantResolutionStore is a minimal OpenStore for exercising
@@ -38,11 +39,11 @@ func noProjectRoot() (string, string, error) {
 
 func TestResolveOpenTenantInferenceForbidden(t *testing.T) {
 	store := openTenantResolutionStore{}
-	_, err := resolveOpenTenant(store, noProjectRoot, OpenParams{UseDefaultTenant: false})
+	_, err := shared.ResolveOpenTenant(store, noProjectRoot, shared.OpenParams{UseDefaultTenant: false})
 	if err == nil {
 		t.Fatal("expected an error when no tenant is given and inference is not permitted")
 	}
-	if !errors.Is(err, ErrOpenTenantNotProvided) {
+	if !errors.Is(err, shared.ErrOpenTenantNotProvided) {
 		t.Fatalf("expected ErrOpenTenantNotProvided, got: %v", err)
 	}
 	msg := err.Error()
@@ -52,18 +53,18 @@ func TestResolveOpenTenantInferenceForbidden(t *testing.T) {
 	if !strings.Contains(msg, "pass a tenant explicitly") {
 		t.Fatalf("error must name its recovery (pass a tenant explicitly): %q", msg)
 	}
-	if errors.Is(err, ErrDefaultTenantNotConfigured) {
+	if errors.Is(err, shared.ErrDefaultTenantNotConfigured) {
 		t.Fatalf("inference-forbidden case must not be mistaken for the inference-permitted-but-unresolved case: %q", msg)
 	}
 }
 
 func TestResolveOpenTenantInferencePermittedButUnresolved(t *testing.T) {
 	store := openTenantResolutionStore{}
-	_, err := resolveOpenTenant(store, noProjectRoot, OpenParams{UseDefaultTenant: true})
+	_, err := shared.ResolveOpenTenant(store, noProjectRoot, shared.OpenParams{UseDefaultTenant: true})
 	if err == nil {
 		t.Fatal("expected an error when no tenant is given and none could be inferred")
 	}
-	if !errors.Is(err, ErrDefaultTenantNotConfigured) {
+	if !errors.Is(err, shared.ErrDefaultTenantNotConfigured) {
 		t.Fatalf("expected ErrDefaultTenantNotConfigured, got: %v", err)
 	}
 	msg := err.Error()
@@ -80,7 +81,7 @@ func TestResolveOpenTenantInferencePermittedButUnresolved(t *testing.T) {
 	if !strings.Contains(msg, "pass a tenant explicitly") || !strings.Contains(msg, "set-default-tenant") {
 		t.Fatalf("error must name its recovery (pass explicitly, or set a default): %q", msg)
 	}
-	if errors.Is(err, ErrOpenTenantNotProvided) {
+	if errors.Is(err, shared.ErrOpenTenantNotProvided) {
 		t.Fatalf("inference-permitted-but-unresolved case must not be mistaken for the inference-forbidden case: %q", msg)
 	}
 }
@@ -104,12 +105,12 @@ func TestResolveOpenTenantNamesTheCommandThatActuallyFailed(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.command, func(t *testing.T) {
-			_, err := resolveOpenTenant(store, noProjectRoot, OpenParams{
+			_, err := shared.ResolveOpenTenant(store, noProjectRoot, shared.OpenParams{
 				UseDefaultTenant:          true,
 				Command:                   tt.command,
 				CommandScopesTenantByFlag: tt.scopesTenantByFlag,
 			})
-			if !errors.Is(err, ErrDefaultTenantNotConfigured) {
+			if !errors.Is(err, shared.ErrDefaultTenantNotConfigured) {
 				t.Fatalf("expected ErrDefaultTenantNotConfigured, got: %v", err)
 			}
 			msg := err.Error()
@@ -140,7 +141,7 @@ func TestResolveOpenTenantNamesTheCommandThatActuallyFailed(t *testing.T) {
 func TestResolveOpenTenantRecoveryFollowsANewlyAdoptingCommand(t *testing.T) {
 	store := openTenantResolutionStore{}
 	const adopting = "erun summarize"
-	_, err := resolveOpenTenant(store, noProjectRoot, OpenParams{
+	_, err := shared.ResolveOpenTenant(store, noProjectRoot, shared.OpenParams{
 		UseDefaultTenant:          true,
 		Command:                   adopting,
 		CommandScopesTenantByFlag: true,
@@ -166,7 +167,7 @@ func TestResolveOpenTenantRecoveryFollowsANewlyAdoptingCommand(t *testing.T) {
 // operator wants.
 func TestResolveOpenTenantCommandWithNonScopingTenantFlagOmitsFlagRemedy(t *testing.T) {
 	store := openTenantResolutionStore{}
-	_, err := resolveOpenTenant(store, noProjectRoot, OpenParams{
+	_, err := shared.ResolveOpenTenant(store, noProjectRoot, shared.OpenParams{
 		UseDefaultTenant:          true,
 		Command:                   "erun list",
 		CommandScopesTenantByFlag: false,

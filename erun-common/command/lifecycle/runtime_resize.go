@@ -9,6 +9,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // A resize turns the standing sizing recommendation (runtime_sizing.go) into
@@ -101,7 +104,7 @@ func validateRuntimeResizeInput(input RuntimeResizeInput, explicitCPU, explicitM
 // hold would then be silently reset to that default. A resource with no
 // verdict reading (no history yet) falls back to the configured value, the
 // only source available for it.
-func liveRuntimePodResources(configured config.RuntimePodResources, recommendation *eruncommon.RuntimeSizingRecommendation) config.RuntimePodResources {
+func liveRuntimePodResources(configured config.RuntimePodResources, recommendation *deploy.RuntimeSizingRecommendation) config.RuntimePodResources {
 	if recommendation == nil {
 		return configured
 	}
@@ -123,7 +126,7 @@ func liveRuntimePodResources(configured config.RuntimePodResources, recommendati
 // resolveRuntimeResizeTarget applies either the standing recommendation or the
 // explicit values on top of the current sizing, leaving whatever the input does
 // not name unchanged.
-func resolveRuntimeResizeTarget(tenant, environment string, current config.RuntimePodResources, input RuntimeResizeInput, recommendation *eruncommon.RuntimeSizingRecommendation, explicitCPU, explicitMemory string) (config.RuntimePodResources, error) {
+func resolveRuntimeResizeTarget(tenant, environment string, current config.RuntimePodResources, input RuntimeResizeInput, recommendation *deploy.RuntimeSizingRecommendation, explicitCPU, explicitMemory string) (config.RuntimePodResources, error) {
 	target := current
 	if !input.ApplyRecommendation {
 		if explicitCPU != "" {
@@ -138,7 +141,7 @@ func resolveRuntimeResizeTarget(tenant, environment string, current config.Runti
 		return config.RuntimePodResources{}, fmt.Errorf("resize: no standing recommendation is available for %s/%s yet — it needs retained usage history, which is only readable from inside the environment's own runtime pod (its resize tool over MCP), not from the host; run `erun usage` a few times first, or resize with explicit --cpu/--memory instead", tenant, environment)
 	}
 	for _, verdict := range recommendation.Verdicts {
-		if verdict.Action != eruncommon.RuntimeSizingRaise && verdict.Action != eruncommon.RuntimeSizingLower {
+		if verdict.Action != deploy.RuntimeSizingRaise && verdict.Action != deploy.RuntimeSizingLower {
 			continue
 		}
 		switch verdict.Resource {
@@ -201,7 +204,7 @@ func runtimeDindResizeActions(current, target config.RuntimePodResources) []Runt
 	return actions
 }
 
-func ResolveRuntimeResizePlan(tenant, environment string, current, currentDind config.RuntimePodResources, ceiling config.NamespaceResourceQuota, input RuntimeResizeInput, recommendation *eruncommon.RuntimeSizingRecommendation) (RuntimeResizePlan, error) {
+func ResolveRuntimeResizePlan(tenant, environment string, current, currentDind config.RuntimePodResources, ceiling config.NamespaceResourceQuota, input RuntimeResizeInput, recommendation *deploy.RuntimeSizingRecommendation) (RuntimeResizePlan, error) {
 	current = config.NormalizeRuntimePodResources(liveRuntimePodResources(current, recommendation))
 	currentDind = config.NormalizeRuntimeDindPodResources(currentDind)
 	explicitCPU := strings.TrimSpace(input.CPU)
@@ -353,13 +356,13 @@ type RuntimeResizeParams struct {
 // (ResolveCurrentDeploySpecs/RunDeploySpecs's own parameters), so resize
 // reuses that exact composition instead of a second one.
 type RuntimeResizeDependencies struct {
-	Store                          eruncommon.DeployStore
-	SaveEnvConfig                  eruncommon.EnvConfigSaver
-	FindProjectRoot                eruncommon.ProjectFinderFunc
-	ResolveDockerBuildContext      eruncommon.BuildContextResolverFunc
-	ResolveKubernetesDeployContext eruncommon.DeployContextResolverFunc
-	Now                            eruncommon.NowFunc
-	DeployHelmChart                eruncommon.HelmChartDeployerFunc
+	Store                          deploy.DeployStore
+	SaveEnvConfig                  deploy.EnvConfigSaver
+	FindProjectRoot                shared.ProjectFinderFunc
+	ResolveDockerBuildContext      shared.BuildContextResolverFunc
+	ResolveKubernetesDeployContext deploy.DeployContextResolverFunc
+	Now                            shared.NowFunc
+	DeployHelmChart                deploy.HelmChartDeployerFunc
 	// LoadActivityLeases reads the leases currently held on the target
 	// environment. Nil means "read the local lease store directly", correct
 	// for the MCP resize tool (always running inside the environment's own
@@ -398,14 +401,14 @@ func traceRuntimeResizePlanActions(ctx core.Context, tenant, environment string,
 // with no way to see why -- the same reasoning `erun list` already prints
 // under `runtime-pod:`, repeated here because resize is where an operator or
 // the desktop's Runtime tab actually watches this recommendation resolve.
-func traceRuntimeSizingRecommendation(ctx core.Context, tenant, environment string, recommendation *eruncommon.RuntimeSizingRecommendation) {
+func traceRuntimeSizingRecommendation(ctx core.Context, tenant, environment string, recommendation *deploy.RuntimeSizingRecommendation) {
 	if recommendation == nil {
 		return
 	}
 	for _, verdict := range recommendation.Verdicts {
-		ctx.Trace(fmt.Sprintf("resize: %s/%s sizing: %s", tenant, environment, eruncommon.FormatRuntimeSizingVerdict(verdict)))
+		ctx.Trace(fmt.Sprintf("resize: %s/%s sizing: %s", tenant, environment, deploy.FormatRuntimeSizingVerdict(verdict)))
 	}
-	ctx.Trace(fmt.Sprintf("resize: %s/%s sizing-evidence: %s", tenant, environment, eruncommon.FormatRuntimeSizingEvidence(*recommendation)))
+	ctx.Trace(fmt.Sprintf("resize: %s/%s sizing-evidence: %s", tenant, environment, deploy.FormatRuntimeSizingEvidence(*recommendation)))
 }
 
 // traceRuntimeResizeOverriddenLeases names every holder the resize is about to
@@ -426,7 +429,7 @@ func applyRuntimeResize(ctx core.Context, deps RuntimeResizeDependencies, tenant
 		return fmt.Errorf("resize: saving the new runtime pod size: %w", err)
 	}
 
-	specs, err := eruncommon.ResolveCurrentDeploySpecs(ctx, deps.Store, deps.FindProjectRoot, deps.ResolveDockerBuildContext, deps.ResolveKubernetesDeployContext, deps.Now, eruncommon.DeployTarget{
+	specs, err := deploy.ResolveCurrentDeploySpecs(ctx, deps.Store, deps.FindProjectRoot, deps.ResolveDockerBuildContext, deps.ResolveKubernetesDeployContext, deps.Now, deploy.DeployTarget{
 		Tenant:      tenant,
 		Environment: environment,
 		RepoPath:    target.RepoPath,
@@ -434,14 +437,14 @@ func applyRuntimeResize(ctx core.Context, deps RuntimeResizeDependencies, tenant
 	if err != nil {
 		return err
 	}
-	if err := eruncommon.RunDeploySpecs(ctx, specs, deps.DeployHelmChart); err != nil {
+	if err := deploy.RunDeploySpecs(ctx, specs, deps.DeployHelmChart); err != nil {
 		return err
 	}
-	return eruncommon.PersistRuntimeVersionFromDeploySpecs(ctx, specs, deps.SaveEnvConfig, eruncommon.ResolveDeployedHelmReleaseVersion)
+	return deploy.PersistRuntimeVersionFromDeploySpecs(ctx, specs, deps.SaveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
 }
 
 func RunRuntimeResize(ctx core.Context, deps RuntimeResizeDependencies, params RuntimeResizeParams) (RuntimeResizeResult, error) {
-	target, err := eruncommon.ResolveOpen(deps.Store, eruncommon.OpenParams{
+	target, err := open.ResolveOpen(deps.Store, shared.OpenParams{
 		Tenant:                    strings.TrimSpace(params.Tenant),
 		Environment:               strings.TrimSpace(params.Environment),
 		UseDefaultTenant:          strings.TrimSpace(params.Tenant) == "",

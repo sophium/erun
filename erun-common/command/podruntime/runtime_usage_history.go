@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 const (
@@ -25,7 +26,7 @@ const (
 // result. now is the time the reading was taken, threaded in explicitly rather
 // than read from the sample, since RuntimeUsage (a reading also returned
 // verbatim by `erun usage`) carries no timestamp of its own.
-func AppendRuntimeUsageSample(history eruncommon.RuntimeUsageHistory, sample config.RuntimeUsage, now time.Time) eruncommon.RuntimeUsageHistory {
+func AppendRuntimeUsageSample(history deploy.RuntimeUsageHistory, sample config.RuntimeUsage, now time.Time) deploy.RuntimeUsageHistory {
 	previous, hasPrevious := history.Latest()
 	// A cumulative counter that went backwards can only mean the container was
 	// replaced. Inferring the restart from the data needs no second source of
@@ -104,7 +105,7 @@ func appendBoundedUsageSamples(samples []config.RuntimeUsage, sample config.Runt
 	return trimmed
 }
 
-func SaveRuntimeUsageHistory(tenant, environment string, history eruncommon.RuntimeUsageHistory) error {
+func SaveRuntimeUsageHistory(tenant, environment string, history deploy.RuntimeUsageHistory) error {
 	path, err := eruncommon.RuntimeUsageHistoryPath(tenant, environment)
 	if err != nil {
 		return err

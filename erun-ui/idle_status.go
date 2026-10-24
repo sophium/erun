@@ -6,11 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
@@ -18,7 +19,7 @@ func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 	if err := errMissingTenantOrEnvironment("load idle status", selection.Tenant, selection.Environment); err != nil {
 		return uiIdleStatus{}, err
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -304,7 +305,7 @@ func (a *App) CancelPendingIdleStop(selection uiSelection) error {
 	if err := errMissingTenantOrEnvironment("cancel pending idle stop", selection.Tenant, selection.Environment); err != nil {
 		return err
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -333,7 +334,7 @@ func (a *App) CancelPendingIdleStop(selection uiSelection) error {
 func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextName string) {
 	selections := a.selectionsForCloudContext(cloudContextName)
 	for _, selection := range selections {
-		result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 			Tenant:      selection.Tenant,
 			Environment: selection.Environment,
 		})
@@ -362,7 +363,7 @@ func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) 
 	if err := errMissingTenantOrEnvironment("load stop history", selection.Tenant, selection.Environment); err != nil {
 		return nil, err
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

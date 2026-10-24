@@ -8,24 +8,24 @@ import (
 	"strings"
 
 	"github.com/manifoldco/promptui"
-	common "github.com/sophium/erun/erun-common"
+	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-func WrapHelmDeployWithReleaseRecovery(promptRunner PromptRunner, deploy common.HelmChartDeployerFunc, recover common.HelmReleaseRecovererFunc) common.HelmChartDeployerFunc {
+func WrapHelmDeployWithReleaseRecovery(promptRunner PromptRunner, deploy deploypkg.HelmChartDeployerFunc, recover deploypkg.HelmReleaseRecovererFunc) deploypkg.HelmChartDeployerFunc {
 	if deploy == nil {
 		return nil
 	}
 	if recover == nil {
-		recover = common.ClearHelmReleasePendingOperation
+		recover = deploypkg.ClearHelmReleasePendingOperation
 	}
 
-	return func(params common.HelmDeployParams) error {
+	return func(params deploypkg.HelmDeployParams) error {
 		err := deploy(params)
 		if err == nil {
 			return nil
 		}
 
-		var pending *common.HelmReleasePendingOperationError
+		var pending *deploypkg.HelmReleasePendingOperationError
 		if !errors.As(err, &pending) || promptRunner == nil {
 			return err
 		}
@@ -60,7 +60,7 @@ func WrapHelmDeployWithReleaseRecovery(promptRunner PromptRunner, deploy common.
 // to run it without a prompt. `erun doctor` draws the same distinction for its
 // own recovery prompts (see doctorConfirm); a real prompt failure still
 // propagates.
-func confirmHelmReleaseRecovery(run PromptRunner, pending *common.HelmReleasePendingOperationError, stderr io.Writer) (bool, error) {
+func confirmHelmReleaseRecovery(run PromptRunner, pending *deploypkg.HelmReleasePendingOperationError, stderr io.Writer) (bool, error) {
 	prompt := promptui.Prompt{
 		Label:     helmReleaseRecoveryPromptLabel(pending),
 		IsConfirm: true,
@@ -95,7 +95,7 @@ func confirmHelmReleaseRecovery(run PromptRunner, pending *common.HelmReleasePen
 // command that runs it without a prompt. The pending error the caller re-reports
 // carries the same remedy; this line is what tells a reader *why* the recovery
 // they were not asked about is not happening.
-func reportHelmRecoveryPromptUnanswered(stderr io.Writer, pending *common.HelmReleasePendingOperationError) {
+func reportHelmRecoveryPromptUnanswered(stderr io.Writer, pending *deploypkg.HelmReleasePendingOperationError) {
 	if stderr == nil {
 		return
 	}
@@ -119,7 +119,7 @@ func IsTrueishEnv(name string) bool {
 	return false
 }
 
-func helmReleaseRecoveryPromptLabel(pending *common.HelmReleasePendingOperationError) string {
+func helmReleaseRecoveryPromptLabel(pending *deploypkg.HelmReleasePendingOperationError) string {
 	if pending == nil {
 		return "clear pending Helm release metadata and retry deploy"
 	}

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // The environment half of the whip pass runs where its target
@@ -47,7 +47,7 @@ var whipNudgeSleep = time.Sleep
 // RemoteAppSessionHeartbeatScript uses, run locally rather than over kubectl
 // exec.
 func environmentWhipSessionAlive(runner WhipCommandRunner, tenant, environment string) (bool, error) {
-	socket := eruncommon.RemoteAppSessionSocketPath(tenant, environment, WhipEnvironmentAgentSessionID)
+	socket := open.RemoteAppSessionSocketPath(tenant, environment, WhipEnvironmentAgentSessionID)
 	script := strings.Join(append(activitypkg.RemoteAppSessionMasterScanLines(socket), `printf '%s' "$master_pid"`), "\n")
 	out, err := runner("sh", "-c", script)
 	if err != nil {
@@ -65,7 +65,7 @@ func environmentWhipSessionAlive(runner WhipCommandRunner, tenant, environment s
 // it. `-r none` skips dtach's own redraw trigger, since this is a push, not an
 // operator reattaching.
 func pushEnvironmentWhipNudge(runner WhipCommandRunner, tenant, environment, text string, settle time.Duration) error {
-	socket := shellSingleQuote(eruncommon.RemoteAppSessionSocketPath(tenant, environment, WhipEnvironmentAgentSessionID))
+	socket := shellSingleQuote(open.RemoteAppSessionSocketPath(tenant, environment, WhipEnvironmentAgentSessionID))
 
 	textScript := fmt.Sprintf("printf %%s %s | timeout 5 dtach -a %s -r none", shellSingleQuote(text), socket)
 	if _, err := runner("sh", "-c", textScript); err != nil {

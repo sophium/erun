@@ -10,7 +10,9 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/workspace"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/mcp"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -44,7 +46,7 @@ func newMCPProxyCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams) error {
+func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams) error {
 	target, err := shared.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
 	if err != nil {
 		return err
@@ -90,7 +92,7 @@ func deprecatedAlias(tool mcp.MCPLocalTool, retired, replacement string) mcp.MCP
 // workspaceSyncLocalTool: it is served here rather than by the edge because
 // the source file is on this host, and the edge runs in the pod with no path
 // back to it.
-func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params common.OpenParams) mcp.MCPLocalTool {
+func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params sharedpkg.OpenParams) mcp.MCPLocalTool {
 	return mcp.MCPLocalTool{
 		Name: "inputs_upload",
 		Description: "Stream a local file on this host into the environment's runtime pod at an explicit destination, byte-identical, without the bytes passing through this call's arguments or your context. " +
@@ -112,7 +114,7 @@ func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params common.OpenPa
 			if err != nil {
 				return "", err
 			}
-			req := common.ShellLaunchParamsFromResult(result)
+			req := cloud.ShellLaunchParamsFromResult(result)
 			var trace bytes.Buffer
 			toolCtx := core.Context{
 				Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &trace, &trace),
@@ -135,7 +137,7 @@ func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params common.OpenPa
 // than by the edge because the mirror is on this host: the edge runs in the pod
 // and has nothing to write to. The environment is resolved per call, so a mirror
 // enabled mid-session is picked up without restarting the session.
-func sshdSyncLocalTool(resolveOpen shared.OpenResolver, params common.OpenParams) mcp.MCPLocalTool {
+func sshdSyncLocalTool(resolveOpen shared.OpenResolver, params sharedpkg.OpenParams) mcp.MCPLocalTool {
 	return mcp.MCPLocalTool{
 		Name: "sshd_sync",
 		Description: "Run one workspace-sync pass for this environment: mirror the pod's git-visible worktree into the host review directory, delete what the pod no longer has, and deliver the pod's cross-built artifacts. " +

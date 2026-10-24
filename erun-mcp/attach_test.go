@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // newAttachTestRuntime scopes a test to a unique tenant/environment pair, so
@@ -236,7 +236,7 @@ func TestAttachRefusesWithoutAttachCapabilityBeforeUpgrade(t *testing.T) {
 		t.Fatalf("status = %d, want %d", status, http.StatusForbidden)
 	}
 
-	socket := eruncommon.RemoteAppSessionSocketPath(runtime.Context.Tenant, runtime.Context.Environment, "denied")
+	socket := open.RemoteAppSessionSocketPath(runtime.Context.Tenant, runtime.Context.Environment, "denied")
 	if _, statErr := os.Stat(socket); !os.IsNotExist(statErr) {
 		t.Fatalf("attach subprocess ran despite the refusal: socket %q exists (stat err %v)", socket, statErr)
 	}
@@ -283,8 +283,8 @@ func TestAttachBridgesPTYAndReportsEndedOutcome(t *testing.T) {
 
 	writeBinary(t, conn, "exit\n")
 	outcome := readOutcomeMessage(t, conn)
-	if outcome.Outcome != eruncommon.AISessionAttachOutcomeEnded {
-		t.Fatalf("outcome = %q, want %q", outcome.Outcome, eruncommon.AISessionAttachOutcomeEnded)
+	if outcome.Outcome != open.AISessionAttachOutcomeEnded {
+		t.Fatalf("outcome = %q, want %q", outcome.Outcome, open.AISessionAttachOutcomeEnded)
 	}
 }
 
@@ -320,9 +320,9 @@ func TestAttachCreatesSessionDirectoryOnAFreshPod(t *testing.T) {
 
 	writeBinary(t, conn, "exit\n")
 	outcome := readOutcomeMessage(t, conn)
-	if outcome.Outcome != eruncommon.AISessionAttachOutcomeEnded {
+	if outcome.Outcome != open.AISessionAttachOutcomeEnded {
 		t.Fatalf("outcome = %q, want %q (a fresh pod's first attach must behave identically to a warm one)",
-			outcome.Outcome, eruncommon.AISessionAttachOutcomeEnded)
+			outcome.Outcome, open.AISessionAttachOutcomeEnded)
 	}
 }
 
@@ -413,8 +413,8 @@ func TestAttachEvictionReportsTakenOverAndPreservesTheSession(t *testing.T) {
 	defer func() { _ = connB.Close() }()
 
 	outcomeA := readOutcomeMessage(t, connA)
-	if outcomeA.Outcome != eruncommon.AISessionAttachOutcomeTakenOver {
-		t.Fatalf("evicted outcome = %q, want %q", outcomeA.Outcome, eruncommon.AISessionAttachOutcomeTakenOver)
+	if outcomeA.Outcome != open.AISessionAttachOutcomeTakenOver {
+		t.Fatalf("evicted outcome = %q, want %q", outcomeA.Outcome, open.AISessionAttachOutcomeTakenOver)
 	}
 
 	writeBinary(t, connB, "echo STILL_ALIVE\n")

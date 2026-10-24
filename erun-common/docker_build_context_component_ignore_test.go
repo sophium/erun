@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/primitive/build"
 )
 
 func writeComponentTreeFile(t *testing.T, root, rel, content string) {
@@ -27,7 +29,7 @@ func TestFindComponentDockerBuildContextResolvesSingleCandidate(t *testing.T) {
 	root := t.TempDir()
 	writeDockerfile(t, root, "erun-devops/docker/erun-dind/Dockerfile")
 
-	context, ok, err := FindComponentDockerBuildContext(root, "erun-dind")
+	context, ok, err := build.FindComponentDockerBuildContext(root, "erun-dind")
 	if err != nil {
 		t.Fatalf("FindComponentDockerBuildContext: %v", err)
 	}
@@ -48,7 +50,7 @@ func TestFindComponentDockerBuildContextRefusesTwoRealCandidates(t *testing.T) {
 	writeDockerfile(t, root, "erun-devops/docker/erun-dind/Dockerfile")
 	writeDockerfile(t, root, "elsewhere/docker/erun-dind/Dockerfile")
 
-	_, ok, err := FindComponentDockerBuildContext(root, "erun-dind")
+	_, ok, err := build.FindComponentDockerBuildContext(root, "erun-dind")
 	if err == nil {
 		t.Fatal("expected a genuinely ambiguous tree to be refused, got no error")
 	}
@@ -74,7 +76,7 @@ func TestFindComponentDockerBuildContextIgnoresCopiesInIgnoredTrees(t *testing.T
 	writeComponentTreeFile(t, root, "erun-docs/.gitignore", "node_modules\n")
 	writeDockerfile(t, root, "erun-docs/node_modules/comlink/docker/erun-dind/Dockerfile")
 
-	context, ok, err := FindComponentDockerBuildContext(root, "erun-dind")
+	context, ok, err := build.FindComponentDockerBuildContext(root, "erun-dind")
 	if err != nil {
 		t.Fatalf("FindComponentDockerBuildContext: %v", err)
 	}

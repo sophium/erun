@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // envEnsureTTL bounds how long one completed reconnect stands in for the next
@@ -160,7 +162,7 @@ func (a *App) runEnvRuntimeEnsure(selection uiSelection, key string, run *envEns
 			a.emitClearEnvNotification(selection.Tenant, selection.Environment, "")
 		}
 	}()
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -239,7 +241,7 @@ func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 // absence: erun could not establish the runtime's state, so offering a
 // deploy would be acting on a state it never confirmed.
 func runtimeCheckFoundDeploymentAbsent(err error) bool {
-	return err != nil && strings.Contains(err.Error(), eruncommon.KubernetesDeploymentAbsentMessageMarker)
+	return err != nil && strings.Contains(err.Error(), deploy.KubernetesDeploymentAbsentMessageMarker)
 }
 
 // surfaceEnvRuntimeStopped renders a stopped environment as stopped and names

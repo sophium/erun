@@ -9,9 +9,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // GateMergeSource is one branch to squash into the prospective merge, in the
@@ -119,7 +119,7 @@ type GateMergeWorkingTreeDependencies struct {
 
 func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependencies) GateMergeWorkingTreeDependencies {
 	if deps.WorkingTreeClean == nil {
-		deps.WorkingTreeClean = eruncommon.GitWorktreeClean
+		deps.WorkingTreeClean = shared.GitWorktreeClean
 	}
 	if deps.ResolveRef == nil {
 		deps.ResolveRef = gitResolveRef
@@ -184,7 +184,7 @@ func GateMergeWorkingTree(ctx core.Context, root string, params GateMergeWorking
 	// drive that has lost the environment stops without touching the tree at
 	// all. Checked in --dry-run too, for the same reason the clean check below
 	// is: it is a read, and a dry run should refuse what a real run refuses.
-	if err := eruncommon.EnsureEnvironmentNotExclusivelyHeld(ctx, "gate-merge", params.UnderLeaseID); err != nil {
+	if err := shared.EnsureEnvironmentNotExclusivelyHeld(ctx, "gate-merge", params.UnderLeaseID); err != nil {
 		return GateMergeWorkingTreeResult{}, err
 	}
 

@@ -12,13 +12,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/mcp"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // StartSession spawns the ERun tab's `erun open` PTY, queued through the
@@ -49,7 +50,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	cols, rows = clampTerminalSize(cols, rows)
 
 	key := openSessionKey(selection, slot)
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -145,7 +146,7 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 	key := localSessionKey(selection, slot)
 
 	repoPath := ""
-	if result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	if result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	}); err == nil {
@@ -233,7 +234,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	cols, rows = clampTerminalSize(cols, rows)
 
 	key := aiSessionKey(selection, slot)
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -375,7 +376,7 @@ func (a *App) StartCreateVersionSession(selection uiSelection, cols, rows int) (
 	if a.ctx == nil {
 		return startSessionResult{}, fmt.Errorf("start create-version session: application context is not ready")
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -589,7 +590,7 @@ func (a *App) OpenIDE(selection uiSelection, ide string) error {
 }
 
 func (a *App) resolveOpenIDEParams(selection uiSelection, ide string) (startTerminalSessionParams, error) {
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -835,7 +836,7 @@ func (a *App) SavePastedFile(sessionID int, payload pastedFilePayload) (pastedFi
 		return pastedFileResult{}, fmt.Errorf("no active terminal session")
 	}
 
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      managed.selection.Tenant,
 		Environment: managed.selection.Environment,
 	})
@@ -862,7 +863,7 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (lifecycle.
 	if err := errMissingTenantOrEnvironment("load diff", selection.Tenant, selection.Environment); err != nil {
 		return lifecycle.DiffResult{}, err
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -933,7 +934,7 @@ func (a *App) ReconnectMCP(selection uiSelection) error {
 	if err := errMissingTenantOrEnvironment("reconnect MCP", selection.Tenant, selection.Environment); err != nil {
 		return err
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -1159,7 +1160,7 @@ func (a *App) EndAISessions(selection uiSelection) (bool, error) {
 		if config, _, err := a.deps.store.LoadERunConfig(); err == nil {
 			gateway = config.OpenRouter
 		}
-		launch := eruncommon.AISessionLaunchCommand(envConfig.AITool, envConfig.Claude, gateway, selection.Tenant, selection.Environment)
+		launch := open.AISessionLaunchCommand(envConfig.AITool, envConfig.Claude, gateway, selection.Tenant, selection.Environment)
 		if launch == strings.TrimSpace(envConfig.AITool) {
 			return false, nil
 		}

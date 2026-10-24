@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // realDockerfilePaths returns every image Dockerfile erun actually builds
@@ -86,7 +89,7 @@ func TestDockerfilesNeverUseAddForLocalContent(t *testing.T) {
 func TestDockerfileCopySourcesContainNoGlobs(t *testing.T) {
 	root := repoRootForDockerignoreTest(t)
 	for _, path := range allDockerfilePaths(t) {
-		sources, err := dockerfileCopySources(path, root)
+		sources, err := buildpkg.DockerfileCopySources(path, root)
 		if err != nil {
 			t.Fatalf("parse COPY sources for %s: %v", path, err)
 		}
@@ -233,7 +236,7 @@ func testStageInstructionLines(text string) []string {
 	inTestStage := false
 	for _, line := range strings.Split(text, "\n") {
 		if dockerfileFromRefPattern.MatchString(line) {
-			inTestStage = dockerfileTestStagePattern.MatchString(line)
+			inTestStage = shared.DockerfileTestStagePattern.MatchString(line)
 			continue
 		}
 		if inTestStage {
@@ -263,7 +266,7 @@ func TestErunBackendAPIOptInE2ESuitesStayInAConsumedTestStage(t *testing.T) {
 	if !dockerfileStageRuns(dockerfileStage{lines: testStageInstructionLines(string(data))}, componentTestCommand) {
 		t.Errorf("%s declares no `test` stage running %s — the component's tests, its database suites included, would never run before its image is built", venue, componentTestCommand)
 	}
-	if !dockerfileHasConsumedTestStage(path) {
+	if !shared.DockerfileHasConsumedTestStage(path) {
 		t.Errorf("%s no longer declares a `test` stage a later stage consumes — without the `AS test` stage and a later stage built or copying from it the image builds and publishes with its tests never run, and a fingerprint written after that build would let later builds reuse an untested result", venue)
 	}
 }

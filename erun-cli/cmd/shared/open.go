@@ -5,9 +5,10 @@ import (
 	"os"
 	"strings"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/sophium/erun/internal"
 )
 
@@ -18,10 +19,10 @@ var CurrentHostOS = func() core.HostOS { return core.DetectHost().OS }
 // via ERUN_FORCE_TTY, the same seam writerIsTerminal already honors.
 var StdinIsTerminal = func() bool { return WriterIsTerminal(os.Stdin) }
 
-func ResolveOpenArgs(command string, args []string, resolveOpen func(common.OpenParams) (config.OpenResult, error)) (common.OpenParams, config.OpenResult, error) {
-	params, err := common.OpenParamsForArgs(args)
+func ResolveOpenArgs(command string, args []string, resolveOpen func(shared.OpenParams) (config.OpenResult, error)) (shared.OpenParams, config.OpenResult, error) {
+	params, err := open.OpenParamsForArgs(args)
 	if err != nil {
-		return common.OpenParams{}, config.OpenResult{}, err
+		return shared.OpenParams{}, config.OpenResult{}, err
 	}
 
 	params.Command = command
@@ -30,10 +31,10 @@ func ResolveOpenArgs(command string, args []string, resolveOpen func(common.Open
 	return params, result, err
 }
 
-func ResolveOpenParams(command string, args []string, overrides common.OpenParams) (common.OpenParams, error) {
-	params, err := common.OpenParamsForArgs(args)
+func ResolveOpenParams(command string, args []string, overrides shared.OpenParams) (shared.OpenParams, error) {
+	params, err := open.OpenParamsForArgs(args)
 	if err != nil {
-		return common.OpenParams{}, err
+		return shared.OpenParams{}, err
 	}
 	if tenant := strings.TrimSpace(overrides.Tenant); tenant != "" {
 		params.Tenant = tenant
@@ -67,12 +68,12 @@ func RunInitBeforeOpen(ctx core.Context, args []string, runInitForArgs func(core
 	return runInitForArgs(ctx, args)
 }
 
-func RunInitBeforeOpenForParams(ctx core.Context, params common.OpenParams, runInitForOpen func(core.Context, common.OpenParams) error) error {
+func RunInitBeforeOpenForParams(ctx core.Context, params shared.OpenParams, runInitForOpen func(core.Context, shared.OpenParams) error) error {
 	ctx.Logger.Debug("running init before resolving open target")
 	return runInitForOpen(ctx, params)
 }
 
-func ResolveOpenWithInitRetry(ctx core.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error) (config.OpenResult, bool, error) {
+func ResolveOpenWithInitRetry(ctx core.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(shared.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error) (config.OpenResult, bool, error) {
 	params, result, err := ResolveOpenArgs(ctx.Command, args, resolveOpen)
 	if !shouldRunInit(err) {
 		return result, false, err
@@ -86,7 +87,7 @@ func ResolveOpenWithInitRetry(ctx core.Context, args []string, shouldRunInit fun
 	return result, true, err
 }
 
-func ResolveOpenWithInitRetryForParams(ctx core.Context, params common.OpenParams, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (config.OpenResult, error), runInitForOpen func(core.Context, common.OpenParams) error) (config.OpenResult, bool, error) {
+func ResolveOpenWithInitRetryForParams(ctx core.Context, params shared.OpenParams, shouldRunInit func(error) bool, resolveOpen func(shared.OpenParams) (config.OpenResult, error), runInitForOpen func(core.Context, shared.OpenParams) error) (config.OpenResult, bool, error) {
 	result, err := resolveOpen(params)
 	if !shouldRunInit(err) {
 		return result, false, err
@@ -101,18 +102,18 @@ func ResolveOpenWithInitRetryForParams(ctx core.Context, params common.OpenParam
 }
 
 func openerIsDefaultError(err error) bool {
-	return errors.Is(err, common.ErrDefaultTenantNotConfigured) ||
-		errors.Is(err, common.ErrDefaultEnvironmentNotConfigured) ||
+	return errors.Is(err, shared.ErrDefaultTenantNotConfigured) ||
+		errors.Is(err, shared.ErrDefaultEnvironmentNotConfigured) ||
 		errors.Is(err, config.ErrNotInitialized)
 }
 
 func shouldInitOpenCommand(err error) bool {
-	return errors.Is(err, common.ErrKubernetesContextNotConfigured)
+	return errors.Is(err, shared.ErrKubernetesContextNotConfigured)
 }
 
 func ShouldRunInitForOpenCommand(err error) bool {
 	return ShouldInitRootCommand(err) ||
-		errors.Is(err, common.ErrTenantNotFound) ||
+		errors.Is(err, shared.ErrTenantNotFound) ||
 		errors.Is(err, config.ErrEnvironmentNotFound)
 }
 

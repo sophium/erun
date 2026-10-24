@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"gopkg.in/yaml.v3"
 )
 
@@ -106,7 +107,7 @@ func writeRuntimeJSON(path string, value any) error {
 }
 
 func (b runtimeBoot) platformAliasEntryPath() string {
-	return filepath.Join(b.platformAliasDir, eruncommon.PlatformAliasEntryKey)
+	return filepath.Join(b.platformAliasDir, deploy.PlatformAliasEntryKey)
 }
 
 func describeRuntimePlatformAlias(boot runtimeBoot) string {
@@ -166,8 +167,8 @@ func readRuntimePlatformAliasEntry(path string) ([]config.CloudProviderConfig, e
 // the store's own function and ships beside the token, so nothing here re-derives
 // it.
 func seedRuntimePlatformAliasToken(boot runtimeBoot, configHome string) error {
-	nameData, nameErr := os.ReadFile(filepath.Join(boot.platformAliasDir, eruncommon.PlatformAliasSecretFileKey))
-	token, tokenErr := os.ReadFile(filepath.Join(boot.platformAliasDir, eruncommon.PlatformAliasSecretTokenKey))
+	nameData, nameErr := os.ReadFile(filepath.Join(boot.platformAliasDir, deploy.PlatformAliasSecretFileKey))
+	token, tokenErr := os.ReadFile(filepath.Join(boot.platformAliasDir, deploy.PlatformAliasSecretTokenKey))
 	if nameErr != nil || tokenErr != nil {
 		return nil
 	}

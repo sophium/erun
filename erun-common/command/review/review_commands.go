@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/primitive/build"
 )
 
 // review_commands.go is the shared planning/execution layer `erun review`
@@ -343,7 +344,7 @@ func RunReviewRecordBuild(ctx core.Context, store config.CloudReadStore, alias s
 	if strings.TrimSpace(params.Version) == "" {
 		return platformclient.PlatformBuild{}, fmt.Errorf("version is required: record the version the build minted")
 	}
-	if err := eruncommon.EnsureNotKnownInfrastructureBuildFailure(params.Successful, params.FailureDetail); err != nil {
+	if err := build.EnsureNotKnownInfrastructureBuildFailure(params.Successful, params.FailureDetail); err != nil {
 		return platformclient.PlatformBuild{}, err
 	}
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, deps)

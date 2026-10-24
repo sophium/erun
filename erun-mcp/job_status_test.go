@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // exec_job_status and exec_job_await both echo back a job's command, and for
@@ -25,7 +25,7 @@ import (
 // LoadEnvironmentJob/LoadEnvironmentJobs read back, without needing a real
 // supervisor process behind it -- job.State exited short-circuits the
 // liveness reconciliation that only applies to a job still claiming running.
-func writeJobFixture(t *testing.T, tenant, environment string, job eruncommon.EnvironmentJob) {
+func writeJobFixture(t *testing.T, tenant, environment string, job shared.EnvironmentJob) {
 	t.Helper()
 	dir, err := activity.EnvironmentActivityDir(tenant, environment)
 	if err != nil {
@@ -44,13 +44,13 @@ func writeJobFixture(t *testing.T, tenant, environment string, job eruncommon.En
 	}
 }
 
-func finishedJobFixture(id string, command []string) eruncommon.EnvironmentJob {
+func finishedJobFixture(id string, command []string) shared.EnvironmentJob {
 	zero := 0
 	now := time.Now()
-	return eruncommon.EnvironmentJob{
+	return shared.EnvironmentJob{
 		ID:        id,
 		Name:      id,
-		State:     eruncommon.EnvironmentJobStateExited,
+		State:     shared.EnvironmentJobStateExited,
 		Command:   command,
 		ExitCode:  &zero,
 		StartedAt: now.Add(-time.Minute),

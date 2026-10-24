@@ -9,11 +9,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
-func NewStopCmd(resolveOpen func(common.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) *cobra.Command {
-	target := common.OpenParams{}
+func NewStopCmd(resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) *cobra.Command {
+	target := sharedpkg.OpenParams{}
 	cmd := &cobra.Command{
 		Use:   "stop [TENANT] [ENVIRONMENT]",
 		Short: "Stop an environment's runtime and return its capacity to the node",
@@ -52,7 +53,7 @@ func NewStopCmd(resolveOpen func(common.OpenParams) (config.OpenResult, error), 
 // other cluster-touching command wires: that preflight starts a stopped cloud
 // context, and starting a machine in order to stop a pod on it is the opposite
 // of what the operator asked for.
-func runStopCommand(ctx core.Context, args []string, overrides common.OpenParams, resolveOpen func(common.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) error {
+func runStopCommand(ctx core.Context, args []string, overrides sharedpkg.OpenParams, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) error {
 	params, err := shared.ResolveOpenParams(ctx.Command, args, overrides)
 	if err != nil {
 		return err

@@ -1,6 +1,10 @@
 package eruncommon
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+)
 
 // TestWindowsDrivePathToWSLMount locks the Windows-drive → WSL2 mount translation
 // a local-agent env's host worktree needs. The local k3s node runs in WSL2, which
@@ -17,7 +21,7 @@ func TestWindowsDrivePathToWSLMount(t *testing.T) {
 		{"posix path passes through unchanged", "/home/erun/git/erun", "/home/erun/git/erun"},
 	}
 	for _, c := range cases {
-		if got := windowsDrivePathToWSLMount(c.in); got != c.want {
+		if got := deploy.WindowsDrivePathToWSLMount(c.in); got != c.want {
 			t.Errorf("%s: windowsDrivePathToWSLMount(%q) = %q, want %q", c.name, c.in, got, c.want)
 		}
 	}

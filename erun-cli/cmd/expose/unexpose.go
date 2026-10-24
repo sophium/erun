@@ -5,15 +5,15 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
-func NewUnexposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func NewUnexposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
 	var skipIfUnconfigured bool
 	var servicesZone string
 	var platformNamespace string
@@ -45,7 +45,7 @@ func NewUnexposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, 
 	return cmd
 }
 
-func runUnexposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot common.ProjectFinderFunc, tenant, environment string, skipIfUnconfigured bool, servicesZone, platformNamespace, erunAlias string) error {
+func runUnexposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot sharedpkg.ProjectFinderFunc, tenant, environment string, skipIfUnconfigured bool, servicesZone, platformNamespace, erunAlias string) error {
 	servicesZone = strings.TrimSpace(servicesZone)
 	platformNamespace = strings.TrimSpace(platformNamespace)
 	// --services-zone/--platform-namespace supply what a project checkout would

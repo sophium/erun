@@ -11,6 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // An agent job's working tree is the one thing its own exit status says
@@ -65,7 +67,7 @@ type environmentJobWorktreeOutcome struct {
 	reason   string
 }
 
-func (o environmentJobWorktreeOutcome) apply(job *eruncommon.EnvironmentJob) {
+func (o environmentJobWorktreeOutcome) apply(job *shared.EnvironmentJob) {
 	job.WorktreeDirty = o.dirty
 	job.WorktreeBranch = o.branch
 	job.WorktreeDetached = o.detached
@@ -86,7 +88,7 @@ func (o environmentJobWorktreeOutcome) apply(job *eruncommon.EnvironmentJob) {
 // writes this job's own outcome into; it is what lets
 // agentJobWorktreeContender look at every sibling job sharing this
 // environment without needing tenant/environment threaded through separately.
-func captureAgentJobWorktreeOutcome(job eruncommon.EnvironmentJob, jobsDir string) environmentJobWorktreeOutcome {
+func captureAgentJobWorktreeOutcome(job shared.EnvironmentJob, jobsDir string) environmentJobWorktreeOutcome {
 	ctx := core.Context{Logger: core.NewLogger(core.VerbosityInfo)}
 	dir, branch, dirty := agentJobDirtyWorktree(ctx, job)
 	if !dirty {
@@ -115,7 +117,7 @@ func captureAgentJobWorktreeOutcome(job eruncommon.EnvironmentJob, jobsDir strin
 // This is deliberately not scoped to agent jobs only: a plain command job
 // (e.g. a detached `git`/build invocation) sharing this worktree is just as
 // much a concurrent writer as another agent job would be.
-func agentJobWorktreeContender(jobsDir string, job eruncommon.EnvironmentJob, now time.Time) (string, bool) {
+func agentJobWorktreeContender(jobsDir string, job shared.EnvironmentJob, now time.Time) (string, bool) {
 	dir := strings.TrimSpace(job.Dir)
 	if jobsDir == "" || dir == "" {
 		return "", false
@@ -124,7 +126,7 @@ func agentJobWorktreeContender(jobsDir string, job eruncommon.EnvironmentJob, no
 	if err != nil {
 		return "", false
 	}
-	hostname := eruncommon.CurrentJobHostname()
+	hostname := build.CurrentJobHostname()
 	for _, entry := range entries {
 		if other, live := agentJobWorktreeContenderCandidate(jobsDir, entry, job.ID, dir, now, hostname); live {
 			return other, true
@@ -144,7 +146,7 @@ func agentJobWorktreeContenderCandidate(jobsDir string, entry os.DirEntry, selfI
 	if strings.TrimSuffix(entry.Name(), ".json") == selfID {
 		return "", false
 	}
-	other, err := eruncommon.ReadEnvironmentJob(filepath.Join(jobsDir, entry.Name()))
+	other, err := shared.ReadEnvironmentJob(filepath.Join(jobsDir, entry.Name()))
 	if err != nil || strings.TrimSpace(other.Dir) != dir {
 		return "", false
 	}
@@ -158,7 +160,7 @@ func agentJobWorktreeContenderCandidate(jobsDir string, entry os.DirEntry, selfI
 // agentJobDirtyWorktree reports whether job is a finished agent job whose Dir
 // is a git working tree with uncommitted changes, and if so, its directory
 // and current branch ("HEAD" literal when detached).
-func agentJobDirtyWorktree(ctx core.Context, job eruncommon.EnvironmentJob) (dir, branch string, dirty bool) {
+func agentJobDirtyWorktree(ctx core.Context, job shared.EnvironmentJob) (dir, branch string, dirty bool) {
 	if job.Kind != EnvironmentJobKindAgent {
 		return "", "", false
 	}

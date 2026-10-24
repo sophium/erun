@@ -6,10 +6,11 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 type UpgradeInput struct {
@@ -41,27 +42,27 @@ func upgradeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 				findProjectRoot := func() (string, string, error) {
 					return runtimeFindProjectRoot(runtime.Context, workDir)
 				}
-				resolveBuildContext := func() (eruncommon.DockerBuildContext, error) {
-					return eruncommon.DockerBuildContextAtDir(workDir)
+				resolveBuildContext := func() (shared.DockerBuildContext, error) {
+					return shared.DockerBuildContextAtDir(workDir)
 				}
-				resolveDeployContext := func() (eruncommon.KubernetesDeployContext, error) {
-					return eruncommon.KubernetesDeployContextAtDir(workDir), nil
+				resolveDeployContext := func() (shared.KubernetesDeployContext, error) {
+					return deploy.KubernetesDeployContextAtDir(workDir), nil
 				}
-				deployTarget := eruncommon.DeployTarget{
+				deployTarget := deploy.DeployTarget{
 					Tenant:          item.Tenant,
 					Environment:     item.Environment,
 					RepoPath:        workDir,
 					VersionOverride: item.Target,
 					Force:           target.Force,
 				}
-				specs, err := eruncommon.ResolveCurrentDeploySpecs(ctx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, deployTarget)
+				specs, err := deploy.ResolveCurrentDeploySpecs(ctx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, deployTarget)
 				if err != nil {
 					return err
 				}
-				if err := eruncommon.RunDeploySpecs(ctx, specs, runtime.DeployHelmChart); err != nil {
+				if err := deploy.RunDeploySpecs(ctx, specs, runtime.DeployHelmChart); err != nil {
 					return err
 				}
-				return eruncommon.PersistRuntimeVersionFromDeploySpecs(ctx, specs, runtime.Store.SaveEnvConfig, eruncommon.ResolveDeployedHelmReleaseVersion)
+				return deploy.PersistRuntimeVersionFromDeploySpecs(ctx, specs, runtime.Store.SaveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
 			}
 
 			result := lifecycle.RunUpgradePlan(runCtx, plan, deployer)

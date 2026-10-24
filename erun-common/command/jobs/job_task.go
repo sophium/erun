@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // A task job runs Go work asynchronously in this process instead of a
@@ -96,28 +97,28 @@ func (p TaskEnvironmentJobParams) normalize() (TaskEnvironmentJobParams, error) 
 // once the record is durable. Unlike StartEnvironmentJob there is nothing to
 // detach or wait for here: the goroutine below is this call's whole
 // supervisor, running for as long as this process does.
-func StartTaskEnvironmentJob(params TaskEnvironmentJobParams) (eruncommon.EnvironmentJob, error) {
+func StartTaskEnvironmentJob(params TaskEnvironmentJobParams) (shared.EnvironmentJob, error) {
 	params, err := params.normalize()
 	if err != nil {
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
-	dir, err := eruncommon.EnvironmentJobDir(params.Tenant, params.Environment)
+	dir, err := shared.EnvironmentJobDir(params.Tenant, params.Environment)
 	if err != nil {
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
 	if err := reserveEnvironmentJobID(core.Context{}, dir, params.ID); err != nil {
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
 	logPath := filepath.Join(dir, params.ID+".log")
 	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
 
-	job := eruncommon.EnvironmentJob{
+	job := shared.EnvironmentJob{
 		ID:               params.ID,
 		Name:             params.Name,
 		State:            EnvironmentJobStateRunning,
@@ -125,7 +126,7 @@ func StartTaskEnvironmentJob(params TaskEnvironmentJobParams) (eruncommon.Enviro
 		PID:              os.Getpid(),
 		StartedAt:        time.Now(),
 		LeaseID:          environmentJobLeaseID(params.ID),
-		Hostname:         eruncommon.CurrentJobHostname(),
+		Hostname:         build.CurrentJobHostname(),
 		StartedByJobID:   params.StartedByJobID,
 		Handoff:          params.Handoff,
 		LogPath:          logPath,
@@ -133,11 +134,11 @@ func StartTaskEnvironmentJob(params TaskEnvironmentJobParams) (eruncommon.Enviro
 	}
 	if err := writeEnvironmentJob(dir, job); err != nil {
 		_ = log.Close()
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
 	recorder := &jobRecorder{dir: dir, job: job}
 	writer := &jobOutputWriter{file: log, limit: params.MaxOutputBytes, onTruncate: func() {
-		recorder.update(func(job *eruncommon.EnvironmentJob) { job.OutputTruncated = true })
+		recorder.update(func(job *shared.EnvironmentJob) { job.OutputTruncated = true })
 	}}
 
 	// Never exclusive: a task job is Go work inside this server's own
@@ -192,8 +193,8 @@ func runTaskEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, stopBeat, 
 		}
 	}
 
-	recorder.update(func(job *eruncommon.EnvironmentJob) {
-		job.State = eruncommon.EnvironmentJobStateExited
+	recorder.update(func(job *shared.EnvironmentJob) {
+		job.State = shared.EnvironmentJobStateExited
 		job.EndedAt = time.Now()
 		job.ExitCode = &code
 		job.Reason = reason

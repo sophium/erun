@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // environment_stop.go is the desktop half of the stop/wake lifecycle. Stopping
@@ -26,7 +27,7 @@ func (a *App) StopEnvironment(selection uiSelection) (uiEnvironmentStopResult, e
 	if err := errMissingTenantOrEnvironment("stop environment", selection.Tenant, selection.Environment); err != nil {
 		return uiEnvironmentStopResult{}, err
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -156,7 +157,7 @@ func (a *App) readRuntimeRunStateForSelection(selection uiSelection) (config.Ope
 	if a.deps.store == nil || a.deps.readRuntimeRunState == nil {
 		return config.OpenResult{}, lifecycle.RuntimeRunState{}, errors.New("the Kubernetes reader is not wired")
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      strings.TrimSpace(selection.Tenant),
 		Environment: strings.TrimSpace(selection.Environment),
 	})
@@ -224,7 +225,7 @@ func (a *App) runtimeStopRemainingComponents(selection uiSelection) []string {
 	if a.deps.store == nil {
 		return nil
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      strings.TrimSpace(selection.Tenant),
 		Environment: strings.TrimSpace(selection.Environment),
 	})

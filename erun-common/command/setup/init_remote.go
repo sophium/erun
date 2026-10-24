@@ -12,6 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 type remoteRepositoryState struct {
@@ -25,7 +27,7 @@ type remoteRepositoryState struct {
 // The env it takes is the one this run just reconciled, so init's own deploy sees
 // the settings this invocation supplied rather than the params they arrived in —
 // the two diverge whenever a flag was omitted and the stored value stands.
-func (s BootstrapRunner) ensureRemoteRepository(params eruncommon.BootstrapInitParams, tenant, envName, projectRoot string, env config.EnvConfig) (config.ShellLaunchParams, eruncommon.RemoteRepositorySpec, remoteProvisionedSecrets, error) {
+func (s BootstrapRunner) ensureRemoteRepository(params open.BootstrapInitParams, tenant, envName, projectRoot string, env config.EnvConfig) (config.ShellLaunchParams, eruncommon.RemoteRepositorySpec, remoteProvisionedSecrets, error) {
 	target := s.remoteRepositoryOpenResult(tenant, envName, env.KubernetesContext, projectRoot, params.ResolvedType())
 	target.EnvConfig.RuntimePod = config.NormalizeRuntimePodResources(env.RuntimePod)
 	// The runtime registry is the one field that redirects chart resolution, so
@@ -67,7 +69,7 @@ func (s BootstrapRunner) ensureRemoteRepository(params eruncommon.BootstrapInitP
 	target.EnvConfig.PlatformAliasSecretName = platformAliasSecret
 	provisioned := remoteProvisionedSecrets{registryCredential: registryCredentialSecretName, platformAlias: platformAliasSecret}
 
-	req := eruncommon.ShellLaunchParamsFromResult(target)
+	req := cloud.ShellLaunchParamsFromResult(target)
 
 	if err := s.ensureRemoteRuntime(target, req, env.RuntimeVersion, env.RuntimeImage, params.MCPAuthPublicKeyPath); err != nil {
 		return config.ShellLaunchParams{}, eruncommon.RemoteRepositorySpec{}, remoteProvisionedSecrets{}, err
@@ -149,7 +151,7 @@ func (s BootstrapRunner) resolvePlatformAliasSecret(target config.OpenResult) (s
 	if provisioned {
 		return name, nil
 	}
-	return eruncommon.ProvisionPlatformAliasSecret(s.Context, store, target.Tenant, namespace, target.EnvConfig.KubernetesContext, deps)
+	return deploy.ProvisionPlatformAliasSecret(s.Context, store, target.Tenant, namespace, target.EnvConfig.KubernetesContext, deps)
 }
 
 func (s BootstrapRunner) writeRemoteInitMarker(req config.ShellLaunchParams, marker eruncommon.RemoteInitMarker) error {
@@ -164,7 +166,7 @@ func (s BootstrapRunner) writeRemoteInitMarker(req config.ShellLaunchParams, mar
 	return nil
 }
 
-func (s BootstrapRunner) remoteRepositorySpecForClone(params eruncommon.BootstrapInitParams, tenant, envName string, req config.ShellLaunchParams, state remoteRepositoryState) (eruncommon.RemoteRepositorySpec, error) {
+func (s BootstrapRunner) remoteRepositorySpecForClone(params open.BootstrapInitParams, tenant, envName string, req config.ShellLaunchParams, state remoteRepositoryState) (eruncommon.RemoteRepositorySpec, error) {
 	repositoryURL, err := s.resolveRemoteRepositoryURL(params, tenant, envName)
 	if err != nil {
 		return eruncommon.RemoteRepositorySpec{}, err
@@ -183,7 +185,7 @@ func (s BootstrapRunner) remoteRepositorySpecForClone(params eruncommon.Bootstra
 	return repository, nil
 }
 
-func (s BootstrapRunner) remoteRepositorySpecWithCredentials(params eruncommon.BootstrapInitParams, tenant, envName string, req config.ShellLaunchParams, state remoteRepositoryState, repository eruncommon.RemoteRepositorySpec) (eruncommon.RemoteRepositorySpec, error) {
+func (s BootstrapRunner) remoteRepositorySpecWithCredentials(params open.BootstrapInitParams, tenant, envName string, req config.ShellLaunchParams, state remoteRepositoryState, repository eruncommon.RemoteRepositorySpec) (eruncommon.RemoteRepositorySpec, error) {
 	repository, err := s.resolveRemoteRepositoryCredentials(params, tenant, envName, repository, state.CodeCommitPublicKey)
 	if err != nil {
 		return eruncommon.RemoteRepositorySpec{}, err
@@ -258,21 +260,21 @@ func (s BootstrapRunner) ensureRemoteRuntime(target config.OpenResult, req confi
 	// localhost port-forward the pod cannot reach, so a later deploy that renders
 	// the correct cluster form rolls the pod. The runtime IMAGE still pulls from
 	// its own registry (publishedDevopsChartRegistry, e.g. ghcr), so create works.
-	spec, err := eruncommon.ResolvePublishedDevopsDeploySpecWithOverrides(s.Context, target, runtimeVersion, "", runtimeImageStated)
+	spec, err := deploy.ResolvePublishedDevopsDeploySpecWithOverrides(s.Context, target, runtimeVersion, "", runtimeImageStated)
 	if err != nil {
 		return err
 	}
 	// Init owns the env's single deploy, so it must also carry the desktop's
 	// MCP-auth key; otherwise the desktop would redeploy right after init just to
 	// inject it, rolling the pod init just created. A blank path is a no-op.
-	if err := eruncommon.ApplyMCPAuthToRuntimeSpec(s.Context, eruncommon.DeployTarget{Tenant: target.Tenant, MCPAuthPublicKeyPath: mcpAuthPublicKeyPath}, &spec); err != nil {
+	if err := deploy.ApplyMCPAuthToRuntimeSpec(s.Context, deploy.DeployTarget{Tenant: target.Tenant, MCPAuthPublicKeyPath: mcpAuthPublicKeyPath}, &spec); err != nil {
 		return err
 	}
-	if err := eruncommon.RunDeploySpec(s.Context, spec, s.DeployHelmChart); err != nil {
+	if err := deploy.RunDeploySpec(s.Context, spec, s.DeployHelmChart); err != nil {
 		return err
 	}
 
-	s.Context.TraceCommand("", "kubectl", eruncommon.KubectlDeploymentWaitArgs(req)...)
+	s.Context.TraceCommand("", "kubectl", cloud.KubectlDeploymentWaitArgs(req)...)
 	if s.Context.DryRun || s.WaitForRemoteRuntime == nil {
 		return nil
 	}
@@ -367,7 +369,7 @@ func remoteGHCRCredentialCheckScript(registry string) string {
 	}, "\n")
 }
 
-func (s BootstrapRunner) resolveRemoteRepositoryURL(params eruncommon.BootstrapInitParams, tenant, envName string) (string, error) {
+func (s BootstrapRunner) resolveRemoteRepositoryURL(params open.BootstrapInitParams, tenant, envName string) (string, error) {
 	if params.RemoteRepositoryURL != "" {
 		return params.RemoteRepositoryURL, nil
 	}
@@ -389,7 +391,7 @@ func (s BootstrapRunner) resolveRemoteRepositoryURL(params eruncommon.BootstrapI
 	return repositoryURL, nil
 }
 
-func (s BootstrapRunner) resolveRemoteRepositoryCredentials(params eruncommon.BootstrapInitParams, tenant, envName string, spec eruncommon.RemoteRepositorySpec, codeCommitPublicKey string) (eruncommon.RemoteRepositorySpec, error) {
+func (s BootstrapRunner) resolveRemoteRepositoryCredentials(params open.BootstrapInitParams, tenant, envName string, spec eruncommon.RemoteRepositorySpec, codeCommitPublicKey string) (eruncommon.RemoteRepositorySpec, error) {
 	if spec.CodeCommitHost == "" || spec.CodeCommitSSHKeyID != "" {
 		return spec, nil
 	}
@@ -421,7 +423,7 @@ func (s BootstrapRunner) resolveRemoteRepositoryCredentials(params eruncommon.Bo
 	return spec, nil
 }
 
-func (s BootstrapRunner) resolveExistingRemoteHostConfig(params eruncommon.BootstrapInitParams, tenant, envName string, req config.ShellLaunchParams, state remoteRepositoryState, repository eruncommon.RemoteRepositorySpec) (eruncommon.RemoteRepositorySpec, bool, error) {
+func (s BootstrapRunner) resolveExistingRemoteHostConfig(params open.BootstrapInitParams, tenant, envName string, req config.ShellLaunchParams, state remoteRepositoryState, repository eruncommon.RemoteRepositorySpec) (eruncommon.RemoteRepositorySpec, bool, error) {
 	if !state.HasSSHConfig {
 		return repository, false, nil
 	}
@@ -454,7 +456,7 @@ func (s BootstrapRunner) resolveExistingRemoteHostConfig(params eruncommon.Boots
 	return repository, true, nil
 }
 
-func (s BootstrapRunner) waitForRemoteKeyImport(params eruncommon.BootstrapInitParams, tenant, envName string, req config.ShellLaunchParams, repository eruncommon.RemoteRepositorySpec, publicKey string) error {
+func (s BootstrapRunner) waitForRemoteKeyImport(params open.BootstrapInitParams, tenant, envName string, req config.ShellLaunchParams, repository eruncommon.RemoteRepositorySpec, publicKey string) error {
 	publicKey = strings.TrimSpace(publicKey)
 	if publicKey != "" {
 		if repository.CodeCommitHost != "" {

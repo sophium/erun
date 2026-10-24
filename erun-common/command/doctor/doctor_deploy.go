@@ -5,19 +5,20 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // DeployRecoveryActionPromptLabel is the interactive confirm shown before the
 // action runs.
-func DeployRecoveryActionPromptLabel(action eruncommon.DeployRecoveryAction, req config.ShellLaunchParams) string {
+func DeployRecoveryActionPromptLabel(action deploy.DeployRecoveryAction, req config.ShellLaunchParams) string {
 	target := strings.TrimSpace(req.Tenant) + "/" + strings.TrimSpace(req.Environment)
 	switch action {
-	case eruncommon.DeployRecoveryClearPendingHelm:
+	case deploy.DeployRecoveryClearPendingHelm:
 		return fmt.Sprintf("Clear the stuck pending helm release for %s?", target)
-	case eruncommon.DeployRecoveryRollback:
+	case deploy.DeployRecoveryRollback:
 		return fmt.Sprintf("Roll back %s to its last successful revision?", target)
 	default:
 		return fmt.Sprintf("Run deploy recovery %q for %s?", action, target)
@@ -28,11 +29,11 @@ func DeployRecoveryActionPromptLabel(action eruncommon.DeployRecoveryAction, req
 // with no prompt, so a caller whose stdin reached EOF is told how to proceed
 // rather than only that the action did not run. It sits beside the prompt label
 // because it is the same question's non-interactive answer.
-func DeployRecoveryActionWithoutPromptHint(action eruncommon.DeployRecoveryAction) string {
+func DeployRecoveryActionWithoutPromptHint(action deploy.DeployRecoveryAction) string {
 	switch action {
-	case eruncommon.DeployRecoveryClearPendingHelm:
+	case deploy.DeployRecoveryClearPendingHelm:
 		return "Re-run with --clear-pending-helm to run it without a prompt."
-	case eruncommon.DeployRecoveryRollback:
+	case deploy.DeployRecoveryRollback:
 		return "Re-run with --rollback to run it without a prompt."
 	default:
 		return "Re-run with the matching flag to run it without a prompt."
@@ -40,11 +41,11 @@ func DeployRecoveryActionWithoutPromptHint(action eruncommon.DeployRecoveryActio
 }
 
 // DeployRecoveryActionDescription is the one-line "Running: …" label.
-func DeployRecoveryActionDescription(action eruncommon.DeployRecoveryAction) string {
+func DeployRecoveryActionDescription(action deploy.DeployRecoveryAction) string {
 	switch action {
-	case eruncommon.DeployRecoveryClearPendingHelm:
+	case deploy.DeployRecoveryClearPendingHelm:
 		return "Clear pending helm release"
-	case eruncommon.DeployRecoveryRollback:
+	case deploy.DeployRecoveryRollback:
 		return "Roll back to the last successful revision"
 	default:
 		return string(action)
@@ -61,15 +62,15 @@ func helmRollbackArgs(req config.ShellLaunchParams) []string {
 	if strings.TrimSpace(req.KubernetesContext) != "" {
 		args = append(args, "--kube-context", req.KubernetesContext)
 	}
-	return append(args, "--wait", "--timeout", eruncommon.DefaultShellLaunchWaitTimeout)
+	return append(args, "--wait", "--timeout", cloud.DefaultShellLaunchWaitTimeout)
 }
 
 // RunDeployRecovery runs the chosen helm-level recovery against the runtime
 // release, mutating the cluster only on a real (non-dry-run) run.
-func RunDeployRecovery(ctx core.Context, req config.ShellLaunchParams, action eruncommon.DeployRecoveryAction) (string, error) {
+func RunDeployRecovery(ctx core.Context, req config.ShellLaunchParams, action deploy.DeployRecoveryAction) (string, error) {
 	switch action {
-	case eruncommon.DeployRecoveryClearPendingHelm:
-		clear := eruncommon.HelmReleaseRecoveryParams{
+	case deploy.DeployRecoveryClearPendingHelm:
+		clear := deploy.HelmReleaseRecoveryParams{
 			ReleaseName:       config.RuntimeReleaseName(req.Tenant),
 			Namespace:         strings.TrimSpace(req.Namespace),
 			KubernetesContext: strings.TrimSpace(req.KubernetesContext),
@@ -82,9 +83,9 @@ func RunDeployRecovery(ctx core.Context, req config.ShellLaunchParams, action er
 		var out bytes.Buffer
 		clear.Stdout = &out
 		clear.Stderr = &out
-		err := eruncommon.ClearHelmReleasePendingOperation(clear)
+		err := deploy.ClearHelmReleasePendingOperation(clear)
 		return strings.TrimSpace(out.String()), err
-	case eruncommon.DeployRecoveryRollback:
+	case deploy.DeployRecoveryRollback:
 		args := helmRollbackArgs(req)
 		ctx.TraceCommand("", "helm", args...)
 		if ctx.DryRun {

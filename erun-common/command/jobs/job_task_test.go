@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func TestStartTaskEnvironmentJobRecordsATypedResult(t *testing.T) {
@@ -121,7 +121,7 @@ func TestStartTaskEnvironmentJobRecoversAPanic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJob: %v", err)
 	}
-	if finished.State != eruncommon.EnvironmentJobStateExited {
+	if finished.State != shared.EnvironmentJobStateExited {
 		t.Fatalf("state = %q, want exited (never left running)", finished.State)
 	}
 	if finished.Succeeded {
@@ -296,7 +296,7 @@ func TestStartTaskEnvironmentJobCapsItsLog(t *testing.T) {
 func TestATaskJobIsFoundByTheJobThatStartedIt(t *testing.T) {
 	tenant, environment := "acme", "dev"
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	dir, err := eruncommon.EnvironmentJobDir(tenant, environment)
+	dir, err := shared.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestATaskJobIsFoundByTheJobThatStartedIt(t *testing.T) {
 func TestAHandoffTaskJobIsExcludedFromItsParentsFinishCheck(t *testing.T) {
 	tenant, environment := "acme", "dev"
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	dir, err := eruncommon.EnvironmentJobDir(tenant, environment)
+	dir, err := shared.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}

@@ -10,10 +10,13 @@ import (
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
-func NewUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
+func NewUpgradeCmd(store deploypkg.DeployStore, saveEnvConfig deploypkg.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploypkg.DeployContextResolverFunc, now sharedpkg.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc) *cobra.Command {
 	var versionOverride string
 	var tenant string
 	var environment string
@@ -98,7 +101,7 @@ func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, 
 	}, nil
 }
 
-func runUpgrade(ctx core.Context, store common.DeployStore, target lifecycle.UpgradeTarget, deploy lifecycle.UpgradeItemDeployer) error {
+func runUpgrade(ctx core.Context, store deploypkg.DeployStore, target lifecycle.UpgradeTarget, deploy lifecycle.UpgradeItemDeployer) error {
 	// A scoped run (the desktop's per-env Upgrade-all fan-out) captures into
 	// that env's trace log; the cross-tenant global run has no single env to
 	// attribute the trace to.
@@ -154,22 +157,22 @@ func printUpgradeDryRunMarker(ctx core.Context) error {
 	return err
 }
 
-func newUpgradeDeployer(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, force bool) lifecycle.UpgradeItemDeployer {
+func newUpgradeDeployer(store deploypkg.DeployStore, saveEnvConfig deploypkg.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploypkg.DeployContextResolverFunc, now sharedpkg.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc, force bool) lifecycle.UpgradeItemDeployer {
 	return func(ctx core.Context, item lifecycle.UpgradePlanItem) error {
-		deployTarget := common.DeployTarget{
+		deployTarget := deploypkg.DeployTarget{
 			Tenant:          item.Tenant,
 			Environment:     item.Environment,
 			VersionOverride: item.Target,
 			Force:           force,
 		}
-		specs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
+		specs, err := deploypkg.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 		if err != nil {
 			return err
 		}
-		if err := common.RunDeploySpecs(ctx, specs, deployHelmChart); err != nil {
+		if err := deploypkg.RunDeploySpecs(ctx, specs, deployHelmChart); err != nil {
 			return err
 		}
-		if err := common.PersistRuntimeVersionFromDeploySpecs(ctx, specs, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion); err != nil {
+		if err := deploypkg.PersistRuntimeVersionFromDeploySpecs(ctx, specs, saveEnvConfig, deploypkg.ResolveDeployedHelmReleaseVersion); err != nil {
 			return err
 		}
 		shared.NoticeStaleRuntimePortForwards(ctx, specs)

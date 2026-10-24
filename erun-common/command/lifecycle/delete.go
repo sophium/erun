@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 type (
@@ -130,7 +130,7 @@ func removePortForwardStateFiles(ctx core.Context, tenant, environment string) e
 // is touched, and only while no other configured environment derives it, so a
 // block a live environment legitimately owns survives.
 func removeEnvironmentSSHConfigAlias(ctx core.Context, store DeleteStore, tenant, environment string, result *DeleteEnvironmentResult) error {
-	alias := eruncommon.SSHHostAlias(tenant, environment)
+	alias := open.SSHHostAlias(tenant, environment)
 	if alias == "" {
 		return nil
 	}
@@ -180,7 +180,7 @@ func sshAliasClaimedByOtherEnvironment(store DeleteStore, tenant, environment, a
 		if name == "" || name == environment {
 			continue
 		}
-		if eruncommon.SSHHostAlias(tenant, name) == alias {
+		if open.SSHHostAlias(tenant, name) == alias {
 			return true, nil
 		}
 	}

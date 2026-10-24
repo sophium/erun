@@ -6,6 +6,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 type (
@@ -107,5 +108,5 @@ func waitForDoctorDaemon(ctx core.Context, req config.ShellLaunchParams, daemon 
 	if daemon.Kind == DoctorDockerDaemonHost {
 		return nil
 	}
-	return eruncommon.TraceAndWaitForRuntime(ctx, req)
+	return cloud.TraceAndWaitForRuntime(ctx, req)
 }

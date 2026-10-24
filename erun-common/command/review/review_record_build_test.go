@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 )
 
 // Every build recorded against a review is RECORDED and carries its version:
@@ -77,13 +77,13 @@ func TestRunReviewRecordBuildRefusesAKnownInfrastructureFailure(t *testing.T) {
 		t.Errorf("expected the refusal before any platform call, got %d calls", calls.Load())
 	}
 
-	if err := eruncommon.EnsureNotKnownInfrastructureBuildFailure(false, "#16 213.0 error Error: https://registry.yarnpkg.com/lucide-react/-/lucide-react-1.34.0.tgz: ESOCKETTIMEDOUT"); err == nil {
+	if err := buildpkg.EnsureNotKnownInfrastructureBuildFailure(false, "#16 213.0 error Error: https://registry.yarnpkg.com/lucide-react/-/lucide-react-1.34.0.tgz: ESOCKETTIMEDOUT"); err == nil {
 		t.Error("a registry download that timed out mid-install must not be recorded as FAILED")
 	}
-	if err := eruncommon.EnsureNotKnownInfrastructureBuildFailure(false, "make: *** [Makefile:1060: check] Error 2"); err != nil {
+	if err := buildpkg.EnsureNotKnownInfrastructureBuildFailure(false, "make: *** [Makefile:1060: check] Error 2"); err != nil {
 		t.Errorf("an ordinary red build must still be recordable as FAILED, got %v", err)
 	}
-	if err := eruncommon.EnsureNotKnownInfrastructureBuildFailure(true, "tls handshake timeout"); err != nil {
+	if err := buildpkg.EnsureNotKnownInfrastructureBuildFailure(true, "tls handshake timeout"); err != nil {
 		t.Errorf("a successful build is never refused, got %v", err)
 	}
 }

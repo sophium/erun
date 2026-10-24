@@ -4,9 +4,10 @@ import (
 	"time"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/podruntime"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -80,12 +81,12 @@ func NewUsageCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runUsageCommand(ctx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams, intervalSeconds float64) error {
+func runUsageCommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, intervalSeconds float64) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
-	req := common.ShellLaunchParamsFromResult(result)
+	req := cloud.ShellLaunchParamsFromResult(result)
 	usage, err := podruntime.RunRuntimeUsage(ctx, nil, nil, req, podruntime.RuntimeUsageParams{
 		Interval: time.Duration(intervalSeconds * float64(time.Second)),
 	})

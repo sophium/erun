@@ -18,7 +18,6 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
@@ -26,6 +25,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	mcppkg "github.com/sophium/erun/erun-common/infra/mcp"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 type initInteractionStore struct{}
@@ -895,7 +896,7 @@ func TestReleaseToolPreview(t *testing.T) {
 	if output.Executed {
 		t.Fatalf("expected preview output, got %+v", output)
 	}
-	if output.Spec.Mode != eruncommon.ReleaseModeCandidate || output.Spec.Version == "" || len(output.Spec.Stages) == 0 {
+	if output.Spec.Mode != shared.ReleaseModeCandidate || output.Spec.Version == "" || len(output.Spec.Stages) == 0 {
 		t.Fatalf("unexpected release output: %+v", output)
 	}
 	if len(output.Spec.DockerImages) != 1 || output.Spec.DockerImages[0].Tag == "" {
@@ -1023,7 +1024,7 @@ func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
 			}
 			return nil
 		},
-		BuildDockerImage: func(eruncommon.DockerBuildSpec, io.Writer, io.Writer) error {
+		BuildDockerImage: func(shared.DockerBuildSpec, io.Writer, io.Writer) error {
 			t.Fatal("unexpected docker build")
 			return nil
 		},
@@ -1071,7 +1072,7 @@ func newComponentBuildFixture(t *testing.T) string {
 func TestBuildToolBuildsComponentWithMultiPlatformSpec(t *testing.T) {
 	projectRoot := newComponentBuildFixture(t)
 
-	var captured *eruncommon.DockerBuildSpec
+	var captured *shared.DockerBuildSpec
 	handler := buildTool(normalizeRuntimeConfig(RuntimeConfig{
 		Context: RuntimeContext{
 			Environment: "dev",
@@ -1081,7 +1082,7 @@ func TestBuildToolBuildsComponentWithMultiPlatformSpec(t *testing.T) {
 			t.Fatal("unexpected build script call: --component must resolve the docker context directly")
 			return nil
 		},
-		BuildDockerImage: func(spec eruncommon.DockerBuildSpec, stdout, stderr io.Writer) error {
+		BuildDockerImage: func(spec shared.DockerBuildSpec, stdout, stderr io.Writer) error {
 			captured = &spec
 			return nil
 		},
@@ -1137,7 +1138,7 @@ func TestBuildToolSurfacesInvalidDockerContext(t *testing.T) {
 			Environment: "dev",
 			RepoPath:    projectRoot,
 		},
-		BuildDockerImage: func(eruncommon.DockerBuildSpec, io.Writer, io.Writer) error {
+		BuildDockerImage: func(shared.DockerBuildSpec, io.Writer, io.Writer) error {
 			t.Fatal("unexpected docker build: resolution must fail before execution")
 			return nil
 		},
@@ -1256,7 +1257,7 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 		EnsureKubernetesNamespace: func(string, string) error {
 			return nil
 		},
-		DeployHelmChart: func(eruncommon.HelmDeployParams) error {
+		DeployHelmChart: func(deploy.HelmDeployParams) error {
 			return nil
 		},
 		WaitForRemoteRuntime: func(configpkg.ShellLaunchParams) error {
@@ -1301,7 +1302,7 @@ func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 		EnsureKubernetesNamespace: func(string, string) error {
 			return nil
 		},
-		DeployHelmChart: func(params eruncommon.HelmDeployParams) error {
+		DeployHelmChart: func(params deploy.HelmDeployParams) error {
 			deployedVersion = params.Version
 			return nil
 		},

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // TestStartSessionStopsReconnectingAfterRepeatedFailures guards against
@@ -552,7 +552,7 @@ func TestSessionTakenOverByAnotherWindowDoesNotReconnect(t *testing.T) {
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			session := newStubTerminalSession()
 			session.initialOutput = append(session.initialOutput,
-				[]byte(eruncommon.ShellSessionTakenOverNotice+"\n")...)
+				[]byte(open.ShellSessionTakenOverNotice+"\n")...)
 			sessionsMu.Lock()
 			sessions = append(sessions, session)
 			sessionsMu.Unlock()

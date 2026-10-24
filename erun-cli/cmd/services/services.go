@@ -9,6 +9,8 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/expose"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -51,12 +53,12 @@ func NewServicesCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runServicesCommand(ctx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams) error {
+func runServicesCommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
-	req := common.ShellLaunchParamsFromResult(result)
+	req := cloud.ShellLaunchParamsFromResult(result)
 	services, err := expose.RunListEnvironmentServices(ctx, req)
 	if err != nil {
 		return fmt.Errorf("cannot list this environment's Services: %w", err)

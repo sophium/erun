@@ -9,6 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 type ListResult struct {
@@ -97,7 +99,7 @@ type ListTenantResult struct {
 	Environments              []eruncommon.ListEnvironmentResult `json:"environments,omitempty"`
 }
 
-func ResolveListResult(store eruncommon.ListStore, findProjectRoot eruncommon.ProjectFinderFunc, params eruncommon.OpenParams) (ListResult, error) {
+func ResolveListResult(store eruncommon.ListStore, findProjectRoot shared.ProjectFinderFunc, params shared.OpenParams) (ListResult, error) {
 	if store == nil {
 		return ListResult{}, fmt.Errorf("store is required")
 	}
@@ -115,7 +117,7 @@ func ResolveListResult(store eruncommon.ListStore, findProjectRoot eruncommon.Pr
 		return ListResult{}, err
 	}
 
-	effectiveResult, effectiveErr := eruncommon.ResolveOpen(store, params)
+	effectiveResult, effectiveErr := open.ResolveOpen(store, params)
 	configDir, configDirErr := configpkg.ERunConfigDir()
 	if configDirErr != nil {
 		return ListResult{}, configDirErr
@@ -245,7 +247,7 @@ func configuredTenantForRepo(repoName string, tenants []configpkg.TenantConfig) 
 	return ""
 }
 
-func detectCurrentRepo(findProjectRoot eruncommon.ProjectFinderFunc) (string, string, error) {
+func detectCurrentRepo(findProjectRoot shared.ProjectFinderFunc) (string, string, error) {
 	if findProjectRoot == nil {
 		findProjectRoot = configpkg.FindProjectRoot
 	}
@@ -307,7 +309,7 @@ func loadListOrchestrators(store eruncommon.ListStore) ([]ListOrchestratorResult
 func loadListDefaultEnvironment(store eruncommon.ListStore, tenant string) (string, error) {
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {
-		return "", eruncommon.ErrDefaultEnvironmentNotConfigured
+		return "", shared.ErrDefaultEnvironmentNotConfigured
 	}
 	config, _, err := store.LoadTenantConfig(tenant)
 	if err != nil {

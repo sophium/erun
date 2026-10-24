@@ -6,9 +6,9 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 func loadAPILog(ctx context.Context, input uiTenantDashboardInput) (string, error) {
@@ -32,7 +32,7 @@ func loadAPILogFromKubernetes(ctx context.Context, kubernetesContext, tenant, en
 	return kubectlText(ctx, kubernetesContext,
 		"--namespace", namespace,
 		"logs",
-		"-l", "app="+eruncommon.APIDeploymentName(tenant),
+		"-l", "app="+open.APIDeploymentName(tenant),
 		"--prefix",
 		"-c", "erun-backend-api",
 		"--tail", "400",

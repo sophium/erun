@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // SSHEnvironmentAlias is one configured environment's standing on the host's
@@ -97,7 +98,7 @@ func newSSHAliasClaims(environments []SSHEnvironmentAlias) sshAliasClaims {
 // isOrphan reports whether alias is one erun derives and no environment
 // answers for. An alias erun did not derive belongs to the operator.
 func (c sshAliasClaims) isOrphan(alias string) bool {
-	if alias == "" || !strings.HasPrefix(alias, SSHHostAliasPrefix) {
+	if alias == "" || !strings.HasPrefix(alias, open.SSHHostAliasPrefix) {
 		return false
 	}
 	return !c.claimed[alias]

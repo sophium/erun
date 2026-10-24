@@ -4,9 +4,9 @@ import (
 	"io"
 	"testing"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // TestDeployRuntimeHealsPersistedVersionOnCachedNoOp guards a real gotcha: a
@@ -24,7 +24,7 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 	const stalePersisted = "1.0.86-snapshot-00000000000000"
 	const registry = "ghcr.io/sophium"
 
-	newRunner := func(resolver common.HelmReleaseVersionResolverFunc, save func(string, config.EnvConfig) error) *resolvedOpenRunner {
+	newRunner := func(resolver deploy.HelmReleaseVersionResolverFunc, save func(string, config.EnvConfig) error) *resolvedOpenRunner {
 		return &resolvedOpenRunner{
 			ctx: core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard)},
 			result: config.OpenResult{
@@ -35,13 +35,13 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 			resolveDeployedVersion: resolver,
 		}
 	}
-	skipHelmExecution := common.DeploySpec{
+	skipHelmExecution := deploy.DeploySpec{
 		Target: config.OpenResult{
 			Tenant:    tenant,
 			EnvConfig: config.EnvConfig{Name: "local", RuntimeVersion: stalePersisted, RuntimeRegistry: registry},
 		},
 		SkipHelm: true,
-		Deploy: common.HelmDeploySpec{
+		Deploy: deploy.HelmDeploySpec{
 			ReleaseName:       config.RuntimeReleaseName(tenant),
 			Namespace:         "erun-local",
 			Version:           mintedVersion,
@@ -108,10 +108,10 @@ func TestDeployRuntimeHealsPersistedRuntimeImage(t *testing.T) {
 	// SkipHelm bypasses RunDeploySpec's real helm/kubectl work (as the cached-
 	// no-op test above does) so this stays a persistence-only unit test; the
 	// resolver above stands in for the running release's own reported version.
-	execution := common.DeploySpec{
+	execution := deploy.DeploySpec{
 		Target:   config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "build"}},
 		SkipHelm: true,
-		Deploy: common.HelmDeploySpec{
+		Deploy: deploy.HelmDeploySpec{
 			ReleaseName:          config.RuntimeReleaseName(tenant),
 			Version:              version,
 			ContainerRegistry:    "ghcr.io/sophium",

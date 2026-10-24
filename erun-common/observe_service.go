@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // ObservedService is one Service in an environment's namespace. It exists so a
@@ -56,9 +58,9 @@ type ServiceItem struct {
 // diagnostic record). RunObservation prefixes its own name onto what it gets
 // back, so its output is unchanged.
 func FetchObservedServices(args []string) ([]ObservedService, error) {
-	raw, stderr, err := RunObserveKubectl(args)
+	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
-		return nil, fmt.Errorf("get service: %w", KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("get service: %w", deploy.KubectlErrorMessage(err, stderr))
 	}
 	var list ServiceList
 	if err := json.Unmarshal(raw, &list); err != nil {

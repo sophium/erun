@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // deploymentAbsentErrorForTest builds the exact "runtime ... is not deployed"
@@ -21,7 +21,7 @@ import (
 // runtimeCheckFoundDeploymentAbsent looks for rather than an ad hoc string.
 func deploymentAbsentErrorForTest(tenant, environment string) error {
 	return fmt.Errorf("runtime for %s/%s %s %q not found in namespace %q); run `erun deploy %s %s` first",
-		tenant, environment, eruncommon.KubernetesDeploymentAbsentMessageMarker, tenant+"-devops", tenant+"-"+environment, tenant, environment)
+		tenant, environment, deploy.KubernetesDeploymentAbsentMessageMarker, tenant+"-devops", tenant+"-"+environment, tenant, environment)
 }
 
 // These tests lock the per-env ensure dedupe: opening an env and respawning

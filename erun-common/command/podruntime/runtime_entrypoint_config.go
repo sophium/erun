@@ -9,6 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,7 +29,7 @@ func describeRuntimeBootConfig(boot runtimeBoot) string {
 // construction. Keys the injection does not carry are preserved, as every
 // config writer preserves them.
 func writeRuntimeBootConfig(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
-	injected, ok := eruncommon.ResolveInjectedRuntimeConfig(boot.env)
+	injected, ok := shared.ResolveInjectedRuntimeConfig(boot.env)
 	if !ok {
 		return nil
 	}
@@ -43,12 +44,12 @@ func writeRuntimeBootConfig(_ core.Context, boot runtimeBoot, _ *runtimeSupervis
 	if err != nil {
 		env = configpkg.EnvConfig{}
 	}
-	env = eruncommon.OverlayInjectedEnvConfig(env, injected.Env)
+	env = shared.OverlayInjectedEnvConfig(env, injected.Env)
 	env.LocalRepoPath = boot.repoDir()
 	return writeRuntimeBootYAML(eruncommon.RuntimeEnvConfigPath(configHome, injected.Tenant, injected.Environment), env)
 }
 
-func writeRuntimeBootRootConfig(configHome string, injected eruncommon.InjectedRuntimeConfig) error {
+func writeRuntimeBootRootConfig(configHome string, injected shared.InjectedRuntimeConfig) error {
 	root, _, err := eruncommon.LoadRuntimeRootConfigForSync(configHome)
 	if err != nil {
 		root = configpkg.ERunConfig{}
@@ -63,7 +64,7 @@ func writeRuntimeBootRootConfig(configHome string, injected eruncommon.InjectedR
 	return writeRuntimeBootYAML(eruncommon.RuntimeRootConfigPath(configHome), root)
 }
 
-func writeRuntimeBootTenantConfig(configHome string, injected eruncommon.InjectedRuntimeConfig) error {
+func writeRuntimeBootTenantConfig(configHome string, injected shared.InjectedRuntimeConfig) error {
 	path := filepath.Join(configHome, configpkg.ConfigRoot, injected.Tenant, configpkg.ConfigFile)
 	tenant := configpkg.TenantConfig{}
 	if data, err := os.ReadFile(path); err == nil {

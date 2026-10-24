@@ -34,16 +34,16 @@ this file for the conventions below.
 
 https://github.com/sophium/erun/issues/2741 splits this module into layers so
 an edit recompiles only its dependents and the compiler enforces primitive
-independence. The base, infra and command layers are in place (`base/*`,
-`infra/*`, `command/*`); the primitives and their orchestration are still the
-root package `eruncommon` until their step lands, and new code is written so
-it would already sit in one layer:
+independence. Every layer is in place: `base/*`, `infra/*`, `primitive/*`
+(with `primitive/shared` beneath the primitives), `orchestration` and
+`command/*`. What the root package `eruncommon` still holds is code two or more
+commands share; new code goes into the layer it belongs to:
 
 ```
 erun-common/
   base/          model/ core/ config/
   infra/         kube/ helm/ gitx/ registry/ platformclient/ cloud/ activity/ mcp/ mcpauth/ mcptools/
-  primitive/     build/ push/ deploy/ open/ release/
+  primitive/     shared/ build/ push/ deploy/ open/ release/
   orchestration/ build --release, --deploy, --push: compositions of primitives
   command/       ai/ doctor/ e2e/ expose/ jobs/ lifecycle/ mergequeue/ observe/ orchestrator/ platform/ podruntime/ review/ setup/ terraform/ workspace/
 ```
@@ -53,7 +53,8 @@ erun-common/
 | `base/model` | stdlib only |
 | `base/core`, `base/config` | lower `base/*` (config → core → model) |
 | `infra/*` | `base/*`; another `infra/*` only where its depguard rule names it |
-| `primitive/*` | `base/*`, `infra/*`; never another primitive |
+| `primitive/shared` | `base/*`, `infra/*` |
+| `primitive/*` | `base/*`, `infra/*`, `primitive/shared`; never another primitive |
 | `orchestration` | `base/*`, `infra/*`, `primitive/*` |
 | `command/*` | anything below, and the root package until the primitives leave it; never another `command/*` |
 | erun-backend-api | `base/*`, `infra/{cloud,mcpauth,mcptools,platformclient}` only |
@@ -89,9 +90,9 @@ erun-common/
 - Test helpers are not shared across packages. A `_test.go` declaration
   cannot be exported, so a helper a moved test needs is copied into that
   package's tests, and moved instead when its own package no longer uses it.
-- Until the rest lands: a primitive's files never call another primitive (the
-  composition goes in an orchestration-shaped file), types and config code
-  never call build, deploy or release, and no new file mixes layers.
+- A primitive never calls another primitive: what two primitives share goes to
+  `primitive/shared`, and a composition of primitives goes in `orchestration`.
+  Types and config code never call build, deploy or release.
 - `cmd/buildcost` measures what one edit costs every module's build, vet and
   test compile; compare a layer's edit before and after its step.
 

@@ -20,6 +20,11 @@ import (
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/push"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 type RuntimeContext struct {
@@ -33,18 +38,18 @@ type RuntimeContext struct {
 type runtimeStore interface {
 	setup.BootstrapStore
 	eruncommon.ListStore
-	eruncommon.DockerStore
-	eruncommon.DeployStore
+	shared.DockerStore
+	deploy.DeployStore
 }
 
 type RuntimeConfig struct {
 	Context                        RuntimeContext
 	Store                          runtimeStore
-	BuildScriptRunner              eruncommon.BuildScriptRunnerFunc
-	BuildDockerImage               eruncommon.DockerImageBuilderFunc
-	PushDockerImage                eruncommon.DockerImagePusherFunc
-	DeployHelmChart                eruncommon.HelmChartDeployerFunc
-	EnsureKubernetesNamespace      eruncommon.NamespaceEnsurerFunc
+	BuildScriptRunner              build.BuildScriptRunnerFunc
+	BuildDockerImage               build.DockerImageBuilderFunc
+	PushDockerImage                shared.DockerImagePusherFunc
+	DeployHelmChart                deploy.HelmChartDeployerFunc
+	EnsureKubernetesNamespace      deploy.NamespaceEnsurerFunc
 	DeleteKubernetesNamespace      lifecycle.NamespaceDeleterFunc
 	WaitForRemoteRuntime           setup.RemoteRuntimeWaitFunc
 	RunRemoteCommand               kube.RemoteCommandRunnerFunc
@@ -80,7 +85,7 @@ type CommandOutput struct {
 	// ClosePullRequest carries what an `exec_close-pr` call actually did.
 	ClosePullRequest *review.ClosePullRequestResult `json:"closePullRequest,omitempty"`
 	// Spec carries the resolved release plan `release` publishes.
-	Spec *eruncommon.ReleaseSpec `json:"spec,omitempty"`
+	Spec *shared.ReleaseSpec `json:"spec,omitempty"`
 	// Interaction carries a structured question `init` needs answered in a
 	// follow-up call, when it cannot resolve one from the input given.
 	Interaction *setup.BootstrapInitInteraction `json:"interaction,omitempty"`
@@ -98,16 +103,16 @@ func normalizeRuntimeConfigBuildDefaults(cfg RuntimeConfig) RuntimeConfig {
 		cfg.Store = config.ConfigStore{}
 	}
 	if cfg.BuildScriptRunner == nil {
-		cfg.BuildScriptRunner = eruncommon.BuildScriptRunner
+		cfg.BuildScriptRunner = build.BuildScriptRunner
 	}
 	if cfg.BuildDockerImage == nil {
-		cfg.BuildDockerImage = eruncommon.DockerImageBuilder
+		cfg.BuildDockerImage = build.DockerImageBuilder
 	}
 	if cfg.PushDockerImage == nil {
-		cfg.PushDockerImage = eruncommon.DockerImagePusher
+		cfg.PushDockerImage = shared.DockerImagePusher
 	}
 	if cfg.DeployHelmChart == nil {
-		cfg.DeployHelmChart = eruncommon.DeployHelmChart
+		cfg.DeployHelmChart = deploy.DeployHelmChart
 	}
 	return cfg
 }
@@ -117,9 +122,9 @@ func normalizeRuntimeConfigRemoteDefaults(cfg RuntimeConfig) RuntimeConfig {
 	if namespaceEnsurer == nil {
 		namespaceEnsurer = kube.EnsureKubernetesNamespace
 	}
-	cfg.DeployHelmChart = eruncommon.WrapHelmChartDeployerWithNamespaceEnsure(namespaceEnsurer, cfg.DeployHelmChart)
+	cfg.DeployHelmChart = deploy.WrapHelmChartDeployerWithNamespaceEnsure(namespaceEnsurer, cfg.DeployHelmChart)
 	if cfg.WaitForRemoteRuntime == nil {
-		cfg.WaitForRemoteRuntime = eruncommon.WaitForShellDeployment
+		cfg.WaitForRemoteRuntime = open.WaitForShellDeployment
 	}
 	if cfg.RunRemoteCommand == nil {
 		cfg.RunRemoteCommand = kube.RunRemoteCommand
@@ -159,9 +164,9 @@ func mirrorToJobLog(capture, log io.Writer) io.Writer {
 	return io.MultiWriter(capture, log)
 }
 
-func runtimePushFunc(runtime RuntimeConfig) eruncommon.DockerPushFunc {
-	return func(ctx core.Context, pushInput eruncommon.DockerPushSpec) error {
-		return eruncommon.RunDockerPush(ctx, pushInput, runtime.PushDockerImage)
+func runtimePushFunc(runtime RuntimeConfig) build.DockerPushFunc {
+	return func(ctx core.Context, pushInput shared.DockerPushSpec) error {
+		return push.RunDockerPush(ctx, pushInput, runtime.PushDockerImage)
 	}
 }
 

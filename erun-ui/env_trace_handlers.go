@@ -10,6 +10,8 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // envTraceTailBytes bounds how much of the per-env trace log one console
@@ -37,7 +39,7 @@ func (a *App) LoadEnvTrace(selection uiSelection) (uiEnvTrace, error) {
 	if err := errMissingTenantOrEnvironment("load environment trace", selection.Tenant, selection.Environment); err != nil {
 		return uiEnvTrace{}, err
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

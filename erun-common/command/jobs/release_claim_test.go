@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // TestClaimReleaseVersionReclaimsTheLeftoversOfACancelledRelease drives the
@@ -26,11 +26,11 @@ func TestClaimReleaseVersionReclaimsTheLeftoversOfACancelledRelease(t *testing.T
 	cancelled := activity.EnvironmentActivityLeaseHolder{Tenant: tenant}
 	start := time.Now()
 
-	cancelledSHA, err := eruncommon.TakeReleaseRepoClaim(ctx, repo, environment, version, cancelled, start, nil)
+	cancelledSHA, err := shared.TakeReleaseRepoClaim(ctx, repo, environment, version, cancelled, start, nil)
 	if err != nil {
 		t.Fatalf("cancelled release's repository claim: %v", err)
 	}
-	if _, err := eruncommon.TakeReleaseVersionClaim(tenant, environment, version, cancelled, exitedProcessPIDForTest(t), start); err != nil {
+	if _, err := shared.TakeReleaseVersionClaim(tenant, environment, version, cancelled, exitedProcessPIDForTest(t), start); err != nil {
 		t.Fatalf("cancelled release's local claim: %v", err)
 	}
 
@@ -42,8 +42,8 @@ func TestClaimReleaseVersionReclaimsTheLeftoversOfACancelledRelease(t *testing.T
 		t.Fatal("the cancelled holder's claim must still be inside its TTL to reproduce the reported refusal")
 	}
 
-	spec := eruncommon.ReleaseSpec{ProjectRoot: repo, Version: version}
-	release, err := eruncommon.ClaimReleaseVersion(ctx, spec, runtimePodEnvForTest(tenant, environment))
+	spec := shared.ReleaseSpec{ProjectRoot: repo, Version: version}
+	release, err := shared.ClaimReleaseVersion(ctx, spec, runtimePodEnvForTest(tenant, environment))
 	if err != nil {
 		t.Fatalf("the next attempt in this environment must reclaim a cancelled holder's claim, got: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestClaimReleaseVersionReclaimsTheLeftoversOfACancelledRelease(t *testing.T
 
 	// The reclaim is a real one: the version's claim ref now names this
 	// attempt, so a release elsewhere is refused from here on.
-	sha, exists, err := eruncommon.GitLsRemoteRef(ctx, repo, eruncommon.ReleaseRepoClaimRemote, eruncommon.ReleaseRepoClaimRef(version))
+	sha, exists, err := shared.GitLsRemoteRef(ctx, repo, shared.ReleaseRepoClaimRemote, shared.ReleaseRepoClaimRef(version))
 	if err != nil || !exists {
 		t.Fatalf("expected the reclaiming attempt to hold the version's claim, exists=%v err=%v", exists, err)
 	}
@@ -76,9 +76,9 @@ func runtimePodEnvForTest(tenant, environment string) func(string) string {
 
 // readReleaseRepoClaimForTest reads a claim blob back by its sha, failing the
 // test rather than returning an error it would only ever report the same way.
-func readReleaseRepoClaimForTest(t *testing.T, ctx core.Context, repo, sha string) eruncommon.ReleaseRepoClaimRecord {
+func readReleaseRepoClaimForTest(t *testing.T, ctx core.Context, repo, sha string) shared.ReleaseRepoClaimRecord {
 	t.Helper()
-	record, err := eruncommon.ReadReleaseRepoClaimBlob(ctx, repo, sha)
+	record, err := shared.ReadReleaseRepoClaimBlob(ctx, repo, sha)
 	if err != nil {
 		t.Fatalf("reading back claim %s: %v", sha, err)
 	}

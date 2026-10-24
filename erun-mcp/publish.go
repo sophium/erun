@@ -6,8 +6,10 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 var errMissingPublishVersion = errors.New("publish requires a version: it mirrors an already-built version's images from the FROM to the TO registry and never builds — set the version input")
@@ -28,19 +30,19 @@ func publishTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 			findProjectRoot := func() (string, string, error) {
 				return runtimeFindProjectRoot(runtime.Context, workDir)
 			}
-			resolveBuildContext := func() (eruncommon.DockerBuildContext, error) {
-				return eruncommon.DockerBuildContextAtDir(workDir)
+			resolveBuildContext := func() (shared.DockerBuildContext, error) {
+				return shared.DockerBuildContextAtDir(workDir)
 			}
-			resolveDeployContext := func() (eruncommon.KubernetesDeployContext, error) {
-				return eruncommon.KubernetesDeployContextAtDir(workDir), nil
+			resolveDeployContext := func() (shared.KubernetesDeployContext, error) {
+				return deploy.KubernetesDeployContextAtDir(workDir), nil
 			}
-			target := eruncommon.DeployTarget{
+			target := deploy.DeployTarget{
 				Tenant:          strings.TrimSpace(runtime.Context.Tenant),
 				Environment:     strings.TrimSpace(runtime.Context.Environment),
 				RepoPath:        workDir,
 				VersionOverride: strings.TrimSpace(input.Version),
 			}
-			return eruncommon.RunPublish(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target)
+			return orchestration.RunPublish(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target)
 		})
 		envelope, err := runJobEnvelope(runtime, "publish", input.JobEnvelopeInput, input.Preview, execute)
 		return nil, envelope, err

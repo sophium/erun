@@ -16,6 +16,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // repoRootForOverviewDocTest returns the repo root. erun-mcp sits directly
@@ -299,7 +300,7 @@ func TestMCPOverviewEnvironmentExampleMatchesTheResolvedJSON(t *testing.T) {
 		Idle:  &activity.EnvironmentIdleStatus{Policy: policy, StopEligible: true},
 		Health: &eruncommon.EnvironmentHealth{
 			RootConfig: eruncommon.RootConfigInspection{ConfigStatus: eruncommon.RootConfigStatusOK},
-			Deploy:     eruncommon.DeployDiagnosisResult{HelmStatus: "STATUS: deployed"},
+			Deploy:     deploy.DeployDiagnosisResult{HelmStatus: "STATUS: deployed"},
 		},
 	}
 	encoded, err := json.Marshal(fixture)

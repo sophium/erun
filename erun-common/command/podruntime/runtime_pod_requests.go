@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // RuntimePodRequestsRunnerFunc runs the one read-only kubectl invocation this
@@ -58,9 +58,9 @@ func readRuntimeUsageRequests(ctx core.Context, runner RuntimePodRequestsRunnerF
 // observe's pod read runs, with its stderr folded into the error so an
 // unreachable API server is reported as what it is.
 func runPodRequestsKubectl(args []string) ([]byte, error) {
-	raw, stderr, err := eruncommon.RunObserveKubectl(args)
+	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
-		return nil, fmt.Errorf("kubectl get pods: %w", eruncommon.KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("kubectl get pods: %w", deploy.KubectlErrorMessage(err, stderr))
 	}
 	return raw, nil
 }
@@ -72,7 +72,7 @@ func parseRuntimePodRequests(raw []byte) (*config.RuntimeUsageRequests, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return nil, fmt.Errorf("kubectl returned no pod list for this environment's release")
 	}
-	list, ok := eruncommon.ParsePodStatusList(raw)
+	list, ok := deploy.ParsePodStatusList(raw)
 	if !ok {
 		return nil, fmt.Errorf("unrecognized kubectl output")
 	}
@@ -96,8 +96,8 @@ func parseRuntimePodRequests(raw []byte) (*config.RuntimeUsageRequests, error) {
 // actually serving is the Running one, so it wins over a Pending or terminating
 // predecessor; a name-sorted first pod decides everything else, so the reading
 // is deterministic rather than dependent on list order.
-func selectRuntimePodForRequests(items []eruncommon.PodStatusItem) (eruncommon.PodStatusItem, bool) {
-	running := make([]eruncommon.PodStatusItem, 0, len(items))
+func selectRuntimePodForRequests(items []deploy.PodStatusItem) (deploy.PodStatusItem, bool) {
+	running := make([]deploy.PodStatusItem, 0, len(items))
 	for _, item := range items {
 		if strings.EqualFold(strings.TrimSpace(item.Status.Phase), "Running") {
 			running = append(running, item)
@@ -108,7 +108,7 @@ func selectRuntimePodForRequests(items []eruncommon.PodStatusItem) (eruncommon.P
 		preferred = items
 	}
 	if len(preferred) == 0 {
-		return eruncommon.PodStatusItem{}, false
+		return deploy.PodStatusItem{}, false
 	}
 	selected := preferred[0]
 	for _, item := range preferred[1:] {
@@ -123,7 +123,7 @@ func selectRuntimePodForRequests(items []eruncommon.PodStatusItem) (eruncommon.P
 // quantity this parser cannot read is an error rather than a zero: reporting a
 // smaller reservation than the pod declares is the one wrong answer that
 // matters here, since the whole reading exists to be compared against a limit.
-func declaredContainerRequests(pod eruncommon.PodStatusItem) (map[string]config.KubernetesRequests, error) {
+func declaredContainerRequests(pod deploy.PodStatusItem) (map[string]config.KubernetesRequests, error) {
 	containers := make(map[string]config.KubernetesRequests, len(pod.Spec.Containers))
 	for _, container := range pod.Spec.Containers {
 		requests, err := kubernetesRequestsFromValues(container.Resources.Requests)
@@ -139,7 +139,7 @@ func declaredContainerRequests(pod eruncommon.PodStatusItem) (map[string]config.
 }
 
 // effectivePodRequests is the request the scheduler admits the pod on.
-func effectivePodRequests(pod eruncommon.PodStatusItem) (config.KubernetesRequests, error) {
+func effectivePodRequests(pod deploy.PodStatusItem) (config.KubernetesRequests, error) {
 	return EffectiveKubernetesPodRequests(
 		kubernetesContainerResources(pod.Spec.Containers),
 		kubernetesContainerResources(pod.Spec.InitContainers),
@@ -160,7 +160,7 @@ type KubernetesContainerResources struct {
 	Requests map[string]string
 }
 
-func kubernetesContainerResources(containers []eruncommon.SpecContainerEntry) []KubernetesContainerResources {
+func kubernetesContainerResources(containers []deploy.SpecContainerEntry) []KubernetesContainerResources {
 	out := make([]KubernetesContainerResources, 0, len(containers))
 	for _, container := range containers {
 		out = append(out, KubernetesContainerResources{

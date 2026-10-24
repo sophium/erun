@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/build"
 )
 
 // runtimePodRequestsList is `kubectl get pods -o json` for a local-agent
@@ -72,7 +72,7 @@ func TestUsageRequestsReportThePodsOwnDeclaredRequests(t *testing.T) {
 	if runtime.MemoryBytes != 1024*(1<<20) {
 		t.Errorf("runtime container memory request = %d bytes, want 1024Mi", runtime.MemoryBytes)
 	}
-	dind := requests.Containers[eruncommon.RuntimeDindContainerName]
+	dind := requests.Containers[build.RuntimeDindContainerName]
 	if dind.CPUMilli != 250 || dind.MemoryBytes != 1024*(1<<20) {
 		t.Errorf("expected the erun-dind sidecar's own 0.25 CPU / 1024Mi request, got %+v", dind)
 	}

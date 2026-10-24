@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // orchestrator_launch_settings.go holds the CLI's writers for an orchestrator's
@@ -43,7 +43,7 @@ func ParseOrchestratorModelFlag(value string) (string, error) {
 // ParseOrchestratorEffortFlag resolves a CLI-facing effort token into the value
 // OrchestratorConfig.Effort stores, validated by SetOrchestratorEffort.
 func ParseOrchestratorEffortFlag(value string) (string, error) {
-	return parseOrchestratorLaunchSettingFlag("effort", "one of "+strings.Join(eruncommon.ClaudeEffortLevels, ", "), value)
+	return parseOrchestratorLaunchSettingFlag("effort", "one of "+strings.Join(open.ClaudeEffortLevels, ", "), value)
 }
 
 func parseOrchestratorLaunchSettingFlag(setting, expected, value string) (string, error) {

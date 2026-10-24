@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"sort"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/podruntime"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 func WriteUsageResult(ctx core.Context, report podruntime.RuntimeUsageReport) error {
@@ -226,7 +226,7 @@ func writeUsageWarnings(ctx core.Context, warnings []string) error {
 // observed rather than silence about a saturated one: a memory warning is
 // derived from the same evidence and the same threshold as a raise, so a
 // warning always arrives with its verdict.
-func writeUsageSizing(ctx core.Context, sizing *common.RuntimeSizingRecommendation) error {
+func writeUsageSizing(ctx core.Context, sizing *deploy.RuntimeSizingRecommendation) error {
 	if sizing == nil {
 		return nil
 	}

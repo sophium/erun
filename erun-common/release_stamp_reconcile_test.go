@@ -2,6 +2,8 @@ package eruncommon
 
 import (
 	"testing"
+
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // A release that fails after its "release" stage stamp commit leaves that
@@ -23,7 +25,7 @@ import (
 // stage must carry no add/commit commands at all, only the (already
 // idempotent, via canSkipExistingReleaseTag) tag command.
 func TestNewReleaseStageOmitsCommitWhenNoFileUpdatesAreNeeded(t *testing.T) {
-	stage := newReleaseStage("/tmp/release-stamp-test", nil, "1.2.3", ReleaseModeStable)
+	stage := shared.NewReleaseStage("/tmp/release-stamp-test", nil, "1.2.3", shared.ReleaseModeStable)
 	for _, command := range stage.GitCommands {
 		if len(command.Args) > 0 && command.Args[0] == "commit" {
 			t.Fatalf("expected no commit command when no file updates are needed, got %v", command.Args)

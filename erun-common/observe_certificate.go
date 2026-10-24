@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // ObservedCertificate is a cert-manager Certificate's readiness. Orders is
@@ -207,12 +208,12 @@ func parseOwnedResourceList(raw []byte) ([]OwnedResourceItem, error) {
 }
 
 func fetchOwnedResourceList(args []string, kind string) ([]OwnedResourceItem, error) {
-	raw, stderr, err := RunObserveKubectl(args)
+	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
 		if isKubectlUnknownResource(stderr) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("observe: get %s: %w", kind, KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("observe: get %s: %w", kind, deploy.KubectlErrorMessage(err, stderr))
 	}
 	return parseOwnedResourceList(raw)
 }
@@ -223,12 +224,12 @@ func fetchOwnedResourceList(args []string, kind string) ([]OwnedResourceItem, er
 // that walk is itself conditional on what the first read finds, so its
 // kubectl calls are traced only when they actually run.
 func FetchObservedCertificates(ctx core.Context, req config.ShellLaunchParams, certArgs []string) ([]ObservedCertificate, error) {
-	raw, stderr, err := RunObserveKubectl(certArgs)
+	raw, stderr, err := deploy.RunObserveKubectl(certArgs)
 	if err != nil {
 		if isKubectlUnknownResource(stderr) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("observe: get certificates: %w", KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("observe: get certificates: %w", deploy.KubectlErrorMessage(err, stderr))
 	}
 	var list certificateList
 	if err := json.Unmarshal(raw, &list); err != nil {

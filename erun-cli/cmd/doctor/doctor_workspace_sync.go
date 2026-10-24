@@ -5,10 +5,10 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // runWorkspaceSyncDoctor diagnoses, and optionally repairs, the host-side SSH
@@ -80,7 +80,7 @@ func anyDoctorActionRequested(flags ...bool) bool {
 // it would run instead of touching the filesystem or the network, so the
 // integration goldens stay deterministic.
 func diagnoseAndReportWorkspaceSync(ctx core.Context, result config.OpenResult) (bool, error) {
-	info := common.SSHConnectionInfoForResult(result)
+	info := open.SSHConnectionInfoForResult(result)
 	mirror := shared.ValueOrNone(strings.TrimSpace(result.EnvConfig.SSHD.WorkspaceSync.LocalPath))
 	if _, err := fmt.Fprintf(ctx.Stdout, "== Workspace sync (host mirror) ==\n  host alias: %s\n  mirror: %s\n", info.HostAlias, mirror); err != nil {
 		return false, err
@@ -184,7 +184,7 @@ func persistWorkspaceSyncKeyPath(ctx core.Context, configStore config.ConfigStor
 }
 
 func writeWorkspaceSyncLocalSSHConfig(ctx core.Context, result config.OpenResult) error {
-	info := common.SSHConnectionInfoForResult(result)
+	info := open.SSHConnectionInfoForResult(result)
 	if ctx.DryRun {
 		ctx.Trace(fmt.Sprintf("workspace-sync: write ssh config host %s for %s/%s", info.HostAlias, result.Tenant, result.Environment))
 		return nil
@@ -201,7 +201,7 @@ func writeWorkspaceSyncLocalSSHConfig(ctx core.Context, result config.OpenResult
 // mirror can now sync or names the one remaining step the repair will not run —
 // a redeploy to deploy SSHD into the pod.
 func reportWorkspaceSyncRepairOutcome(ctx core.Context, result config.OpenResult) error {
-	info := common.SSHConnectionInfoForResult(result)
+	info := open.SSHConnectionInfoForResult(result)
 	if ctx.DryRun {
 		ctx.TraceCommand("", "ssh", workspaceSyncReachArgs(info.HostAlias)...)
 		return nil

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // reportedRuntimePodEnvNames is the `erun-devops` container's environment
@@ -151,12 +151,12 @@ func TestRunDeployDiagnosisNamesTheMissingGatewayRouting(t *testing.T) {
 	writeDoctorHelmStub(t, "NAME: frs-devops\nSTATUS: deployed\nREVISION: 42\n", "", 0)
 	stub := writeRuntimeKubectlStub(t, runtimeDeploymentJSON(config.DevopsComponentName, reportedRuntimePodEnvNames()))
 
-	diagnosis := eruncommon.RunDeployDiagnosis(testTraceContext(false), gatewayDiagnosisRequest(reportedGateway()))
+	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), gatewayDiagnosisRequest(reportedGateway()))
 
 	status := diagnosis.AgentCredentials
-	if status.State != eruncommon.RuntimeAgentCredentialMissing {
+	if status.State != deploy.RuntimeAgentCredentialMissing {
 		t.Fatalf("AgentCredentials.State = %q, want %q (readError=%q)",
-			status.State, eruncommon.RuntimeAgentCredentialMissing, status.ReadError)
+			status.State, deploy.RuntimeAgentCredentialMissing, status.ReadError)
 	}
 	if status.GatewayBaseURL != "https://openrouter.ai/api" {
 		t.Fatalf("AgentCredentials.GatewayBaseURL = %q, want the configured gateway", status.GatewayBaseURL)
@@ -174,7 +174,7 @@ func TestRunDeployDiagnosisNamesTheMissingGatewayRouting(t *testing.T) {
 	// recovery classifier is right to find nothing wrong with it. The agent
 	// answer is the one fact that was missing, and it does not make the release
 	// unhealthy.
-	if action, ok := eruncommon.RecommendedDeployRecovery(diagnosis); ok {
+	if action, ok := deploy.RecommendedDeployRecovery(diagnosis); ok {
 		t.Fatalf("RecommendedDeployRecovery = %q, want no action for a release that is deployed", action)
 	}
 }
@@ -185,13 +185,13 @@ func TestRunDeployDiagnosisNamesTheMissingGatewayRouting(t *testing.T) {
 // indistinguishable from one that reports "missing" for everything.
 func TestRunDeployDiagnosisConfirmsGatewayRoutingWhenTheTemplateCarriesIt(t *testing.T) {
 	writeDoctorHelmStub(t, "NAME: frs-devops\nSTATUS: deployed\nREVISION: 42\n", "", 0)
-	carrying := append([]string{eruncommon.GatewayBaseURLEnv, "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"}, reportedRuntimePodEnvNames()...)
+	carrying := append([]string{deploy.GatewayBaseURLEnv, "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL"}, reportedRuntimePodEnvNames()...)
 	writeRuntimeKubectlStub(t, runtimeDeploymentJSON(config.DevopsComponentName, carrying))
 
-	diagnosis := eruncommon.RunDeployDiagnosis(testTraceContext(false), gatewayDiagnosisRequest(reportedGateway()))
+	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), gatewayDiagnosisRequest(reportedGateway()))
 
-	if got := diagnosis.AgentCredentials.State; got != eruncommon.RuntimeAgentCredentialConfigured {
-		t.Fatalf("AgentCredentials.State = %q, want %q", got, eruncommon.RuntimeAgentCredentialConfigured)
+	if got := diagnosis.AgentCredentials.State; got != deploy.RuntimeAgentCredentialConfigured {
+		t.Fatalf("AgentCredentials.State = %q, want %q", got, deploy.RuntimeAgentCredentialConfigured)
 	}
 }
 
@@ -205,10 +205,10 @@ func TestRunDeployDiagnosisMakesNoAgentClaimWithoutAGateway(t *testing.T) {
 	writeDoctorHelmStub(t, "NAME: frs-devops\nSTATUS: deployed\nREVISION: 42\n", "", 0)
 	stub := writeRuntimeKubectlStub(t, runtimeDeploymentJSON(config.DevopsComponentName, reportedRuntimePodEnvNames()))
 
-	diagnosis := eruncommon.RunDeployDiagnosis(testTraceContext(false), gatewayDiagnosisRequest(nil))
+	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), gatewayDiagnosisRequest(nil))
 
-	if got := diagnosis.AgentCredentials.State; got != eruncommon.RuntimeAgentCredentialNotApplicable {
-		t.Fatalf("AgentCredentials.State = %q, want %q", got, eruncommon.RuntimeAgentCredentialNotApplicable)
+	if got := diagnosis.AgentCredentials.State; got != deploy.RuntimeAgentCredentialNotApplicable {
+		t.Fatalf("AgentCredentials.State = %q, want %q", got, deploy.RuntimeAgentCredentialNotApplicable)
 	}
 	if stub.askedFor(t, "get deployment") {
 		t.Fatalf("an install with no gateway paid for a pod-template read anyway; invocations: %v", stub.invocations(t))
@@ -223,11 +223,11 @@ func TestRunDeployDiagnosisDoesNotCallAnUnreadTemplateMissing(t *testing.T) {
 	writeDoctorHelmStub(t, "NAME: frs-devops\nSTATUS: deployed\nREVISION: 42\n", "", 0)
 	writeKubectlStub(t, `Error from server (Forbidden): deployments.apps "frs-devops" is forbidden`, 1)
 
-	diagnosis := eruncommon.RunDeployDiagnosis(testTraceContext(false), gatewayDiagnosisRequest(reportedGateway()))
+	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), gatewayDiagnosisRequest(reportedGateway()))
 
 	status := diagnosis.AgentCredentials
-	if status.State != eruncommon.RuntimeAgentCredentialUnknown {
-		t.Fatalf("AgentCredentials.State = %q, want %q", status.State, eruncommon.RuntimeAgentCredentialUnknown)
+	if status.State != deploy.RuntimeAgentCredentialUnknown {
+		t.Fatalf("AgentCredentials.State = %q, want %q", status.State, deploy.RuntimeAgentCredentialUnknown)
 	}
 	if status.ReadError == "" {
 		t.Fatalf("AgentCredentials.ReadError is empty, want the reason the template could not be read")
@@ -245,72 +245,72 @@ func TestResolveRuntimeAgentCredentialStatus(t *testing.T) {
 	optedOut := false
 	cases := []struct {
 		name   string
-		params eruncommon.RuntimeAgentCredentialParams
-		want   eruncommon.RuntimeAgentCredentialState
+		params deploy.RuntimeAgentCredentialParams
+		want   deploy.RuntimeAgentCredentialState
 	}{
 		{
 			name:   "no catalog configured",
-			params: eruncommon.RuntimeAgentCredentialParams{Container: config.DevopsComponentName, ContainerEnvObserved: true},
-			want:   eruncommon.RuntimeAgentCredentialNotApplicable,
+			params: deploy.RuntimeAgentCredentialParams{Container: config.DevopsComponentName, ContainerEnvObserved: true},
+			want:   deploy.RuntimeAgentCredentialNotApplicable,
 		},
 		{
 			name: "the environment opted out of the catalog",
-			params: eruncommon.RuntimeAgentCredentialParams{
+			params: deploy.RuntimeAgentCredentialParams{
 				Claude:               config.EnvironmentClaudeConfig{UseGateway: &optedOut},
 				Gateway:              reportedGateway(),
 				Container:            config.DevopsComponentName,
 				ContainerEnvObserved: true,
 			},
-			want: eruncommon.RuntimeAgentCredentialNotApplicable,
+			want: deploy.RuntimeAgentCredentialNotApplicable,
 		},
 		{
 			name: "the template carries the routing variable",
-			params: eruncommon.RuntimeAgentCredentialParams{
+			params: deploy.RuntimeAgentCredentialParams{
 				Gateway:              reportedGateway(),
 				Container:            config.DevopsComponentName,
 				ContainerEnvObserved: true,
-				ContainerEnvNames:    []string{"HOME", eruncommon.GatewayBaseURLEnv},
+				ContainerEnvNames:    []string{"HOME", deploy.GatewayBaseURLEnv},
 			},
-			want: eruncommon.RuntimeAgentCredentialConfigured,
+			want: deploy.RuntimeAgentCredentialConfigured,
 		},
 		{
 			// A padded name is still the variable the container sets; the
 			// comparison normalizes rather than trusting the read's spacing.
 			name: "a padded routing variable still counts",
-			params: eruncommon.RuntimeAgentCredentialParams{
+			params: deploy.RuntimeAgentCredentialParams{
 				Gateway:              reportedGateway(),
 				Container:            config.DevopsComponentName,
 				ContainerEnvObserved: true,
-				ContainerEnvNames:    []string{" " + eruncommon.GatewayBaseURLEnv + " "},
+				ContainerEnvNames:    []string{" " + deploy.GatewayBaseURLEnv + " "},
 			},
-			want: eruncommon.RuntimeAgentCredentialConfigured,
+			want: deploy.RuntimeAgentCredentialConfigured,
 		},
 		{
 			name: "the template was read and carries nothing",
-			params: eruncommon.RuntimeAgentCredentialParams{
+			params: deploy.RuntimeAgentCredentialParams{
 				Gateway:              reportedGateway(),
 				Container:            config.DevopsComponentName,
 				ContainerEnvObserved: true,
 				ContainerEnvNames:    reportedRuntimePodEnvNames(),
 			},
-			want: eruncommon.RuntimeAgentCredentialMissing,
+			want: deploy.RuntimeAgentCredentialMissing,
 		},
 		{
 			name: "the template was never read",
-			params: eruncommon.RuntimeAgentCredentialParams{
+			params: deploy.RuntimeAgentCredentialParams{
 				Gateway:   reportedGateway(),
 				Container: config.DevopsComponentName,
 			},
-			want: eruncommon.RuntimeAgentCredentialUnknown,
+			want: deploy.RuntimeAgentCredentialUnknown,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := eruncommon.ResolveRuntimeAgentCredentialStatus(tc.params)
+			got := deploy.ResolveRuntimeAgentCredentialStatus(tc.params)
 			if got.State != tc.want {
 				t.Fatalf("State = %q, want %q", got.State, tc.want)
 			}
-			if tc.want == eruncommon.RuntimeAgentCredentialMissing && got.GatewayBaseURL == "" {
+			if tc.want == deploy.RuntimeAgentCredentialMissing && got.GatewayBaseURL == "" {
 				t.Fatalf("a missing-routing verdict must still name the gateway that is being dropped")
 			}
 		})
@@ -321,14 +321,14 @@ func TestResolveRuntimeAgentCredentialStatus(t *testing.T) {
 // unparsable document and a template with no such container are both "could not
 // observe", never an empty environment that would read as a missing credential.
 func TestRuntimeDeploymentContainerEnvNames(t *testing.T) {
-	if _, found := eruncommon.RuntimeDeploymentContainerEnvNames([]byte("not json"), config.DevopsComponentName); found {
+	if _, found := deploy.RuntimeDeploymentContainerEnvNames([]byte("not json"), config.DevopsComponentName); found {
 		t.Fatalf("an unparsable document reported a container")
 	}
 	other := runtimeDeploymentJSON("some-other-container", reportedRuntimePodEnvNames())
-	if _, found := eruncommon.RuntimeDeploymentContainerEnvNames([]byte(other), config.DevopsComponentName); found {
+	if _, found := deploy.RuntimeDeploymentContainerEnvNames([]byte(other), config.DevopsComponentName); found {
 		t.Fatalf("a template with no %q container reported one", config.DevopsComponentName)
 	}
-	names, found := eruncommon.RuntimeDeploymentContainerEnvNames(
+	names, found := deploy.RuntimeDeploymentContainerEnvNames(
 		[]byte(runtimeDeploymentJSON(config.DevopsComponentName, []string{"HOME", "", "  ", "ERUN_TENANT"})),
 		config.DevopsComponentName,
 	)

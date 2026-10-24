@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/primitive/build"
 )
 
 // TestEmptyListingCommandsEmitAnArrayNotNull pins every command whose whole
@@ -33,7 +33,7 @@ func TestEmptyListingCommandsEmitAnArrayNotNull(t *testing.T) {
 		{"platform user list", []platformclient.PlatformUser(nil)},
 		{"platform environment list", []platformclient.PlatformEnvironment(nil)},
 		{"platform context list", []platformclient.PlatformContext(nil)},
-		{"build profile", []common.TimingRecordSummary(nil)},
+		{"build profile", []build.TimingRecordSummary(nil)},
 	}
 
 	for _, tc := range cases {

@@ -12,9 +12,9 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // ignoreAlreadyClosed makes a session's Close idempotent. A PTY whose process
@@ -607,7 +607,7 @@ func resolveTerminalStartDir(preferred string) string {
 	return "."
 }
 
-func resolveDeployStartDir(findProjectRoot eruncommon.ProjectFinderFunc, result config.OpenResult) string {
+func resolveDeployStartDir(findProjectRoot shared.ProjectFinderFunc, result config.OpenResult) string {
 	if findProjectRoot != nil {
 		if _, projectRoot, err := findProjectRoot(); err == nil && strings.TrimSpace(projectRoot) != "" {
 			return resolveTerminalStartDir(projectRoot)

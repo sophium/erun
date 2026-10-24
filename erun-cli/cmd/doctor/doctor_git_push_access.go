@@ -3,10 +3,11 @@ package doctor
 import (
 	"fmt"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // reportGitPushAccess flags the asymmetry that makes this expensive to
@@ -25,14 +26,14 @@ import (
 // When an earlier section already confirmed the cluster is unreachable
 // (diagnosis.ClusterUnreachable), this reports the same skip instead of
 // paying its own kubectl exec timeout to rediscover it.
-func reportGitPushAccess(ctx core.Context, result config.OpenResult, diagnosis common.DeployDiagnosisResult) error {
+func reportGitPushAccess(ctx core.Context, result config.OpenResult, diagnosis deploy.DeployDiagnosisResult) error {
 	if !result.EnvConfig.RemoteWorktree() {
 		return nil
 	}
 	if diagnosis.ClusterUnreachable {
 		return reportPodSkippedUnreachable(ctx, "Git push access")
 	}
-	req := common.ShellLaunchParamsFromResult(result)
+	req := cloud.ShellLaunchParamsFromResult(result)
 	status, err := gitx.InspectGitPushAccess(ctx, nil, req, result.RepoPath)
 	if err != nil {
 		if ctx.DryRun {

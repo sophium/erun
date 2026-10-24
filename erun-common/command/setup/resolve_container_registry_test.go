@@ -3,8 +3,8 @@ package setup
 import (
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // TestResolveContainerRegistryPrecedence pins the order resolveContainerRegistry
@@ -15,7 +15,7 @@ import (
 func TestResolveContainerRegistryPrecedence(t *testing.T) {
 	tests := []struct {
 		name             string
-		params           eruncommon.BootstrapInitParams
+		params           open.BootstrapInitParams
 		projectRoot      string
 		projectRegistry  string
 		current          string
@@ -27,14 +27,14 @@ func TestResolveContainerRegistryPrecedence(t *testing.T) {
 	}{
 		{
 			name:         "cluster registry short-circuits everything else",
-			params:       eruncommon.BootstrapInitParams{ClusterRegistry: &config.ClusterRegistry{}, ContainerRegistry: "explicit"},
+			params:       open.BootstrapInitParams{ClusterRegistry: &config.ClusterRegistry{}, ContainerRegistry: "explicit"},
 			current:      "stored",
 			creating:     true,
 			wantRegistry: "",
 		},
 		{
 			name:            "explicit container registry beats project config and current",
-			params:          eruncommon.BootstrapInitParams{ContainerRegistry: "explicit"},
+			params:          open.BootstrapInitParams{ContainerRegistry: "explicit"},
 			projectRoot:     "/project",
 			projectRegistry: "project",
 			current:         "stored",

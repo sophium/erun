@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/build"
 )
 
 // dindDockerdEntrypoint is the stock docker:dind entrypoint the sidecar hands
@@ -64,7 +64,7 @@ func runDindEntrypoint(ctx core.Context, params DindEntrypointParams, host dindE
 	// Reads procfs/sysfs rather than shelling out to iproute2, which the dind
 	// image has no reason to carry (egressMTUUnder, shared with the build-side
 	// MTU diagnosis that looks at the same namespace from the other side).
-	if mtu, _, ok := eruncommon.EgressMTUUnder(host.procRoot, host.sysRoot); ok {
+	if mtu, _, ok := build.EgressMTUUnder(host.procRoot, host.sysRoot); ok {
 		ctx.Info(fmt.Sprintf("erun-dind: bridging containers at the pod network's MTU %d", mtu))
 		args = append([]string{"--mtu=" + strconv.Itoa(mtu)}, args...)
 	} else {

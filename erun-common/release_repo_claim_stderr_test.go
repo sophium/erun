@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // TestWriteReleaseRepoClaimBlobIncludesGitStderr and
@@ -18,7 +19,7 @@ import (
 func TestWriteReleaseRepoClaimBlobIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: could not write blob object", 128)
 	now := time.Now()
-	_, err := writeReleaseRepoClaimBlob(testTraceContext(false), t.TempDir(), "prod",
+	_, err := shared.WriteReleaseRepoClaimBlob(testTraceContext(false), t.TempDir(), "prod",
 		activity.EnvironmentActivityLeaseHolder{Tenant: "acme"}, now, now)
 	if err == nil {
 		t.Fatal("expected an error for a failing git invocation")
@@ -40,7 +41,7 @@ func TestLoadReleaseRepoClaimRecordCatFileIncludesGitStderr(t *testing.T) {
 	}
 	t.Setenv("ERUN_GIT_BIN", path)
 
-	_, err := loadReleaseRepoClaimRecord(testTraceContext(false), t.TempDir(), "origin", "refs/release-claims/prod", "1.0.0")
+	_, err := shared.LoadReleaseRepoClaimRecord(testTraceContext(false), t.TempDir(), "origin", "refs/release-claims/prod", "1.0.0")
 	if err == nil {
 		t.Fatal("expected an error for a failing git invocation")
 	}

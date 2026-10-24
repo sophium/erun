@@ -16,6 +16,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 	"gopkg.in/yaml.v3"
 )
 
@@ -98,7 +101,7 @@ type BootstrapInitResult struct {
 
 type BootstrapInitDependencies struct {
 	Store           BootstrapStore
-	FindProjectRoot eruncommon.ProjectFinderFunc
+	FindProjectRoot shared.ProjectFinderFunc
 	GetWorkingDir   WorkDirFunc
 	SelectTenant    SelectTenantFunc
 	// TenantSelectionUnavailable tells the tenant-selection policy that this
@@ -113,12 +116,12 @@ type BootstrapInitDependencies struct {
 	PromptContainerRegistry    PromptValueFunc
 	PromptRemoteRepositoryURL  PromptValueFunc
 	PromptCodeCommitSSHKeyID   PromptValueFunc
-	EnsureKubernetesNamespace  eruncommon.NamespaceEnsurerFunc
-	LoadProjectConfig          eruncommon.ProjectConfigLoaderFunc
+	EnsureKubernetesNamespace  deploy.NamespaceEnsurerFunc
+	LoadProjectConfig          shared.ProjectConfigLoaderFunc
 	SaveProjectConfig          ProjectConfigSaverFunc
 	WaitForRemoteRuntime       RemoteRuntimeWaitFunc
 	RunRemoteCommand           kube.RemoteCommandRunnerFunc
-	DeployHelmChart            eruncommon.HelmChartDeployerFunc
+	DeployHelmChart            deploy.HelmChartDeployerFunc
 	Sleep                      core.SleepFunc
 	// ProbeHostedRegistry answers whether erun's hosted registry can be pushed
 	// to. Unset defaults to a real probe, so a caller that wires nothing still
@@ -138,7 +141,7 @@ type BootstrapRunner struct {
 
 type bootstrapRunState struct {
 	runner                BootstrapRunner
-	params                eruncommon.BootstrapInitParams
+	params                open.BootstrapInitParams
 	result                BootstrapInitResult
 	detected              projectContext
 	tenants               []configpkg.TenantConfig
@@ -155,7 +158,7 @@ type bootstrapRunState struct {
 	envConfigChanged      bool
 }
 
-func RunBootstrapInitWithDependencies(deps BootstrapInitDependencies, params eruncommon.BootstrapInitParams) (BootstrapInitResult, error) {
+func RunBootstrapInitWithDependencies(deps BootstrapInitDependencies, params open.BootstrapInitParams) (BootstrapInitResult, error) {
 	return BootstrapRunner{
 		BootstrapInitDependencies: deps,
 		Context:                   deps.Context,
@@ -191,7 +194,7 @@ func TraceProjectConfigSaver(ctx core.Context, save ProjectConfigSaverFunc) Proj
 	}
 }
 
-func TraceNamespaceEnsurer(ctx core.Context, ensure eruncommon.NamespaceEnsurerFunc) eruncommon.NamespaceEnsurerFunc {
+func TraceNamespaceEnsurer(ctx core.Context, ensure deploy.NamespaceEnsurerFunc) deploy.NamespaceEnsurerFunc {
 	if ensure == nil {
 		return nil
 	}
@@ -285,7 +288,7 @@ func (s tracedBootstrapStore) ListEnvConfigs(tenant string) ([]configpkg.EnvConf
 	return portStore.ListEnvConfigs(tenant)
 }
 
-func (s BootstrapRunner) run(params eruncommon.BootstrapInitParams) (BootstrapInitResult, error) {
+func (s BootstrapRunner) run(params open.BootstrapInitParams) (BootstrapInitResult, error) {
 	s = s.withDefaults()
 	state := bootstrapRunState{
 		runner: s,
@@ -484,7 +487,7 @@ func (s *bootstrapRunState) defaultTenantCandidate() (string, string, error) {
 	tenant := s.params.Tenant
 	projectRoot := s.params.ProjectRoot
 	if s.params.RemoteWorktree() {
-		return tenant, eruncommon.RemoteWorktreePathForRepoName(tenant), nil
+		return tenant, open.RemoteWorktreePathForRepoName(tenant), nil
 	}
 	if tenant != "" && projectRoot != "" {
 		return tenant, projectRoot, nil
@@ -524,7 +527,7 @@ func (s *bootstrapRunState) resolveTenant() error {
 		s.tenant = project.tenant
 	}
 	if s.params.RemoteWorktree() {
-		s.params.ProjectRoot = eruncommon.RemoteWorktreePathForRepoName(s.tenant)
+		s.params.ProjectRoot = open.RemoteWorktreePathForRepoName(s.tenant)
 	}
 	return nil
 }
@@ -738,7 +741,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		CloudProviderAlias: cloudProviderAlias,
 		ManagedCloud:       managedCloud,
 		RuntimeVersion:     s.params.ResolvedRuntimeVersion(),
-		RuntimeImage:       eruncommon.StripRuntimeImageTag(s.params.RuntimeImage),
+		RuntimeImage:       deploy.StripRuntimeImageTag(s.params.RuntimeImage),
 		RuntimeRegistry:    strings.TrimSpace(s.params.RuntimeRegistry),
 		// Record the key init's runtime deploy trusted, so the next redeploy
 		// rethreads it instead of dropping the env's MCP edge to unauthenticated.
@@ -801,7 +804,7 @@ func (s *bootstrapRunState) createHostEnvConfig(envProjectRoot string) error {
 // initDeployConfig resolves the Deploy block a new env is created with: a
 // saved components selection when --components named one, else the zero value
 // (no saved selection, so deploy falls back to the repo plan).
-func initDeployConfig(params eruncommon.BootstrapInitParams) configpkg.EnvironmentDeployConfig {
+func initDeployConfig(params open.BootstrapInitParams) configpkg.EnvironmentDeployConfig {
 	components, given := initComponentsOverride(params)
 	if !given {
 		return configpkg.EnvironmentDeployConfig{}
@@ -815,11 +818,11 @@ func initDeployConfig(params eruncommon.BootstrapInitParams) configpkg.Environme
 // (even to an empty slice) is an explicit request. That distinction is what
 // lets an explicitly empty --components clear a saved selection instead of
 // being indistinguishable from not passing the flag at all.
-func initComponentsOverride(params eruncommon.BootstrapInitParams) ([]string, bool) {
+func initComponentsOverride(params open.BootstrapInitParams) ([]string, bool) {
 	if params.Components == nil {
 		return nil, false
 	}
-	return eruncommon.NormalizeComponentNames(*params.Components), true
+	return deploy.NormalizeComponentNames(*params.Components), true
 }
 
 // describeComponentsSetting renders a resolved components list for a trace
@@ -836,7 +839,7 @@ func describeComponentsSetting(components []string) string {
 // a resolvable cluster: entry when the operator requested the in-cluster registry
 // (--cluster-registry), otherwise the single static registry resolved from
 // --container-registry / the prompt.
-func seedInitContainerRegistries(params eruncommon.BootstrapInitParams, registry string) configpkg.ContainerRegistries {
+func seedInitContainerRegistries(params open.BootstrapInitParams, registry string) configpkg.ContainerRegistries {
 	if params.ClusterRegistry != nil {
 		return configpkg.ClusterContainerRegistries(*params.ClusterRegistry)
 	}
@@ -916,7 +919,7 @@ func (s *bootstrapRunState) updateExistingEnvSettings() error {
 		return nil
 	}
 	s.applyEnvRuntimeVersion()
-	s.applyEnvSetting("runtime image", eruncommon.StripRuntimeImageTag(s.params.RuntimeImage), &s.envConfig.RuntimeImage)
+	s.applyEnvSetting("runtime image", deploy.StripRuntimeImageTag(s.params.RuntimeImage), &s.envConfig.RuntimeImage)
 	// Re-running init is how an env deadlocked on chart resolution gets out: the
 	// registry lands on the config before this run's own deploy resolves a chart.
 	s.applyEnvSetting("runtime registry", s.params.RuntimeRegistry, &s.envConfig.RuntimeRegistry)
@@ -1299,7 +1302,7 @@ func remoteHostConfigLabel(tenant, envName string) string {
 	return fmt.Sprintf("Use existing SSH host config for environment %q in tenant %q", envName, tenant)
 }
 
-func normalizeBootstrapParams(params eruncommon.BootstrapInitParams) eruncommon.BootstrapInitParams {
+func normalizeBootstrapParams(params open.BootstrapInitParams) open.BootstrapInitParams {
 	params.Tenant = strings.TrimSpace(params.Tenant)
 	params.SelectedTenant = strings.TrimSpace(params.SelectedTenant)
 	params.ProjectRoot = strings.TrimSpace(params.ProjectRoot)
@@ -1347,13 +1350,13 @@ func (s BootstrapRunner) withStoreDefaults() BootstrapRunner {
 
 func (s BootstrapRunner) withRuntimeDefaults() BootstrapRunner {
 	if s.WaitForRemoteRuntime == nil {
-		s.WaitForRemoteRuntime = eruncommon.WaitForShellDeployment
+		s.WaitForRemoteRuntime = open.WaitForShellDeployment
 	}
 	if s.RunRemoteCommand == nil {
 		s.RunRemoteCommand = kube.RunRemoteCommand
 	}
 	if s.DeployHelmChart == nil {
-		s.DeployHelmChart = eruncommon.DeployHelmChart
+		s.DeployHelmChart = deploy.DeployHelmChart
 	}
 	if s.Sleep == nil {
 		s.Sleep = time.Sleep
@@ -1368,7 +1371,7 @@ func (s BootstrapRunner) withLoggerDefaults() BootstrapRunner {
 	return s
 }
 
-func (s BootstrapRunner) confirmTenant(params eruncommon.BootstrapInitParams, tenant, projectRoot string) (bool, error) {
+func (s BootstrapRunner) confirmTenant(params open.BootstrapInitParams, tenant, projectRoot string) (bool, error) {
 	if params.AutoApprove {
 		return true, nil
 	}
@@ -1381,7 +1384,7 @@ func (s BootstrapRunner) confirmTenant(params eruncommon.BootstrapInitParams, te
 	})
 }
 
-func (s BootstrapRunner) confirmEnvironment(params eruncommon.BootstrapInitParams, tenant, envName string) error {
+func (s BootstrapRunner) confirmEnvironment(params open.BootstrapInitParams, tenant, envName string) error {
 	if params.AutoApprove {
 		return nil
 	}
@@ -1415,7 +1418,7 @@ func (s BootstrapRunner) confirm(interaction BootstrapInitInteraction) (bool, er
 	return confirmed, nil
 }
 
-func (s BootstrapRunner) resolveKubernetesContext(params eruncommon.BootstrapInitParams, tenant, envName, current string) (string, error) {
+func (s BootstrapRunner) resolveKubernetesContext(params open.BootstrapInitParams, tenant, envName, current string) (string, error) {
 	if params.KubernetesContext != "" {
 		return params.KubernetesContext, nil
 	}
@@ -1443,7 +1446,7 @@ func (s BootstrapRunner) resolveKubernetesContext(params eruncommon.BootstrapIni
 	return context, nil
 }
 
-func (s BootstrapRunner) ResolveContainerRegistry(params eruncommon.BootstrapInitParams, tenant, envName, projectRoot, current string, creating bool) (string, error) {
+func (s BootstrapRunner) ResolveContainerRegistry(params open.BootstrapInitParams, tenant, envName, projectRoot, current string, creating bool) (string, error) {
 	// A cluster registry is written as a resolvable cluster: entry, not a static
 	// string, so short-circuit the string resolution/prompt entirely.
 	if params.ClusterRegistry != nil {
@@ -1542,7 +1545,7 @@ func (s BootstrapRunner) resolveCloudProviderAlias(kubernetesContext, current st
 	return strings.TrimSpace(status.CloudProviderAlias), nil
 }
 
-func (s BootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, registry string, params eruncommon.BootstrapInitParams) error {
+func (s BootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, registry string, params open.BootstrapInitParams) error {
 	// Remote envs record the registry on the env config only; the shared project
 	// config is for local-agent envs whose worktree lives in this repo.
 	if params.Remote {
@@ -1642,7 +1645,7 @@ func tenantNameList(tenants []configpkg.TenantConfig) []string {
 	return names
 }
 
-func (s BootstrapRunner) selectTenant(params eruncommon.BootstrapInitParams, tenants []configpkg.TenantConfig) (eruncommon.TenantSelectionResult, error) {
+func (s BootstrapRunner) selectTenant(params open.BootstrapInitParams, tenants []configpkg.TenantConfig) (eruncommon.TenantSelectionResult, error) {
 	if params.InitializeCurrentProject {
 		return eruncommon.TenantSelectionResult{Initialize: true}, nil
 	}

@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
@@ -239,7 +239,7 @@ func runJobStart(cmd *cobra.Command, resolveOpen shared.OpenResolver, params job
 	return ctx.WriteResult(job)
 }
 
-func startJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobspkg.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+func startJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobspkg.StartEnvironmentJobParams) (sharedpkg.EnvironmentJob, bool, error) {
 	if !shared.EnvironmentTargetsItself() {
 		return startJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
@@ -247,12 +247,12 @@ func startJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.O
 	// job never depends on what the caller's PATH happens to hold.
 	supervisor, err := shared.ErunExecutablePath()
 	if err != nil {
-		return common.EnvironmentJob{}, false, err
+		return sharedpkg.EnvironmentJob{}, false, err
 	}
 	params.SupervisorPath = supervisor
 	job, err := jobspkg.StartEnvironmentJob(commandCtx, params)
 	if err != nil {
-		return common.EnvironmentJob{}, false, err
+		return sharedpkg.EnvironmentJob{}, false, err
 	}
 	return job, !commandCtx.DryRun, nil
 }
@@ -318,13 +318,13 @@ func runJobAttach(cmd *cobra.Command, resolveOpen shared.OpenResolver, params jo
 	return ctx.WriteResult(job)
 }
 
-func attachJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobspkg.AttachEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+func attachJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobspkg.AttachEnvironmentJobParams) (sharedpkg.EnvironmentJob, bool, error) {
 	if !shared.EnvironmentTargetsItself() {
 		return attachJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
 	job, err := jobspkg.AttachEnvironmentJob(commandCtx, params)
 	if err != nil {
-		return common.EnvironmentJob{}, false, err
+		return sharedpkg.EnvironmentJob{}, false, err
 	}
 	return job, !commandCtx.DryRun, nil
 }
@@ -404,55 +404,55 @@ func runJobStatus(cmd *cobra.Command, resolveOpen shared.OpenResolver, tenant, e
 	return ctx.WriteResult(jobs)
 }
 
-func readJobStatus(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, tenant, environment, id string) (common.EnvironmentJob, []common.EnvironmentJob, bool, error) {
+func readJobStatus(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, tenant, environment, id string) (sharedpkg.EnvironmentJob, []sharedpkg.EnvironmentJob, bool, error) {
 	if !shared.EnvironmentTargetsItself() {
 		return readJobStatusFromEnvironment(ctx, commandCtx, resolveOpen, tenant, environment, id)
 	}
 	return readStoredJobStatus(commandCtx, tenant, environment, id)
 }
 
-func readJobStatusFromEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, tenant, environment, id string) (common.EnvironmentJob, []common.EnvironmentJob, bool, error) {
+func readJobStatusFromEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, tenant, environment, id string) (sharedpkg.EnvironmentJob, []sharedpkg.EnvironmentJob, bool, error) {
 	result, resolved, err := jobStatusFromEnvironment(ctx, commandCtx, resolveOpen, tenant, environment, id)
 	if err != nil || !resolved {
-		return common.EnvironmentJob{}, nil, resolved, err
+		return sharedpkg.EnvironmentJob{}, nil, resolved, err
 	}
 	jobs := result.Jobs
 	if jobs == nil {
-		jobs = []common.EnvironmentJob{}
+		jobs = []sharedpkg.EnvironmentJob{}
 	}
 	if strings.TrimSpace(id) == "" {
-		return common.EnvironmentJob{}, jobs, resolved, nil
+		return sharedpkg.EnvironmentJob{}, jobs, resolved, nil
 	}
 	if result.Job == nil {
-		return common.EnvironmentJob{}, jobs, resolved, fmt.Errorf("%s/%s returned no job for id %q", tenant, environment, id)
+		return sharedpkg.EnvironmentJob{}, jobs, resolved, fmt.Errorf("%s/%s returned no job for id %q", tenant, environment, id)
 	}
 	return *result.Job, jobs, resolved, nil
 }
 
-func readStoredJobStatus(commandCtx core.Context, tenant, environment, id string) (common.EnvironmentJob, []common.EnvironmentJob, bool, error) {
+func readStoredJobStatus(commandCtx core.Context, tenant, environment, id string) (sharedpkg.EnvironmentJob, []sharedpkg.EnvironmentJob, bool, error) {
 	if commandCtx.DryRun {
 		commandCtx.TraceCommand("", "job", "status", tenant, environment, id)
-		return common.EnvironmentJob{}, nil, false, nil
+		return sharedpkg.EnvironmentJob{}, nil, false, nil
 	}
 	now := time.Now()
 	if strings.TrimSpace(id) != "" {
 		job, err := jobspkg.LoadEnvironmentJob(tenant, environment, id, now)
 		if err != nil {
-			return common.EnvironmentJob{}, nil, false, err
+			return sharedpkg.EnvironmentJob{}, nil, false, err
 		}
-		return job, []common.EnvironmentJob{job}, true, nil
+		return job, []sharedpkg.EnvironmentJob{job}, true, nil
 	}
 	jobs, err := jobspkg.LoadEnvironmentJobs(tenant, environment, now)
 	if err != nil {
-		return common.EnvironmentJob{}, nil, false, err
+		return sharedpkg.EnvironmentJob{}, nil, false, err
 	}
 	if jobs == nil {
-		jobs = []common.EnvironmentJob{}
+		jobs = []sharedpkg.EnvironmentJob{}
 	}
-	return common.EnvironmentJob{}, jobs, true, nil
+	return sharedpkg.EnvironmentJob{}, jobs, true, nil
 }
 
-func writeJobList(ctx core.Context, jobs []common.EnvironmentJob) error {
+func writeJobList(ctx core.Context, jobs []sharedpkg.EnvironmentJob) error {
 	if len(jobs) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no jobs")
 		return err
@@ -467,22 +467,22 @@ func writeJobList(ctx core.Context, jobs []common.EnvironmentJob) error {
 
 // jobStatusLine renders the outcome without ever implying one that was not
 // recorded: an unknown job says so and says why.
-func jobStatusLine(job common.EnvironmentJob) string {
+func jobStatusLine(job sharedpkg.EnvironmentJob) string {
 	switch job.State {
 	case jobspkg.EnvironmentJobStateRunning:
 		return jobRunningLine(job)
-	case common.EnvironmentJobStateExited:
+	case sharedpkg.EnvironmentJobStateExited:
 		return jobExitedLine(job)
-	case common.EnvironmentJobStateAbandoned:
+	case sharedpkg.EnvironmentJobStateAbandoned:
 		return jobAbandonedLine(job)
-	case common.EnvironmentJobStateGateIncomplete:
+	case sharedpkg.EnvironmentJobStateGateIncomplete:
 		return jobGateIncompleteLine(job)
 	default:
 		return jobUnknownLine(job)
 	}
 }
 
-func jobRunningLine(job common.EnvironmentJob) string {
+func jobRunningLine(job sharedpkg.EnvironmentJob) string {
 	line := fmt.Sprintf("running: %s", job.Name)
 	if job.ChildPID > 0 {
 		line += fmt.Sprintf(", pid %d", job.ChildPID)
@@ -496,7 +496,7 @@ func jobRunningLine(job common.EnvironmentJob) string {
 // start here is being refused right now. Without it an operator reading `job
 // status` sees a running job and a refusal that mentions a lease id, with
 // nothing on screen connecting the two.
-func jobExclusiveSuffix(job common.EnvironmentJob) string {
+func jobExclusiveSuffix(job sharedpkg.EnvironmentJob) string {
 	if !job.Exclusive {
 		return ""
 	}
@@ -509,7 +509,7 @@ func jobExclusiveSuffix(job common.EnvironmentJob) string {
 // task job the only place the work's own error text lands at all -- was
 // readable in JSON and invisible to anyone reading the human line. The signal
 // takes its place when there is one: that already is the reason.
-func jobExitedLine(job common.EnvironmentJob) string {
+func jobExitedLine(job sharedpkg.EnvironmentJob) string {
 	line := fmt.Sprintf("exited %d: %s", jobExitCodeOrUnset(job), job.Name)
 	switch {
 	case strings.TrimSpace(job.Signal) != "":
@@ -523,7 +523,7 @@ func jobExitedLine(job common.EnvironmentJob) string {
 // jobStartedJobFailedSuffix surfaces a job this job started and waited for
 // (see EnvironmentJobStateGateIncomplete) that finished without succeeding --
 // the one thing this job's own exit code cannot say once that wait is over.
-func jobStartedJobFailedSuffix(job common.EnvironmentJob) string {
+func jobStartedJobFailedSuffix(job sharedpkg.EnvironmentJob) string {
 	if strings.TrimSpace(job.StartedJobFailed) == "" {
 		return ""
 	}
@@ -536,7 +536,7 @@ func jobStartedJobFailedSuffix(job common.EnvironmentJob) string {
 // to work out by hand from git state. Silent either way, a vanished directory
 // and an accumulating one both read as the product doing nothing. See
 // work_clone_reclaim.go in erun-common.
-func jobCloneSuffix(job common.EnvironmentJob) string {
+func jobCloneSuffix(job sharedpkg.EnvironmentJob) string {
 	if job.CloneReclaimed {
 		return ", clone reclaimed"
 	}
@@ -551,7 +551,7 @@ func jobCloneSuffix(job common.EnvironmentJob) string {
 // exit status cannot: uncommitted work in its own working directory, and
 // whether the supervisor managed to check-point it. See job_worktree.go in
 // erun-common for what this reports and why.
-func jobWorktreeSuffix(job common.EnvironmentJob) string {
+func jobWorktreeSuffix(job sharedpkg.EnvironmentJob) string {
 	if !job.WorktreeDirty {
 		return ""
 	}
@@ -561,7 +561,7 @@ func jobWorktreeSuffix(job common.EnvironmentJob) string {
 // jobWorktreeSummary is the human-readable half of jobWorktreeSuffix, reused
 // by jobAwaitExit's error text so the two surfaces never describe the same
 // outcome differently.
-func jobWorktreeSummary(job common.EnvironmentJob) string {
+func jobWorktreeSummary(job sharedpkg.EnvironmentJob) string {
 	switch {
 	case job.WorktreePushed:
 		return fmt.Sprintf("working tree was dirty; checkpointed as %s and pushed to %s", job.WorktreeCommit, job.WorktreeRemote)
@@ -575,7 +575,7 @@ func jobWorktreeSummary(job common.EnvironmentJob) string {
 // jobAbandonedLine is rendered distinctly from both exited and unknown: the
 // exit status was captured (unlike unknown), but it is never a success (unlike
 // exited) -- the reason names the background work nothing will ever report on.
-func jobAbandonedLine(job common.EnvironmentJob) string {
+func jobAbandonedLine(job sharedpkg.EnvironmentJob) string {
 	line := fmt.Sprintf("abandoned %d: %s", jobExitCodeOrUnset(job), job.Name)
 	if strings.TrimSpace(job.Signal) != "" {
 		line += fmt.Sprintf(" (signal %s)", job.Signal)
@@ -589,7 +589,7 @@ func jobAbandonedLine(job common.EnvironmentJob) string {
 // jobGateIncompleteLine is rendered distinctly from abandoned: the still-running
 // work is a sibling job record this job started, not a process left behind in
 // its own process group.
-func jobGateIncompleteLine(job common.EnvironmentJob) string {
+func jobGateIncompleteLine(job sharedpkg.EnvironmentJob) string {
 	line := fmt.Sprintf("gate-incomplete %d: %s", jobExitCodeOrUnset(job), job.Name)
 	if strings.TrimSpace(job.Signal) != "" {
 		line += fmt.Sprintf(" (signal %s)", job.Signal)
@@ -600,7 +600,7 @@ func jobGateIncompleteLine(job common.EnvironmentJob) string {
 	return line + jobAgentSuffix(job) + jobReinvocationSuffix(job) + jobWorktreeSuffix(job) + jobOutputSuffix(job)
 }
 
-func jobUnknownLine(job common.EnvironmentJob) string {
+func jobUnknownLine(job sharedpkg.EnvironmentJob) string {
 	line := fmt.Sprintf("unknown: %s", job.Name)
 	if strings.TrimSpace(job.Reason) != "" {
 		line += " (" + job.Reason + ")"
@@ -612,7 +612,7 @@ func jobUnknownLine(job common.EnvironmentJob) string {
 // operator watching `job status` sees the same signal the 5s caller rule acts
 // on rather than only the frozen activity string a stalled beat would
 // otherwise leave on screen.
-func jobAliveSuffix(job common.EnvironmentJob) string {
+func jobAliveSuffix(job sharedpkg.EnvironmentJob) string {
 	if job.AliveAgeMs == nil {
 		return ""
 	}
@@ -622,7 +622,7 @@ func jobAliveSuffix(job common.EnvironmentJob) string {
 // jobAgentSuffix reports what an agent run is doing right now. An agent job that
 // has emitted nothing yet says so rather than reading as an idle one — the
 // difference is exactly what a caller polling for progress needs.
-func jobAgentSuffix(job common.EnvironmentJob) string {
+func jobAgentSuffix(job sharedpkg.EnvironmentJob) string {
 	if job.Kind != jobspkg.EnvironmentJobKindAgent {
 		return ""
 	}
@@ -640,14 +640,14 @@ func jobAgentSuffix(job common.EnvironmentJob) string {
 // one thing that turns "this job started work that failed" into a real second
 // chance for the agent to act rather than a silent record nobody reads. Empty
 // for a job that never needed one.
-func jobReinvocationSuffix(job common.EnvironmentJob) string {
+func jobReinvocationSuffix(job sharedpkg.EnvironmentJob) string {
 	if job.ReinvocationCount <= 0 {
 		return ""
 	}
 	return fmt.Sprintf(", resumed %d/%d time(s)", job.ReinvocationCount, jobspkg.EnvironmentJobMaxReinvocations())
 }
 
-func jobOutputSuffix(job common.EnvironmentJob) string {
+func jobOutputSuffix(job sharedpkg.EnvironmentJob) string {
 	suffix := fmt.Sprintf(", %d bytes of output", job.OutputBytes)
 	if job.OutputTruncated {
 		suffix += " (truncated at the output cap)"
@@ -655,7 +655,7 @@ func jobOutputSuffix(job common.EnvironmentJob) string {
 	return suffix
 }
 
-func jobExitCodeOrUnset(job common.EnvironmentJob) int {
+func jobExitCodeOrUnset(job sharedpkg.EnvironmentJob) int {
 	if job.ExitCode == nil {
 		return -1
 	}
@@ -772,13 +772,13 @@ func jobAwaitExit(result jobspkg.AwaitEnvironmentJobResult) error {
 	switch {
 	case result.TimedOut:
 		return internal.WithExitCode(fmt.Errorf("job %q is still running after %ds", result.Job.ID, result.TimeoutSeconds), jobAwaitTimeoutExitCode)
-	case result.Job.State == common.EnvironmentJobStateUnknown:
+	case result.Job.State == sharedpkg.EnvironmentJobStateUnknown:
 		return internal.WithExitCode(fmt.Errorf("job %q has no recorded outcome: %s", result.Job.ID, result.Job.Reason), jobAwaitUnknownExitCode)
 	case result.Job.Succeeded:
 		return nil
-	case result.Job.State == common.EnvironmentJobStateAbandoned:
+	case result.Job.State == sharedpkg.EnvironmentJobStateAbandoned:
 		return fmt.Errorf("job %q abandoned background work: %s", result.Job.ID, result.Job.Reason)
-	case result.Job.State == common.EnvironmentJobStateGateIncomplete:
+	case result.Job.State == sharedpkg.EnvironmentJobStateGateIncomplete:
 		return fmt.Errorf("job %q ended while work it started was still running: %s", result.Job.ID, result.Job.Reason)
 	case result.Job.WorktreeDirty:
 		return fmt.Errorf("job %q ended with an uncommitted working tree: %s", result.Job.ID, jobWorktreeSummary(result.Job))
@@ -795,7 +795,7 @@ func jobAwaitExit(result jobspkg.AwaitEnvironmentJobResult) error {
 // whose work never started says so at all. Signal first, for the same reason
 // jobExitedLine prefers it: it already is the reason, and the recorded text
 // would only restate it.
-func jobFailedExitError(job common.EnvironmentJob) error {
+func jobFailedExitError(job sharedpkg.EnvironmentJob) error {
 	switch {
 	case strings.TrimSpace(job.Signal) != "":
 		return fmt.Errorf("job %q exited %d (signal %s)", job.ID, jobExitCodeOrUnset(job), job.Signal)

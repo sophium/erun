@@ -11,6 +11,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 	"gopkg.in/yaml.v3"
 )
 
@@ -76,7 +77,7 @@ func TestProvisionedAliasResolvesInThePod(t *testing.T) {
 	var podConfig configpkg.ERunConfig
 	readTestYAML(t, rootPath, &podConfig)
 
-	resolved, err := eruncommon.ResolveERunPlatformAlias(staticCloudStore{config: podConfig}, "")
+	resolved, err := shared.ResolveERunPlatformAlias(staticCloudStore{config: podConfig}, "")
 	if err != nil {
 		t.Fatalf("the pod still cannot resolve a platform alias after provisioning: %v", err)
 	}
@@ -103,7 +104,7 @@ func assertUnprovisionedAliasIsUnusable(t *testing.T, document string) {
 	if err := yaml.Unmarshal([]byte(document), &before); err != nil {
 		t.Fatalf("the unprovisioned config does not parse: %v", err)
 	}
-	_, err := eruncommon.ResolveERunPlatformAlias(staticCloudStore{config: before}, "")
+	_, err := shared.ResolveERunPlatformAlias(staticCloudStore{config: before}, "")
 	if !errors.Is(err, cloud.ErrPlatformAliasUnusable) {
 		t.Fatalf("expected the reported unusable-alias failure before provisioning, got %v", err)
 	}

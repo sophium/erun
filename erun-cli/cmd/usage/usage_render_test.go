@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/podruntime"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 const (
@@ -63,7 +63,7 @@ func TestUsageReportRendersTheSizingRecommendationBesideTheWarnings(t *testing.T
 	}
 
 	report := podruntime.RuntimeUsageReport{RuntimeUsage: usage}
-	recommendation, ok := common.RecommendRuntimeSizing(common.RuntimeSizingParams{Live: &usage})
+	recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{Live: &usage})
 	if !ok {
 		t.Fatal("a reading at 98% of its limit produced no recommendation")
 	}

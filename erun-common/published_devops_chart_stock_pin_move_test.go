@@ -5,6 +5,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // stockPinTarget is the state the reported failure was reproduced in: an environment whose
@@ -33,7 +34,7 @@ func stockPinTarget() config.OpenResult {
 // recording the newer version.
 func TestDeployMovesStockRuntimePinWithTheDeployVersion(t *testing.T) {
 	const version = "1.0.283"
-	spec, err := resolvePublishedDevopsDeploySpecWithReason(core.Context{}, stockPinTarget(), version, "no local runtime chart", "", false)
+	spec, err := deploy.ResolvePublishedDevopsDeploySpecWithReason(core.Context{}, stockPinTarget(), version, "no local runtime chart", "", false)
 	if err != nil {
 		t.Fatalf("resolving the runtime deploy spec: %v", err)
 	}
@@ -72,7 +73,7 @@ func TestStockRuntimePinMoveLeavesADeliberateCoordinateAlone(t *testing.T) {
 			RuntimeRegistry:     "ghcr.io/sophium",
 		},
 	}
-	spec, err := resolvePublishedDevopsDeploySpecWithReason(core.Context{}, target, "1.0.86", "no local runtime chart", "", false)
+	spec, err := deploy.ResolvePublishedDevopsDeploySpecWithReason(core.Context{}, target, "1.0.86", "no local runtime chart", "", false)
 	if err != nil {
 		t.Fatalf("resolving the runtime deploy spec: %v", err)
 	}
@@ -90,12 +91,12 @@ func TestStockRuntimePinMoveLeavesADeliberateCoordinateAlone(t *testing.T) {
 // is the version the pods run.
 func TestPersistKeepsRecordedVersionAndRunningImageInStep(t *testing.T) {
 	const version = "1.0.283"
-	spec, err := resolvePublishedDevopsDeploySpecWithReason(core.Context{}, stockPinTarget(), version, "no local runtime chart", "", false)
+	spec, err := deploy.ResolvePublishedDevopsDeploySpecWithReason(core.Context{}, stockPinTarget(), version, "no local runtime chart", "", false)
 	if err != nil {
 		t.Fatalf("resolving the runtime deploy spec: %v", err)
 	}
 	var saved *config.EnvConfig
-	persistOrFatal(t, core.Context{}, []DeploySpec{spec}, capturingSave(new(string), &saved), nil)
+	persistOrFatal(t, core.Context{}, []deploy.DeploySpec{spec}, capturingSave(new(string), &saved), nil)
 	if saved == nil {
 		t.Fatalf("the deploy must persist the runtime coordinate it installed")
 	}

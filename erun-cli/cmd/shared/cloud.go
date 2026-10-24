@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/manifoldco/promptui"
-	common "github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
@@ -22,8 +21,8 @@ func CloudDependencies() cloud.CloudDependencies {
 // credentials into an env's runtime pod. The root config store and the cloud
 // dependency set are stateless values, so they are constructed here instead of
 // widening open's already-long dependency list.
-func RefreshEnvironmentHostCredentials(ctx core.Context, result configpkg.OpenResult) (common.HostCredentialsRefresh, error) {
-	return common.RefreshHostAWSCredentials(ctx, configpkg.ConfigStore{}, result, CloudDependencies())
+func RefreshEnvironmentHostCredentials(ctx core.Context, result configpkg.OpenResult) (cloud.HostCredentialsRefresh, error) {
+	return cloud.RefreshHostAWSCredentials(ctx, configpkg.ConfigStore{}, result, CloudDependencies())
 }
 
 func RunCloudInitAWSCommand(ctx core.Context, store cloud.CloudStore, promptRunner PromptRunner, params cloud.InitAWSCloudProviderParams, deps cloud.CloudDependencies) error {

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/mcp"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 func workspaceSyncPlanEnv(kind config.EnvironmentType, sshd, sync bool, localPath string) config.OpenResult {
@@ -59,7 +59,7 @@ func TestResolveWorkspaceSyncParamsAddressesThePodWorktree(t *testing.T) {
 	if params.LocalPath != "/host/mirror" {
 		t.Fatalf("local path = %q", params.LocalPath)
 	}
-	if params.HostAlias != eruncommon.SSHHostAlias("acme", "dev") {
+	if params.HostAlias != open.SSHHostAlias("acme", "dev") {
 		t.Fatalf("host alias = %q", params.HostAlias)
 	}
 	if strings.TrimSpace(params.RemotePath) == "" {

@@ -43,13 +43,16 @@ import (
 	"github.com/sophium/erun/cmd/upgrade"
 	"github.com/sophium/erun/cmd/usage"
 	"github.com/sophium/erun/cmd/version"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
+	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
+	openpkg "github.com/sophium/erun/erun-common/primitive/open"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -69,15 +72,15 @@ func Execute() error {
 type rootDependencies struct {
 	configStore               config.ConfigStore
 	store                     rootStore
-	deployHelmChart           common.HelmChartDeployerFunc
-	recoveringDeployHelmChart common.HelmChartDeployerFunc
-	runInit                   func(core.Context, common.BootstrapInitParams) error
+	deployHelmChart           deploypkg.HelmChartDeployerFunc
+	recoveringDeployHelmChart deploypkg.HelmChartDeployerFunc
+	runInit                   func(core.Context, openpkg.BootstrapInitParams) error
 	runInitForArgs            func(core.Context, []string) error
-	runInitForOpen            func(core.Context, common.OpenParams) error
-	dockerRegistryLogin       common.DockerRegistryLoginFunc
-	push                      common.DockerPushFunc
-	resolveOpen               func(common.OpenParams) (config.OpenResult, error)
-	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (common.DeploySpec, error)
+	runInitForOpen            func(core.Context, sharedpkg.OpenParams) error
+	dockerRegistryLogin       buildpkg.DockerRegistryLoginFunc
+	push                      buildpkg.DockerPushFunc
+	resolveOpen               func(sharedpkg.OpenParams) (config.OpenResult, error)
+	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (deploypkg.DeploySpec, error)
 	activateMCP               shared.MCPForwarder
 	activateAPI               shared.APIForwarder
 	activateSSHD              shared.SSHDActivator
@@ -87,10 +90,10 @@ type rootDependencies struct {
 func newRootDependencies() rootDependencies {
 	configStore := config.ConfigStore{}
 	store := rootStore(configStore)
-	dockerRegistryLogin := common.DockerRegistryLoginWithHostedRegistry(store, shared.CloudDependencies())
-	deployHelmChart := common.WrapHelmChartDeployerWithNamespaceEnsure(initcmd.EnsureKubernetesNamespace, common.DeployHelmChart)
-	recoveringDeployHelmChart := shared.WrapHelmDeployWithReleaseRecovery(shared.RunPrompt, deployHelmChart, common.ClearHelmReleasePendingOperation)
-	runInit := newRunInit(store, config.FindProjectRoot, shared.RunPrompt, runSelect, initcmd.ListKubernetesContexts, initcmd.EnsureKubernetesNamespace, common.WaitForShellDeployment, kube.RunRemoteCommand, recoveringDeployHelmChart)
+	dockerRegistryLogin := buildpkg.DockerRegistryLoginWithHostedRegistry(store, shared.CloudDependencies())
+	deployHelmChart := deploypkg.WrapHelmChartDeployerWithNamespaceEnsure(initcmd.EnsureKubernetesNamespace, deploypkg.DeployHelmChart)
+	recoveringDeployHelmChart := shared.WrapHelmDeployWithReleaseRecovery(shared.RunPrompt, deployHelmChart, deploypkg.ClearHelmReleasePendingOperation)
+	runInit := newRunInit(store, config.FindProjectRoot, shared.RunPrompt, runSelect, initcmd.ListKubernetesContexts, initcmd.EnsureKubernetesNamespace, openpkg.WaitForShellDeployment, kube.RunRemoteCommand, recoveringDeployHelmChart)
 	deps := rootDependencies{
 		configStore:               configStore,
 		store:                     store,
@@ -111,24 +114,24 @@ func newRootDependencies() rootDependencies {
 	return deps
 }
 
-func (d rootDependencies) resolveOpenResult(params common.OpenParams) (config.OpenResult, error) {
-	return common.ResolveOpen(d.store, params)
+func (d rootDependencies) resolveOpenResult(params sharedpkg.OpenParams) (config.OpenResult, error) {
+	return openpkg.ResolveOpen(d.store, params)
 }
 
-func (d rootDependencies) resolveRuntimeDeploySpecForOpenTarget(ctx core.Context, target config.OpenResult, allowLocalBuilds bool) (common.DeploySpec, error) {
-	return resolveRuntimeDeploySpecForOpen(ctx, d.store, config.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, shared.CurrentBuildInfo(), target, allowLocalBuilds)
+func (d rootDependencies) resolveRuntimeDeploySpecForOpenTarget(ctx core.Context, target config.OpenResult, allowLocalBuilds bool) (deploypkg.DeploySpec, error) {
+	return resolveRuntimeDeploySpecForOpen(ctx, d.store, config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext, deploypkg.ResolveKubernetesDeployContext, time.Now, shared.CurrentBuildInfo(), target, allowLocalBuilds)
 }
 
 func (d rootDependencies) runManagedDeployForOpen(ctx core.Context, target config.OpenResult) error {
 	ctx = shared.WithCloudContextPreflight(ctx, d.store)
-	specs, err := common.ResolveCurrentDeploySpecs(
+	specs, err := deploypkg.ResolveCurrentDeploySpecs(
 		ctx,
 		d.store,
 		config.FindProjectRoot,
-		common.ResolveDockerBuildContext,
-		common.ResolveKubernetesDeployContext,
+		sharedpkg.ResolveDockerBuildContext,
+		deploypkg.ResolveKubernetesDeployContext,
 		time.Now,
-		common.DeployTarget{
+		deploypkg.DeployTarget{
 			Tenant:      target.Tenant,
 			Environment: target.Environment,
 			RepoPath:    target.RepoPath,
@@ -137,7 +140,7 @@ func (d rootDependencies) runManagedDeployForOpen(ctx core.Context, target confi
 	if err != nil {
 		return err
 	}
-	return common.RunDeploySpecs(ctx, specs, d.recoveringDeployHelmChart)
+	return deploypkg.RunDeploySpecs(ctx, specs, d.recoveringDeployHelmChart)
 }
 
 func (d rootDependencies) rootCommand() *cobra.Command {
@@ -189,7 +192,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 		idle.NewIdleCmd(d.configStore, d.resolveOpen),
 		orchestrator.NewWhipCmd(d.configStore, d.resolveOpen),
 		execcmd.DeprecatedTopLevelJobCmd(d.resolveOpen),
-		build.NewReleaseCmd(d.store, config.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, gitx.GitCommandRunner, common.DockerImageBuilder, d.dockerRegistryLogin, runSelect, d.push),
+		build.NewReleaseCmd(d.store, config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext, time.Now, gitx.GitCommandRunner, buildpkg.DockerImageBuilder, d.dockerRegistryLogin, runSelect, d.push),
 		version.NewVersionCmd(func() (version.VersionCommandInfo, error) {
 			return version.ResolveVersionCommandBuildInfo(config.FindProjectRoot)
 		}, registry.ResolveDefaultRuntimeRegistryVersions),
@@ -211,9 +214,9 @@ func (d rootDependencies) openCommand() *cobra.Command {
 		d.store.SaveEnvConfig,
 		d.runInitForOpen,
 		shared.RunPrompt,
-		open.NewOpenShellRunner(common.WaitForShellDeployment, common.ExecShell),
+		open.NewOpenShellRunner(openpkg.WaitForShellDeployment, openpkg.ExecShell),
 		d.runManagedDeploy,
-		common.CheckKubernetesDeployment,
+		deploypkg.CheckKubernetesDeployment,
 		d.resolveRuntimeDeploySpec,
 		d.deployHelmChart,
 		d.activateMCP,
@@ -240,8 +243,8 @@ func (d rootDependencies) containerCommand() *cobra.Command {
 	return shared.NewCommandGroup(
 		"container",
 		"Container utilities",
-		build.NewBuildCmd(d.store, config.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, d.dockerRegistryLogin, runSelect, d.push, d.recoveringDeployHelmChart, d.configStore, shared.CloudDependencies()),
-		build.NewPushCmd(d.store, config.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, d.dockerRegistryLogin, runSelect, d.push),
+		build.NewBuildCmd(d.store, config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext, deploypkg.ResolveKubernetesDeployContext, time.Now, buildpkg.BuildScriptRunner, buildpkg.DockerImageBuilder, d.dockerRegistryLogin, runSelect, d.push, d.recoveringDeployHelmChart, d.configStore, shared.CloudDependencies()),
+		build.NewPushCmd(d.store, config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext, time.Now, buildpkg.DockerImageBuilder, d.dockerRegistryLogin, runSelect, d.push),
 	)
 }
 
@@ -249,25 +252,25 @@ func (d rootDependencies) k8sCommand() *cobra.Command {
 	return shared.NewCommandGroup(
 		"k8s",
 		"Kubernetes utilities",
-		deploy.NewK8sDeployCmd(d.store, d.store.SaveEnvConfig, config.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart),
+		deploy.NewK8sDeployCmd(d.store, d.store.SaveEnvConfig, config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext, deploypkg.ResolveKubernetesDeployContext, time.Now, buildpkg.DockerImageBuilder, d.push, d.recoveringDeployHelmChart),
 	)
 }
 
 func (d rootDependencies) optionalBuildCommand() *cobra.Command {
-	if !hasOptionalBuildCmd(config.FindProjectRoot, common.ResolveDockerBuildContext) {
+	if !hasOptionalBuildCmd(config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext) {
 		return nil
 	}
-	buildCmd := build.NewBuildCmd(d.store, config.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, d.dockerRegistryLogin, runSelect, d.push, d.recoveringDeployHelmChart, d.configStore, shared.CloudDependencies())
-	buildCmd.Short = optionalBuildCmdShort(d.store, config.FindProjectRoot, common.ResolveDockerBuildContext)
+	buildCmd := build.NewBuildCmd(d.store, config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext, deploypkg.ResolveKubernetesDeployContext, time.Now, buildpkg.BuildScriptRunner, buildpkg.DockerImageBuilder, d.dockerRegistryLogin, runSelect, d.push, d.recoveringDeployHelmChart, d.configStore, shared.CloudDependencies())
+	buildCmd.Short = optionalBuildCmdShort(d.store, config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext)
 	return buildCmd
 }
 
 func (d rootDependencies) optionalPushCommand() *cobra.Command {
-	if !hasOptionalPushCmd(config.FindProjectRoot, common.ResolveDockerBuildContext) {
+	if !hasOptionalPushCmd(config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext) {
 		return nil
 	}
-	pushCmd := build.NewRootPushCmd(d.store, config.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, d.dockerRegistryLogin, runSelect, d.push, d.configStore, shared.CloudDependencies())
-	pushCmd.Short = optionalPushCmdShort(config.FindProjectRoot, common.ResolveDockerBuildContext)
+	pushCmd := build.NewRootPushCmd(d.store, config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext, time.Now, buildpkg.BuildScriptRunner, buildpkg.DockerImageBuilder, d.dockerRegistryLogin, runSelect, d.push, d.configStore, shared.CloudDependencies())
+	pushCmd.Short = optionalPushCmdShort(config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext)
 	return pushCmd
 }
 
@@ -275,19 +278,19 @@ func (d rootDependencies) optionalPushCommand() *cobra.Command {
 // --version X" from a cwd that may lack a kubernetes deploy context, so the
 // command must exist even where no context resolves.
 func (d rootDependencies) deployCommand() *cobra.Command {
-	return deploy.NewDeployCmd(d.store, d.store.SaveEnvConfig, config.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
+	return deploy.NewDeployCmd(d.store, d.store.SaveEnvConfig, config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext, deploypkg.ResolveKubernetesDeployContext, time.Now, buildpkg.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
 }
 
 func (d rootDependencies) resizeCommand() *cobra.Command {
-	return resize.NewResizeCmd(d.store, d.store.SaveEnvConfig, config.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, d.recoveringDeployHelmChart, d.resolveOpen)
+	return resize.NewResizeCmd(d.store, d.store.SaveEnvConfig, config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext, deploypkg.ResolveKubernetesDeployContext, d.recoveringDeployHelmChart, d.resolveOpen)
 }
 
 func (d rootDependencies) publishCommand() *cobra.Command {
-	return build.NewPublishCmd(d.store, config.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now)
+	return build.NewPublishCmd(d.store, config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext, deploypkg.ResolveKubernetesDeployContext, time.Now)
 }
 
 func (d rootDependencies) upgradeCommand() *cobra.Command {
-	return upgrade.NewUpgradeCmd(d.store, d.store.SaveEnvConfig, config.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
+	return upgrade.NewUpgradeCmd(d.store, d.store.SaveEnvConfig, config.FindProjectRoot, sharedpkg.ResolveDockerBuildContext, deploypkg.ResolveKubernetesDeployContext, time.Now, buildpkg.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
 }
 
 func (d rootDependencies) runRoot(cmd *cobra.Command, args []string) error {
@@ -299,5 +302,5 @@ func (d rootDependencies) runRoot(cmd *cobra.Command, args []string) error {
 	if initRan {
 		return nil
 	}
-	return open.RunResolvedOpenCommandWithAPI(ctx, result, open.OpenOptions{}, shared.RunPrompt, open.NewOpenShellRunner(common.WaitForShellDeployment, common.ExecShell), d.runManagedDeploy, common.CheckKubernetesDeployment, d.resolveRuntimeDeploySpec, d.deployHelmChart, d.activateMCP, d.activateAPI, d.activateSSHD, open.LaunchVSCode, open.LaunchIntelliJ)
+	return open.RunResolvedOpenCommandWithAPI(ctx, result, open.OpenOptions{}, shared.RunPrompt, open.NewOpenShellRunner(openpkg.WaitForShellDeployment, openpkg.ExecShell), d.runManagedDeploy, deploypkg.CheckKubernetesDeployment, d.resolveRuntimeDeploySpec, d.deployHelmChart, d.activateMCP, d.activateAPI, d.activateSSHD, open.LaunchVSCode, open.LaunchIntelliJ)
 }

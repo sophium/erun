@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/mcp"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // exec_write_push.go exposes the runtime repo's commit/push primitives to the
@@ -75,7 +76,7 @@ func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (gitx.C
 	if err != nil {
 		return gitx.CommitWorkingTreeResult{}, err
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -114,7 +115,7 @@ func (a *App) ExecPush(selection uiSelection, input uiExecPushInput) (gitx.PushW
 	if branch == "" {
 		return gitx.PushWorkingTreeBranchResult{}, fmt.Errorf("branch is required")
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

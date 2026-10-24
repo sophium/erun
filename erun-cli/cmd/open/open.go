@@ -14,6 +14,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -49,11 +53,11 @@ func refuseOpenForHostEnvironment(result config.OpenResult) error {
 func resolveOpenTarget(
 	ctx core.Context,
 	args []string,
-	target common.OpenParams,
+	target sharedpkg.OpenParams,
 	vscode bool,
 	intellij bool,
-	resolveOpen func(common.OpenParams) (config.OpenResult, error),
-	runInitForOpen func(core.Context, common.OpenParams) error,
+	resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error),
+	runInitForOpen func(core.Context, sharedpkg.OpenParams) error,
 	saveEnvConfig func(string, config.EnvConfig) error,
 ) (config.OpenResult, bool, error) {
 	if vscode && intellij {
@@ -73,14 +77,14 @@ func resolveOpenTarget(
 	if err := refuseOpenForHostEnvironment(result); err != nil {
 		return config.OpenResult{}, false, err
 	}
-	result, err = common.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
+	result, err = open.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
 	if err != nil {
 		return config.OpenResult{}, false, err
 	}
 	return result, false, nil
 }
 
-func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(common.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, common.OpenParams) error, promptRunner shared.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP shared.MCPForwarder, activateAPI shared.APIForwarder, activateSSHD shared.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
+func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, sharedpkg.OpenParams) error, promptRunner shared.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment deploy.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP shared.MCPForwarder, activateAPI shared.APIForwarder, activateSSHD shared.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
 	var intellij bool
@@ -92,7 +96,7 @@ func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func
 	var aiTab bool
 	var contributeTab bool
 	var reconnect bool
-	target := common.OpenParams{}
+	target := sharedpkg.OpenParams{}
 
 	cmd := &cobra.Command{
 		Use:   "open [TENANT] [ENVIRONMENT]",
@@ -187,7 +191,7 @@ type OpenOptions struct {
 	Reconnect        bool
 }
 
-func ResolveOpenWithInitStop(ctx core.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error) (config.OpenResult, bool, error) {
+func ResolveOpenWithInitStop(ctx core.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error) (config.OpenResult, bool, error) {
 	_, result, err := shared.ResolveOpenArgs(ctx.Command, args, resolveOpen)
 	if !shouldRunInit(err) {
 		return result, false, err
@@ -200,7 +204,7 @@ func ResolveOpenWithInitStop(ctx core.Context, args []string, shouldRunInit func
 	return config.OpenResult{}, true, nil
 }
 
-func resolveOpenWithInitStopForParams(ctx core.Context, params common.OpenParams, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (config.OpenResult, error), runInitForOpen func(core.Context, common.OpenParams) error) (config.OpenResult, bool, error) {
+func resolveOpenWithInitStopForParams(ctx core.Context, params sharedpkg.OpenParams, shouldRunInit func(error) bool, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), runInitForOpen func(core.Context, sharedpkg.OpenParams) error) (config.OpenResult, bool, error) {
 	result, err := resolveOpen(params)
 	if !shouldRunInit(err) {
 		return result, false, err
@@ -213,7 +217,7 @@ func resolveOpenWithInitStopForParams(ctx core.Context, params common.OpenParams
 	return config.OpenResult{}, true, nil
 }
 
-func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, options OpenOptions, promptRunner shared.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP shared.MCPForwarder, activateAPI shared.APIForwarder, activateSSHD shared.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
+func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, options OpenOptions, promptRunner shared.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment deploy.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP shared.MCPForwarder, activateAPI shared.APIForwarder, activateSSHD shared.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
 	ctx, closeEnvTrace := common.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
 	runner := resolvedOpenRunner{
@@ -226,7 +230,7 @@ func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, o
 		checkKubernetesDeployment: checkKubernetesDeployment,
 		resolveRuntimeDeploySpec:  resolveRuntimeDeploySpec,
 		deployHelmChart:           deployHelmChart,
-		resolveDeployedVersion:    common.ResolveDeployedHelmReleaseVersion,
+		resolveDeployedVersion:    deploy.ResolveDeployedHelmReleaseVersion,
 		activateMCP:               activateMCP,
 		activateAPI:               activateAPI,
 		activateSSHD:              activateSSHD,
@@ -243,10 +247,10 @@ type resolvedOpenRunner struct {
 	promptRunner              shared.PromptRunner
 	openShell                 OpenShellRunner
 	runManagedDeploy          func(core.Context, config.OpenResult) error
-	checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc
-	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (common.DeploySpec, error)
-	deployHelmChart           common.HelmChartDeployerFunc
-	resolveDeployedVersion    common.HelmReleaseVersionResolverFunc
+	checkKubernetesDeployment deploy.KubernetesDeploymentCheckerFunc
+	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error)
+	deployHelmChart           deploy.HelmChartDeployerFunc
+	resolveDeployedVersion    deploy.HelmReleaseVersionResolverFunc
 	activateMCP               shared.MCPForwarder
 	activateAPI               shared.APIForwarder
 	activateSSHD              shared.SSHDActivator
@@ -267,7 +271,7 @@ func (r *resolvedOpenRunner) run() error {
 		return err
 	}
 
-	shellReq := common.ShellLaunchParamsFromResult(r.result)
+	shellReq := cloud.ShellLaunchParamsFromResult(r.result)
 	shellReq.AppSession = r.options.AppSession
 	shellReq.AI = r.options.AI
 	shellReq.Contribute = r.options.Contribute
@@ -395,7 +399,7 @@ func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq config.ShellLaunchParam
 	return r.deployRuntime(execution)
 }
 
-func (r *resolvedOpenRunner) resolveRuntimeExecution() (common.DeploySpec, error) {
+func (r *resolvedOpenRunner) resolveRuntimeExecution() (deploy.DeploySpec, error) {
 	// Heal envs created by older binaries: their tenant Chart.yaml is pinned to
 	// the literal "1.0.0" placeholder, so helm keeps pulling an erun-devops:1.0.0
 	// image that was never published and every rollout fails at pod startup.
@@ -403,32 +407,32 @@ func (r *resolvedOpenRunner) resolveRuntimeExecution() (common.DeploySpec, error
 	if appVersion == "" {
 		appVersion = shared.CurrentBuildInfo().Version
 	}
-	if err := common.MigrateDefaultDevopsChartAppVersion(r.ctx, r.result.RepoPath, r.result.Tenant, appVersion); err != nil {
-		return common.DeploySpec{}, err
+	if err := deploy.MigrateDefaultDevopsChartAppVersion(r.ctx, r.result.RepoPath, r.result.Tenant, appVersion); err != nil {
+		return deploy.DeploySpec{}, err
 	}
 	execution, err := r.resolveRuntimeDeploySpec(r.ctx, r.result, r.options.AllowLocalBuilds)
 	if err != nil {
-		return common.DeploySpec{}, err
+		return deploy.DeploySpec{}, err
 	}
 	execution, err = applyRuntimeDeployImageOverride(r.ctx, r.result, execution, r.options.RuntimeImage)
 	if err != nil {
-		return common.DeploySpec{}, err
+		return deploy.DeploySpec{}, err
 	}
 	return applyRuntimeDeployVersionOverride(execution, r.options.VersionOverride), nil
 }
 
-func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq config.ShellLaunchParams, execution common.DeploySpec) (bool, error) {
+func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq config.ShellLaunchParams, execution deploy.DeploySpec) (bool, error) {
 	if strings.TrimSpace(r.options.VersionOverride) != "" || strings.TrimSpace(r.options.RuntimeImage) != "" {
 		return true, nil
 	}
 	if r.checkKubernetesDeployment == nil {
 		return false, nil
 	}
-	deployed, err := r.checkKubernetesDeployment(r.ctx, common.KubernetesDeploymentCheckParams{
+	deployed, err := r.checkKubernetesDeployment(r.ctx, deploy.KubernetesDeploymentCheckParams{
 		Name:               config.RuntimeReleaseName(r.result.Tenant),
 		Namespace:          config.KubernetesNamespaceName(r.result.Tenant, r.result.Environment),
 		KubernetesContext:  r.result.EnvConfig.KubernetesContext,
-		ExpectedRepoPath:   common.RemoteShellWorktreePath(shellReq),
+		ExpectedRepoPath:   open.RemoteShellWorktreePath(shellReq),
 		ExpectedSSHD:       sshdExpectationForDeployment(r.result),
 		ExpectedMCPPort:    config.MCPPortForResult(r.result),
 		ExpectedSSHPort:    config.SSHLocalPortForResult(r.result),
@@ -444,7 +448,7 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq config.ShellLaunchPara
 	return !deployed, nil
 }
 
-func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
+func (r *resolvedOpenRunner) deployRuntime(execution deploy.DeploySpec) error {
 	if r.options.VSCode || r.options.IntelliJ {
 		if r.ctx.DryRun {
 			r.ctx.Trace(fmt.Sprintf("open: dry-run: would deploy runtime for %s/%s before launching %s; in real mode the user must run `erun sshd init %s %s` or `erun deploy %s %s` first", r.result.Tenant, r.result.Environment, ideOpenLabel(r.options), r.result.Tenant, r.result.Environment, r.result.Tenant, r.result.Environment))
@@ -456,7 +460,7 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 		execution.Deploy.SSHDEnabled = true
 	}
 	r.ctx.Logger.Debug("deploying the devops runtime before opening the shell")
-	if err := common.RunDeploySpec(r.ctx, execution, r.openHelmDeployer(execution)); err != nil {
+	if err := deploy.RunDeploySpec(r.ctx, execution, r.openHelmDeployer(execution)); err != nil {
 		return err
 	}
 	// Persist through the same shared writer `erun deploy`/`erun upgrade` use
@@ -468,14 +472,14 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 	// stated RuntimeChart, and the MCP-auth key, and already knows to heal to
 	// the running version instead of a never-pushed snapshot when every image
 	// came from the fingerprint cache (SkipHelm).
-	return common.PersistRuntimeVersionFromDeploySpecs(r.ctx, []common.DeploySpec{execution}, r.options.SaveEnvConfig, r.resolveDeployedVersion)
+	return deploy.PersistRuntimeVersionFromDeploySpecs(r.ctx, []deploy.DeploySpec{execution}, r.options.SaveEnvConfig, r.resolveDeployedVersion)
 }
 
-func (r *resolvedOpenRunner) openHelmDeployer(execution common.DeploySpec) common.HelmChartDeployerFunc {
+func (r *resolvedOpenRunner) openHelmDeployer(execution deploy.DeploySpec) deploy.HelmChartDeployerFunc {
 	return shared.WrapHelmDeployWithReleaseRecovery(
 		r.promptRunner,
 		wrapOpenHelmDeployWithSpinner(r.ctx, execution.Deploy.ReleaseName, r.deployHelmChart),
-		common.ClearHelmReleasePendingOperation,
+		deploy.ClearHelmReleasePendingOperation,
 	)
 }
 
@@ -497,7 +501,7 @@ func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
 	if r.checkKubernetesDeployment == nil {
 		return nil
 	}
-	present, err := r.checkKubernetesDeployment(r.ctx, common.KubernetesDeploymentCheckParams{
+	present, err := r.checkKubernetesDeployment(r.ctx, deploy.KubernetesDeploymentCheckParams{
 		Name:              release,
 		Namespace:         namespace,
 		KubernetesContext: r.result.EnvConfig.KubernetesContext,
@@ -510,7 +514,7 @@ func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
 		// desktop, reading only this text across a CLI subprocess boundary, can
 		// tell a genuine absence apart from a check that could not resolve an
 		// answer without re-deriving kubectl's own error grammar.
-		return fmt.Errorf("runtime for %s/%s "+common.KubernetesDeploymentAbsentMessageMarker+" %q not found in namespace %q); run `erun deploy %s %s` first",
+		return fmt.Errorf("runtime for %s/%s "+deploy.KubernetesDeploymentAbsentMessageMarker+" %q not found in namespace %q); run `erun deploy %s %s` first",
 			r.result.Tenant, r.result.Environment, release, namespace, r.result.Tenant, r.result.Environment)
 	}
 	return nil
@@ -688,7 +692,7 @@ func (r *resolvedOpenRunner) emitNoShellSetup() error {
 }
 
 func (r *resolvedOpenRunner) traceShellPreview(shellReq config.ShellLaunchParams) {
-	if preview, err := common.PreviewShellLaunch(shellReq); err == nil {
+	if preview, err := open.PreviewShellLaunch(shellReq); err == nil {
 		if len(preview.SeedArgs) > 0 {
 			r.ctx.TraceCommand("", "kubectl", preview.SeedArgs...)
 			r.ctx.Trace("open: SSH private key streamed to the runtime pod on stdin (kept off the command line)")
@@ -708,18 +712,18 @@ func (r *resolvedOpenRunner) traceShellPreview(shellReq config.ShellLaunchParams
 func (r *resolvedOpenRunner) runShellLoop(shellReq config.ShellLaunchParams) error {
 	for {
 		err := r.openShell(r.ctx, shellReq)
-		if errors.Is(err, common.ErrShellPodReplaced) {
+		if errors.Is(err, open.ErrShellPodReplaced) {
 			continue
 		}
-		if errors.Is(err, common.ErrShellSessionTakenOver) {
+		if errors.Is(err, open.ErrShellSessionTakenOver) {
 			// Another ERun window re-attached this persistent session; it keeps
 			// running there, so end this viewer cleanly. The notice line is the
 			// desktop's signal to stop its reconnect loop instead of stealing the
 			// session straight back.
-			r.ctx.Info(common.ShellSessionTakenOverNotice)
+			r.ctx.Info(open.ShellSessionTakenOverNotice)
 			return nil
 		}
-		if !errors.Is(err, common.ErrShellReattachDeploy) {
+		if !errors.Is(err, open.ErrShellReattachDeploy) {
 			return err
 		}
 		if r.runManagedDeploy == nil {
@@ -749,11 +753,11 @@ func sshdExpectationForDeployment(result config.OpenResult) *bool {
 	return &expected
 }
 
-func wrapOpenHelmDeployWithSpinner(ctx core.Context, releaseName string, deployHelmChart common.HelmChartDeployerFunc) common.HelmChartDeployerFunc {
+func wrapOpenHelmDeployWithSpinner(ctx core.Context, releaseName string, deployHelmChart deploy.HelmChartDeployerFunc) deploy.HelmChartDeployerFunc {
 	if deployHelmChart == nil {
 		return nil
 	}
-	return func(params common.HelmDeployParams) error {
+	return func(params deploy.HelmDeployParams) error {
 		return runWithSpinner(
 			ctx,
 			" deploying "+releaseName+" with helm",
@@ -768,19 +772,19 @@ func wrapOpenHelmDeployWithSpinner(ctx core.Context, releaseName string, deployH
 // applyRuntimeDeployImageOverride applies a runtime-image override only for
 // published-chart envs; envs on a repo-local chart ignore it because the local
 // chart's templates own their image references.
-func applyRuntimeDeployImageOverride(ctx core.Context, result config.OpenResult, execution common.DeploySpec, runtimeImage string) (common.DeploySpec, error) {
+func applyRuntimeDeployImageOverride(ctx core.Context, result config.OpenResult, execution deploy.DeploySpec, runtimeImage string) (deploy.DeploySpec, error) {
 	runtimeImage = strings.TrimSpace(runtimeImage)
 	if runtimeImage == "" {
 		return execution, nil
 	}
-	if !result.RemoteRepo() && !common.IsOCIChartReference(execution.Deploy.ChartPath) {
+	if !result.RemoteRepo() && !deploy.IsOCIChartReference(execution.Deploy.ChartPath) {
 		return execution, nil
 	}
 	result.EnvConfig.RuntimeImage = runtimeImage
-	return common.ResolvePublishedDevopsDeploySpec(ctx, result, "")
+	return deploy.ResolvePublishedDevopsDeploySpec(ctx, result, "")
 }
 
-func applyRuntimeDeployVersionOverride(execution common.DeploySpec, versionOverride string) common.DeploySpec {
+func applyRuntimeDeployVersionOverride(execution deploy.DeploySpec, versionOverride string) deploy.DeploySpec {
 	versionOverride = strings.TrimSpace(versionOverride)
 	if versionOverride == "" {
 		return execution
@@ -1001,7 +1005,7 @@ func localShellSetupScript(result config.OpenResult, dialect openNoShellDialect)
 		}
 		return strings.Join(commands, "\n") + "\n"
 	default:
-		return common.LocalShellSetupScript(result)
+		return open.LocalShellSetupScript(result)
 	}
 }
 

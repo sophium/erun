@@ -19,6 +19,9 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // E2ETarget scopes an erun e2e run to a deployed environment, the same
@@ -155,7 +158,7 @@ func resolveE2ERuns(ctx core.Context, params E2EParams, deps e2eDeps) (*E2EResul
 	}
 	traceE2EVersion(ctx, version, versionOverride != "")
 	if len(secrets) > 0 {
-		ctx.Trace("e2e: secrets configured as " + eruncommon.DescribeDockerBuildSecrets(secrets) + " (.erun/config.yaml e2e.secrets)")
+		ctx.Trace("e2e: secrets configured as " + shared.DescribeDockerBuildSecrets(secrets) + " (.erun/config.yaml e2e.secrets)")
 	}
 
 	runs := make([]e2eRun, 0, len(params.Plan.Suites))
@@ -260,8 +263,8 @@ func e2eDockerBuildArgs(suite E2ESuite, version, baseURL string, exposed []erunc
 	for _, service := range sorted {
 		args = append(args, "--build-arg", e2eServiceURLBuildArg(service.Service)+"="+service.Scheme+"://"+service.Hostname)
 	}
-	args = eruncommon.AppendCgroupParentArg(args, cgroupParent)
-	args = append(args, eruncommon.DockerSecretArgs(secrets)...)
+	args = build.AppendCgroupParentArg(args, cgroupParent)
+	args = append(args, shared.DockerSecretArgs(secrets)...)
 	return append(args, "-f", suite.Dockerfile, ".")
 }
 
@@ -374,7 +377,7 @@ func checkE2EPreconditions(ctx core.Context, target E2ETarget, suites []E2ESuite
 		ctx.Trace("e2e: --base-url and --version name the target; no environment is read (deployment, exposure and version checks skipped)")
 		return versionOverride, nil, nil
 	}
-	deployed, err := eruncommon.CheckKubernetesDeployment(ctx, eruncommon.KubernetesDeploymentCheckParams{
+	deployed, err := deploy.CheckKubernetesDeployment(ctx, deploy.KubernetesDeploymentCheckParams{
 		Name:              config.RuntimeReleaseName(target.Tenant),
 		Namespace:         target.Namespace,
 		KubernetesContext: target.KubernetesContext,
@@ -383,7 +386,7 @@ func checkE2EPreconditions(ctx core.Context, target E2ETarget, suites []E2ESuite
 		return "", nil, fmt.Errorf("erun e2e: could not confirm %s/%s is deployed: %w", target.Tenant, target.Environment, err)
 	}
 	if !deployed {
-		return "", nil, fmt.Errorf("erun e2e: %s/%s "+eruncommon.KubernetesDeploymentAbsentMessageMarker+" %q not found in namespace %q); run `erun deploy %s %s` first",
+		return "", nil, fmt.Errorf("erun e2e: %s/%s "+deploy.KubernetesDeploymentAbsentMessageMarker+" %q not found in namespace %q); run `erun deploy %s %s` first",
 			target.Tenant, target.Environment, config.RuntimeReleaseName(target.Tenant), target.Namespace, target.Tenant, target.Environment)
 	}
 
@@ -397,7 +400,7 @@ func checkE2EPreconditions(ctx core.Context, target E2ETarget, suites []E2ESuite
 	if versionOverride != "" {
 		return versionOverride, exposed, nil
 	}
-	version, err := eruncommon.ResolveDeployedHelmReleaseVersion(ctx, config.RuntimeReleaseName(target.Tenant), target.Namespace, target.KubernetesContext)
+	version, err := deploy.ResolveDeployedHelmReleaseVersion(ctx, config.RuntimeReleaseName(target.Tenant), target.Namespace, target.KubernetesContext)
 	if err != nil {
 		return "", nil, fmt.Errorf("erun e2e: could not resolve the deployed version for %s/%s: %w", target.Tenant, target.Environment, err)
 	}
@@ -497,7 +500,7 @@ func lookupE2EHost(host string) ([]string, error) {
 // docker.secrets: a declared secret that cannot be supplied fails the run
 // rather than letting the suite degrade to skipping what it was meant to check.
 func resolveE2ESecrets(projectRoot string) ([]config.DockerBuildSecret, error) {
-	cfg, ok, err := eruncommon.LoadProjectConfigForDockerSecrets(projectRoot)
+	cfg, ok, err := shared.LoadProjectConfigForDockerSecrets(projectRoot)
 	if err != nil || !ok {
 		return nil, err
 	}

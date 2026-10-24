@@ -5,6 +5,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 func TestParseSSHHostEntriesReadsTheDirectivesErunWrites(t *testing.T) {
@@ -84,7 +85,7 @@ func TestFindOrphanedSSHAliasesNamesWhatEachStaleBlockNowReaches(t *testing.T) {
 func TestFindOrphanedSSHAliasesDoesNotReportABlockAnEnvironmentStillClaims(t *testing.T) {
 	entries := []config.SSHHostEntry{{Alias: "erun-team-dev", Port: 17022}}
 	environments := []eruncommon.SSHEnvironmentAlias{
-		{Tenant: "team", Environment: "dev", Alias: eruncommon.SSHHostAlias("team", "dev"), LocalPort: 17022},
+		{Tenant: "team", Environment: "dev", Alias: open.SSHHostAlias("team", "dev"), LocalPort: 17022},
 	}
 	if orphans := eruncommon.FindOrphanedSSHAliases(entries, environments); len(orphans) != 0 {
 		t.Fatalf("a claimed alias is not stale, got %+v", orphans)

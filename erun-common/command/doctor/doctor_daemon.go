@@ -8,6 +8,9 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // A doctor docker-storage read or prune acts on exactly one docker daemon, and
@@ -85,10 +88,10 @@ func ResolveDoctorDockerDaemon(req config.ShellLaunchParams) DoctorDockerDaemon 
 	case req.Type.UsesDindSidecar():
 		return DoctorDockerDaemon{
 			Kind:      DoctorDockerDaemonDindSidecar,
-			Container: eruncommon.RuntimeDindContainerName,
-			Label:     "the " + eruncommon.RuntimeDindContainerName + " sidecar",
+			Container: build.RuntimeDindContainerName,
+			Label:     "the " + build.RuntimeDindContainerName + " sidecar",
 			Where: fmt.Sprintf("container %s of deployment/%s in namespace %s, where this environment's image builds run and where its build images are stored",
-				eruncommon.RuntimeDindContainerName, config.RuntimeReleaseName(req.Tenant), req.Namespace),
+				build.RuntimeDindContainerName, config.RuntimeReleaseName(req.Tenant), req.Namespace),
 		}
 	case req.Type == config.EnvironmentTypeHost:
 		return DoctorDockerDaemon{
@@ -101,7 +104,7 @@ func ResolveDoctorDockerDaemon(req config.ShellLaunchParams) DoctorDockerDaemon 
 			Kind:  DoctorDockerDaemonNone,
 			Label: "no build daemon",
 			Where: "this environment resolves to type \"runtime\", which installs published versions by reference and never builds: its pod carries no " +
-				eruncommon.RuntimeDindContainerName + " sidecar, so it holds no build images to prune. Prune a build environment (a local-agent, remote-agent, or host environment) instead",
+				build.RuntimeDindContainerName + " sidecar, so it holds no build images to prune. Prune a build environment (a local-agent, remote-agent, or host environment) instead",
 		}
 	default:
 		return DoctorDockerDaemon{
@@ -359,7 +362,7 @@ func runDoctorDockerSteps(ctx core.Context, runner eruncommon.RuntimeContainerCo
 	result, err := runner(req, daemon.Container, script)
 	if err != nil {
 		return DoctorDockerResult{Daemon: daemon, Stdout: result.Stdout, Stderr: result.Stderr},
-			eruncommon.NormalizeDoctorKubectlError(req, result.Stderr, err)
+			cloud.NormalizeDoctorKubectlError(req, result.Stderr, err)
 	}
 	stdout, readings := splitDoctorDockerReadings(result.Stdout)
 	return DoctorDockerResult{Daemon: daemon, Stdout: stdout, Stderr: result.Stderr, Readings: readings}, nil
@@ -501,7 +504,7 @@ func parseDoctorDockerStore(text string) (DoctorDockerStore, bool) {
 		if strings.EqualFold(name, "local volumes") {
 			continue
 		}
-		reclaimable, ok := eruncommon.ParseDockerSize(fields[len(fields)-1])
+		reclaimable, ok := shared.ParseDockerSize(fields[len(fields)-1])
 		if !ok {
 			continue
 		}

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // RuntimeSizingLines render the standing recommendation under `runtime-pod:`,
@@ -14,17 +14,17 @@ import (
 // detail — a recommendation whose window and counters are invisible cannot be
 // argued with, and this one has to be argued with before anyone shrinks an
 // environment.
-func RuntimeSizingLines(sizing *common.RuntimeSizingRecommendation, indent string) []string {
+func RuntimeSizingLines(sizing *deploy.RuntimeSizingRecommendation, indent string) []string {
 	if sizing == nil {
 		return nil
 	}
 	verdicts := make([]string, 0, len(sizing.Verdicts))
 	for _, verdict := range sizing.Verdicts {
-		verdicts = append(verdicts, common.FormatRuntimeSizingVerdict(verdict))
+		verdicts = append(verdicts, deploy.FormatRuntimeSizingVerdict(verdict))
 	}
 	return []string{
 		indent + "sizing: " + strings.Join(verdicts, "; "),
-		indent + "sizing-evidence: " + common.FormatRuntimeSizingEvidence(*sizing),
+		indent + "sizing-evidence: " + deploy.FormatRuntimeSizingEvidence(*sizing),
 	}
 }
 

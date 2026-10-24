@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 const testGatewayURL = "https://openrouter.ai/api"
@@ -36,7 +36,7 @@ func TestResolveGatewayCredentialPrefersTheSavedValue(t *testing.T) {
 	if err := store.SaveCloudSecret("claude-gateway", "saved-by-operator"); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	got, err := eruncommon.ResolveGatewayCredentialFromStore(store, "claude-gateway", testGatewayURL)
+	got, err := deploy.ResolveGatewayCredentialFromStore(store, "claude-gateway", testGatewayURL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestResolveGatewayCredentialReusesTheHostKeyForTheSameGateway(t *testing.T)
 	// through this gateway has the key on this machine, so nothing saved yet
 	// means the host key, not a failure.
 	stubClaudeSettings(t, `{"env":{"ANTHROPIC_BASE_URL":"`+testGatewayURL+`","ANTHROPIC_AUTH_TOKEN":"from-host"}}`)
-	got, err := eruncommon.ResolveGatewayCredentialFromStore(emptySecretStore(t), "claude-gateway", testGatewayURL)
+	got, err := deploy.ResolveGatewayCredentialFromStore(emptySecretStore(t), "claude-gateway", testGatewayURL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestResolveGatewayCredentialNeverSendsAHostKeyToAnotherGateway(t *testing.T
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			stubClaudeSettings(t, tc.env)
-			got, err := eruncommon.ResolveGatewayCredentialFromStore(emptySecretStore(t), "claude-gateway", testGatewayURL)
+			got, err := deploy.ResolveGatewayCredentialFromStore(emptySecretStore(t), "claude-gateway", testGatewayURL)
 			if err == nil {
 				t.Fatalf("a key for another endpoint must not be delivered, got %q", got)
 			}
@@ -118,7 +118,7 @@ func TestResolveGatewayCredentialExplainsADirectAnthropicHost(t *testing.T) {
 	// has to say that, because otherwise the operator reads "no credential" over
 	// a settings file that plainly has one.
 	stubClaudeSettings(t, `{"env":{"ANTHROPIC_API_KEY":"sk-ant-api03-secret"}}`)
-	_, err := eruncommon.ResolveGatewayCredentialFromStore(emptySecretStore(t), "claude-gateway", testGatewayURL)
+	_, err := deploy.ResolveGatewayCredentialFromStore(emptySecretStore(t), "claude-gateway", testGatewayURL)
 	if err == nil {
 		t.Fatal("a direct-Anthropic key must not be delivered to a gateway")
 	}
@@ -129,7 +129,7 @@ func TestResolveGatewayCredentialExplainsADirectAnthropicHost(t *testing.T) {
 
 func TestResolveGatewayCredentialNamesBothSourcesWhenNeitherExists(t *testing.T) {
 	stubClaudeSettings(t, "")
-	_, err := eruncommon.ResolveGatewayCredentialFromStore(emptySecretStore(t), "claude-gateway", testGatewayURL)
+	_, err := deploy.ResolveGatewayCredentialFromStore(emptySecretStore(t), "claude-gateway", testGatewayURL)
 	if err == nil {
 		t.Fatal("no credential anywhere must be an error, not an empty Secret")
 	}
@@ -148,7 +148,7 @@ func TestResolveGatewayCredentialReportsAnUnreadableStore(t *testing.T) {
 	// the operator saved.
 	stubClaudeSettings(t, `{"env":{"ANTHROPIC_BASE_URL":"`+testGatewayURL+`","ANTHROPIC_AUTH_TOKEN":"from-host"}}`)
 	want := errors.New("permission denied")
-	_, err := eruncommon.ResolveGatewayCredentialFromStore(failingSecretStore{err: want}, "claude-gateway", testGatewayURL)
+	_, err := deploy.ResolveGatewayCredentialFromStore(failingSecretStore{err: want}, "claude-gateway", testGatewayURL)
 	if !errors.Is(err, want) {
 		t.Fatalf("err = %v, want it to wrap %v", err, want)
 	}

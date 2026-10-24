@@ -7,6 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // TestRemoteShellLaunchPersistentSession pins the reconnect contract: a desktop
@@ -24,7 +25,7 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 
 	preview := func(t *testing.T, req config.ShellLaunchParams) string {
 		t.Helper()
-		p, err := PreviewShellLaunch(req)
+		p, err := open.PreviewShellLaunch(req)
 		if err != nil {
 			t.Fatalf("PreviewShellLaunch: %v", err)
 		}
@@ -111,8 +112,8 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 func TestSessionSocketPathCannotCollideWithTheDesktopBinary(t *testing.T) {
 	paths := []string{
 		activity.RemoteAppSessionSocketDir,
-		RemoteAppSessionSocketPath("erun", "local", "open-0"),
-		RemoteAppSessionSocketPath("erun", "local", "ai"),
+		open.RemoteAppSessionSocketPath("erun", "local", "open-0"),
+		open.RemoteAppSessionSocketPath("erun", "local", "ai"),
 	}
 	for _, path := range paths {
 		if strings.Contains(path, core.DesktopAppName) {
@@ -121,7 +122,7 @@ func TestSessionSocketPathCannotCollideWithTheDesktopBinary(t *testing.T) {
 	}
 	// The dtach command line is what pkill actually matches, so the same
 	// property is asserted on the rendered script rather than only on the path.
-	script, err := PreviewShellLaunch(config.ShellLaunchParams{
+	script, err := open.PreviewShellLaunch(config.ShellLaunchParams{
 		Tenant:      "erun",
 		Environment: "local",
 		Namespace:   "erun-local",
@@ -164,7 +165,7 @@ func TestParseRemoteAppSessionIDs(t *testing.T) {
 		"",
 		"not-a-socket",
 	}, "\n")
-	got := ParseRemoteAppSessionIDs("erun", "local", lsOutput)
+	got := open.ParseRemoteAppSessionIDs("erun", "local", lsOutput)
 	want := []string{"open-0", "open-1", "ai", "contribute-ai"}
 	if len(got) != len(want) {
 		t.Fatalf("ParseRemoteAppSessionIDs = %v, want %v", got, want)
@@ -181,7 +182,7 @@ func TestParseRemoteAppSessionIDs(t *testing.T) {
 // and fails open — an unidentifiable master kills nothing but still drops the
 // socket.
 func TestRemoteAppSessionEndScript(t *testing.T) {
-	script := RemoteAppSessionEndScript("erun", "local", "open-2")
+	script := open.RemoteAppSessionEndScript("erun", "local", "open-2")
 	for _, want := range []string{
 		`[ "$child_comm" != "dtach" ]`,
 		`if [ -n "$master_pid" ]; then kill "$master_pid" 2>/dev/null || true; fi`,
@@ -201,7 +202,7 @@ func TestRemoteAppSessionEndScript(t *testing.T) {
 // pod's /proc/<pid>/cmdline, or exec audit logs) — it reaches the pod only on
 // the separate seed exec's stdin.
 func TestRemoteShellGitSeedKeepsPrivateKeyOffArgv(t *testing.T) {
-	lines := remoteShellGitSeedScriptLines(
+	lines := open.RemoteShellGitSeedScriptLines(
 		`"$HOME/git/erun"`, "github.com", core.ShellQuote("sophium"), core.ShellQuote("erun"),
 		"github.com ssh-ed25519 AAAAEXAMPLE",
 	)
@@ -232,7 +233,7 @@ func TestRemoteShellGitSeedKeepsPrivateKeyOffArgv(t *testing.T) {
 // key on stdin, not in the argv, so the key bytes never appear in a process
 // listing.
 func TestRemoteSSHKeySeedArgsStreamOnStdin(t *testing.T) {
-	args := remoteSSHKeySeedArgs(config.ShellLaunchParams{Tenant: "erun", KubernetesContext: "ctx", Namespace: "erun-local"})
+	args := open.RemoteSSHKeySeedArgs(config.ShellLaunchParams{Tenant: "erun", KubernetesContext: "ctx", Namespace: "erun-local"})
 
 	sawI, sawIT := false, false
 	for _, a := range args {

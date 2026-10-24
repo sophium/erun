@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // openGatewayStore is an OpenStore whose root config carries a gateway catalog,
@@ -66,13 +69,13 @@ func TestOpenAILaunchHonoursTheEnvironmentsGateway(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := ResolveOpen(openGatewayStore{catalog: catalog, claude: tc.claude, repoPath: t.TempDir()}, OpenParams{Tenant: "team", Environment: "dev"})
+			result, err := open.ResolveOpen(openGatewayStore{catalog: catalog, claude: tc.claude, repoPath: t.TempDir()}, shared.OpenParams{Tenant: "team", Environment: "dev"})
 			if err != nil {
 				t.Fatalf("resolve open: %v", err)
 			}
-			req := ShellLaunchParamsFromResult(result)
+			req := cloud.ShellLaunchParamsFromResult(result)
 			req.AI = true
-			body := strings.Join(remoteSessionLauncherBody(req, "/tmp/bashrc"), "\n")
+			body := strings.Join(open.RemoteSessionLauncherBody(req, "/tmp/bashrc"), "\n")
 
 			if !strings.Contains(body, "--model "+tc.model) {
 				t.Fatalf("the AI session should launch on %s:\n%s", tc.model, body)
@@ -94,7 +97,7 @@ func TestOpenAILaunchHonoursTheEnvironmentsGateway(t *testing.T) {
 // read: a root config that cannot be read must not fail the open, and leaves
 // the launch on its gateway-less answer.
 func TestOpenWithoutAReadableRootConfigLaunchesWithoutAGateway(t *testing.T) {
-	if got := resolveOpenGateway(openTenantResolutionStore{}); got != nil {
+	if got := shared.ResolveOpenGateway(openTenantResolutionStore{}); got != nil {
 		t.Fatalf("an unreadable root config should resolve no gateway, got %+v", got)
 	}
 }

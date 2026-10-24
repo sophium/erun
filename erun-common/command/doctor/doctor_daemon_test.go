@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/build"
 )
 
 func doctorTestContext() core.Context {
@@ -36,14 +36,14 @@ func TestResolveDoctorDockerDaemonSelectsTheDaemonHoldingBuildImages(t *testing.
 			name:          "a local-agent environment builds in the dind sidecar",
 			envType:       config.EnvironmentTypeLocalAgent,
 			wantKind:      DoctorDockerDaemonDindSidecar,
-			wantContainer: eruncommon.RuntimeDindContainerName,
+			wantContainer: build.RuntimeDindContainerName,
 			wantLabel:     "the erun-dind sidecar",
 		},
 		{
 			name:          "a remote-agent environment builds in the dind sidecar",
 			envType:       config.EnvironmentTypeRemoteAgent,
 			wantKind:      DoctorDockerDaemonDindSidecar,
-			wantContainer: eruncommon.RuntimeDindContainerName,
+			wantContainer: build.RuntimeDindContainerName,
 			wantLabel:     "the erun-dind sidecar",
 		},
 		{
@@ -187,8 +187,8 @@ func TestDoctorDockerStorageRunsAgainstTheResolvedDaemon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run steps: %v", err)
 	}
-	if gotContainer != eruncommon.RuntimeDindContainerName {
-		t.Fatalf("exec container = %q, want %q", gotContainer, eruncommon.RuntimeDindContainerName)
+	if gotContainer != build.RuntimeDindContainerName {
+		t.Fatalf("exec container = %q, want %q", gotContainer, build.RuntimeDindContainerName)
 	}
 	if !strings.Contains(gotScript, "docker image prune -a -f") {
 		t.Fatalf("script does not prune images:\n%s", gotScript)

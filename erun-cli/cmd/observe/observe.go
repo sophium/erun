@@ -5,9 +5,10 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/observe"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -70,12 +71,12 @@ func parseObserveSecretChecks(raw []string) ([]observe.ObserveSecretCheck, error
 	return checks, nil
 }
 
-func runObserveCommand(ctx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams, checks []observe.ObserveSecretCheck) error {
+func runObserveCommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, checks []observe.ObserveSecretCheck) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
-	req := common.ShellLaunchParamsFromResult(result)
+	req := cloud.ShellLaunchParamsFromResult(result)
 	observed, err := observe.RunObservation(ctx, req, observe.ObserveParams{Secrets: checks})
 	if err != nil {
 		return err

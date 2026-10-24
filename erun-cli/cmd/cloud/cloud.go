@@ -14,6 +14,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -65,13 +67,13 @@ func newCloudRefreshCmd(store cloudCommandStoreInterface, deps cloud.CloudDepend
 }
 
 func runCloudRefreshCommand(ctx core.Context, store cloudCommandStoreInterface, tenant, environment string, deps cloud.CloudDependencies) error {
-	result, err := common.ResolveOpen(store, common.OpenParams{Tenant: tenant, Environment: environment})
+	result, err := open.ResolveOpen(store, sharedpkg.OpenParams{Tenant: tenant, Environment: environment})
 	if err != nil {
 		return err
 	}
 	ctx, closeEnvTrace := common.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
-	refresh, err := common.RefreshHostAWSCredentials(ctx, store, result, deps)
+	refresh, err := cloud.RefreshHostAWSCredentials(ctx, store, result, deps)
 	if err != nil {
 		return err
 	}
@@ -82,7 +84,7 @@ func runCloudRefreshCommand(ctx core.Context, store cloudCommandStoreInterface, 
 	return writeHostCredentialsRefreshed(ctx, result, refresh)
 }
 
-func writeHostCredentialsRefreshed(ctx core.Context, result configpkg.OpenResult, refresh common.HostCredentialsRefresh) error {
+func writeHostCredentialsRefreshed(ctx core.Context, result configpkg.OpenResult, refresh cloud.HostCredentialsRefresh) error {
 	line := fmt.Sprintf("Refreshed %s credentials for %s/%s in profile %s (%s)",
 		refresh.Alias, result.Tenant, result.Environment, refresh.Profile, refresh.Path)
 	if !refresh.Expiration.IsZero() {

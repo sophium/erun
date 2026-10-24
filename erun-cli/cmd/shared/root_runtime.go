@@ -3,7 +3,7 @@ package shared
 import (
 	"strings"
 
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -35,10 +35,10 @@ func NewCommandGroup(use, short string, commands ...*cobra.Command) *cobra.Comma
 // tenant-resolution failure names the command the operator actually ran and
 // offers that command's own recovery. Every scoped command routing through
 // here is what keeps that true when a new command adopts the flag pair.
-func ScopedOpenParams(command, tenant, environment string) common.OpenParams {
+func ScopedOpenParams(command, tenant, environment string) shared.OpenParams {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	return common.OpenParams{
+	return shared.OpenParams{
 		Tenant:                    tenant,
 		Environment:               environment,
 		UseDefaultTenant:          tenant == "",

@@ -4,13 +4,14 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/e2e"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
-func NewE2ECmd(resolveOpen shared.OpenResolver, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func NewE2ECmd(resolveOpen shared.OpenResolver, findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
 	var tenant, environment, component, baseURL, version string
 	cmd := &cobra.Command{
 		Use:   "e2e",
@@ -63,7 +64,7 @@ func NewE2ECmd(resolveOpen shared.OpenResolver, findProjectRoot common.ProjectFi
 	return cmd
 }
 
-func runE2ECommand(ctx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams, findProjectRoot common.ProjectFinderFunc, component, baseURL, version string) error {
+func runE2ECommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, findProjectRoot sharedpkg.ProjectFinderFunc, component, baseURL, version string) error {
 	plan, err := e2e.ResolveE2EPlan(findProjectRoot, component)
 	if err != nil {
 		return err
@@ -99,7 +100,7 @@ func runE2ECommand(ctx core.Context, resolveOpen shared.OpenResolver, params com
 // --base-url and --version and no --tenant/--environment the URL and version
 // name the target entirely, so no environment is resolved at all: a machine
 // with no tenant configured can still run the suites against, say, production.
-func resolveE2ETarget(resolveOpen shared.OpenResolver, params common.OpenParams, targetNamed bool, baseURL, version string) (e2e.E2ETarget, error) {
+func resolveE2ETarget(resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, targetNamed bool, baseURL, version string) (e2e.E2ETarget, error) {
 	if !targetNamed && strings.TrimSpace(baseURL) != "" && strings.TrimSpace(version) != "" {
 		return e2e.E2ETarget{}, nil
 	}
@@ -107,7 +108,7 @@ func resolveE2ETarget(resolveOpen shared.OpenResolver, params common.OpenParams,
 	if err != nil {
 		return e2e.E2ETarget{}, err
 	}
-	req := common.ShellLaunchParamsFromResult(result)
+	req := cloud.ShellLaunchParamsFromResult(result)
 	return e2e.E2ETarget{
 		Tenant:            req.Tenant,
 		Environment:       req.Environment,

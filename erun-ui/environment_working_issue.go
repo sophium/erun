@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 type workingIssueCommandRunner func(ctx context.Context, dir, name string, args ...string) (string, error)
@@ -64,7 +65,7 @@ func (a *App) EnvironmentWorkingIssue(selection uiSelection) (uiWorkingIssue, er
 		return cached, nil
 	}
 
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

@@ -5,11 +5,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // A stopped environment is one whose runtime Deployment is scaled to zero. That
@@ -182,7 +183,7 @@ type StopEnvironmentResult struct {
 // rather than by reading the surviving pods afterwards and concluding the stop
 // failed.
 func StopRemainingComponents(result config.OpenResult) []string {
-	names := eruncommon.SelectedPublishableComponents(result.EnvConfig.Deploy.Components, result.Tenant, config.ProjectK8sConfig{})
+	names := deploy.SelectedPublishableComponents(result.EnvConfig.Deploy.Components, result.Tenant, config.ProjectK8sConfig{})
 	// Nil, not an empty slice: every caller branches on len() and none of them
 	// can tell the two apart, while an empty-but-present slice is what makes a
 	// struct comparison in a test fail for a reason that has nothing to say
@@ -494,13 +495,13 @@ func scaleRuntimeDeployment(ctx core.Context, target RuntimeScaleTarget, replica
 // reusing the same rollout wait `erun open` performs before it execs a shell.
 func WaitRuntimeAvailable(ctx core.Context, target RuntimeScaleTarget) error {
 	args := kubectlRuntimeTargetArgs(target)
-	args = append(args, "wait", "--for=condition=Available", "--timeout", eruncommon.DefaultShellLaunchWaitTimeout, "deployment/"+target.ReleaseName)
+	args = append(args, "wait", "--for=condition=Available", "--timeout", cloud.DefaultShellLaunchWaitTimeout, "deployment/"+target.ReleaseName)
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
 		return nil
 	}
 	if config.CurrentExecutionMode(kube.KubectlDeploymentWaitExecutionOperation) == config.ExecutionModeLibrary {
-		return kube.LibraryWaitForDeploymentAvailable(target.KubernetesContext, target.Namespace, target.ReleaseName, eruncommon.DefaultShellLaunchWaitTimeout)
+		return kube.LibraryWaitForDeploymentAvailable(target.KubernetesContext, target.Namespace, target.ReleaseName, cloud.DefaultShellLaunchWaitTimeout)
 	}
 	return core.RawCommandRunner("", "kubectl", args, ctx.Stdin, ctx.Stdout, ctx.Stderr)
 }

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // A tool started with wait:false runs its work inside this server's own
@@ -185,7 +185,7 @@ func publishedInputProperties(t *testing.T, name string, inputSchema any) map[st
 // startEnvelopeJob starts a background task through the envelope and returns
 // its finished record, bounded so work that never settles fails the test
 // rather than hanging the suite.
-func startEnvelopeJob(t *testing.T, runtime RuntimeConfig, name string, input JobEnvelopeInput, execute func(bool, io.Writer) (CommandOutput, error)) eruncommon.EnvironmentJob {
+func startEnvelopeJob(t *testing.T, runtime RuntimeConfig, name string, input JobEnvelopeInput, execute func(bool, io.Writer) (CommandOutput, error)) shared.EnvironmentJob {
 	t.Helper()
 	envelope, err := runJobEnvelope(runtime, name, input, false, execute)
 	if err != nil {

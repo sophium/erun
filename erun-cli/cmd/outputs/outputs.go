@@ -11,7 +11,9 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -84,12 +86,12 @@ func addOutputsScopeFlags(cmd *cobra.Command, tenant, environment, dirPath *stri
 	cmd.Flags().StringVar(dirPath, "path", "", "Pod directory to operate on (default: $ERUN_OUTPUTS_DIR, /home/erun/.erun/outputs)")
 }
 
-func runOutputsListCommand(ctx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams, dirPath string, limit int, run jobs.RuntimeOutputsRunner) error {
+func runOutputsListCommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, dirPath string, limit int, run jobs.RuntimeOutputsRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
-	req := common.ShellLaunchParamsFromResult(result)
+	req := cloud.ShellLaunchParamsFromResult(result)
 	list, err := jobs.ResolveRuntimeOutputs(ctx, req, jobs.RuntimeOutputsParams{Dir: dirPath, Limit: limit}, run)
 	if err != nil {
 		return err
@@ -140,12 +142,12 @@ type outputsDownloadCLIResult struct {
 	Signing *common.HostArtifactSigning `json:"signing,omitempty"`
 }
 
-func runOutputsDownloadCommand(ctx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams, dirPath, name, dest string, force bool, run jobs.RuntimeOutputsRunner) error {
+func runOutputsDownloadCommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, dirPath, name, dest string, force bool, run jobs.RuntimeOutputsRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
-	req := common.ShellLaunchParamsFromResult(result)
+	req := cloud.ShellLaunchParamsFromResult(result)
 	out, err := jobs.DownloadRuntimeOutput(ctx, req, jobs.RuntimeOutputDownloadParams{Dir: dirPath, Name: name}, run)
 	if err != nil {
 		return err

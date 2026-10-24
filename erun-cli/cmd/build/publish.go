@@ -6,11 +6,14 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
-func NewPublishCmd(store common.DeployStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc) *cobra.Command {
-	target := common.DeployTarget{}
+func NewPublishCmd(store deploy.DeployStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc) *cobra.Command {
+	target := deploy.DeployTarget{}
 	cmd := &cobra.Command{
 		Use:   "publish [TENANT] [ENVIRONMENT]",
 		Short: "Mirror a built version's images to the shared registry",
@@ -38,7 +41,7 @@ func NewPublishCmd(store common.DeployStore, findProjectRoot common.ProjectFinde
 			var closeEnvTrace func()
 			ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, publishTarget.Tenant, publishTarget.Environment)
 			defer closeEnvTrace()
-			return common.RunPublish(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, publishTarget)
+			return orchestration.RunPublish(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, publishTarget)
 		},
 	}
 	shared.AddDryRunFlag(cmd)

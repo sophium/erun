@@ -20,6 +20,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // An orchestrator is a host-side AI session that is NOT scoped to a single
@@ -2246,7 +2247,7 @@ func orchestratorSessionEnv(id string, launchEnv []string) []string {
 		// record itself as the return target for a rebuild+restart (see the
 		// erun-orchestrate skill), and its hooks can name whose report they
 		// write. Empty for transient/Investigate sessions.
-		eruncommon.OrchestratorIDEnvVar + "=" + id,
+		shared.OrchestratorIDEnvVar + "=" + id,
 	}
 	env = append(env, launchEnv...)
 	// An orchestrator has no pod, so the outputs convention an in-pod agent

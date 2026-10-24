@@ -7,15 +7,15 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // loadEnvironmentJobsFromMCP lists an environment's retained jobs from its own
 // pod, the only place a remote-agent/runtime env's jobs actually run. Reads
 // are idle-probed so watching the Jobs tab never holds an otherwise-idle env
 // awake.
-func loadEnvironmentJobsFromMCP(ctx context.Context, endpoint, bearer string) ([]eruncommon.EnvironmentJob, error) {
+func loadEnvironmentJobsFromMCP(ctx context.Context, endpoint, bearer string) ([]shared.EnvironmentJob, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
@@ -35,13 +35,13 @@ func loadEnvironmentJobsFromMCP(ctx context.Context, endpoint, bearer string) ([
 		return nil, err
 	}
 	var payload struct {
-		Jobs []eruncommon.EnvironmentJob `json:"jobs"`
+		Jobs []shared.EnvironmentJob `json:"jobs"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return nil, err
 	}
 	if payload.Jobs == nil {
-		return []eruncommon.EnvironmentJob{}, nil
+		return []shared.EnvironmentJob{}, nil
 	}
 	return payload.Jobs, nil
 }

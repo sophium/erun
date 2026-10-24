@@ -14,6 +14,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/doctor"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 type DoctorInput struct {
@@ -184,7 +186,7 @@ func runDoctorTenantEnvActions(runtime RuntimeConfig, input DoctorInput, runCtx 
 	if err != nil {
 		return err
 	}
-	req := eruncommon.ShellLaunchParamsFromResult(target)
+	req := cloud.ShellLaunchParamsFromResult(target)
 	diagnosis, err := writeDoctorDeployDiagnosis(runCtx, req)
 	if err != nil {
 		return err
@@ -367,8 +369,8 @@ func firstNonBlank(values ...string) string {
 // section that needs the runtime pod (git push access, docker storage) can
 // skip its own probe instead of independently rediscovering the same
 // unreachable cluster.
-func writeDoctorDeployDiagnosis(runCtx core.Context, req config.ShellLaunchParams) (eruncommon.DeployDiagnosisResult, error) {
-	diagnosis := eruncommon.RunDeployDiagnosis(runCtx, req)
+func writeDoctorDeployDiagnosis(runCtx core.Context, req config.ShellLaunchParams) (deploy.DeployDiagnosisResult, error) {
+	diagnosis := deploy.RunDeployDiagnosis(runCtx, req)
 	if status := strings.TrimSpace(diagnosis.HelmStatus); status != "" {
 		if _, err := fmt.Fprintf(runCtx.Stdout, "== Helm release status ==\n%s\n\n", status); err != nil {
 			return diagnosis, err
@@ -447,13 +449,13 @@ func runDoctorRecoveryToolActions(runCtx core.Context, input DoctorInput, req co
 	return nil
 }
 
-func deployRecoveryActionsFromInput(input DoctorInput) []eruncommon.DeployRecoveryAction {
-	actions := make([]eruncommon.DeployRecoveryAction, 0, 2)
+func deployRecoveryActionsFromInput(input DoctorInput) []deploy.DeployRecoveryAction {
+	actions := make([]deploy.DeployRecoveryAction, 0, 2)
 	if input.ClearPendingHelm {
-		actions = append(actions, eruncommon.DeployRecoveryClearPendingHelm)
+		actions = append(actions, deploy.DeployRecoveryClearPendingHelm)
 	}
 	if input.Rollback {
-		actions = append(actions, eruncommon.DeployRecoveryRollback)
+		actions = append(actions, deploy.DeployRecoveryRollback)
 	}
 	return actions
 }
@@ -517,7 +519,7 @@ func resolveDoctorOpenResult(runtime RuntimeConfig, input DoctorInput) (config.O
 	if err != nil {
 		return config.OpenResult{}, err
 	}
-	return eruncommon.ResolveDoctorTarget(runtime.Store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
+	return eruncommon.ResolveDoctorTarget(runtime.Store, shared.OpenParams{Tenant: tenant, Environment: environment})
 }
 
 func doctorActionsFromInput(input DoctorInput) []doctor.DoctorAction {

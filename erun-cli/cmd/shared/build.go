@@ -1,7 +1,7 @@
 package shared
 
 import (
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-var ErrVersionFileNotFound = common.ErrVersionFileNotFound
+var ErrVersionFileNotFound = shared.ErrVersionFileNotFound

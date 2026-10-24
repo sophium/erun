@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // A job's supervisor is the one process a cancel must never reach: it is what
@@ -40,11 +41,11 @@ func TestCancelRefusesToSignalTheSupervisorWhenTheWorkIsNotYetNamed(t *testing.T
 	supervisorCmd := startCancelTestStandInSupervisor(t)
 	supervisor := supervisorCmd.Process
 
-	dir, err := eruncommon.EnvironmentJobDir(tenant, environment)
+	dir, err := shared.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
-	record := eruncommon.EnvironmentJob{
+	record := shared.EnvironmentJob{
 		ID:          id,
 		Name:        id,
 		State:       EnvironmentJobStateRunning,
@@ -52,7 +53,7 @@ func TestCancelRefusesToSignalTheSupervisorWhenTheWorkIsNotYetNamed(t *testing.T
 		PID:         supervisor.Pid,
 		StartedAt:   time.Now(),
 		LastAliveAt: time.Now(),
-		Hostname:    eruncommon.CurrentJobHostname(),
+		Hostname:    build.CurrentJobHostname(),
 		LogPath:     filepath.Join(dir, id+".log"),
 	}
 	if err := writeEnvironmentJob(dir, record); err != nil {

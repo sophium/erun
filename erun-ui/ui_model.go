@@ -6,6 +6,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 type uiState struct {
@@ -42,8 +43,8 @@ type uiEnvironment struct {
 	// eruncommon.ListEnvironmentResult's own fields of the same name -- see
 	// erun-common/runtime_version_line.go and erun-common/list.go. The
 	// environment hover card is the only consumer today.
-	RuntimeVersionLine       *eruncommon.RuntimeVersionLine             `json:"runtimeVersionLine,omitempty"`
-	ErunVersion              *eruncommon.ErunVersion                    `json:"erunVersion,omitempty"`
+	RuntimeVersionLine       *deploy.RuntimeVersionLine                 `json:"runtimeVersionLine,omitempty"`
+	ErunVersion              *deploy.ErunVersion                        `json:"erunVersion,omitempty"`
 	RuntimeImageLineMismatch *eruncommon.RuntimeImageLineMismatchResult `json:"runtimeImageLineMismatch,omitempty"`
 	KubernetesContext        string                                     `json:"kubernetesContext,omitempty"`
 	IsActive                 bool                                       `json:"isActive,omitempty"`
@@ -1080,8 +1081,8 @@ type uiContainerRegistryCluster struct {
 // version: the charts it would roll out, and which chart the runtime itself would
 // be installed from -- the second coordinate the version does not name.
 type uiDeployComponents struct {
-	Components   []eruncommon.DeployableComponent `json:"components"`
-	RuntimeChart uiRuntimeChartPlan               `json:"runtimeChart"`
+	Components   []deploy.DeployableComponent `json:"components"`
+	RuntimeChart uiRuntimeChartPlan           `json:"runtimeChart"`
 }
 
 type uiEnvironmentConfig struct {

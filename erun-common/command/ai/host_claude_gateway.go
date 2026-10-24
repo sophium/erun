@@ -1,7 +1,7 @@
 package ai
 
 import (
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // HostClaudeGatewayEndpoint reports the gateway this machine's own Claude Code
@@ -10,7 +10,7 @@ import (
 // It exists to name the mismatch: a key that will not be reused should say which
 // endpoint it belongs to rather than reading as no key at all.
 func HostClaudeGatewayEndpoint() string {
-	_, endpoint := eruncommon.HostClaudeGatewayCredential()
+	_, endpoint := deploy.HostClaudeGatewayCredential()
 	return endpoint
 }
 
@@ -34,8 +34,8 @@ func HostClaudeGatewayEndpoint() string {
 // whoever stores or delivers it and never lands in config.yaml, a chart value,
 // or a launch command.
 func HostClaudeGatewayCredentialFor(baseURL string) (string, bool) {
-	token, endpoint := eruncommon.HostClaudeGatewayCredential()
-	if token == "" || !eruncommon.SameGatewayEndpoint(endpoint, baseURL) {
+	token, endpoint := deploy.HostClaudeGatewayCredential()
+	if token == "" || !deploy.SameGatewayEndpoint(endpoint, baseURL) {
 		return "", false
 	}
 	return token, true

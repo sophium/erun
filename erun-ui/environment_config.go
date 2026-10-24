@@ -9,12 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -177,7 +178,7 @@ func (a *App) ChooseWorkspaceSyncLocalFolder(selection uiSelection, current stri
 	})
 }
 
-func resolveWorkspaceSyncDialogDefaultDirectory(findProjectRoot eruncommon.ProjectFinderFunc) string {
+func resolveWorkspaceSyncDialogDefaultDirectory(findProjectRoot shared.ProjectFinderFunc) string {
 	if findProjectRoot == nil {
 		return ""
 	}
@@ -257,7 +258,7 @@ func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated conf
 	if !existing.RemoteWorktree() || strings.TrimSpace(updated.CloudProviderAlias) == strings.TrimSpace(existing.CloudProviderAlias) {
 		return nil
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -325,7 +326,7 @@ func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, f
 		Claude:            claudeConfigToUI(config.Claude),
 		ClaudeDefaults:    claudeDefaultsForUI(gateway),
 		AITool:            strings.TrimSpace(config.AITool),
-		AILaunchSignature: eruncommon.AISessionLaunchCommand(config.AITool, config.Claude, gateway, tenant, name),
+		AILaunchSignature: open.AISessionLaunchCommand(config.AITool, config.Claude, gateway, tenant, name),
 		LocalPorts: uiEnvironmentLocalPorts{
 			RangeStart:          ports.RangeStart,
 			RangeEnd:            ports.RangeEnd,

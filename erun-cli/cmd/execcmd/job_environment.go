@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/jobs"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // The job verbs run the work inside the environment wherever they are invoked
@@ -19,10 +19,10 @@ import (
 // erun-mcp must not import each other, so the wire shape is restated here.
 
 type environmentJobResult struct {
-	Tenant      string                `json:"tenant"`
-	Environment string                `json:"environment"`
-	Job         common.EnvironmentJob `json:"job"`
-	Executed    bool                  `json:"executed"`
+	Tenant      string                   `json:"tenant"`
+	Environment string                   `json:"environment"`
+	Job         sharedpkg.EnvironmentJob `json:"job"`
+	Executed    bool                     `json:"executed"`
 }
 
 // environmentJobEnvelopeResult mirrors exec_raw's response, which -- unlike
@@ -36,10 +36,10 @@ type environmentJobEnvelopeResult struct {
 }
 
 type environmentJobStatusResult struct {
-	Tenant      string                  `json:"tenant"`
-	Environment string                  `json:"environment"`
-	Job         *common.EnvironmentJob  `json:"job,omitempty"`
-	Jobs        []common.EnvironmentJob `json:"jobs"`
+	Tenant      string                     `json:"tenant"`
+	Environment string                     `json:"environment"`
+	Job         *sharedpkg.EnvironmentJob  `json:"job,omitempty"`
+	Jobs        []sharedpkg.EnvironmentJob `json:"jobs"`
 }
 
 type environmentJobCancelResult struct {
@@ -54,9 +54,9 @@ type environmentJobCancelResult struct {
 // did (exec_raw's does not carry one at all, since it is also used
 // synchronously), so the command branch follows up with one exec_job_status
 // call to return the same complete record callers of this function expect.
-func startJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobs.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+func startJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobs.StartEnvironmentJobParams) (sharedpkg.EnvironmentJob, bool, error) {
 	if err := jobs.ValidateEnvironmentJobStart(params); err != nil {
-		return common.EnvironmentJob{}, false, err
+		return sharedpkg.EnvironmentJob{}, false, err
 	}
 	if params.Agent != "" {
 		return startAgentJobInEnvironment(ctx, commandCtx, resolveOpen, params)
@@ -64,7 +64,7 @@ func startJobInEnvironment(ctx context.Context, commandCtx core.Context, resolve
 	return startCommandJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 }
 
-func startAgentJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobs.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+func startAgentJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobs.StartEnvironmentJobParams) (sharedpkg.EnvironmentJob, bool, error) {
 	arguments := map[string]any{}
 	shared.PutEnvironmentToolArgument(arguments, "name", params.Name)
 	shared.PutEnvironmentToolArgument(arguments, "id", params.ID)
@@ -79,7 +79,7 @@ func startAgentJobInEnvironment(ctx context.Context, commandCtx core.Context, re
 	shared.PutEnvironmentToolArgument(arguments, "startedByJobId", startedByJobIDForOffEnvironmentStart(params))
 	result, resolved, err := shared.CallEnvironmentTool[environmentJobResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "exec_agent", arguments, false)
 	if err != nil {
-		return common.EnvironmentJob{}, resolved, jobs.DescribeExclusiveJobStartVersionSkew(params.Tenant, params.Environment, params.Exclusive, err)
+		return sharedpkg.EnvironmentJob{}, resolved, jobs.DescribeExclusiveJobStartVersionSkew(params.Tenant, params.Environment, params.Exclusive, err)
 	}
 	return result.Job, resolved, nil
 }
@@ -95,10 +95,10 @@ func startedByJobIDForOffEnvironmentStart(params jobs.StartEnvironmentJobParams)
 	if params.StartedByJobID != "" {
 		return params.StartedByJobID
 	}
-	return common.CurrentEnvironmentJobID()
+	return sharedpkg.CurrentEnvironmentJobID()
 }
 
-func startCommandJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobs.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+func startCommandJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobs.StartEnvironmentJobParams) (sharedpkg.EnvironmentJob, bool, error) {
 	arguments := map[string]any{}
 	shared.PutEnvironmentToolArgument(arguments, "name", params.Name)
 	shared.PutEnvironmentToolArgument(arguments, "id", params.ID)
@@ -113,27 +113,27 @@ func startCommandJobInEnvironment(ctx context.Context, commandCtx core.Context, 
 	arguments["wait"] = false
 	started, resolved, err := shared.CallEnvironmentTool[environmentJobEnvelopeResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "exec_raw", arguments, false)
 	if err != nil {
-		return common.EnvironmentJob{}, resolved, jobs.DescribeExclusiveJobStartVersionSkew(params.Tenant, params.Environment, params.Exclusive, err)
+		return sharedpkg.EnvironmentJob{}, resolved, jobs.DescribeExclusiveJobStartVersionSkew(params.Tenant, params.Environment, params.Exclusive, err)
 	}
 	if !resolved {
-		return common.EnvironmentJob{}, resolved, nil
+		return sharedpkg.EnvironmentJob{}, resolved, nil
 	}
 	if started.JobID == "" {
-		return common.EnvironmentJob{}, resolved, fmt.Errorf("%s/%s started the job but returned no jobId", params.Tenant, params.Environment)
+		return sharedpkg.EnvironmentJob{}, resolved, fmt.Errorf("%s/%s started the job but returned no jobId", params.Tenant, params.Environment)
 	}
 	status, resolved, err := jobStatusFromEnvironment(ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, started.JobID)
 	if err != nil || !resolved {
-		return common.EnvironmentJob{}, resolved, err
+		return sharedpkg.EnvironmentJob{}, resolved, err
 	}
 	if status.Job == nil {
-		return common.EnvironmentJob{}, resolved, fmt.Errorf("%s/%s returned no job for id %q", params.Tenant, params.Environment, started.JobID)
+		return sharedpkg.EnvironmentJob{}, resolved, fmt.Errorf("%s/%s returned no job for id %q", params.Tenant, params.Environment, started.JobID)
 	}
 	return *status.Job, resolved, nil
 }
 
-func attachJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobs.AttachEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+func attachJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobs.AttachEnvironmentJobParams) (sharedpkg.EnvironmentJob, bool, error) {
 	if err := jobs.ValidateEnvironmentJobAttach(params); err != nil {
-		return common.EnvironmentJob{}, false, err
+		return sharedpkg.EnvironmentJob{}, false, err
 	}
 	arguments := map[string]any{}
 	shared.PutEnvironmentToolArgument(arguments, "name", params.Name)

@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // The environment-scoped exclusive lease in release_claim_test.go passed
@@ -46,7 +46,7 @@ func TestReleaseRepoClaimRefusesASecondReleaseFromADifferentCheckoutAndNamesTheH
 	ctx := newTestClaimContext()
 
 	holderA := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
-	sha, err := eruncommon.TakeReleaseRepoClaim(ctx, envA, "build-a", "1.0.213", holderA, now, nil)
+	sha, err := shared.TakeReleaseRepoClaim(ctx, envA, "build-a", "1.0.213", holderA, now, nil)
 	if err != nil {
 		t.Fatalf("first environment's claim: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestReleaseRepoClaimRefusesASecondReleaseFromADifferentCheckoutAndNamesTheH
 	}
 
 	holderB := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
-	_, err = eruncommon.TakeReleaseRepoClaim(ctx, envB, "build-b", "1.0.213", holderB, now.Add(time.Second), nil)
+	_, err = shared.TakeReleaseRepoClaim(ctx, envB, "build-b", "1.0.213", holderB, now.Add(time.Second), nil)
 	if err == nil {
 		t.Fatal("expected a second release of the same version from a different checkout to be refused")
 	}
@@ -71,7 +71,7 @@ func TestReleaseRepoClaimRefusesASecondReleaseFromADifferentCheckoutAndNamesTheH
 
 	// A release of a different version must not be affected: the claim is
 	// scoped to the version's own ref, not the whole repository.
-	if _, err := eruncommon.TakeReleaseRepoClaim(ctx, envB, "build-b", "1.0.214", holderB, now.Add(time.Second), nil); err != nil {
+	if _, err := shared.TakeReleaseRepoClaim(ctx, envB, "build-b", "1.0.214", holderB, now.Add(time.Second), nil); err != nil {
 		t.Fatalf("a release of a different version must not collide with an unrelated one in flight: %v", err)
 	}
 }
@@ -92,11 +92,11 @@ func TestReleaseRepoClaimRefusalNamesTheEnvironmentWhenTheOrchestratorIDIsUnset(
 	ctx := newTestClaimContext()
 
 	holder := activity.EnvironmentActivityLeaseHolder{Tenant: "erun"}
-	if _, err := eruncommon.TakeReleaseRepoClaim(ctx, envA, "build", "1.0.215", holder, now, nil); err != nil {
+	if _, err := shared.TakeReleaseRepoClaim(ctx, envA, "build", "1.0.215", holder, now, nil); err != nil {
 		t.Fatalf("first environment's claim: %v", err)
 	}
 
-	_, err := eruncommon.TakeReleaseRepoClaim(ctx, envB, "release", "1.0.215", holder, now.Add(time.Second), nil)
+	_, err := shared.TakeReleaseRepoClaim(ctx, envB, "release", "1.0.215", holder, now.Add(time.Second), nil)
 	if err == nil {
 		t.Fatal("expected a second release of the same version from a different environment to be refused")
 	}
@@ -115,7 +115,7 @@ func TestReleaseRepoClaimReclaimsAnAbandonedReleaseFromADifferentCheckout(t *tes
 	ctx := newTestClaimContext()
 
 	holderA := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
-	if _, err := eruncommon.TakeReleaseRepoClaim(ctx, envA, "build-a", "1.0.213", holderA, start, nil); err != nil {
+	if _, err := shared.TakeReleaseRepoClaim(ctx, envA, "build-a", "1.0.213", holderA, start, nil); err != nil {
 		t.Fatalf("first environment's claim: %v", err)
 	}
 
@@ -123,9 +123,9 @@ func TestReleaseRepoClaimReclaimsAnAbandonedReleaseFromADifferentCheckout(t *tes
 	// claim. Nobody outside envA can remove the ref by hand, so the only way
 	// envB's release ever proceeds is if the claim reclaims itself once it
 	// lapses.
-	afterLapse := start.Add(eruncommon.ReleaseVersionClaimTTL + time.Minute)
+	afterLapse := start.Add(shared.ReleaseVersionClaimTTL + time.Minute)
 	holderB := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
-	sha, err := eruncommon.TakeReleaseRepoClaim(ctx, envB, "build-b", "1.0.213", holderB, afterLapse, nil)
+	sha, err := shared.TakeReleaseRepoClaim(ctx, envB, "build-b", "1.0.213", holderB, afterLapse, nil)
 	if err != nil {
 		t.Fatalf("expected the abandoned claim to be reclaimed automatically, got refused: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestReleaseRepoClaimReclaimsAnAbandonedReleaseFromADifferentCheckout(t *tes
 		t.Fatalf("expected a real repository claim, got an inconclusive no-op")
 	}
 
-	remoteSHA, exists, err := eruncommon.GitLsRemoteRef(ctx, envB, eruncommon.ReleaseRepoClaimRemote, eruncommon.ReleaseRepoClaimRef("1.0.213"))
+	remoteSHA, exists, err := shared.GitLsRemoteRef(ctx, envB, shared.ReleaseRepoClaimRemote, shared.ReleaseRepoClaimRef("1.0.213"))
 	if err != nil || !exists {
 		t.Fatalf("expected the reclaimed ref to be published, exists=%v err=%v", exists, err)
 	}
@@ -176,16 +176,16 @@ func TestReleaseRepoClaimStillRefusesWhileThisEnvironmentsHolderIsAlive(t *testi
 	ctx := newTestClaimContext()
 
 	running := activity.EnvironmentActivityLeaseHolder{Tenant: tenant, Orchestrator: "orchestrator-a"}
-	if _, err := eruncommon.TakeReleaseVersionClaim(tenant, environment, version, running, os.Getpid(), start); err != nil {
+	if _, err := shared.TakeReleaseVersionClaim(tenant, environment, version, running, os.Getpid(), start); err != nil {
 		t.Fatalf("running release's local claim: %v", err)
 	}
-	if _, err := eruncommon.TakeReleaseRepoClaim(ctx, repo, environment, version, running, start, nil); err != nil {
+	if _, err := shared.TakeReleaseRepoClaim(ctx, repo, environment, version, running, start, nil); err != nil {
 		t.Fatalf("running release's repository claim: %v", err)
 	}
 
 	retry := start.Add(time.Minute)
 	localHolderAlive := func() bool {
-		held, err := eruncommon.EnvironmentHasLiveReleaseHolder(tenant, environment, version, retry)
+		held, err := shared.EnvironmentHasLiveReleaseHolder(tenant, environment, version, retry)
 		if err != nil {
 			t.Fatalf("reading this environment's release claims: %v", err)
 		}
@@ -196,7 +196,7 @@ func TestReleaseRepoClaimStillRefusesWhileThisEnvironmentsHolderIsAlive(t *testi
 	}
 
 	second := activity.EnvironmentActivityLeaseHolder{Tenant: tenant, Orchestrator: "orchestrator-b"}
-	_, err := eruncommon.TakeReleaseRepoClaim(ctx, repo, environment, version, second, retry, localHolderAlive)
+	_, err := shared.TakeReleaseRepoClaim(ctx, repo, environment, version, second, retry, localHolderAlive)
 	if err == nil {
 		t.Fatal("expected a second release in the same environment to be refused while the first is running")
 	}
@@ -217,11 +217,11 @@ func TestReleaseRepoClaimFreshClaimSetsStartedAtToNow(t *testing.T) {
 	ctx := newTestClaimContext()
 	holder := activity.EnvironmentActivityLeaseHolder{Tenant: "erun"}
 
-	sha, err := eruncommon.TakeReleaseRepoClaim(ctx, env, "build", "1.0.220", holder, now, nil)
+	sha, err := shared.TakeReleaseRepoClaim(ctx, env, "build", "1.0.220", holder, now, nil)
 	if err != nil {
 		t.Fatalf("fresh claim: %v", err)
 	}
-	record, err := eruncommon.ReadReleaseRepoClaimBlob(ctx, env, sha)
+	record, err := shared.ReadReleaseRepoClaimBlob(ctx, env, sha)
 	if err != nil {
 		t.Fatalf("reading back the claim blob: %v", err)
 	}
@@ -243,25 +243,25 @@ func TestReleaseRepoClaimRenewalPreservesStartedAtAndAdvancesOnlyExpiresAt(t *te
 	ctx := newTestClaimContext()
 	holder := activity.EnvironmentActivityLeaseHolder{Tenant: "erun"}
 
-	sha, err := eruncommon.TakeReleaseRepoClaim(ctx, env, "ux", "1.0.220", holder, started, nil)
+	sha, err := shared.TakeReleaseRepoClaim(ctx, env, "ux", "1.0.220", holder, started, nil)
 	if err != nil {
 		t.Fatalf("initial claim: %v", err)
 	}
 
 	renewedAt := started.Add(13 * time.Minute)
-	newSHA, err := eruncommon.RenewReleaseRepoClaim(ctx, env, "ux", "1.0.220", holder, renewedAt, sha)
+	newSHA, err := shared.RenewReleaseRepoClaim(ctx, env, "ux", "1.0.220", holder, renewedAt, sha)
 	if err != nil {
 		t.Fatalf("renewal: %v", err)
 	}
 
-	record, err := eruncommon.ReadReleaseRepoClaimBlob(ctx, env, newSHA)
+	record, err := shared.ReadReleaseRepoClaimBlob(ctx, env, newSHA)
 	if err != nil {
 		t.Fatalf("reading back the renewed claim blob: %v", err)
 	}
 	if !record.StartedAt.Equal(started) {
 		t.Errorf("renewal StartedAt = %v, want the original %v preserved", record.StartedAt, started)
 	}
-	wantExpiresAt := renewedAt.Add(eruncommon.ReleaseVersionClaimTTL)
+	wantExpiresAt := renewedAt.Add(shared.ReleaseVersionClaimTTL)
 	if !record.ExpiresAt.Equal(wantExpiresAt) {
 		t.Errorf("renewal ExpiresAt = %v, want %v", record.ExpiresAt, wantExpiresAt)
 	}
@@ -283,18 +283,18 @@ func TestReleaseRepoClaimReclaimOfAnExpiredHolderSetsANewStartedAt(t *testing.T)
 	ctx := newTestClaimContext()
 
 	holderA := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
-	if _, err := eruncommon.TakeReleaseRepoClaim(ctx, envA, "build-a", "1.0.220", holderA, start, nil); err != nil {
+	if _, err := shared.TakeReleaseRepoClaim(ctx, envA, "build-a", "1.0.220", holderA, start, nil); err != nil {
 		t.Fatalf("first environment's claim: %v", err)
 	}
 
-	afterLapse := start.Add(eruncommon.ReleaseVersionClaimTTL + time.Minute)
+	afterLapse := start.Add(shared.ReleaseVersionClaimTTL + time.Minute)
 	holderB := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
-	sha, err := eruncommon.TakeReleaseRepoClaim(ctx, envB, "build-b", "1.0.220", holderB, afterLapse, nil)
+	sha, err := shared.TakeReleaseRepoClaim(ctx, envB, "build-b", "1.0.220", holderB, afterLapse, nil)
 	if err != nil {
 		t.Fatalf("expected the abandoned claim to be reclaimed automatically, got refused: %v", err)
 	}
 
-	record, err := eruncommon.ReadReleaseRepoClaimBlob(ctx, envB, sha)
+	record, err := shared.ReadReleaseRepoClaimBlob(ctx, envB, sha)
 	if err != nil {
 		t.Fatalf("reading back the reclaiming holder's blob: %v", err)
 	}
@@ -318,12 +318,12 @@ func TestReleaseRepoClaimRefusalReportsHowLongTheHolderHasBeenRunning(t *testing
 	ctx := newTestClaimContext()
 
 	holderA := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a", Tenant: "erun"}
-	if _, err := eruncommon.TakeReleaseRepoClaim(ctx, envA, "build-a", "1.0.220", holderA, start, nil); err != nil {
+	if _, err := shared.TakeReleaseRepoClaim(ctx, envA, "build-a", "1.0.220", holderA, start, nil); err != nil {
 		t.Fatalf("first environment's claim: %v", err)
 	}
 
 	holderB := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b", Tenant: "erun"}
-	_, err := eruncommon.TakeReleaseRepoClaim(ctx, envB, "build-b", "1.0.220", holderB, start.Add(15*time.Minute), nil)
+	_, err := shared.TakeReleaseRepoClaim(ctx, envB, "build-b", "1.0.220", holderB, start.Add(15*time.Minute), nil)
 	if err == nil {
 		t.Fatal("expected the second claim to be refused")
 	}
@@ -375,10 +375,10 @@ func TestReleaseBranchPushRebaseKeepsTheReleaseTagOnTheTargetBranch(t *testing.T
 	runGitForTest(t, repo, "commit", "-q", "-m", "[skip ci] prepare 1.0.214-next")
 
 	ctx := newTestClaimContext()
-	spec := eruncommon.ReleaseSpec{ProjectRoot: repo, Branch: "main", Version: "1.0.213", Mode: eruncommon.ReleaseModeStable}
-	command := eruncommon.ReleaseCommandSpec{Dir: repo, Name: "git", Args: []string{"push", "--follow-tags", "origin", "main"}}
+	spec := shared.ReleaseSpec{ProjectRoot: repo, Branch: "main", Version: "1.0.213", Mode: shared.ReleaseModeStable}
+	command := shared.ReleaseCommandSpec{Dir: repo, Name: "git", Args: []string{"push", "--follow-tags", "origin", "main"}}
 
-	if err := eruncommon.RunReleaseBranchPush(ctx, spec, command, gitx.GitCommandRunner); err != nil {
+	if err := shared.RunReleaseBranchPush(ctx, spec, command, gitx.GitCommandRunner); err != nil {
 		t.Fatalf("runReleaseBranchPush: %v", err)
 	}
 
@@ -435,10 +435,10 @@ func TestReleaseBranchPushRebaseIgnoresAnOlderCommitWithTheSameSubjectOutsideThe
 	runGitForTest(t, repo, "commit", "-q", "-m", "[skip ci] prepare 1.0.214-next")
 
 	ctx := newTestClaimContext()
-	spec := eruncommon.ReleaseSpec{ProjectRoot: repo, Branch: "main", Version: "1.0.213", Mode: eruncommon.ReleaseModeStable}
-	command := eruncommon.ReleaseCommandSpec{Dir: repo, Name: "git", Args: []string{"push", "--follow-tags", "origin", "main"}}
+	spec := shared.ReleaseSpec{ProjectRoot: repo, Branch: "main", Version: "1.0.213", Mode: shared.ReleaseModeStable}
+	command := shared.ReleaseCommandSpec{Dir: repo, Name: "git", Args: []string{"push", "--follow-tags", "origin", "main"}}
 
-	if err := eruncommon.RunReleaseBranchPush(ctx, spec, command, gitx.GitCommandRunner); err != nil {
+	if err := shared.RunReleaseBranchPush(ctx, spec, command, gitx.GitCommandRunner); err != nil {
 		t.Fatalf("runReleaseBranchPush: %v", err)
 	}
 
@@ -482,10 +482,10 @@ func TestReleaseBranchPushRebaseRefusesAnAmbiguousReplayedTagSubject(t *testing.
 	runGitForTest(t, other, "push", "-q", "origin", "main")
 
 	ctx := newTestClaimContext()
-	spec := eruncommon.ReleaseSpec{ProjectRoot: repo, Branch: "main", Version: "1.0.213", Mode: eruncommon.ReleaseModeStable}
-	command := eruncommon.ReleaseCommandSpec{Dir: repo, Name: "git", Args: []string{"push", "--follow-tags", "origin", "main"}}
+	spec := shared.ReleaseSpec{ProjectRoot: repo, Branch: "main", Version: "1.0.213", Mode: shared.ReleaseModeStable}
+	command := shared.ReleaseCommandSpec{Dir: repo, Name: "git", Args: []string{"push", "--follow-tags", "origin", "main"}}
 
-	err := eruncommon.RunReleaseBranchPush(ctx, spec, command, gitx.GitCommandRunner)
+	err := shared.RunReleaseBranchPush(ctx, spec, command, gitx.GitCommandRunner)
 	if err == nil {
 		t.Fatal("expected an ambiguous replayed tag subject to refuse rather than silently retag")
 	}

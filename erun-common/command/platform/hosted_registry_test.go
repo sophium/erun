@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/setup"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // TestHostedRegistryProbeTreatsUnauthorizedAsAvailable pins the rule the whole
@@ -65,7 +66,7 @@ func TestErunRegistryRefusesWhenUnreachable(t *testing.T) {
 			}
 		},
 	}}
-	registry, err := runner.ResolveContainerRegistry(eruncommon.BootstrapInitParams{ErunRegistry: true}, "acme", "dev", "", "", true)
+	registry, err := runner.ResolveContainerRegistry(open.BootstrapInitParams{ErunRegistry: true}, "acme", "dev", "", "", true)
 	if err == nil {
 		t.Fatalf("expected --erun-registry to refuse an unreachable registry, got %q", registry)
 	}
@@ -87,7 +88,7 @@ func TestErunRegistryAcceptedWhenAvailable(t *testing.T) {
 			return eruncommon.HostedRegistryStatus{Host: config.HostedRegistryHost, Available: true}
 		},
 	}}
-	registry, err := runner.ResolveContainerRegistry(eruncommon.BootstrapInitParams{ErunRegistry: true}, "acme", "dev", "", "", true)
+	registry, err := runner.ResolveContainerRegistry(open.BootstrapInitParams{ErunRegistry: true}, "acme", "dev", "", "", true)
 	if err != nil {
 		t.Fatalf("an available registry must be accepted: %v", err)
 	}

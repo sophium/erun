@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-common/primitive/open"
 	"golang.org/x/term"
 )
 
@@ -18,12 +18,12 @@ type OpenShellRunner func(core.Context, config.ShellLaunchParams) error
 
 const desktopAppSessionEnvVar = orchestrator.DesktopSessionEnvVar
 
-func NewOpenShellRunner(waitForShellDeployment func(config.ShellLaunchParams) error, execShell common.ShellLauncherFunc) OpenShellRunner {
+func NewOpenShellRunner(waitForShellDeployment func(config.ShellLaunchParams) error, execShell open.ShellLauncherFunc) OpenShellRunner {
 	if waitForShellDeployment == nil {
-		waitForShellDeployment = common.WaitForShellDeployment
+		waitForShellDeployment = open.WaitForShellDeployment
 	}
 	if execShell == nil {
-		execShell = common.ExecShell
+		execShell = open.ExecShell
 	}
 
 	return func(ctx core.Context, req config.ShellLaunchParams) error {

@@ -6,9 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // jobSupervisorContainerRestart asks the Kubernetes API for this pod's own
@@ -22,7 +23,7 @@ import (
 // the API call failed, the named container is missing from the response, or
 // its terminated timestamp does not parse. A caller must never read ok=false
 // as "did not restart" -- only as "could not check".
-func jobSupervisorContainerRestart(podName, containerName string, runner eruncommon.OpenKubectlRunnerFunc) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
+func jobSupervisorContainerRestart(podName, containerName string, runner shared.OpenKubectlRunnerFunc) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
 	podName = strings.TrimSpace(podName)
 	if podName == "" {
 		return false, "", 0, time.Time{}, false
@@ -36,7 +37,7 @@ func jobSupervisorContainerRestart(podName, containerName string, runner eruncom
 // defaultJobSupervisorContainerRestart is the subprocess-backed path
 // jobSupervisorContainerRestart dispatches to by default. It reuses the same
 // `kubectl get pod -o json` shape open_runtime_diagnostics.go already parses.
-func defaultJobSupervisorContainerRestart(podName, containerName string, runner eruncommon.OpenKubectlRunnerFunc) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
+func defaultJobSupervisorContainerRestart(podName, containerName string, runner shared.OpenKubectlRunnerFunc) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
 	if runner == nil {
 		return false, "", 0, time.Time{}, false
 	}
@@ -44,7 +45,7 @@ func defaultJobSupervisorContainerRestart(podName, containerName string, runner 
 	if err := runner(kube.KubectlGetPodArgs(podName), &stdout, &stderr); err != nil {
 		return false, "", 0, time.Time{}, false
 	}
-	var pod eruncommon.RuntimePodDiagnostic
+	var pod open.RuntimePodDiagnostic
 	if err := json.Unmarshal(stdout.Bytes(), &pod); err != nil {
 		return false, "", 0, time.Time{}, false
 	}
@@ -92,7 +93,7 @@ func libraryJobSupervisorContainerRestart(podName, containerName string) (restar
 // after to be attributed to this job, rather than a stale restart from long
 // before it started. LastAliveAt is the more precise signal (the supervisor's
 // own last heartbeat); StartedAt is the fallback for a job that never beat.
-func jobLastKnownAliveAt(job eruncommon.EnvironmentJob) time.Time {
+func jobLastKnownAliveAt(job shared.EnvironmentJob) time.Time {
 	if !job.LastAliveAt.IsZero() {
 		return job.LastAliveAt
 	}

@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // E2ESuite is one discovered erun e2e suite: a Dockerfile under
@@ -42,9 +42,9 @@ const e2eMigrationRemedy = "move each suite to <tenant>-devops/e2e/<component>/D
 // subdirectory holding a Dockerfile. component narrows the run to the suite of
 // that name; empty runs every suite. A project with no e2e directory resolves
 // an empty plan rather than an error, unless a suite was asked for by name.
-func ResolveE2EPlan(findProjectRoot eruncommon.ProjectFinderFunc, component string) (E2EPlan, error) {
+func ResolveE2EPlan(findProjectRoot shared.ProjectFinderFunc, component string) (E2EPlan, error) {
 	component = strings.TrimSpace(component)
-	projectRoot, err := eruncommon.ResolveDockerBuildProjectRoot(findProjectRoot, eruncommon.DockerCommandTarget{})
+	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, shared.DockerCommandTarget{})
 	if err != nil {
 		return E2EPlan{}, err
 	}
@@ -53,7 +53,7 @@ func ResolveE2EPlan(findProjectRoot eruncommon.ProjectFinderFunc, component stri
 	}
 	projectRoot = filepath.Clean(projectRoot)
 
-	cfg, _, err := eruncommon.LoadProjectConfigForDockerSecrets(projectRoot)
+	cfg, _, err := shared.LoadProjectConfigForDockerSecrets(projectRoot)
 	if err != nil {
 		return E2EPlan{}, err
 	}

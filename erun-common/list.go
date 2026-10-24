@@ -7,6 +7,8 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 type ListStore interface {
@@ -28,11 +30,11 @@ type ListEnvironmentResult struct {
 	// RuntimeVersionLine names which release line RuntimeVersion's number
 	// belongs to. Nil whenever RuntimeVersion itself is empty -- there is
 	// nothing to annotate for an environment that has never deployed.
-	RuntimeVersionLine *RuntimeVersionLine `json:"runtimeVersionLine,omitempty"`
+	RuntimeVersionLine *deploy.RuntimeVersionLine `json:"runtimeVersionLine,omitempty"`
 	// ErunVersion is the erun version this environment's runtime chart carries
 	// -- see ResolveErunVersion. Nil whenever it cannot be read from config
 	// alone, including whenever RuntimeVersion itself is empty.
-	ErunVersion *ErunVersion `json:"erunVersion,omitempty"`
+	ErunVersion *deploy.ErunVersion `json:"erunVersion,omitempty"`
 	// RuntimeImageLineMismatch is set only when the environment's recorded and
 	// last-observed runtime images name different release lines -- see
 	// EnvConfig.RuntimeImageLineMismatch.
@@ -43,8 +45,8 @@ type ListEnvironmentResult struct {
 	// environment — which is every environment seen from a host other than its
 	// own runtime container, since the history is written by the container that
 	// produced it.
-	Sizing       *RuntimeSizingRecommendation `json:"sizing,omitempty"`
-	ManagedCloud bool                         `json:"managedCloud,omitempty"`
+	Sizing       *deploy.RuntimeSizingRecommendation `json:"sizing,omitempty"`
+	ManagedCloud bool                                `json:"managedCloud,omitempty"`
 	// Hosted is the platform row this environment corresponds to, when it has
 	// one. Nil means the environment is not marked as hosted, which is the
 	// normal state: most environments never reach the platform.
@@ -97,7 +99,7 @@ func NewListEnvironmentResult(store ListStore, tenant configpkg.TenantConfig, en
 		ContainerRegistries:      configpkg.EffectiveEnvironmentContainerRegistries(env),
 		RuntimeVersion:           strings.TrimSpace(env.RuntimeVersion),
 		RuntimeVersionLine:       runtimeVersionLine,
-		ErunVersion:              ResolveErunVersion(env, runtimeVersionLine),
+		ErunVersion:              deploy.ResolveErunVersion(env, runtimeVersionLine),
 		RuntimeImageLineMismatch: listRuntimeImageLineMismatch(env),
 		RuntimePod:               env.RuntimePod,
 		Sizing:                   EnvironmentRuntimeSizing(tenant.Name, env),
@@ -133,11 +135,11 @@ func listHostedEnvironment(env configpkg.EnvConfig) *configpkg.HostedEnvironment
 // is a RuntimeVersion to annotate at all -- an environment that has never
 // deployed has no version, and "undetermined" would misread as "deployed,
 // but the line is unknown" rather than "never deployed".
-func listRuntimeVersionLine(tenant string, env configpkg.EnvConfig) *RuntimeVersionLine {
+func listRuntimeVersionLine(tenant string, env configpkg.EnvConfig) *deploy.RuntimeVersionLine {
 	if strings.TrimSpace(env.RuntimeVersion) == "" {
 		return nil
 	}
-	line := ResolveRuntimeVersionLine(tenant, env)
+	line := deploy.ResolveRuntimeVersionLine(tenant, env)
 	return &line
 }
 
@@ -155,12 +157,12 @@ func listRuntimeImageLineMismatch(env configpkg.EnvConfig) *RuntimeImageLineMism
 // one. A read failure is silence rather than an error: every caller of this
 // (`erun list`, `resize`, the `usage` MCP tool) treats sizing as advisory and
 // must not fail over it.
-func EnvironmentRuntimeSizing(tenant string, env configpkg.EnvConfig) *RuntimeSizingRecommendation {
+func EnvironmentRuntimeSizing(tenant string, env configpkg.EnvConfig) *deploy.RuntimeSizingRecommendation {
 	history, err := LoadRuntimeUsageHistory(tenant, env.Name)
 	if err != nil {
 		return nil
 	}
-	recommendation, ok := RecommendRuntimeSizing(RuntimeSizingParams{History: history, Ceiling: env.NamespaceQuota})
+	recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history, Ceiling: env.NamespaceQuota})
 	if !ok {
 		return nil
 	}
@@ -227,7 +229,7 @@ func NewListSSHResult(result configpkg.OpenResult) ListSSHResult {
 		return ListSSHResult{}
 	}
 
-	info := SSHConnectionInfoForResult(result)
+	info := open.SSHConnectionInfoForResult(result)
 	sync := result.EnvConfig.SSHD.WorkspaceSync
 	return ListSSHResult{
 		Enabled:                true,

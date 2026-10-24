@@ -6,9 +6,11 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/observe"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 type ObserveSecretCheckInput struct {
@@ -33,7 +35,7 @@ func observeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 		if err != nil {
 			return nil, observe.ObserveResult{}, err
 		}
-		req := eruncommon.ShellLaunchParamsFromResult(target)
+		req := cloud.ShellLaunchParamsFromResult(target)
 		runCtx := runtimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
 		result, err := observe.RunObservation(runCtx, req, observe.ObserveParams{Secrets: observeSecretChecksFromInput(input.Secrets)})
 		if err != nil {
@@ -61,5 +63,5 @@ func resolveObserveOpenResult(runtime RuntimeConfig, input ObserveInput) (config
 	if err != nil {
 		return config.OpenResult{}, err
 	}
-	return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
+	return open.ResolveOpen(runtime.Store, shared.OpenParams{Tenant: tenant, Environment: environment})
 }

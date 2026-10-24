@@ -5,15 +5,15 @@ import (
 	"strings"
 	"time"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // runEnvConfigRestoreFromArgs recovers a changed or corrupted env config before
 // the rest of doctor tries to load it.
 func runEnvConfigRestoreFromArgs(ctx core.Context, args []string, selector string) (bool, error) {
-	params, err := common.OpenParamsForArgs(args)
+	params, err := open.OpenParamsForArgs(args)
 	if err != nil {
 		return false, err
 	}

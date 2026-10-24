@@ -7,8 +7,11 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/orchestration"
+	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/push"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 type BuildInput struct {
@@ -48,10 +51,10 @@ func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 				}
 				// build is a pure primitive that only builds and mints the version;
 				// MCP composes primitives itself rather than exposing a deploy switch.
-				if err := eruncommon.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, runtimePushFunc(runtime), runtime.Store, cloudDependencies()); err != nil {
+				if err := orchestration.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, runtimePushFunc(runtime), runtime.Store, cloudDependencies()); err != nil {
 					return err
 				}
-				built := eruncommon.NewBuildResult(execution)
+				built := orchestration.NewBuildResult(execution)
 				result = &built
 				return nil
 			})
@@ -75,8 +78,8 @@ func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			if err != nil {
 				return err
 			}
-			return eruncommon.RunPushCommand(runCtx, func(runCtx core.Context) error {
-				return eruncommon.RunDockerPushExecution(runCtx, execution, runtime.BuildDockerImage, runtimePushFunc(runtime))
+			return push.RunPushCommand(runCtx, func(runCtx core.Context) error {
+				return orchestration.RunDockerPushExecution(runCtx, execution, runtime.BuildDockerImage, runtimePushFunc(runtime))
 			})
 		})
 		envelope, err := runJobEnvelope(runtime, "push", input.JobEnvelopeInput, input.Preview, execute)
@@ -84,9 +87,9 @@ func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 	}
 }
 
-func resolveRuntimeBuildExecution(ctx core.Context, runtime RuntimeConfig, projectRoot, component, versionOverride string, release, noIncremental bool, platforms []string) (eruncommon.BuildExecutionSpec, error) {
+func resolveRuntimeBuildExecution(ctx core.Context, runtime RuntimeConfig, projectRoot, component, versionOverride string, release, noIncremental bool, platforms []string) (shared.BuildExecutionSpec, error) {
 	environment := strings.TrimSpace(runtime.Context.Environment)
-	target := eruncommon.DockerCommandTarget{
+	target := shared.DockerCommandTarget{
 		ProjectRoot:     projectRoot,
 		Environment:     environment,
 		VersionOverride: versionOverride,
@@ -97,35 +100,35 @@ func resolveRuntimeBuildExecution(ctx core.Context, runtime RuntimeConfig, proje
 	findProjectRoot := func() (string, string, error) {
 		return runtimeFindProjectRoot(runtime.Context, projectRoot)
 	}
-	resolveBuildContext := func() (eruncommon.DockerBuildContext, error) {
-		return eruncommon.DockerBuildContextAtDir(projectRoot)
+	resolveBuildContext := func() (shared.DockerBuildContext, error) {
+		return shared.DockerBuildContextAtDir(projectRoot)
 	}
 
 	if component != "" {
-		target, releaseSpec, err := eruncommon.ResolveDockerBuildTarget(findProjectRoot, target)
+		target, releaseSpec, err := buildpkg.ResolveDockerBuildTarget(findProjectRoot, target)
 		if err != nil {
-			return eruncommon.BuildExecutionSpec{}, err
+			return shared.BuildExecutionSpec{}, err
 		}
 
-		build, err := eruncommon.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, environment, component, target.VersionOverride, target.Platforms)
+		build, err := buildpkg.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, environment, component, target.VersionOverride, target.Platforms)
 		if err != nil {
-			return eruncommon.BuildExecutionSpec{}, err
+			return shared.BuildExecutionSpec{}, err
 		}
 		if build == nil {
-			return eruncommon.BuildExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
+			return shared.BuildExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 		}
-		execution := eruncommon.BuildExecutionSpecFromDockerBuilds([]eruncommon.DockerBuildSpec{*build})
+		execution := buildpkg.BuildExecutionSpecFromDockerBuilds([]shared.DockerBuildSpec{*build})
 		if releaseSpec != nil {
-			execution = eruncommon.BuildExecutionSpecWithRelease(execution, *releaseSpec)
+			execution = orchestration.BuildExecutionSpecWithRelease(execution, *releaseSpec)
 		}
-		return eruncommon.ApplyIncrementalToBuildExecution(ctx, execution, noIncremental)
+		return buildpkg.ApplyIncrementalToBuildExecution(ctx, execution, noIncremental)
 	}
 
-	return eruncommon.ResolveBuildExecution(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
+	return orchestration.ResolveBuildExecution(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
 }
 
-func resolveRuntimePushExecution(ctx core.Context, runtime RuntimeConfig, projectRoot, component, versionOverride string) (eruncommon.DockerPushExecutionSpec, error) {
-	target := eruncommon.DockerCommandTarget{
+func resolveRuntimePushExecution(ctx core.Context, runtime RuntimeConfig, projectRoot, component, versionOverride string) (shared.DockerPushExecutionSpec, error) {
+	target := shared.DockerCommandTarget{
 		ProjectRoot:     projectRoot,
 		Environment:     strings.TrimSpace(runtime.Context.Environment),
 		VersionOverride: versionOverride,
@@ -133,32 +136,32 @@ func resolveRuntimePushExecution(ctx core.Context, runtime RuntimeConfig, projec
 	findProjectRoot := func() (string, string, error) {
 		return runtimeFindProjectRoot(runtime.Context, projectRoot)
 	}
-	resolveBuildContext := func() (eruncommon.DockerBuildContext, error) {
-		return eruncommon.DockerBuildContextAtDir(projectRoot)
+	resolveBuildContext := func() (shared.DockerBuildContext, error) {
+		return shared.DockerBuildContextAtDir(projectRoot)
 	}
 
 	if component == "" {
-		pushInput, buildInput, err := eruncommon.ResolveDockerPushSpec(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
+		pushInput, buildInput, err := orchestration.ResolveDockerPushSpec(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
 		if err != nil {
-			return eruncommon.DockerPushExecutionSpec{}, err
+			return shared.DockerPushExecutionSpec{}, err
 		}
-		builds := make([]eruncommon.DockerBuildSpec, 0, 1)
+		builds := make([]shared.DockerBuildSpec, 0, 1)
 		if buildInput != nil {
 			builds = append(builds, *buildInput)
 		}
-		return eruncommon.DockerPushExecutionSpecFromSpecs(builds, []eruncommon.DockerPushSpec{pushInput}), nil
+		return orchestration.DockerPushExecutionSpecFromSpecs(builds, []shared.DockerPushSpec{pushInput}), nil
 	}
 
-	build, err := eruncommon.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride), target.Platforms)
+	build, err := buildpkg.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride), target.Platforms)
 	if err != nil {
-		return eruncommon.DockerPushExecutionSpec{}, err
+		return shared.DockerPushExecutionSpec{}, err
 	}
 	if build == nil {
-		return eruncommon.DockerPushExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
+		return shared.DockerPushExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 	}
 	build.Push = true
 
-	return eruncommon.DockerPushExecutionSpecFromSpecs([]eruncommon.DockerBuildSpec{*build}, []eruncommon.DockerPushSpec{
-		eruncommon.NewDockerPushSpec(projectRoot, build.Image),
+	return orchestration.DockerPushExecutionSpecFromSpecs([]shared.DockerBuildSpec{*build}, []shared.DockerPushSpec{
+		buildpkg.NewDockerPushSpec(projectRoot, build.Image),
 	}), nil
 }

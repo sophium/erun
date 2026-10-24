@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // tenantUmbrellaTarget is the shape the reported failure was reproduced in: a
@@ -38,12 +39,12 @@ func tenantUmbrellaTarget() config.OpenResult {
 // a resolution that reads the registry at all reports a hold instead.
 func TestTenantUmbrellaAtTheDeployVersionIsNotProbed(t *testing.T) {
 	const version = "1.0.143"
-	t.Setenv(publishedChartProbeOverrideEnv, "")
+	t.Setenv(deploy.PublishedChartProbeOverrideEnv, "")
 	var trace bytes.Buffer
 	ctx := core.Context{Logger: core.NewLogger(core.VerbosityInfo).WithTraceSink(&trace)}
 	target := tenantUmbrellaTarget()
 	target.EnvConfig.RuntimeChart = "oci://ghcr.io/sophium/charts/frs-devops:" + version
-	spec, err := resolvePublishedDevopsDeploySpecWithReason(ctx, target, version, "no local runtime chart", "", false)
+	spec, err := deploy.ResolvePublishedDevopsDeploySpecWithReason(ctx, target, version, "no local runtime chart", "", false)
 	if err != nil {
 		t.Fatalf("resolving the runtime deploy spec: %v", err)
 	}
@@ -59,11 +60,11 @@ func TestTenantUmbrellaAtTheDeployVersionIsNotProbed(t *testing.T) {
 // override half: --runtime-chart replaces the coordinate wholesale, so a hold
 // reported against the coordinate about to be replaced would be noise.
 func TestTenantUmbrellaHoldIsNotReportedWhenTheOperatorOverridesTheChart(t *testing.T) {
-	t.Setenv(publishedChartProbeOverrideEnv, "")
+	t.Setenv(deploy.PublishedChartProbeOverrideEnv, "")
 	var trace bytes.Buffer
 	ctx := core.Context{Logger: core.NewLogger(core.VerbosityInfo).WithTraceSink(&trace)}
 	override := "oci://ghcr.io/sophium/charts/frs-devops:1.0.143"
-	if _, err := resolvePublishedDevopsDeploySpecWithReason(ctx, tenantUmbrellaTarget(), "1.0.143", "no local runtime chart", override, false); err != nil {
+	if _, err := deploy.ResolvePublishedDevopsDeploySpecWithReason(ctx, tenantUmbrellaTarget(), "1.0.143", "no local runtime chart", override, false); err != nil {
 		t.Fatalf("resolving the runtime deploy spec: %v", err)
 	}
 	if got := trace.String(); strings.Contains(got, "holding") {

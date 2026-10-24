@@ -13,10 +13,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func (a *App) LoadState() (uiState, error) {
-	result, err := lifecycle.ResolveListResult(a.deps.store, a.deps.findProjectRoot, eruncommon.OpenParams{
+	result, err := lifecycle.ResolveListResult(a.deps.store, a.deps.findProjectRoot, shared.OpenParams{
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
 	})

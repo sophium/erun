@@ -9,6 +9,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // EnvironmentLifecycleState is the environment read model's single resolved
@@ -119,17 +122,17 @@ func resolveWorkloadLifecycleState(in EnvironmentLifecycleInputs) EnvironmentLif
 // action RecommendedDeployRecovery would suggest layered on top so a caller
 // does not need to re-run that classification itself.
 type EnvironmentHealth struct {
-	RootConfig          RootConfigInspection  `json:"rootConfig"`
-	Deploy              DeployDiagnosisResult `json:"deploy"`
-	RecommendedRecovery DeployRecoveryAction  `json:"recommendedRecovery,omitempty"`
+	RootConfig          RootConfigInspection            `json:"rootConfig"`
+	Deploy              deploypkg.DeployDiagnosisResult `json:"deploy"`
+	RecommendedRecovery deploypkg.DeployRecoveryAction  `json:"recommendedRecovery,omitempty"`
 }
 
 // ResolveEnvironmentHealth composes the doctor pieces callers already have
 // (RootConfigInspection and DeployDiagnosisResult) into one health view. It
 // runs no commands of its own; the caller is responsible for having run a
 // real diagnosis -- see EnvironmentHealth's doc comment.
-func ResolveEnvironmentHealth(rootConfig RootConfigInspection, deploy DeployDiagnosisResult) EnvironmentHealth {
-	recovery, _ := RecommendedDeployRecovery(deploy)
+func ResolveEnvironmentHealth(rootConfig RootConfigInspection, deploy deploypkg.DeployDiagnosisResult) EnvironmentHealth {
+	recovery, _ := deploypkg.RecommendedDeployRecovery(deploy)
 	return EnvironmentHealth{RootConfig: rootConfig, Deploy: deploy, RecommendedRecovery: recovery}
 }
 
@@ -169,7 +172,7 @@ func AssembleEnvironmentReadModel(tenant string, environment ListEnvironmentResu
 	}
 	if health != nil {
 		inputs.DeployHealthObserved = true
-		_, needsRecovery := RecommendedDeployRecovery(health.Deploy)
+		_, needsRecovery := deploypkg.RecommendedDeployRecovery(health.Deploy)
 		inputs.DeployHealthy = !needsRecovery
 	}
 	return EnvironmentReadModel{
@@ -201,7 +204,7 @@ func ResolveEnvironmentDetail(store ListStore, tenant, environment string) (List
 	if err != nil {
 		return ListEnvironmentResult{}, err
 	}
-	effective, effectiveErr := ResolveOpen(store, OpenParams{Tenant: tenant, Environment: environment})
+	effective, effectiveErr := open.ResolveOpen(store, shared.OpenParams{Tenant: tenant, Environment: environment})
 	portAllocations, err := config.ResolveAllEnvironmentLocalPorts(store)
 	if err != nil {
 		return ListEnvironmentResult{}, err
@@ -245,15 +248,15 @@ func ResolveEnvironmentReadModel(ctx core.Context, store ListStore, tenant, envi
 		if err != nil {
 			return EnvironmentReadModel{}, err
 		}
-		openResult, err := ResolveDoctorTarget(store, OpenParams{Tenant: tenant, Environment: environment})
+		openResult, err := ResolveDoctorTarget(store, shared.OpenParams{Tenant: tenant, Environment: environment})
 		if err != nil {
 			return EnvironmentReadModel{}, err
 		}
 		// The erun-level gateway catalog arrives on the resolved target (an
 		// unreadable root config leaves it unset), so the diagnosis judges the
 		// same routing the AI launch uses.
-		request := ShellLaunchParamsFromResult(openResult)
-		diagnosis := RunDeployDiagnosis(ctx, request)
+		request := cloud.ShellLaunchParamsFromResult(openResult)
+		diagnosis := deploypkg.RunDeployDiagnosis(ctx, request)
 		resolved := ResolveEnvironmentHealth(rootConfig, diagnosis)
 		health = &resolved
 	}

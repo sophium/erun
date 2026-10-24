@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -105,7 +105,7 @@ type mcpTokenResult struct {
 	Token       string `json:"token"`
 }
 
-func runMCPCallCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams, tool, arguments string) error {
+func runMCPCallCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, tool, arguments string) error {
 	tool = strings.TrimSpace(tool)
 	if tool == "" {
 		return fmt.Errorf("--tool is required; run `erun mcp tools` to list the environment's tools")
@@ -141,7 +141,7 @@ func runMCPCallCommand(ctx context.Context, commandCtx core.Context, resolveOpen
 	return writeMCPCallText(commandCtx, result)
 }
 
-func runMCPToolsCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams) error {
+func runMCPToolsCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams) error {
 	target, err := shared.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
 	if err != nil {
 		return err
@@ -183,7 +183,7 @@ func listMCPToolsWithReattach(ctx context.Context, commandCtx core.Context, targ
 	return result, err
 }
 
-func runMCPTokenCommand(commandCtx core.Context, resolveOpen shared.OpenResolver, params common.OpenParams) error {
+func runMCPTokenCommand(commandCtx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams) error {
 	target, err := shared.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
 	if err != nil {
 		return err

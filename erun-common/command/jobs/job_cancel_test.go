@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // The mirror image of a false clean exit: a job whose only started work is one it
@@ -45,7 +45,7 @@ func TestEnvironmentJobDeliberatelyCancelledByItsParentIsNotReportedAsAFailedSta
 // eventual RunEnvironmentJobSupervisor error lands on.
 func startCancelTestInnerJob(t *testing.T, tenant, environment, parentID, innerID string) <-chan error {
 	t.Helper()
-	t.Setenv(eruncommon.EnvironmentJobIDEnvVar, parentID)
+	t.Setenv(shared.EnvironmentJobIDEnvVar, parentID)
 	done := make(chan error, 1)
 	go func() {
 		done <- RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
@@ -57,7 +57,7 @@ func startCancelTestInnerJob(t *testing.T, tenant, environment, parentID, innerI
 		})
 	}()
 
-	inner, err := pollUntilEnvironmentJob(tenant, environment, innerID, 5*time.Second, func(job eruncommon.EnvironmentJob) bool {
+	inner, err := pollUntilEnvironmentJob(tenant, environment, innerID, 5*time.Second, func(job shared.EnvironmentJob) bool {
 		return job.ChildPID > 0
 	})
 	if err != nil {
@@ -98,11 +98,11 @@ func cancelCancelTestInnerJob(t *testing.T, tenant, environment, innerID string,
 
 // runCancelTestOuterJob runs the outer job (a plain, already-finished
 // command) and returns its own loaded record.
-func runCancelTestOuterJob(t *testing.T, tenant, environment, parentID string) eruncommon.EnvironmentJob {
+func runCancelTestOuterJob(t *testing.T, tenant, environment, parentID string) shared.EnvironmentJob {
 	t.Helper()
 	// The outer job itself was never started by anyone -- clear the env
 	// before running it so its own record does not claim a parent of its own.
-	t.Setenv(eruncommon.EnvironmentJobIDEnvVar, "")
+	t.Setenv(shared.EnvironmentJobIDEnvVar, "")
 	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,

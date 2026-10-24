@@ -6,13 +6,16 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/release"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
-func NewReleaseCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, runGit gitx.GitCommandRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push common.DockerPushFunc) *cobra.Command {
+func NewReleaseCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, runGit gitx.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry build.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push build.DockerPushFunc) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:           "release",
@@ -37,12 +40,12 @@ func NewReleaseCmd(store common.DockerStore, findProjectRoot common.ProjectFinde
 	return cmd
 }
 
-func runReleaseCommand(ctx core.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, force bool, runGit gitx.GitCommandRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push common.DockerPushFunc) error {
-	execution, err := common.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, common.DockerCommandTarget{Release: true, Force: force})
+func runReleaseCommand(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, force bool, runGit gitx.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry build.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push build.DockerPushFunc) error {
+	execution, err := orchestration.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, sharedpkg.DockerCommandTarget{Release: true, Force: force})
 	if err != nil {
 		return err
 	}
-	version := strings.TrimSpace(common.NewBuildResult(execution).Version)
+	version := strings.TrimSpace(orchestration.NewBuildResult(execution).Version)
 	if _, err := fmt.Fprintln(ctx.Stdout, version); err != nil {
 		return err
 	}
@@ -58,9 +61,9 @@ func runReleaseCommand(ctx core.Context, store common.DockerStore, findProjectRo
 	// Source control only: release stamps, commits, tags and pushes the version
 	// and never builds or publishes an artifact. Build and publish are
 	// `erun build --release` and `erun push --version`. See RunReleaseSpec.
-	spec, ok := common.BuildExecutionReleaseSpec(execution)
+	spec, ok := orchestration.BuildExecutionReleaseSpec(execution)
 	if !ok {
 		return fmt.Errorf("release: the resolved plan is not a release")
 	}
-	return common.RunReleaseSpec(ctx, spec, gitToStderr)
+	return release.RunReleaseSpec(ctx, spec, gitToStderr)
 }

@@ -5,8 +5,10 @@ import (
 	"io"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/command/expose"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 type ServicesInput struct {
@@ -32,12 +34,12 @@ func servicesTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 		if err != nil {
 			return nil, expose.EnvironmentServiceList{}, err
 		}
-		target, err := eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
+		target, err := open.ResolveOpen(runtime.Store, shared.OpenParams{Tenant: tenant, Environment: environment})
 		if err != nil {
 			return nil, expose.EnvironmentServiceList{}, err
 		}
 		runCtx := runtimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
-		result, err := expose.RunListEnvironmentServices(runCtx, eruncommon.ShellLaunchParamsFromResult(target))
+		result, err := expose.RunListEnvironmentServices(runCtx, cloud.ShellLaunchParamsFromResult(target))
 		if err != nil {
 			return nil, expose.EnvironmentServiceList{}, err
 		}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // ObservedSecretCheck reports whether a named Secret exists and carries a
@@ -27,12 +28,12 @@ type observeSecretItem struct {
 
 func fetchObservedSecretCheck(args []string, check ObserveSecretCheck) ObservedSecretCheck {
 	result := ObservedSecretCheck{Name: check.Name, Key: check.Key}
-	raw, stderr, err := eruncommon.RunObserveKubectl(args)
+	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
 		if eruncommon.IsKubectlNotFound(stderr) {
 			return result
 		}
-		result.Error = eruncommon.KubectlErrorMessage(err, stderr).Error()
+		result.Error = deploy.KubectlErrorMessage(err, stderr).Error()
 		return result
 	}
 	var secret observeSecretItem

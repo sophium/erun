@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // platform_machine_identity.go delivers a *machine* identity into an
@@ -67,16 +67,16 @@ func provisionMachineIdentitySecret(ctx core.Context, store config.CloudReadStor
 	if err != nil || !ok {
 		return "", false, err
 	}
-	entry, err := eruncommon.RenderPlatformAliasEntry(provisioned.provider)
+	entry, err := deploy.RenderPlatformAliasEntry(provisioned.provider)
 	if err != nil {
 		return "", false, err
 	}
 	ref := machineIdentityClientSecretRef(provisioned.provider.Alias)
-	name := eruncommon.PlatformAliasSecretName(tenant)
+	name := deploy.PlatformAliasSecretName(tenant)
 	args := kube.KubectlApplyStdinArgs(namespace, kubernetesContext)
 	ctx.Trace("apply machine identity secret " + name + " (identity " + provisioned.subject + ", client secret redacted)")
 	ctx.TraceCommand("", "kubectl", args...)
-	manifest := eruncommon.RenderPlatformAliasSecret(name, namespace, entry, cloud.CloudSecretFileName(ref), provisioned.clientSecret)
+	manifest := deploy.RenderPlatformAliasSecret(name, namespace, entry, cloud.CloudSecretFileName(ref), provisioned.clientSecret)
 	if err := kube.ApplySecretManifest(kubernetesContext, namespace, "machine identity secret", manifest, args); err != nil {
 		return "", false, err
 	}
@@ -126,8 +126,8 @@ func machineIdentityPlatformClient(ctx core.Context, store config.CloudReadStore
 	// Re-resolved rather than threaded from the caller so "this host has
 	// nothing to ask with" is decided in the one place that already decides it,
 	// and without a second network-free resolution to keep in step.
-	provider, _, ok, err := eruncommon.ResolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
-	if err != nil && !eruncommon.HostAliasSelected(ctx.PlatformAlias) && eruncommon.IsPlatformAliasAmbiguity(err) {
+	provider, _, ok, err := deploy.ResolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
+	if err != nil && !deploy.HostAliasSelected(ctx.PlatformAlias) && deploy.IsPlatformAliasAmbiguity(err) {
 		// Several aliases and none named: nothing to ask with, so fall back.
 		// The delegated path declines on the same ambiguity and reports it,
 		// which is what keeps init from failing on such a host.

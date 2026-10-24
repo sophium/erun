@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // The reproduction this closes: an agent job's own exit status says nothing
@@ -243,11 +243,11 @@ func TestAgentJobFinishingWhileASiblingIsStillLiveOnTheSameWorktreeIsNotCheckpoi
 	const siblingID = "i2083"
 	const id = "land2083"
 
-	dir, err := eruncommon.EnvironmentJobDir(tenant, environment)
+	dir, err := shared.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
-	sibling := eruncommon.EnvironmentJob{
+	sibling := shared.EnvironmentJob{
 		ID:        siblingID,
 		Name:      siblingID,
 		State:     EnvironmentJobStateRunning,

@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // TestParseRuntimeUsageReadings covers the fixture shapes #1233 measured
@@ -576,7 +577,7 @@ func TestRunRuntimeUsageReportsTheDindSidecarSeparately(t *testing.T) {
 
 	req := config.ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
 	runner := func(_ config.ShellLaunchParams, container, _ string) (kube.RemoteCommandResult, error) {
-		if container == eruncommon.RuntimeDindContainerName {
+		if container == build.RuntimeDindContainerName {
 			return kube.RemoteCommandResult{Stdout: busyDindReading}, nil
 		}
 		return kube.RemoteCommandResult{Stdout: idleRuntimeReading}, nil
@@ -612,7 +613,7 @@ func TestRunRuntimeUsageDindExecFailureFailsSoft(t *testing.T) {
 	idleRuntimeReading := "cgroup_type=cgroup2fs\nmemory_current=100\nmemory_max=200\nmemory_peak=100\nmemory_oom_kill=0\ncpu_max=100000 100000\ncpu_usage_before=0\ncpu_usage_after=0\ncpu_time_before_ns=1000000000\ncpu_time_after_ns=2000000000\ndisk_workspace=overlay 100 50 50 50% /home/erun"
 	req := config.ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
 	runner := func(_ config.ShellLaunchParams, container, _ string) (kube.RemoteCommandResult, error) {
-		if container == eruncommon.RuntimeDindContainerName {
+		if container == build.RuntimeDindContainerName {
 			return kube.RemoteCommandResult{}, errors.New("container not found")
 		}
 		return kube.RemoteCommandResult{Stdout: idleRuntimeReading}, nil
@@ -682,7 +683,7 @@ func assertRuntimeUsageThrottleWarning(t *testing.T, dindReading, want string) {
 	t.Helper()
 	req := config.ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
 	runner := func(_ config.ShellLaunchParams, container, _ string) (kube.RemoteCommandResult, error) {
-		if container == eruncommon.RuntimeDindContainerName {
+		if container == build.RuntimeDindContainerName {
 			return kube.RemoteCommandResult{Stdout: dindReading}, nil
 		}
 		return kube.RemoteCommandResult{Stdout: runtimeUsageRuntimeContainerReading()}, nil
@@ -884,7 +885,7 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 	}
 
 	t.Run("a retained kill and near-limit peak keep warning after a restart", func(t *testing.T) {
-		history := eruncommon.RuntimeUsageHistory{Restarts: 25, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
+		history := deploy.RuntimeUsageHistory{Restarts: 25, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
 
 		warnings := retainedMemoryUsageWarnings(restarted, history)
 		if !hasWarningContaining(warnings, "retained history recorded 1 OOM kill") {
@@ -901,7 +902,7 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 			LimitBytes: limit, PercentOfLimit: 100 * float64(52428800) / float64(limit),
 			OOMKillsObserved: true,
 		}
-		for _, history := range []eruncommon.RuntimeUsageHistory{
+		for _, history := range []deploy.RuntimeUsageHistory{
 			{},
 			{Restarts: 3, ObservedPeakMemoryBytes: 104857600},
 		} {
@@ -917,7 +918,7 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 		// what clears it -- there is no stored "already warned" flag to reset.
 		raised := restarted
 		raised.LimitBytes = 9663676416 // 9216Mi
-		history := eruncommon.RuntimeUsageHistory{Restarts: 25, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
+		history := deploy.RuntimeUsageHistory{Restarts: 25, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
 
 		warnings := retainedMemoryUsageWarnings(raised, history)
 		if hasWarningContaining(warnings, "retained memory peak reached") {
@@ -929,7 +930,7 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 	})
 
 	t.Run("an uninterrupted container is not warned twice", func(t *testing.T) {
-		history := eruncommon.RuntimeUsageHistory{Restarts: 0, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
+		history := deploy.RuntimeUsageHistory{Restarts: 0, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
 
 		if warnings := retainedMemoryUsageWarnings(unrestarted, history); len(warnings) != 0 {
 			t.Errorf("live counters already cover this container, got %v", warnings)
@@ -962,7 +963,7 @@ func TestApplyRetainedUsageWarningsReadsTheEnvironmentHistory(t *testing.T) {
 		t.Fatalf("no retained history must not manufacture a warning, got %v", warnings)
 	}
 
-	history := AppendRuntimeUsageSample(eruncommon.RuntimeUsageHistory{}, config.RuntimeUsage{
+	history := AppendRuntimeUsageSample(deploy.RuntimeUsageHistory{}, config.RuntimeUsage{
 		Memory: config.RuntimeMemoryUsage{LimitBytes: 6442450944, PeakBytes: 6443237376, PeakObserved: true, OOMKills: 1, OOMKillsObserved: true},
 	}, time.Now())
 	if err := SaveRuntimeUsageHistory("erun", "code3", history); err != nil {

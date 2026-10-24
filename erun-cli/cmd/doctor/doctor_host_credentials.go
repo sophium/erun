@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"time"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // reportHostCredentials tells the operator whether the environment's copy of
@@ -22,14 +23,14 @@ import (
 // When an earlier section already confirmed the cluster is unreachable
 // (diagnosis.ClusterUnreachable), this reports the same skip instead of
 // paying its own kubectl exec timeout to rediscover it.
-func reportHostCredentials(ctx core.Context, store config.ConfigStore, result config.OpenResult, diagnosis common.DeployDiagnosisResult) error {
+func reportHostCredentials(ctx core.Context, store config.ConfigStore, result config.OpenResult, diagnosis deploy.DeployDiagnosisResult) error {
 	if !result.EnvConfig.HasAWSCloudAlias() {
 		return nil
 	}
 	if diagnosis.ClusterUnreachable {
 		return reportPodSkippedUnreachable(ctx, "Host AWS credentials")
 	}
-	status, err := common.InspectHostAWSCredentials(ctx, nil, store, result)
+	status, err := cloud.InspectHostAWSCredentials(ctx, nil, store, result)
 	if err != nil {
 		if ctx.DryRun {
 			return nil
@@ -49,14 +50,14 @@ func reportHostCredentials(ctx core.Context, store config.ConfigStore, result co
 // hostCredentialsRegionLine names the missing-region failure mode from #904 in
 // the same place: an alias with no resolvable region leaves the pod's AWS calls
 // with no default region at all.
-func hostCredentialsRegionLine(status common.HostCredentialsStatus) string {
+func hostCredentialsRegionLine(status cloud.HostCredentialsStatus) string {
 	if status.Region == "" {
 		return "none resolved — AWS calls in this environment have no default region until the alias carries an SSO region or the environment names an ECR registry"
 	}
 	return status.Region
 }
 
-func hostCredentialsStatusLine(status common.HostCredentialsStatus, result config.OpenResult) string {
+func hostCredentialsStatusLine(status cloud.HostCredentialsStatus, result config.OpenResult) string {
 	refresh := fmt.Sprintf("run `erun cloud refresh %s %s`", result.Tenant, result.Environment)
 	switch {
 	case !status.Present:

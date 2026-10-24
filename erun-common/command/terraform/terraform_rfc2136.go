@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // terraformDNS01ProviderRFC2136 is the cluster-edge module's dns01_provider
@@ -117,7 +118,7 @@ func readTerraformRFC2136Secret(ctx core.Context, requirement terraformRFC2136Re
 	args = append(args, "-n", requirement.Namespace, "get", "secret", requirement.SecretName, "-o", jsonPath)
 	ctx.TraceCommand("", "kubectl", args...)
 
-	output, stderr, err := eruncommon.RunObserveKubectl(args)
+	output, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
 		return "", terraformRFC2136ReadError(requirement, stderr, err)
 	}

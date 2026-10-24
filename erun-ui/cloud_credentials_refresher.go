@@ -6,10 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 const (
@@ -90,7 +91,7 @@ func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (strin
 	if err != nil || provider.Provider != config.CloudProviderAWS {
 		return "", config.OpenResult{}, false
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -117,7 +118,7 @@ func (a *App) stopCloudCredentialsRefresherForSelection(selection uiSelection) {
 	}
 	refresher.cancel()
 	<-refresher.done
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

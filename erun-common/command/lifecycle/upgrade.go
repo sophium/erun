@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
+	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // UpgradeVersionsOverrideEnv is a test-only seam that forces the upgrade
@@ -66,7 +66,7 @@ type EnvVersionsResolver func(ctx core.Context, tenant string, env config.EnvCon
 // private/nonexistent tenant repo (ghcr 403s both alike) never blocks the
 // upgrade. Each result is tagged with its source registry so the caller can
 // offer a pick when registries disagree on the newest version.
-func UpgradeVersionsResolverForStore(_ eruncommon.DeployStore, lookup RegistryVersionsLookup) EnvVersionsResolver {
+func UpgradeVersionsResolverForStore(_ deploypkg.DeployStore, lookup RegistryVersionsLookup) EnvVersionsResolver {
 	return func(_ core.Context, tenant string, env config.EnvConfig) ([]SourcedRuntimeVersions, error) {
 		if versions, forcedError, ok := runtimeVersionsOverrideFromEnvWithError(); ok {
 			if forcedError != "" {
@@ -163,17 +163,17 @@ type UpgradeTarget struct {
 // decision through ctx so `--dry-run` is a complete audit of which envs are
 // opted in, the channel each tracks, its current version, and the resolved
 // target (or why it is unresolved).
-func ResolveUpgradePlanForStore(ctx core.Context, store eruncommon.DeployStore, target UpgradeTarget, resolveVersions EnvVersionsResolver) (UpgradePlan, error) {
+func ResolveUpgradePlanForStore(ctx core.Context, store deploypkg.DeployStore, target UpgradeTarget, resolveVersions EnvVersionsResolver) (UpgradePlan, error) {
 	return buildUpgradePlan(store, target, resolveVersions, ctx.Trace)
 }
 
 // BuildUpgradePlan is the Context-free plan resolver for in-process callers
 // (the desktop) that have no CLI/MCP trace channel.
-func BuildUpgradePlan(store eruncommon.DeployStore, target UpgradeTarget, resolveVersions EnvVersionsResolver) (UpgradePlan, error) {
+func BuildUpgradePlan(store deploypkg.DeployStore, target UpgradeTarget, resolveVersions EnvVersionsResolver) (UpgradePlan, error) {
 	return buildUpgradePlan(store, target, resolveVersions, nil)
 }
 
-func buildUpgradePlan(store eruncommon.DeployStore, target UpgradeTarget, resolveVersions EnvVersionsResolver, trace func(string)) (UpgradePlan, error) {
+func buildUpgradePlan(store deploypkg.DeployStore, target UpgradeTarget, resolveVersions EnvVersionsResolver, trace func(string)) (UpgradePlan, error) {
 	traceln := func(msg string) {
 		if trace != nil {
 			trace(msg)
@@ -231,7 +231,7 @@ func normalizeUpgradeScope(target UpgradeTarget) (upgradeScope, error) {
 // plan items, and reports whether scope.gateEnvironment (when named) was
 // actually found among them -- a typo must fail the whole plan, not resolve
 // silently with no gate verdict.
-func collectUpgradePlanItems(store eruncommon.DeployStore, tenants []config.TenantConfig, scope upgradeScope, resolveVersions EnvVersionsResolver, traceln func(string)) ([]UpgradePlanItem, bool, error) {
+func collectUpgradePlanItems(store deploypkg.DeployStore, tenants []config.TenantConfig, scope upgradeScope, resolveVersions EnvVersionsResolver, traceln func(string)) ([]UpgradePlanItem, bool, error) {
 	items := make([]UpgradePlanItem, 0)
 	gateFound := scope.gateEnvironment == ""
 	for _, tenant := range tenants {

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 const sshdPortForwardStartupTimeout = 5 * time.Second
@@ -28,11 +28,11 @@ type sshdPortForwardState struct {
 	ProxyProcessID    int    `json:"proxyProcessId,omitempty"`
 }
 
-func EnsureSSHDPortForward(ctx core.Context, result config.OpenResult) (common.SSHConnectionInfo, error) {
-	info := common.SSHConnectionInfoForResult(result)
+func EnsureSSHDPortForward(ctx core.Context, result config.OpenResult) (open.SSHConnectionInfo, error) {
+	info := open.SSHConnectionInfoForResult(result)
 	statePath, err := sshdPortForwardStatePath(result.Tenant, result.Environment, ctx.DryRun)
 	if err != nil {
-		return common.SSHConnectionInfo{}, err
+		return open.SSHConnectionInfo{}, err
 	}
 	state, _ := loadSSHDPortForwardState(statePath)
 	expectedState := sshdPortForwardState{
@@ -65,7 +65,7 @@ func EnsureSSHDPortForward(ctx core.Context, result config.OpenResult) (common.S
 	if CanConnectLocalPort(info.Port) {
 		adopted, err := adoptForeignSSHDPortForward(ctx, statePath, expectedState, args, info)
 		if err != nil {
-			return common.SSHConnectionInfo{}, err
+			return open.SSHConnectionInfo{}, err
 		}
 		if adopted {
 			return info, nil
@@ -79,7 +79,7 @@ func EnsureSSHDPortForward(ctx core.Context, result config.OpenResult) (common.S
 
 // adoptForeignSSHDPortForward mirrors adoptForeignMCPPortForward for the
 // SSHD forward. See that function for the contract.
-func adoptForeignSSHDPortForward(ctx core.Context, statePath string, expected sshdPortForwardState, expectedArgs []string, info common.SSHConnectionInfo) (bool, error) {
+func adoptForeignSSHDPortForward(ctx core.Context, statePath string, expected sshdPortForwardState, expectedArgs []string, info open.SSHConnectionInfo) (bool, error) {
 	pid, argv, ok := FindLocalPortHolder(info.Port)
 	if !ok {
 		return false, fmt.Errorf("local SSH port %d is already in use", info.Port)
@@ -132,7 +132,7 @@ func stopStaleSSHDPortForward(ctx core.Context, matches bool, state sshdPortForw
 	}
 }
 
-func startSSHDPortForward(ctx core.Context, statePath string, expectedState sshdPortForwardState, args []string, info common.SSHConnectionInfo) (common.SSHConnectionInfo, error) {
+func startSSHDPortForward(ctx core.Context, statePath string, expectedState sshdPortForwardState, args []string, info open.SSHConnectionInfo) (open.SSHConnectionInfo, error) {
 	logPath := sshdPortForwardLogPath(statePath)
 	expectedState.LogPath = logPath
 	process, err := StartPortForwardWithBindRetry(ctx, "sshd", info.Port, func() (*os.Process, error) {
@@ -154,7 +154,7 @@ func startSSHDPortForward(ctx core.Context, statePath string, expectedState sshd
 	})
 	if err != nil {
 		ReleaseUnreachablePortForward(ctx, "sshd", process, info.Port, err)
-		return common.SSHConnectionInfo{}, err
+		return open.SSHConnectionInfo{}, err
 	}
 	return info, nil
 }

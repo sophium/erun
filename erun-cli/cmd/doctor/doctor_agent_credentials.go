@@ -3,9 +3,9 @@ package doctor
 import (
 	"fmt"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // reportAgentCredentials tells the operator whether this environment's runtime
@@ -25,10 +25,10 @@ import (
 // it broken. Like the neighbouring host-credentials section, it also stays
 // silent under --dry-run: the read is still traced by the diagnosis that owns
 // it, but the section is a live report.
-func reportAgentCredentials(ctx core.Context, result config.OpenResult, diagnosis common.DeployDiagnosisResult) error {
+func reportAgentCredentials(ctx core.Context, result config.OpenResult, diagnosis deploy.DeployDiagnosisResult) error {
 	status := diagnosis.AgentCredentials
 	switch status.State {
-	case "", common.RuntimeAgentCredentialNotApplicable:
+	case "", deploy.RuntimeAgentCredentialNotApplicable:
 		return nil
 	}
 	if diagnosis.ClusterUnreachable {
@@ -46,16 +46,16 @@ const agentCredentialSectionHeader = "Agent capability"
 // agentCredentialStatusLine is the whole finding in one sentence, with the next
 // action attached rather than left to be inferred. Each arm says what was read,
 // what it means for an agent run, and what to do about it.
-func agentCredentialStatusLine(status common.RuntimeAgentCredentialStatus, result config.OpenResult) string {
+func agentCredentialStatusLine(status deploy.RuntimeAgentCredentialStatus, result config.OpenResult) string {
 	switch status.State {
-	case common.RuntimeAgentCredentialConfigured:
+	case deploy.RuntimeAgentCredentialConfigured:
 		return fmt.Sprintf("available — the runtime pod's %s container carries %s (%s), so Claude Code in this environment is routed at the gateway erun configured.",
-			status.Container, common.GatewayBaseURLEnv, status.GatewayBaseURL)
-	case common.RuntimeAgentCredentialMissing:
+			status.Container, deploy.GatewayBaseURLEnv, status.GatewayBaseURL)
+	case deploy.RuntimeAgentCredentialMissing:
 		return fmt.Sprintf("UNAVAILABLE — the runtime pod's %s container carries no %s, so no agent job in this environment has a provider or a credential to serve a turn with and every one of them will fail.\n"+
 			"erun configured the gateway %s for this environment and passes it to its chart on every deploy, so the deployed pod template is what dropped it: that chart predates the credential injection.\n"+
 			"Fix: deploy this environment (%s/%s) on a runtime chart that renders it — `erun deploy %s %s` after advancing the environment's runtime chart version.",
-			status.Container, common.GatewayBaseURLEnv, status.GatewayBaseURL, result.Tenant, result.Environment, result.Tenant, result.Environment)
+			status.Container, deploy.GatewayBaseURLEnv, status.GatewayBaseURL, result.Tenant, result.Environment, result.Tenant, result.Environment)
 	default:
 		return fmt.Sprintf("unknown — could not read the runtime pod template's environment (%s), so this check has no answer either way.", status.ReadError)
 	}

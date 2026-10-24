@@ -3,12 +3,12 @@ package shared
 import (
 	"fmt"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // OpenResolver resolves an env's runtime target from tenant/environment scope.
-type OpenResolver func(common.OpenParams) (config.OpenResult, error)
+type OpenResolver func(shared.OpenParams) (config.OpenResult, error)
 
 func FormatOutputSize(size int64) string {
 	const unit = 1024

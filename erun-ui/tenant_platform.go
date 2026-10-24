@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/platform"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // tenant_platform.go resolves which erun-hosted-platform identity backs the
@@ -160,7 +160,7 @@ func (a *App) resolveTenantERunPlatformAlias(tenantConfig configpkg.TenantConfig
 // alias. Used both for an explicit aliasOverride (always honored verbatim)
 // and for a tenant that has never attached any cloud alias at all.
 func (a *App) resolveGlobalERunPlatformAlias(aliasOverride string) (configpkg.CloudProviderConfig, *tenantPlatformResolution, error) {
-	provider, err := eruncommon.ResolveERunPlatformAlias(a.deps.store, aliasOverride)
+	provider, err := shared.ResolveERunPlatformAlias(a.deps.store, aliasOverride)
 	if err != nil {
 		resolution, resolveErr := a.tenantPlatformResolutionForResolveError(err)
 		return configpkg.CloudProviderConfig{}, &resolution, resolveErr

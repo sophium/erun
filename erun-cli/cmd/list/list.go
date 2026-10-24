@@ -11,10 +11,11 @@ import (
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
-func NewListCmd(store common.ListStore, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func NewListCmd(store common.ListStore, findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
 	var versionDriftTenant string
 	var gateEnvironment string
 	var controlPlanes bool
@@ -64,7 +65,7 @@ func validateListControlPlaneAliasFlag(controlPlanes bool, erunAlias string) err
 	return nil
 }
 
-func runListCommand(ctx core.Context, store common.ListStore, findProjectRoot common.ProjectFinderFunc, versionDriftTenant, gateEnvironment, erunAlias string, controlPlanes, failOnDrift bool) error {
+func runListCommand(ctx core.Context, store common.ListStore, findProjectRoot sharedpkg.ProjectFinderFunc, versionDriftTenant, gateEnvironment, erunAlias string, controlPlanes, failOnDrift bool) error {
 	ctx.TraceCommand("", "erun", "list")
 	versionDriftTenant = strings.TrimSpace(versionDriftTenant)
 	gateEnvironment = strings.TrimSpace(gateEnvironment)
@@ -73,7 +74,7 @@ func runListCommand(ctx core.Context, store common.ListStore, findProjectRoot co
 		return err
 	}
 
-	result, err := lifecycle.ResolveListResult(store, findProjectRoot, common.OpenParams{
+	result, err := lifecycle.ResolveListResult(store, findProjectRoot, sharedpkg.OpenParams{
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
 	})

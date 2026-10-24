@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 type ListInput struct {
@@ -120,18 +120,18 @@ func buildListToolResult(ctx core.Context, result lifecycle.ListResult, controlP
 	return nil, toolResult, nil
 }
 
-func runtimeOpenParams(runtime RuntimeContext) eruncommon.OpenParams {
+func runtimeOpenParams(runtime RuntimeContext) shared.OpenParams {
 	tenant := strings.TrimSpace(runtime.Tenant)
 	environment := strings.TrimSpace(runtime.Environment)
 
 	switch {
 	case tenant != "" && environment != "":
-		return eruncommon.OpenParams{Tenant: tenant, Environment: environment}
+		return shared.OpenParams{Tenant: tenant, Environment: environment}
 	case tenant != "":
-		return eruncommon.OpenParams{Tenant: tenant, UseDefaultEnvironment: true}
+		return shared.OpenParams{Tenant: tenant, UseDefaultEnvironment: true}
 	case environment != "":
-		return eruncommon.OpenParams{Environment: environment, UseDefaultTenant: true}
+		return shared.OpenParams{Environment: environment, UseDefaultTenant: true}
 	default:
-		return eruncommon.OpenParams{UseDefaultTenant: true, UseDefaultEnvironment: true}
+		return shared.OpenParams{UseDefaultTenant: true, UseDefaultEnvironment: true}
 	}
 }

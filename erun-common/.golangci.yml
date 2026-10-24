@@ -127,10 +127,11 @@ linters:
           allow:
             - github.com/sophium/erun/erun-common/base/
             - github.com/sophium/erun/erun-common/infra/activity$
+            - github.com/sophium/erun/erun-common/infra/kube$
             - github.com/sophium/erun/erun-common/infra/platformclient$
           deny:
             - pkg: github.com/sophium/erun/erun-common
-              desc: infra/cloud may import base/* and infra/activity, infra/platformclient
+              desc: infra/cloud may import base/* and infra/activity, infra/kube, infra/platformclient
         infra-mcp:
           list-mode: lax
           files: ["**/erun-common/infra/mcp/*.go"]
@@ -146,10 +147,41 @@ linters:
           allow:
             - github.com/sophium/erun/erun-common/base/
             - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/
+            - github.com/sophium/erun/erun-common/orchestration$
             - github.com/sophium/erun/erun-common$
           deny:
             - pkg: github.com/sophium/erun/erun-common
-              desc: a command package may import base/*, infra/* and the root package, never another command package
+              desc: a command package may import base/*, infra/*, primitive/*, orchestration and the root package, never another command package
+        primitive-shared:
+          list-mode: lax
+          files: ["**/erun-common/primitive/shared/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: primitive/shared sits below every primitive and may import base/* and infra/* only
+        primitives:
+          list-mode: lax
+          files: ["**/erun-common/primitive/*/*.go", "!**/erun-common/primitive/shared/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/shared$
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: a primitive may import base/*, infra/* and primitive/shared, never another primitive; composing primitives is orchestration's job
+        orchestration:
+          list-mode: lax
+          files: ["**/erun-common/orchestration/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: orchestration composes primitives and may import base/*, infra/* and primitive/* only
     funlen:
       lines: 100
       statements: 50

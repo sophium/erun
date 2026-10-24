@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // zzReinvocationStubClaude puts a stub `claude` on PATH — the name both the
@@ -43,7 +43,7 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 // state every reproduction lane ends in, and the state that makes the
 // supervisor resume the lane's session. It returns the lane's final record and
 // the argv the resumed turn was actually run with.
-func zzRunLaneWithFailedProbe(t *testing.T, task string) (eruncommon.EnvironmentJob, string) {
+func zzRunLaneWithFailedProbe(t *testing.T, task string) (shared.EnvironmentJob, string) {
 	t.Helper()
 	isolateActivityCache(t)
 
@@ -51,7 +51,7 @@ func zzRunLaneWithFailedProbe(t *testing.T, task string) (eruncommon.Environment
 	const environment = "lane"
 	const laneID = "lane"
 
-	dir, err := eruncommon.EnvironmentJobDir(tenant, environment)
+	dir, err := shared.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
@@ -65,10 +65,10 @@ func zzRunLaneWithFailedProbe(t *testing.T, task string) (eruncommon.Environment
 	// that is the whole point, and why the resumption prompt is the only place
 	// the lane's finding can be protected.
 	probeCode := 1
-	if err := writeEnvironmentJob(dir, eruncommon.EnvironmentJob{
+	if err := writeEnvironmentJob(dir, shared.EnvironmentJob{
 		ID:             "probe",
 		Name:           "probe",
-		State:          eruncommon.EnvironmentJobStateExited,
+		State:          shared.EnvironmentJobStateExited,
 		StartedAt:      time.Now(),
 		EndedAt:        time.Now(),
 		ExitCode:       &probeCode,
@@ -152,11 +152,11 @@ func TestReinvocationResumesWithTheTaskTheRunWasOriginallyGiven(t *testing.T) {
 // recoverable gets today's prompt verbatim, with nothing invented in place of
 // a task nobody recorded.
 func TestReinvocationPromptInventsNoTaskItCannotRecover(t *testing.T) {
-	job := eruncommon.EnvironmentJob{
+	job := shared.EnvironmentJob{
 		Kind:      EnvironmentJobKindAgent,
 		AgentTool: "claude",
 		Command:   []string{"claude", "--output-format", "stream-json", "-p", "task"},
-		Progress:  &eruncommon.AgentJobProgress{SessionID: "session"},
+		Progress:  &shared.AgentJobProgress{SessionID: "session"},
 	}
 	got := buildEnvironmentJobReinvocationPrompt(job, "the job this job started (gate) did not succeed")
 	if strings.Contains(got, "The task you were given was") {
@@ -166,10 +166,10 @@ func TestReinvocationPromptInventsNoTaskItCannotRecover(t *testing.T) {
 		t.Fatalf("the outcome is no longer named: %q", got)
 	}
 
-	commandJob := eruncommon.EnvironmentJob{
+	commandJob := shared.EnvironmentJob{
 		Kind:     EnvironmentJobKindCommand,
 		Command:  []string{"make", "check"},
-		Progress: &eruncommon.AgentJobProgress{SessionID: "session"},
+		Progress: &shared.AgentJobProgress{SessionID: "session"},
 	}
 	if got := buildEnvironmentJobReinvocationPrompt(commandJob, "outcome"); strings.Contains(got, "The task you were given was") {
 		t.Fatalf("a command job's argv was read back as an agent task: %q", got)

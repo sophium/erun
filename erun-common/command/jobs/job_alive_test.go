@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // The alive contract exists because a job's supervisor can die outright (a
@@ -146,7 +146,7 @@ func startJobAliveSupervisorHelper(t *testing.T, tenant, environment, id string)
 // and returns the child pid the cleanup after the kill needs.
 func awaitFirstAliveBeat(t *testing.T, tenant, environment, id string) int {
 	t.Helper()
-	job, err := pollUntilEnvironmentJob(tenant, environment, id, 5*time.Second, func(job eruncommon.EnvironmentJob) bool {
+	job, err := pollUntilEnvironmentJob(tenant, environment, id, 5*time.Second, func(job shared.EnvironmentJob) bool {
 		return job.AliveSeq > 0 && job.AliveAgeMs != nil
 	})
 	if err != nil {
@@ -177,7 +177,7 @@ func killJobAliveSupervisorHelper(t *testing.T, helper *exec.Cmd, childPID int) 
 // ~6s bound, not linger as an ambiguous "still running".
 func awaitAliveAgeExceedsStaleThreshold(t *testing.T, tenant, environment, id string) {
 	t.Helper()
-	stale, err := pollUntilEnvironmentJob(tenant, environment, id, 6*time.Second, func(job eruncommon.EnvironmentJob) bool {
+	stale, err := pollUntilEnvironmentJob(tenant, environment, id, 6*time.Second, func(job shared.EnvironmentJob) bool {
 		return job.AliveAgeMs != nil && *job.AliveAgeMs > EnvironmentJobAliveStaleMs
 	})
 	if err != nil {
@@ -190,7 +190,7 @@ func awaitAliveAgeExceedsStaleThreshold(t *testing.T, tenant, environment, id st
 	// The pid-liveness reconcile already catches up by this point too — the
 	// documented caller rule's "unknown, never success, never a tool error"
 	// is backed by both signals agreeing, not aliveAgeMs alone.
-	if stale.State != eruncommon.EnvironmentJobStateUnknown {
+	if stale.State != shared.EnvironmentJobStateUnknown {
 		t.Fatalf("State = %q, want unknown once the supervisor pid is confirmed gone", stale.State)
 	}
 }
@@ -209,9 +209,9 @@ func awaitAliveAgeExceedsStaleThreshold(t *testing.T, tenant, environment, id st
 // product behaviour they assert was never wrong. Its bound is now one read
 // past the deadline rather than exactly the deadline, which is the price of
 // never discarding an observation the condition would have accepted.
-func pollUntilEnvironmentJob(tenant, environment, id string, timeout time.Duration, want func(eruncommon.EnvironmentJob) bool) (eruncommon.EnvironmentJob, error) {
+func pollUntilEnvironmentJob(tenant, environment, id string, timeout time.Duration, want func(shared.EnvironmentJob) bool) (shared.EnvironmentJob, error) {
 	deadline := time.Now().Add(timeout)
-	var last eruncommon.EnvironmentJob
+	var last shared.EnvironmentJob
 	for {
 		now := time.Now()
 		job, err := LoadEnvironmentJob(tenant, environment, id, now)
@@ -252,13 +252,13 @@ func TestRegisteredEnvironmentJobIsPublishedWithABeat(t *testing.T) {
 		t.Fatalf("registerEnvironmentJob: %v", err)
 	}
 
-	dir, err := eruncommon.EnvironmentJobDir(tenant, environment)
+	dir, err := shared.EnvironmentJobDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("environmentJobDir: %v", err)
 	}
 	// Read back through the store rather than the recorder, so this asserts
 	// what a reader of the record actually sees the moment it appears.
-	published, err := eruncommon.ReadEnvironmentJob(filepath.Join(dir, id+".json"))
+	published, err := shared.ReadEnvironmentJob(filepath.Join(dir, id+".json"))
 	if err != nil {
 		t.Fatalf("read published job record: %v", err)
 	}

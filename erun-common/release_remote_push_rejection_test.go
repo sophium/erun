@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // The two directions of the misdiagnosed release push, as unit tests over the
@@ -55,16 +56,16 @@ func recordingReleasePushRunner(rejection string) (gitx.GitCommandRunnerFunc, *[
 	return runner, calls
 }
 
-func releasePushTestSpec() ReleaseSpec {
-	return ReleaseSpec{
+func releasePushTestSpec() shared.ReleaseSpec {
+	return shared.ReleaseSpec{
 		ProjectRoot: "/repo",
 		Branch:      "main",
 		Version:     "1.4.2",
 	}
 }
 
-func releasePushTestCommand(dir string) ReleaseCommandSpec {
-	return ReleaseCommandSpec{
+func releasePushTestCommand(dir string) shared.ReleaseCommandSpec {
+	return shared.ReleaseCommandSpec{
 		Dir:  dir,
 		Name: "git",
 		Args: []string{"push", "--follow-tags", "origin", "main", "develop"},
@@ -78,7 +79,7 @@ func releasePushTestContext() core.Context {
 func TestReleasePushRejectionOfDevelopIsNotAttributedToMainHavingMoved(t *testing.T) {
 	runGit, calls := recordingReleasePushRunner(developRejection)
 
-	err := RunReleaseBranchPush(releasePushTestContext(), releasePushTestSpec(), releasePushTestCommand(t.TempDir()), runGit)
+	err := shared.RunReleaseBranchPush(releasePushTestContext(), releasePushTestSpec(), releasePushTestCommand(t.TempDir()), runGit)
 	if err == nil {
 		t.Fatal("a rejected develop must fail the release")
 	}
@@ -117,7 +118,7 @@ func assertNoUnrequestedRemediation(t *testing.T, calls [][]string) {
 func TestReleasePushRetryRebasesTheBaseBranchThatActuallyMoved(t *testing.T) {
 	runGit, calls := recordingReleasePushRunner(movedMainRejection)
 
-	if err := RunReleaseBranchPush(releasePushTestContext(), releasePushTestSpec(), releasePushTestCommand(t.TempDir()), runGit); err != nil {
+	if err := shared.RunReleaseBranchPush(releasePushTestContext(), releasePushTestSpec(), releasePushTestCommand(t.TempDir()), runGit); err != nil {
 		t.Fatalf("a base branch that moved must still be absorbed, got: %v", err)
 	}
 
@@ -144,22 +145,22 @@ func TestParseReleasePushRejections(t *testing.T) {
 	cases := []struct {
 		name   string
 		output string
-		want   []releasePushRejection
+		want   []shared.ReleasePushRejection
 	}{
 		{
 			name:   "develop non-fast-forward alongside a landed main",
 			output: developRejection,
-			want:   []releasePushRejection{{Ref: "develop", Reason: "non-fast-forward"}},
+			want:   []shared.ReleasePushRejection{{Ref: "develop", Reason: "non-fast-forward"}},
 		},
 		{
 			name:   "a base branch rejected because the remote moved first",
 			output: movedMainRejection,
-			want:   []releasePushRejection{{Ref: "main", Reason: "fetch first"}},
+			want:   []shared.ReleasePushRejection{{Ref: "main", Reason: "fetch first"}},
 		},
 		{
 			name:   "several refs rejected at once",
 			output: " ! [rejected]        main -> main (fetch first)\n ! [rejected]        develop -> develop (non-fast-forward)\n",
-			want: []releasePushRejection{
+			want: []shared.ReleasePushRejection{
 				{Ref: "main", Reason: "fetch first"},
 				{Ref: "develop", Reason: "non-fast-forward"},
 			},
@@ -167,7 +168,7 @@ func TestParseReleasePushRejections(t *testing.T) {
 		{
 			name:   "a rejection with no reason is still named",
 			output: " ! [rejected]        develop -> develop\n",
-			want:   []releasePushRejection{{Ref: "develop"}},
+			want:   []shared.ReleasePushRejection{{Ref: "develop"}},
 		},
 		{
 			name:   "output with no rejection at all",
@@ -178,7 +179,7 @@ func TestParseReleasePushRejections(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			got := parseReleasePushRejections(testCase.output)
+			got := shared.ParseReleasePushRejections(testCase.output)
 			if len(got) != len(testCase.want) {
 				t.Fatalf("got %v, want %v", got, testCase.want)
 			}
@@ -202,13 +203,13 @@ func TestReleasePushRejectedErrorNamesTheHalfReleaseAndNeverThePrePublicationSha
 	publishedSpec.ArtifactsPublished = true
 	cases := []struct {
 		name       string
-		rejections []releasePushRejection
+		rejections []shared.ReleasePushRejection
 		wantIn     []string
 		notIn      []string
 	}{
 		{
 			name:       "a develop rejection",
-			rejections: []releasePushRejection{{Ref: "develop", Reason: "non-fast-forward"}},
+			rejections: []shared.ReleasePushRejection{{Ref: "develop", Reason: "non-fast-forward"}},
 			wantIn: []string{
 				"develop (non-fast-forward)",
 				"reconcile develop with its remote",
@@ -236,7 +237,7 @@ func TestReleasePushRejectedErrorNamesTheHalfReleaseAndNeverThePrePublicationSha
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			err := releasePushRejectedError(publishedSpec, testCase.rejections, errors.New("exit status 1"))
+			err := shared.ReleasePushRejectedError(publishedSpec, testCase.rejections, errors.New("exit status 1"))
 			message := err.Error()
 			for _, want := range testCase.wantIn {
 				if !strings.Contains(message, want) {
@@ -267,7 +268,7 @@ func TestReleasePushRejectedErrorNamesTheHalfReleaseAndNeverThePrePublicationSha
 // installs by reference and never builds.
 func TestReleasePushRejectedErrorDoesNotClaimArtifactsASourceControlOnlyReleaseNeverPublished(t *testing.T) {
 	spec := releasePushTestSpec() // ArtifactsPublished stays false: `erun release`.
-	message := releasePushRejectedError(spec, []releasePushRejection{{Ref: "develop", Reason: "non-fast-forward"}}, errors.New("exit status 1")).Error()
+	message := shared.ReleasePushRejectedError(spec, []shared.ReleasePushRejection{{Ref: "develop", Reason: "non-fast-forward"}}, errors.New("exit status 1")).Error()
 
 	assertMessageOmits(t, message,
 		"images and charts verified on the registry",
@@ -287,8 +288,8 @@ func TestReleasePushRejectedErrorDoesNotClaimArtifactsASourceControlOnlyReleaseN
 		name    string
 		message string
 	}{
-		{"the rebase that could not absorb the move", releaseRebaseFailedRecovery(spec, "main")},
-		{"the tag that could not be re-pointed", releaseRepointFailedRecovery(spec)},
+		{"the rebase that could not absorb the move", shared.ReleaseRebaseFailedRecovery(spec, "main")},
+		{"the tag that could not be re-pointed", shared.ReleaseRepointFailedRecovery(spec)},
 	}
 	for _, recovery := range recoveries {
 		assertMessageOmits(t, recovery.message, "already published")
@@ -302,13 +303,13 @@ func TestReleasePushRejectedErrorKeepsTheRegistryClaimForARunThatPublished(t *te
 	spec := releasePushTestSpec()
 	spec.ArtifactsPublished = true
 
-	message := releasePushRejectedError(spec, []releasePushRejection{{Ref: "develop", Reason: "non-fast-forward"}}, errors.New("exit status 1")).Error()
+	message := shared.ReleasePushRejectedError(spec, []shared.ReleasePushRejection{{Ref: "develop", Reason: "non-fast-forward"}}, errors.New("exit status 1")).Error()
 	assertMessageNames(t, message, "images and charts verified on the registry")
 	assertMessageOmits(t, message, "erun push --version")
 
 	for _, recovery := range []string{
-		releaseRebaseFailedRecovery(spec, "main"),
-		releaseRepointFailedRecovery(spec),
+		shared.ReleaseRebaseFailedRecovery(spec, "main"),
+		shared.ReleaseRepointFailedRecovery(spec),
 	} {
 		assertMessageNames(t, recovery, "is already published")
 		assertMessageOmits(t, recovery, "erun push --version")
@@ -378,7 +379,7 @@ func TestReleasePushRejectedTheMovedBaseBranch(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			got := releasePushRejectedTheMovedBaseBranch(parseReleasePushRejections(testCase.output), testCase.branch)
+			got := shared.ReleasePushRejectedTheMovedBaseBranch(shared.ParseReleasePushRejections(testCase.output), testCase.branch)
 			if got != testCase.wantRebase {
 				t.Fatalf("got %v, want %v (%s)", got, testCase.wantRebase, testCase.why)
 			}

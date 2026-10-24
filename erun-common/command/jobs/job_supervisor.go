@@ -18,6 +18,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // Starting a job detaches it, and the detachment is erun's job rather than the
@@ -379,27 +381,27 @@ func normalizeEnvironmentJobLeaseTTL(ttl time.Duration) (time.Duration, error) {
 }
 
 // StartEnvironmentJob detaches the work and returns the handle to it.
-func StartEnvironmentJob(ctx core.Context, params StartEnvironmentJobParams) (eruncommon.EnvironmentJob, error) {
+func StartEnvironmentJob(ctx core.Context, params StartEnvironmentJobParams) (shared.EnvironmentJob, error) {
 	params, err := params.normalize()
 	if err != nil {
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
 	if err := ensureAgentJobToolAvailable(ctx, params.Agent); err != nil {
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
-	dir, err := eruncommon.EnvironmentJobDir(params.Tenant, params.Environment)
+	dir, err := shared.EnvironmentJobDir(params.Tenant, params.Environment)
 	if err != nil {
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
 	if err := reserveEnvironmentJobID(ctx, dir, params.ID); err != nil {
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
 	// Resolved before anything is spawned: a start that has lost the
 	// environment must be refused, not handed a handle to a job that then has
 	// to die. params.Exclusive becomes what this job actually holds, so the
 	// supervisor argv and the recorded job agree with it.
 	if params.Exclusive, err = resolveEnvironmentJobExclusivity(ctx, dir, params, time.Now()); err != nil {
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
 
 	logPath := environmentJobLogPath(dir, params.ID)
@@ -422,13 +424,13 @@ func StartEnvironmentJob(ctx core.Context, params StartEnvironmentJobParams) (er
 // outright, never a handle to nothing. Every failure path here gives back an
 // exclusivity claim this start took, so a failed start cannot strand the
 // environment for the claim's whole TTL.
-func spawnEnvironmentJobSupervisor(dir string, params StartEnvironmentJobParams, args []string) (eruncommon.EnvironmentJob, error) {
+func spawnEnvironmentJobSupervisor(dir string, params StartEnvironmentJobParams, args []string) (shared.EnvironmentJob, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
 	if params.Exclusive {
 		if _, err := takeEnvironmentJobExclusivityClaim(params, time.Now()); err != nil {
-			return eruncommon.EnvironmentJob{}, environmentJobExclusivityTakeError(params, err, time.Now())
+			return shared.EnvironmentJob{}, environmentJobExclusivityTakeError(params, err, time.Now())
 		}
 	}
 	cmd := core.Command(params.SupervisorPath, args...)
@@ -453,7 +455,7 @@ func spawnEnvironmentJobSupervisor(dir string, params StartEnvironmentJobParams,
 	closeEnvironmentJobStartupCapture(startup)
 	if startErr != nil {
 		releaseUnsupervisedEnvironmentJobExclusivityClaim(params, 0)
-		return eruncommon.EnvironmentJob{}, fmt.Errorf("start job supervisor: %w", startErr)
+		return shared.EnvironmentJob{}, fmt.Errorf("start job supervisor: %w", startErr)
 	}
 	// Reap the supervisor when it eventually exits. A long-lived caller (the MCP
 	// server) would otherwise collect a zombie per job.
@@ -462,7 +464,7 @@ func spawnEnvironmentJobSupervisor(dir string, params StartEnvironmentJobParams,
 	job, err := awaitEnvironmentJobRecord(dir, params.ID, cmd.Process.Pid)
 	if err != nil {
 		releaseUnsupervisedEnvironmentJobExclusivityClaim(params, cmd.Process.Pid)
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
 	return job, nil
 }
@@ -541,11 +543,11 @@ func releaseUnsupervisedEnvironmentJobExclusivityClaim(params StartEnvironmentJo
 // says so, because the alternative is an orchestrator unable to re-run named
 // work without inventing ids.
 func reserveEnvironmentJobID(ctx core.Context, dir, id string) error {
-	existing, err := eruncommon.ReadEnvironmentJob(filepath.Join(dir, id+".json"))
+	existing, err := shared.ReadEnvironmentJob(filepath.Join(dir, id+".json"))
 	if err != nil {
 		return nil
 	}
-	resolved := reconcileEnvironmentJob(dir, existing, time.Now(), activity.ProcessAlive, eruncommon.CurrentJobHostname())
+	resolved := reconcileEnvironmentJob(dir, existing, time.Now(), activity.ProcessAlive, build.CurrentJobHostname())
 	if !resolved.Finished() {
 		return fmt.Errorf("job %q is already running (pid %d); pass a different id or cancel it first", id, resolved.PID)
 	}
@@ -567,31 +569,31 @@ func reserveEnvironmentJobID(ctx core.Context, dir, id string) error {
 // supervisor, the one process that has to survive to record the outcome. A
 // terminal record is a complete answer too: there is no work to name because
 // there is no longer any work.
-func awaitEnvironmentJobRecord(dir, id string, supervisorPID int) (eruncommon.EnvironmentJob, error) {
+func awaitEnvironmentJobRecord(dir, id string, supervisorPID int) (shared.EnvironmentJob, error) {
 	deadline := time.Now().Add(jobSupervisorReportTimeout)
 	for {
-		job, err := eruncommon.ReadEnvironmentJob(filepath.Join(dir, id+".json"))
+		job, err := shared.ReadEnvironmentJob(filepath.Join(dir, id+".json"))
 		if err == nil && (job.ChildPID > 0 || job.Finished()) {
 			return job, nil
 		}
 		if !time.Now().Before(deadline) {
 			if err == nil {
-				return eruncommon.EnvironmentJob{}, fmt.Errorf("job supervisor %d registered job %q without naming the work's process within %s", supervisorPID, id, jobSupervisorReportTimeout)
+				return shared.EnvironmentJob{}, fmt.Errorf("job supervisor %d registered job %q without naming the work's process within %s", supervisorPID, id, jobSupervisorReportTimeout)
 			}
-			return eruncommon.EnvironmentJob{}, fmt.Errorf("job supervisor %d did not register job %q within %s", supervisorPID, id, jobSupervisorReportTimeout)
+			return shared.EnvironmentJob{}, fmt.Errorf("job supervisor %d did not register job %q within %s", supervisorPID, id, jobSupervisorReportTimeout)
 		}
 		if !activity.ProcessAlive(supervisorPID) {
 			// The supervisor is gone and there is no record to read a cause
 			// from. Its own output is the one place that cause can survive, so
 			// the failure to register is reported with it rather than alone.
-			return eruncommon.EnvironmentJob{}, fmt.Errorf("job supervisor %d exited without registering job %q%s", supervisorPID, id, jobSupervisorStartupFailureCause(dir, id))
+			return shared.EnvironmentJob{}, fmt.Errorf("job supervisor %d exited without registering job %q%s", supervisorPID, id, jobSupervisorStartupFailureCause(dir, id))
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-func plannedEnvironmentJob(params StartEnvironmentJobParams, logPath string) eruncommon.EnvironmentJob {
-	return eruncommon.EnvironmentJob{
+func plannedEnvironmentJob(params StartEnvironmentJobParams, logPath string) shared.EnvironmentJob {
+	return shared.EnvironmentJob{
 		ID:               params.ID,
 		Name:             params.Name,
 		State:            EnvironmentJobStateRunning,
@@ -680,17 +682,17 @@ type EnvironmentJobSupervisorParams struct {
 type jobRecorder struct {
 	dir string
 	mu  sync.Mutex
-	job eruncommon.EnvironmentJob
+	job shared.EnvironmentJob
 }
 
-func (r *jobRecorder) update(mutate func(*eruncommon.EnvironmentJob)) {
+func (r *jobRecorder) update(mutate func(*shared.EnvironmentJob)) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	mutate(&r.job)
 	_ = writeEnvironmentJob(r.dir, r.job)
 }
 
-func (r *jobRecorder) snapshot() eruncommon.EnvironmentJob {
+func (r *jobRecorder) snapshot() shared.EnvironmentJob {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.job
@@ -734,7 +736,7 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 	if err != nil {
 		return nil, err
 	}
-	dir, err := eruncommon.EnvironmentJobDir(params.Tenant, params.Environment)
+	dir, err := shared.EnvironmentJobDir(params.Tenant, params.Environment)
 	if err != nil {
 		return nil, err
 	}
@@ -742,7 +744,7 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 		return nil, err
 	}
 	now := time.Now()
-	job := eruncommon.EnvironmentJob{
+	job := shared.EnvironmentJob{
 		ID:        id,
 		Name:      name,
 		State:     EnvironmentJobStateRunning,
@@ -764,7 +766,7 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 		LogPath:          environmentJobLogPath(dir, id),
 		OutputLimitBytes: limit,
 		LeaseID:          environmentJobLeaseID(id),
-		Hostname:         eruncommon.CurrentJobHostname(),
+		Hostname:         build.CurrentJobHostname(),
 		// An explicit override (see StartEnvironmentJobParams.StartedByJobID)
 		// wins when the start call could not rely on this process inheriting
 		// ERUN_JOB_ID for free; otherwise this supervisor's own process
@@ -772,7 +774,7 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 		// own child process is given below), so a value here means this job
 		// was started from inside another job's work rather than from
 		// outside any job.
-		StartedByJobID: eruncommon.FirstNonEmptyString(strings.TrimSpace(params.StartedByJobID), strings.TrimSpace(os.Getenv(eruncommon.EnvironmentJobIDEnvVar))),
+		StartedByJobID: eruncommon.FirstNonEmptyString(strings.TrimSpace(params.StartedByJobID), strings.TrimSpace(os.Getenv(shared.EnvironmentJobIDEnvVar))),
 		Handoff:        params.Handoff,
 		Exclusive:      params.Exclusive,
 	}
@@ -848,8 +850,8 @@ func recordEnvironmentJobSupervisorFailure(recorder *jobRecorder, err error, pan
 		reason = fmt.Sprintf("job supervisor panicked before it could record an outcome: %v", panicked)
 	}
 	code := 1
-	recorder.update(func(job *eruncommon.EnvironmentJob) {
-		job.State = eruncommon.EnvironmentJobStateExited
+	recorder.update(func(job *shared.EnvironmentJob) {
+		job.State = shared.EnvironmentJobStateExited
 		job.EndedAt = time.Now()
 		job.ExitCode = &code
 		job.Reason = reason
@@ -883,7 +885,7 @@ func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params Environ
 	defer stopAlive()
 
 	writer := &jobOutputWriter{file: log, limit: job.OutputLimitBytes, agent: agent, onTruncate: func() {
-		recorder.update(func(job *eruncommon.EnvironmentJob) { job.OutputTruncated = true })
+		recorder.update(func(job *shared.EnvironmentJob) { job.OutputTruncated = true })
 	}}
 
 	// command is reassigned on a bounded reinvocation (see
@@ -904,7 +906,7 @@ func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params Environ
 		// apart from an unrelated one sharing the environment. It stays the same
 		// job.ID across every reinvoked turn, which is what lets a job this turn
 		// starts still be recognized as this job's own child.
-		cmd.Env = append(append(os.Environ(), sortedEnvironmentJobEnvPairs(params.Env)...), eruncommon.EnvironmentJobIDEnvVar+"="+job.ID)
+		cmd.Env = append(append(os.Environ(), sortedEnvironmentJobEnvPairs(params.Env)...), shared.EnvironmentJobIDEnvVar+"="+job.ID)
 		cmd.Stdin = nil
 		cmd.Stdout = writer
 		cmd.Stderr = writer
@@ -920,7 +922,7 @@ func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params Environ
 			waitErr = startErr
 		} else {
 			childPID = cmd.Process.Pid
-			recorder.update(func(job *eruncommon.EnvironmentJob) { job.ChildPID = childPID })
+			recorder.update(func(job *shared.EnvironmentJob) { job.ChildPID = childPID })
 			// Reap the descendants this child orphans onto the supervisor while
 			// it runs (see startEnvironmentJobChildReaper). Scoped to exactly
 			// this window, in which the job's own command is the only os/exec
@@ -975,7 +977,7 @@ func considerEnvironmentJobReinvocation(recorder *jobRecorder, beat *jobHeartbea
 		// already validated the tool name at start. Settle rather than loop.
 		return nil, false
 	}
-	recorder.update(func(job *eruncommon.EnvironmentJob) { job.ReinvocationCount++ })
+	recorder.update(func(job *shared.EnvironmentJob) { job.ReinvocationCount++ })
 	return resumeCommand, true
 }
 
@@ -1003,11 +1005,11 @@ func considerEnvironmentJobReinvocation(recorder *jobRecorder, beat *jobHeartbea
 //     its own bound by starting more work — whatever a reinvoked turn itself
 //     starts is evaluated against this same counter and this same deadline the
 //     next time this function runs.
-func decideEnvironmentJobReinvocation(job eruncommon.EnvironmentJob, jobState, startedJobFailed, reason string, deadline time.Time) (string, bool) {
+func decideEnvironmentJobReinvocation(job shared.EnvironmentJob, jobState, startedJobFailed, reason string, deadline time.Time) (string, bool) {
 	if job.Kind != EnvironmentJobKindAgent {
 		return "", false
 	}
-	if jobState != eruncommon.EnvironmentJobStateGateIncomplete && startedJobFailed == "" {
+	if jobState != shared.EnvironmentJobStateGateIncomplete && startedJobFailed == "" {
 		return "", false
 	}
 	if job.Progress == nil || strings.TrimSpace(job.Progress.SessionID) == "" {
@@ -1055,7 +1057,7 @@ func environmentJobReinvocationOutcome(reason, startedJobFailed string) string {
 // invocation, a job that ran no agent argv at all — the prompt stays exactly
 // as it was, because a guess at what the task was is worse than saying
 // nothing.
-func buildEnvironmentJobReinvocationPrompt(job eruncommon.EnvironmentJob, outcome string) string {
+func buildEnvironmentJobReinvocationPrompt(job shared.EnvironmentJob, outcome string) string {
 	max := resolveEnvironmentJobMaxReinvocations()
 	attempt := job.ReinvocationCount + 1
 	task := AgentJobCommandPrompt(job.AgentTool, job.Command)
@@ -1110,7 +1112,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 	// or naming a StartedJobFailed exhausted its automatic "later" -- say so,
 	// rather than reporting the same reason a job that never got a reinvocation
 	// at all would report.
-	if count := recorder.snapshot().ReinvocationCount; count > 0 && (jobState == eruncommon.EnvironmentJobStateGateIncomplete || startedJobFailed != "") {
+	if count := recorder.snapshot().ReinvocationCount; count > 0 && (jobState == shared.EnvironmentJobStateGateIncomplete || startedJobFailed != "") {
 		note := fmt.Sprintf("already resumed %d time(s) without a clean outcome; the reinvocation bound is exhausted", count)
 		if reason == "" {
 			reason = note
@@ -1126,7 +1128,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 	// — rather than drifting later still by however long reclaim's own git
 	// plumbing and removal take.
 	endedAt := time.Now()
-	settle := func(job *eruncommon.EnvironmentJob) {
+	settle := func(job *shared.EnvironmentJob) {
 		job.State = jobState
 		job.EndedAt = endedAt
 		job.OutputBytes = writer.written()
@@ -1148,7 +1150,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 	settle(&settled)
 	reclaimed, cloneReason := reclaimAgentJobWorkClone(settled)
 
-	recorder.update(func(job *eruncommon.EnvironmentJob) {
+	recorder.update(func(job *shared.EnvironmentJob) {
 		settle(job)
 		job.CloneReclaimed = reclaimed
 		job.CloneKeptReason = cloneReason
@@ -1190,15 +1192,15 @@ func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os
 		reason = "failed to start: " + waitErr.Error()
 	}
 	self := recorder.snapshot()
-	jobState = eruncommon.EnvironmentJobStateExited
+	jobState = shared.EnvironmentJobStateExited
 	if state != nil && (core.EnvironmentJobProcessGroupSurvivors(childPID) ||
 		core.EnvironmentJobSessionSurvivors(childPID) ||
 		core.EnvironmentJobDescendantSurvivors(os.Getpid(), environmentJobLeftoverExclusions(recorder.dir, self.ID, adoptedBaseline))) {
-		jobState = eruncommon.EnvironmentJobStateAbandoned
+		jobState = shared.EnvironmentJobStateAbandoned
 		reason = "the job's own process exited, but it left other processes still running in its process group, session, or reparented onto this supervisor — background work it started and never waited for; nothing further will be reported for that work"
 	}
 	if running := awaitEnvironmentJobRunningChildren(recorder.dir, self.ID, resolveEnvironmentJobGateIncompleteWaitCap()); len(running) > 0 {
-		jobState = eruncommon.EnvironmentJobStateGateIncomplete
+		jobState = shared.EnvironmentJobStateGateIncomplete
 		reason = environmentJobGateIncompleteReason(running)
 		return code, signal, reason, jobState, startedJobFailed
 	}
@@ -1254,7 +1256,7 @@ func environmentJobLeftoverExclusions(dir, parentID string, adoptedBaseline map[
 // it — the supervisor calling this is already a detached background process
 // — so it polls internally for as long as cap allows instead of returning a
 // "still running" answer for someone else to re-ask.
-func awaitEnvironmentJobRunningChildren(dir, parentID string, waitCap time.Duration) []eruncommon.EnvironmentJob {
+func awaitEnvironmentJobRunningChildren(dir, parentID string, waitCap time.Duration) []shared.EnvironmentJob {
 	poll := resolveEnvironmentJobGateIncompletePoll()
 	deadline := time.Now().Add(waitCap)
 	for {
@@ -1276,7 +1278,7 @@ func awaitEnvironmentJobRunningChildren(dir, parentID string, waitCap time.Durat
 // environmentJobGateIncompleteReason names the still-running job(s) a caller
 // needs to await for a real outcome, so the reason is actionable rather than
 // just a label.
-func environmentJobGateIncompleteReason(running []eruncommon.EnvironmentJob) string {
+func environmentJobGateIncompleteReason(running []shared.EnvironmentJob) string {
 	ids := make([]string, 0, len(running))
 	for _, job := range running {
 		ids = append(ids, job.ID)
@@ -1292,7 +1294,7 @@ func environmentJobGateIncompleteReason(running []eruncommon.EnvironmentJob) str
 // for, and that did not succeed, so a caller reading this job's own failure
 // knows which started job to look at rather than only that this job's own
 // exit code (which can still read as clean) is not the whole story.
-func environmentJobFailedChildReason(failed []eruncommon.EnvironmentJob) string {
+func environmentJobFailedChildReason(failed []shared.EnvironmentJob) string {
 	ids := make([]string, 0, len(failed))
 	for _, job := range failed {
 		ids = append(ids, job.ID)
@@ -1314,7 +1316,7 @@ func environmentJobFailedChildReason(failed []eruncommon.EnvironmentJob) string 
 // itself the failure signal a caller reads; nothing needs to be undone.
 func startEnvironmentJobAliveBeat(recorder *jobRecorder) func() {
 	beatOnce := func() {
-		recorder.update(func(job *eruncommon.EnvironmentJob) {
+		recorder.update(func(job *shared.EnvironmentJob) {
 			job.LastAliveAt = time.Now()
 			job.AliveSeq++
 		})
@@ -1368,7 +1370,7 @@ type jobHeartbeat struct {
 	exclusive bool
 
 	mu        sync.Mutex
-	progress  eruncommon.AgentJobProgress
+	progress  shared.AgentJobProgress
 	leaseName string
 	renewedAt time.Time
 }
@@ -1436,7 +1438,7 @@ func (h *jobHeartbeat) refresh(force bool) {
 		progress := h.agent.snapshot()
 		if progress != h.progress {
 			h.progress = progress
-			h.recorder.update(func(job *eruncommon.EnvironmentJob) {
+			h.recorder.update(func(job *shared.EnvironmentJob) {
 				folded := progress
 				job.Progress = &folded
 			})
@@ -1473,7 +1475,7 @@ func (h *jobHeartbeat) refresh(force bool) {
 // is the window every lease-based exclusion has; the alternative — killing a
 // job's work over a renewal it lost — trades a rare, bounded overlap for a
 // routine one.
-func (h *jobHeartbeat) renewExclusiveClaim(job eruncommon.EnvironmentJob, name string) {
+func (h *jobHeartbeat) renewExclusiveClaim(job shared.EnvironmentJob, name string) {
 	if !h.exclusive {
 		return
 	}
@@ -1587,10 +1589,10 @@ type AttachEnvironmentJobParams struct {
 }
 
 // AttachEnvironmentJob gives work started another way a handle and a lease.
-func AttachEnvironmentJob(ctx core.Context, params AttachEnvironmentJobParams) (eruncommon.EnvironmentJob, error) {
+func AttachEnvironmentJob(ctx core.Context, params AttachEnvironmentJobParams) (shared.EnvironmentJob, error) {
 	dir, job, ttl, err := resolveAttachedEnvironmentJob(params)
 	if err != nil {
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
 	ctx.Trace(fmt.Sprintf("job: attaching %q as job %s, tracking pid %d", job.Name, job.ID, job.PID))
 	ctx.Trace(fmt.Sprintf("job: holding activity lease %s while pid %d lives", job.LeaseID, job.PID))
@@ -1598,7 +1600,7 @@ func AttachEnvironmentJob(ctx core.Context, params AttachEnvironmentJobParams) (
 		return job, nil
 	}
 	if err := writeEnvironmentJob(dir, job); err != nil {
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
 	if _, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant:      params.Tenant,
@@ -1609,29 +1611,29 @@ func AttachEnvironmentJob(ctx core.Context, params AttachEnvironmentJobParams) (
 		TTL:         ttl,
 		Holder:      environmentJobHolder(params.Tenant),
 	}); err != nil {
-		return eruncommon.EnvironmentJob{}, err
+		return shared.EnvironmentJob{}, err
 	}
 	return job, nil
 }
 
-func resolveAttachedEnvironmentJob(params AttachEnvironmentJobParams) (string, eruncommon.EnvironmentJob, time.Duration, error) {
+func resolveAttachedEnvironmentJob(params AttachEnvironmentJobParams) (string, shared.EnvironmentJob, time.Duration, error) {
 	name := strings.TrimSpace(params.Name)
 	id, err := normalizeEnvironmentJobIdentity(params.Tenant, params.Environment, name, params.ID)
 	if err != nil {
-		return "", eruncommon.EnvironmentJob{}, 0, err
+		return "", shared.EnvironmentJob{}, 0, err
 	}
 	if params.PID <= 0 {
-		return "", eruncommon.EnvironmentJob{}, 0, fmt.Errorf("a pid to track is required; an attached job has nothing else to reconcile against")
+		return "", shared.EnvironmentJob{}, 0, fmt.Errorf("a pid to track is required; an attached job has nothing else to reconcile against")
 	}
 	ttl, err := normalizeEnvironmentJobLeaseTTL(params.LeaseTTL)
 	if err != nil {
-		return "", eruncommon.EnvironmentJob{}, 0, err
+		return "", shared.EnvironmentJob{}, 0, err
 	}
-	dir, err := eruncommon.EnvironmentJobDir(params.Tenant, params.Environment)
+	dir, err := shared.EnvironmentJobDir(params.Tenant, params.Environment)
 	if err != nil {
-		return "", eruncommon.EnvironmentJob{}, 0, err
+		return "", shared.EnvironmentJob{}, 0, err
 	}
-	job := eruncommon.EnvironmentJob{
+	job := shared.EnvironmentJob{
 		ID:        id,
 		Name:      name,
 		State:     EnvironmentJobStateRunning,
@@ -1643,7 +1645,7 @@ func resolveAttachedEnvironmentJob(params AttachEnvironmentJobParams) (string, e
 	}
 	// Re-attaching the same id renews rather than restarts, matching the lease
 	// store, so a caller can refresh on a timer without tracking what it holds.
-	if existing, err := eruncommon.ReadEnvironmentJob(filepath.Join(dir, id+".json")); err == nil && existing.Attached && existing.PID == params.PID {
+	if existing, err := shared.ReadEnvironmentJob(filepath.Join(dir, id+".json")); err == nil && existing.Attached && existing.PID == params.PID {
 		job.StartedAt = existing.StartedAt
 	}
 	job.OutputBytes = environmentJobOutputSize(job.LogPath, 0)
@@ -1661,7 +1663,7 @@ type CancelEnvironmentJobParams struct {
 
 // CancelEnvironmentJobResult reports what the cancel did.
 type CancelEnvironmentJobResult struct {
-	Job eruncommon.EnvironmentJob `json:"job"`
+	Job shared.EnvironmentJob `json:"job"`
 	// Signalled is false when the job had already finished, so a cancel that
 	// raced the work's own exit is not reported as having stopped it.
 	Signalled bool   `json:"signalled"`
@@ -1672,7 +1674,7 @@ type CancelEnvironmentJobResult struct {
 // resolveEnvironmentJobCancelTarget names the process a cancel is to signal, or
 // explains why it cannot name one. It is the only place that decides this, so
 // the rule that a job's own supervisor is never a target lives in one place.
-func resolveEnvironmentJobCancelTarget(job eruncommon.EnvironmentJob) (int, error) {
+func resolveEnvironmentJobCancelTarget(job shared.EnvironmentJob) (int, error) {
 	// A task job's PID is this process's own -- there is no subprocess to fall
 	// back to signalling, and falling back anyway would send the signal to
 	// whatever is running this call instead of refusing outright.
@@ -1729,8 +1731,8 @@ func CancelEnvironmentJob(ctx core.Context, params CancelEnvironmentJobParams) (
 	// marker in place by the time it looks for one. Best-effort like the
 	// signal itself: a write that fails here costs only the provenance, not
 	// the cancel.
-	if dir, dirErr := eruncommon.EnvironmentJobDir(params.Tenant, params.Environment); dirErr == nil {
-		recordEnvironmentJobCancelRequest(dir, job.ID, eruncommon.CurrentEnvironmentJobID())
+	if dir, dirErr := shared.EnvironmentJobDir(params.Tenant, params.Environment); dirErr == nil {
+		recordEnvironmentJobCancelRequest(dir, job.ID, shared.CurrentEnvironmentJobID())
 	}
 	if err := core.SignalEnvironmentJobProcessGroup(target, signal); err != nil {
 		return CancelEnvironmentJobResult{}, err

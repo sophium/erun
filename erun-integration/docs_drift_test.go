@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-common/primitive/build"
 )
 
 // buildSignatureDocStopwords are filler and verb words stripped before
@@ -241,7 +241,7 @@ func TestBuildInfrastructureSignaturesAreDocumented(t *testing.T) {
 	}
 	docWords := normalizedWordSet(string(data))
 
-	signatures := eruncommon.BuildInconclusiveSignatures()
+	signatures := build.BuildInconclusiveSignatures()
 	if len(signatures) == 0 {
 		t.Fatal("eruncommon.BuildInconclusiveSignatures() returned nothing; the rest of this test would pass vacuously")
 	}

@@ -6,14 +6,15 @@ import (
 	"time"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
-func NewResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, deployHelmChart common.HelmChartDeployerFunc, resolveOpen shared.OpenResolver) *cobra.Command {
+func NewResizeCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, deployHelmChart deploy.HelmChartDeployerFunc, resolveOpen shared.OpenResolver) *cobra.Command {
 	var tenant, environment, cpu, memory, dindCPU, dindMemory, orchestrator string
 	var applyRecommendation, overrideLease bool
 	cmd := &cobra.Command{

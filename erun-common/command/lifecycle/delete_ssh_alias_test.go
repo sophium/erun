@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // deleteSSHConfigStore is a minimal DeleteStore over an in-memory environment
@@ -99,9 +99,9 @@ func TestDeleteEnvironmentKeepsSSHConfigBlockAnotherEnvironmentOwns(t *testing.T
 	configPath := sandboxSSHConfig(t)
 	// Two names that sanitize to one alias: deleting dev_1 must not strip the
 	// block that live env dev-1 resolves through.
-	alias := eruncommon.SSHHostAlias("team", "dev_1")
-	if alias != eruncommon.SSHHostAlias("team", "dev-1") {
-		t.Fatalf("expected dev_1 and dev-1 to share an alias, got %q and %q", alias, eruncommon.SSHHostAlias("team", "dev-1"))
+	alias := open.SSHHostAlias("team", "dev_1")
+	if alias != open.SSHHostAlias("team", "dev-1") {
+		t.Fatalf("expected dev_1 and dev-1 to share an alias, got %q and %q", alias, open.SSHHostAlias("team", "dev-1"))
 	}
 	writeSSHConfigBlock(t, configPath, alias, 17022)
 
@@ -124,7 +124,7 @@ func TestDeleteEnvironmentKeepsSSHConfigBlockAnotherEnvironmentOwns(t *testing.T
 
 func TestDeleteEnvironmentDryRunReportsBlockWithoutRemovingIt(t *testing.T) {
 	configPath := sandboxSSHConfig(t)
-	writeSSHConfigBlock(t, configPath, eruncommon.SSHHostAlias("team", "dev"), 17022)
+	writeSSHConfigBlock(t, configPath, open.SSHHostAlias("team", "dev"), 17022)
 
 	store := &deleteSSHConfigStore{envs: map[string][]configpkg.EnvConfig{"team": {{Name: "dev"}}}}
 	result, err := RunDeleteEnvironment(core.Context{DryRun: true}, DeleteEnvironmentParams{

@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/helm"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // uiRuntimeChartPlan is what a deploy at the chosen version would install for the
@@ -71,14 +71,14 @@ func (a *App) statedRuntimeChartPlan(tenant, environment, version string) (uiRun
 	if stated == "" {
 		return uiRuntimeChartPlan{}, false
 	}
-	reference, statedVersion := eruncommon.SplitChartReference(stated)
+	reference, statedVersion := deploy.SplitChartReference(stated)
 	if statedVersion == "" {
 		statedVersion = version
 	}
 	return uiRuntimeChartPlan{
 		Reference: reference,
 		Version:   statedVersion,
-		Chart:     eruncommon.ChartNameFromReference(reference),
+		Chart:     deploy.ChartNameFromReference(reference),
 		Source:    "stated",
 	}, true
 }

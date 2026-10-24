@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // ExposeStore is the read surface RunExposeService needs to resolve the target
@@ -473,7 +474,7 @@ func exposePlatformConfigured(params ExposeServiceParams) bool {
 // so a caller can decide up front whether an environment is even eligible for
 // exposure, before offering the action at all (e.g. the desktop's Ports tab).
 func ProjectHasExposablePlatform(projectRoot string) bool {
-	platform := eruncommon.ResolveProjectPlatform(projectRoot)
+	platform := deploy.ResolveProjectPlatform(projectRoot)
 	return !platform.IsZero() && strings.TrimSpace(platform.ServicesZone) != "" && strings.TrimSpace(platform.Env) != ""
 }
 
@@ -549,10 +550,10 @@ func resolveExposePlatformCoordinates(params ExposeServiceParams, store ExposeSt
 		// the DNS write falls back to kubectl's current context — correct for the
 		// single-cluster hosted deployment a deploy Job (the caller this override
 		// exists for) always runs in.
-		return zone, config.NormalizeNamespaceName(namespace), eruncommon.TenantResourcePrefix(platTenant) + "-powerdns", "", nil
+		return zone, config.NormalizeNamespaceName(namespace), shared.TenantResourcePrefix(platTenant) + "-powerdns", "", nil
 	}
 
-	platform := eruncommon.ResolveProjectPlatform(params.ProjectRoot)
+	platform := deploy.ResolveProjectPlatform(params.ProjectRoot)
 	if platform.IsZero() || strings.TrimSpace(platform.ServicesZone) == "" {
 		return "", "", "", "", fmt.Errorf("a platform block with a base domain is required in .erun/config.yaml (the services zone tenant hostnames live under)")
 	}
@@ -572,7 +573,7 @@ func resolveExposePlatformCoordinates(params ExposeServiceParams, store ExposeSt
 	// (<tenant>-powerdns); platform.Env is that env's "<tenant>-<env>" namespace
 	// label, so its tenant prefix gives the Deployment name the exec targets.
 	platTenant, _, _ := splitTenantEnv(platform.Env)
-	return platform.ServicesZone, config.NormalizeNamespaceName(platform.Env), eruncommon.TenantResourcePrefix(platTenant) + "-powerdns", resolvePlatformContext(store, platform.Env), nil
+	return platform.ServicesZone, config.NormalizeNamespaceName(platform.Env), shared.TenantResourcePrefix(platTenant) + "-powerdns", resolvePlatformContext(store, platform.Env), nil
 }
 
 // resolveExposeBackendService picks the Service the Ingress routes to: the one
@@ -581,7 +582,7 @@ func resolveExposeBackendService(backendService, tenant, service string) string 
 	if backendService = strings.TrimSpace(backendService); backendService != "" {
 		return backendService
 	}
-	return fmt.Sprintf("%s-%s", eruncommon.TenantResourcePrefix(tenant), service)
+	return fmt.Sprintf("%s-%s", shared.TenantResourcePrefix(tenant), service)
 }
 
 // resolveExposeTLSPlan resolves the Ingress TLS wiring: https by default,

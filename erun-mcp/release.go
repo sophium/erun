@@ -6,9 +6,11 @@ import (
 	"io"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/orchestration"
+	"github.com/sophium/erun/erun-common/primitive/release"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 type ReleaseInput struct {
@@ -20,7 +22,7 @@ type ReleaseInput struct {
 func releaseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReleaseInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReleaseInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		execute := func(preview bool, log io.Writer) (CommandOutput, error) {
-			var spec eruncommon.ReleaseSpec
+			var spec shared.ReleaseSpec
 			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, workDir string) error {
 				// Release marks source control only: it stamps, tags and pushes the
 				// version and never builds or publishes an artifact. Build and
@@ -29,12 +31,12 @@ func releaseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 				if err != nil {
 					return err
 				}
-				resolved, ok := eruncommon.BuildExecutionReleaseSpec(execution)
+				resolved, ok := orchestration.BuildExecutionReleaseSpec(execution)
 				if !ok {
 					return errors.New("release: the resolved plan is not a release")
 				}
 				spec = resolved
-				return eruncommon.RunReleaseSpec(runCtx, spec, gitx.GitCommandRunner)
+				return release.RunReleaseSpec(runCtx, spec, gitx.GitCommandRunner)
 			})
 			output.Spec = &spec
 			return output, err

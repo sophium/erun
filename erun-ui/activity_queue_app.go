@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 const (
@@ -1195,7 +1195,7 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 		// eruncommon.ShellSessionTakenOverNotice): another ERun window
 		// re-attached this persistent session, so the upcoming PTY exit
 		// must not trigger a reconnect that would steal it back.
-		if strings.TrimSpace(line) == eruncommon.ShellSessionTakenOverNotice {
+		if strings.TrimSpace(line) == open.ShellSessionTakenOverNotice {
 			a.markSessionTakenOver(managed)
 		}
 	}

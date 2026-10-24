@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/sophium/erun/cmd/shared"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/open"
 	jetbrainsconfig "github.com/sophium/erun/internal/jetbrainsconfig"
 )
 
@@ -85,7 +85,7 @@ func launchIDEURI(ctx core.Context, result config.OpenResult, uri string) error 
 }
 
 func vscodeRemoteFolderURI(result config.OpenResult) string {
-	info := common.SSHConnectionInfoForResult(result)
+	info := open.SSHConnectionInfoForResult(result)
 	return "vscode://vscode-remote/ssh-remote+" + url.PathEscape(info.HostAlias) + (&url.URL{Path: info.WorkspacePath}).EscapedPath()
 }
 
@@ -149,7 +149,7 @@ func startIDEURICommand(ctx core.Context, command string, args []string) (string
 func formatIDEOpenError(ideName string, hostOS core.HostOS, result config.OpenResult, technical string, err error, extra string) error {
 	parts := []string{
 		fmt.Sprintf("%s launcher failed on %s.", ideName, hostOSLabel(hostOS)),
-		fmt.Sprintf("Fallback: connect manually in JetBrains over SSH to host %q and open %q.", common.SSHConnectionInfoForResult(result).HostAlias, common.SSHConnectionInfoForResult(result).WorkspacePath),
+		fmt.Sprintf("Fallback: connect manually in JetBrains over SSH to host %q and open %q.", open.SSHConnectionInfoForResult(result).HostAlias, open.SSHConnectionInfoForResult(result).WorkspacePath),
 	}
 	if extra = strings.TrimSpace(extra); extra != "" {
 		parts = append(parts, extra)
@@ -220,7 +220,7 @@ func openIntelliJGatewayProject(ctx core.Context, result config.OpenResult, host
 	if err != nil {
 		return false, nil
 	}
-	info := common.SSHConnectionInfoForResult(result)
+	info := open.SSHConnectionInfoForResult(result)
 	recent, found, err := jetbrainsconfig.FindRecentProject(optionsDir, jetbrainsconfig.StableConfigID(info.HostAlias), info.WorkspacePath)
 	if err != nil {
 		return false, err
@@ -401,7 +401,7 @@ func registerIntelliJProject(ctx core.Context, result config.OpenResult, hostOS 
 	if err != nil {
 		return nil
 	}
-	info := common.SSHConnectionInfoForResult(result)
+	info := open.SSHConnectionInfoForResult(result)
 	entry := jetbrainsconfig.ProjectEntry{
 		ConfigID:       jetbrainsconfig.StableConfigID(info.HostAlias),
 		HostAlias:      info.HostAlias,
@@ -489,7 +489,7 @@ func emitIntelliJManualOpenGuidance(ctx core.Context, result config.OpenResult) 
 	if out == nil {
 		return
 	}
-	info := common.SSHConnectionInfoForResult(result)
+	info := open.SSHConnectionInfoForResult(result)
 	_, _ = fmt.Fprintf(out,
 		"Opened IntelliJ IDEA locally.\n"+
 			"Complete the remote connection in IntelliJ:\n"+

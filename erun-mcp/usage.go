@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/podruntime"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 type UsageInput struct {
@@ -77,7 +79,7 @@ func usageTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 		if err != nil {
 			return nil, UsageOutput{}, err
 		}
-		req := eruncommon.ShellLaunchParamsFromResult(target)
+		req := cloud.ShellLaunchParamsFromResult(target)
 		runCtx := runtimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
 		params := podruntime.RuntimeUsageParams{Interval: usageIntervalFromSeconds(input.IntervalSeconds)}
 		result, err := podruntime.RunRuntimeUsage(runCtx, nil, nil, req, params)
@@ -108,5 +110,5 @@ func resolveUsageOpenResult(runtime RuntimeConfig, input UsageInput) (config.Ope
 	if err != nil {
 		return config.OpenResult{}, err
 	}
-	return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
+	return open.ResolveOpen(runtime.Store, shared.OpenParams{Tenant: tenant, Environment: environment})
 }
