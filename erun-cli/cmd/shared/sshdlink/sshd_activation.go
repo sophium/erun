@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/open"
@@ -26,7 +27,7 @@ const (
 	sshdRemoteExecRetryDelay  = 5 * time.Second
 )
 
-func SyncRemoteSSHDKey(ctx core.Context, result config.OpenResult, runRemoteCommand kube.RemoteCommandRunnerFunc) (string, error) {
+func SyncRemoteSSHDKey(ctx core.Context, result config.OpenResult, runRemoteCommand seam.RemoteCommandRunnerFunc) (string, error) {
 	publicKeyPath, publicKey, err := ResolveSSHDPublicKey(result.EnvConfig.SSHD.PublicKeyPath)
 	if err != nil {
 		if !ctx.DryRun {

@@ -8,10 +8,10 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
-func (s BootstrapRunner) resolveKubernetesContext(params open.BootstrapInitParams, tenant, envName, current string) (string, error) {
+func (s BootstrapRunner) resolveKubernetesContext(params seam.BootstrapInitParams, tenant, envName, current string) (string, error) {
 	if params.KubernetesContext != "" {
 		return params.KubernetesContext, nil
 	}
@@ -39,7 +39,7 @@ func (s BootstrapRunner) resolveKubernetesContext(params open.BootstrapInitParam
 	return context, nil
 }
 
-func (s BootstrapRunner) ResolveContainerRegistry(params open.BootstrapInitParams, tenant, envName, projectRoot, current string, creating bool) (string, error) {
+func (s BootstrapRunner) ResolveContainerRegistry(params seam.BootstrapInitParams, tenant, envName, projectRoot, current string, creating bool) (string, error) {
 	if params.ClusterRegistry != nil {
 		return "", nil
 	}
@@ -131,7 +131,7 @@ func (s BootstrapRunner) resolveCloudProviderAlias(kubernetesContext, current st
 	return strings.TrimSpace(status.CloudProviderAlias), nil
 }
 
-func (s BootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, registry string, params open.BootstrapInitParams) error {
+func (s BootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, registry string, params seam.BootstrapInitParams) error {
 	// The shared project config is only for local-agent envs whose worktree lives
 	// in this repo.
 	if params.Remote {

@@ -7,10 +7,11 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
-func (d HelmDeploySpec) command() helm.CommandSpec {
+func helmDeployCommand(d seam.HelmDeploySpec) helm.CommandSpec {
 	args := []string{
 		"upgrade",
 		"--install",
@@ -108,7 +109,7 @@ func (d HelmDeploySpec) command() helm.CommandSpec {
 	// Local charts get their Chart.yaml stamped by prepareHelmChartForDeploy instead.
 	dir := d.ChartPath
 	if isOCIChartReference(d.ChartPath) {
-		args = append(args, "--version", d.resolvedChartVersion())
+		args = append(args, "--version", resolvedChartVersion(d))
 		dir = ""
 	}
 
@@ -139,7 +140,7 @@ func prefixHelmSetKeys(args []string, prefix string) {
 	}
 }
 
-func (p HelmReleaseRecoveryParams) Command() helm.CommandSpec {
+func HelmReleaseRecoveryCommand(p seam.HelmReleaseRecoveryParams) helm.CommandSpec {
 	args := []string{}
 	if p.Verbosity >= core.VerbosityDebug {
 		args = append(args, "--v=4")
@@ -234,11 +235,11 @@ func (e *HelmImmutableSelectorError) Unwrap() error {
 	return e.Err
 }
 
-func (e *HelmReleasePendingOperationError) RecoveryParams(verbosity int, stdout, stderr io.Writer) HelmReleaseRecoveryParams {
+func (e *HelmReleasePendingOperationError) RecoveryParams(verbosity int, stdout, stderr io.Writer) seam.HelmReleaseRecoveryParams {
 	if e == nil {
-		return HelmReleaseRecoveryParams{Verbosity: verbosity, Stdout: stdout, Stderr: stderr}
+		return seam.HelmReleaseRecoveryParams{Verbosity: verbosity, Stdout: stdout, Stderr: stderr}
 	}
-	return HelmReleaseRecoveryParams{
+	return seam.HelmReleaseRecoveryParams{
 		ReleaseName:       e.ReleaseName,
 		Namespace:         e.Namespace,
 		KubernetesContext: e.KubernetesContext,
@@ -252,6 +253,6 @@ func (e *HelmReleasePendingOperationError) RecoveryCommand() string {
 	if e == nil {
 		return ""
 	}
-	command := e.RecoveryParams(0, nil, nil).Command()
+	command := HelmReleaseRecoveryCommand(e.RecoveryParams(0, nil, nil))
 	return core.FormatShellCommand(command.Dir, command.Name, command.Args...)
 }

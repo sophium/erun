@@ -11,8 +11,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
-	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // newFakeDockerOnPath fakes docker on PATH; `docker push` of a tag fails with
@@ -132,8 +132,8 @@ func TestPromoteDockerImageRebuildsWhenTheCachedFingerprintImageIsGone(t *testin
 	}
 }
 
-func testPromoteBuildInput() dockerspec.DockerBuildSpec {
-	return dockerspec.DockerBuildSpec{
+func testPromoteBuildInput() seam.DockerBuildSpec {
+	return seam.DockerBuildSpec{
 		ContextDir:     "/tmp",
 		DockerfilePath: "Dockerfile",
 		Image: model.DockerImageReference{

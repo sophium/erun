@@ -8,7 +8,6 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 const (
@@ -22,10 +21,6 @@ const (
 	CloudContextStatusStopped = "stopped"
 	CloudContextStatusUnknown = "unknown"
 )
-
-type CloudContextStore interface {
-	seam.CloudStore
-}
 
 // CloudContextEnvLookup lets StartCloudContext enforce working hours; stores without it skip the gate.
 type CloudContextEnvLookup interface {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func KubectlRemoteExecArgs(req config.ShellLaunchParams, script string) []string {
@@ -15,14 +16,14 @@ func KubectlRemoteExecArgs(req config.ShellLaunchParams, script string) []string
 	return args
 }
 
-func RunRemoteCommand(req config.ShellLaunchParams, script string) (RemoteCommandResult, error) {
+func RunRemoteCommand(req config.ShellLaunchParams, script string) (model.RemoteCommandResult, error) {
 	cmd := core.Command("kubectl", KubectlRemoteExecArgs(req, script)...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
-	return RemoteCommandResult{
+	return model.RemoteCommandResult{
 		Stdout: stdout.String(),
 		Stderr: stderr.String(),
 	}, err

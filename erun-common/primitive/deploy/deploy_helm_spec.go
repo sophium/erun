@@ -10,31 +10,32 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
-func newHelmDeploySpec(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride string) (HelmDeploySpec, error) {
+func newHelmDeploySpec(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride string) (seam.HelmDeploySpec, error) {
 	valuesFilePath, err := resolveKubernetesDeployValuesFile(deployContext.ChartPath, target.Environment)
 	if err != nil {
-		return HelmDeploySpec{}, err
+		return seam.HelmDeploySpec{}, err
 	}
 	return newHelmDeploySpecWithValues(target, deployContext, versionOverride, valuesFilePath)
 }
 
-func newHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride, valuesFilePath string) (HelmDeploySpec, error) {
+func newHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride, valuesFilePath string) (seam.HelmDeploySpec, error) {
 	version := strings.TrimSpace(versionOverride)
 	ports := configpkg.LocalPortsForResult(target)
 
 	// Validated here so a bad marker list fails at deploy time, not in-pod.
 	containerRegistries, err := configpkg.DeployTargetContainerRegistries(target)
 	if err != nil {
-		return HelmDeploySpec{}, err
+		return seam.HelmDeploySpec{}, err
 	}
 
 	rolloutTimeout, err := target.EnvConfig.Deploy.Resolve()
 	if err != nil {
-		return HelmDeploySpec{}, err
+		return seam.HelmDeploySpec{}, err
 	}
 
 	// helm won't pass --sets into subchart scope, so command() prefixes them with
@@ -43,7 +44,7 @@ func newHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext mode
 	if deployContextOwnsRuntimeChart(deployContext, target.Tenant) && !isOCIChartReference(deployContext.ChartPath) {
 		subchartKey, err = helm.HelmChartRuntimeSubchartKey(deployContext.ChartPath)
 		if err != nil {
-			return HelmDeploySpec{}, err
+			return seam.HelmDeploySpec{}, err
 		}
 	}
 
@@ -56,7 +57,7 @@ func newHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext mode
 		insecureRegistry = strings.TrimSpace(target.ClusterPullRegistry)
 	}
 
-	return HelmDeploySpec{
+	return seam.HelmDeploySpec{
 		ReleaseName:         deployContext.ComponentName,
 		ChartPath:           deployContext.ChartPath,
 		ValuesFilePath:      valuesFilePath,
@@ -125,7 +126,7 @@ func ResolveProjectPlatform(projectRoot string) configpkg.PlatformConfig {
 	return projectConfig.Platform.Resolve()
 }
 
-func applyCloudContextStopMetadata(store configpkg.CloudReadStore, env configpkg.EnvConfig, deployInput *HelmDeploySpec) {
+func applyCloudContextStopMetadata(store configpkg.CloudReadStore, env configpkg.EnvConfig, deployInput *seam.HelmDeploySpec) {
 	if deployInput == nil {
 		return
 	}
@@ -140,7 +141,7 @@ func applyCloudContextStopMetadata(store configpkg.CloudReadStore, env configpkg
 	deployInput.CloudInstanceID = status.InstanceID
 }
 
-func applyCloudProviderDeployMetadata(store configpkg.CloudReadStore, env configpkg.EnvConfig, deployInput *HelmDeploySpec) {
+func applyCloudProviderDeployMetadata(store configpkg.CloudReadStore, env configpkg.EnvConfig, deployInput *seam.HelmDeploySpec) {
 	if deployInput == nil {
 		return
 	}
@@ -271,7 +272,7 @@ func rootedWithoutDrive(p string) bool {
 	return strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`)
 }
 
-// Params carries the whole spec so the executed command matches the traced one.
-func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
-	return HelmDeployParams{HelmDeploySpec: d, Stdout: stdout, Stderr: stderr}
+// HelmDeployParamsFor carries the whole spec so the executed command matches the traced one.
+func HelmDeployParamsFor(d seam.HelmDeploySpec, stdout, stderr io.Writer) seam.HelmDeployParams {
+	return seam.HelmDeployParams{HelmDeploySpec: d, Stdout: stdout, Stderr: stderr}
 }

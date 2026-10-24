@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/inputs"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
@@ -50,7 +51,7 @@ func newInputsUploadCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runInputsUploadCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, localPath, remotePath string, run inputs.RuntimeInputUploadRunner) error {
+func runInputsUploadCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, localPath, remotePath string, run seam.RuntimeInputUploadRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err

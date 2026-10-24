@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
@@ -47,17 +48,17 @@ func IsOCIChartReference(chartPath string) bool {
 
 // ResolvePublishedDevopsDeploySpec rebuilds the runtime spec for transports that
 // override inputs later; their runtime image is always operator-stated.
-func ResolvePublishedDevopsDeploySpec(ctx core.Context, target config.OpenResult, versionOverride string) (DeploySpec, error) {
+func ResolvePublishedDevopsDeploySpec(ctx core.Context, target config.OpenResult, versionOverride string) (seam.DeploySpec, error) {
 	return ResolvePublishedDevopsDeploySpecWithOverrides(ctx, target, versionOverride, "", true)
 }
 
 // ResolvePublishedDevopsDeploySpecWithOverrides builds the spec for an env with no
 // local runtime chart, pinned to the env's runtime version.
-func ResolvePublishedDevopsDeploySpecWithOverrides(ctx core.Context, target config.OpenResult, versionOverride, runtimeChartOverride string, runtimeImageExplicit bool) (DeploySpec, error) {
+func ResolvePublishedDevopsDeploySpecWithOverrides(ctx core.Context, target config.OpenResult, versionOverride, runtimeChartOverride string, runtimeImageExplicit bool) (seam.DeploySpec, error) {
 	return ResolvePublishedDevopsDeploySpecWithReason(ctx, target, versionOverride, "no local runtime chart", runtimeChartOverride, runtimeImageExplicit)
 }
 
-func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.OpenResult, versionOverride, reason, runtimeChartOverride string, runtimeImageExplicit bool) (DeploySpec, error) {
+func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.OpenResult, versionOverride, reason, runtimeChartOverride string, runtimeImageExplicit bool) (seam.DeploySpec, error) {
 	// Resolve the env's declared registry credential first so private reads are not refused as anonymous.
 	registrypkg.ConfigureInPodDeclaredRegistryAuth(ctx, target)
 	registry := publishedDevopsChartRegistry(target)
@@ -68,12 +69,12 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 	if version == "" {
 		// Dry-run contract: trace the stopping decision before the error return.
 		ctx.Trace("deploy: " + reason + " and no runtime version resolved; cannot deploy the published " + config.DevopsComponentName + " chart")
-		return DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", config.DevopsComponentName)
+		return seam.DeploySpec{}, fmt.Errorf("runtime version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", config.DevopsComponentName)
 	}
 
 	chart, err := resolveRuntimeChartCoordinate(ctx, target, registry, version, reason, strings.TrimSpace(runtimeChartOverride) != "")
 	if err != nil {
-		return DeploySpec{}, err
+		return seam.DeploySpec{}, err
 	}
 	traceRuntimeRegistryMemo(ctx, target, registry, chart.registry)
 
@@ -84,7 +85,7 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 	valuesFilePath := publishedDevopsValuesOverlayPath(ctx, target)
 	deployInput, err := newHelmDeploySpecWithValues(target, deployContext, version, valuesFilePath)
 	if err != nil {
-		return DeploySpec{}, err
+		return seam.DeploySpec{}, err
 	}
 	// helm does not pass top-level --sets into subchart scope, so re-scope them under
 	// the wrapped erun-devops.
@@ -107,12 +108,12 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 		deployInput.ResolvedRuntimeImage = image
 	} else {
 		// No override applies, so the chart's stock default image is fully known; record it.
-		deployInput.ResolvedRuntimeImage = registry + "/" + config.DefaultRuntimeImageName + ":" + deployInput.resolvedChartVersion()
+		deployInput.ResolvedRuntimeImage = registry + "/" + config.DefaultRuntimeImageName + ":" + resolvedChartVersion(deployInput)
 	}
 	deployInput.PersistRuntimeImage = persistImage
 	explicitLineChange := runtimeImageExplicit || strings.TrimSpace(runtimeChartOverride) != ""
 	if err := guardRuntimeCoordinate(ctx, target, chart, runtimeChartOverride, deployInput, explicitLineChange); err != nil {
-		return DeploySpec{}, err
+		return seam.DeploySpec{}, err
 	}
 	if target.EnvConfig.MountsRuntimeSource() {
 		deployInput.RepoURL = strings.TrimSpace(target.EnvConfig.RepoURL)
@@ -120,7 +121,7 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 		ctx.Trace("deploy: mounting mutable source " + deployInput.RepoURL + " at " + deployInput.RepoRef + " on a PVC worktree")
 	}
 
-	return DeploySpec{
+	return seam.DeploySpec{
 		Target:        target,
 		DeployContext: deployContext,
 		Deploy:        deployInput,
@@ -129,7 +130,7 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 
 // resolvePublishedComponentDeploySpec installs a published component chart by
 // reference; a tenant umbrella gets its --sets re-scoped into the wrapped subchart.
-func resolvePublishedComponentDeploySpec(ctx core.Context, target config.OpenResult, componentName, versionOverride string) (DeploySpec, error) {
+func resolvePublishedComponentDeploySpec(ctx core.Context, target config.OpenResult, componentName, versionOverride string) (seam.DeploySpec, error) {
 	registry := publishedTenantComponentChartRegistry(target)
 	version := strings.TrimSpace(versionOverride)
 	if version == "" {
@@ -137,7 +138,7 @@ func resolvePublishedComponentDeploySpec(ctx core.Context, target config.OpenRes
 	}
 	if version == "" {
 		ctx.Trace("deploy: no version resolved for component " + componentName + "; cannot deploy its published chart")
-		return DeploySpec{}, fmt.Errorf("version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", componentName)
+		return seam.DeploySpec{}, fmt.Errorf("version is required to deploy the published %s chart: pass --version or persist runtimeversion in the env config", componentName)
 	}
 
 	chartReference := helm.PublishedDevopsChartOCIRepo(registry) + "/" + componentName
@@ -149,14 +150,14 @@ func resolvePublishedComponentDeploySpec(ctx core.Context, target config.OpenRes
 	}
 	deployInput, err := newHelmDeploySpecWithValues(target, deployContext, version, "")
 	if err != nil {
-		return DeploySpec{}, err
+		return seam.DeploySpec{}, err
 	}
 	deployInput.SubchartKey = publishedUmbrellaSubchartKey(target.Tenant, componentName)
 	deployInput.ReleaseName = publishedComponentReleaseName(target.Tenant, componentName)
 	deployInput.ContainerRegistry = registry
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 
-	return DeploySpec{
+	return seam.DeploySpec{
 		Target:        target,
 		DeployContext: deployContext,
 		Deploy:        deployInput,

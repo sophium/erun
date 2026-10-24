@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 )
 
@@ -65,7 +66,7 @@ func shellReplacementPodReady(req config.ShellLaunchParams, runner seam.OpenKube
 	return false
 }
 
-func runtimePodLooksLikeCleanReplacement(pod RuntimePodDiagnostic) bool {
+func runtimePodLooksLikeCleanReplacement(pod model.RuntimePodDiagnostic) bool {
 	if !strings.EqualFold(strings.TrimSpace(pod.Status.Phase), "Running") {
 		return false
 	}
@@ -83,7 +84,7 @@ func runtimePodLooksLikeCleanReplacement(pod RuntimePodDiagnostic) bool {
 	return true
 }
 
-func runtimePodConditionTrue(pod RuntimePodDiagnostic, conditionType string) bool {
+func runtimePodConditionTrue(pod model.RuntimePodDiagnostic, conditionType string) bool {
 	for _, condition := range pod.Status.Conditions {
 		if strings.EqualFold(strings.TrimSpace(condition.Type), conditionType) {
 			return strings.EqualFold(strings.TrimSpace(condition.Status), "True")
@@ -111,7 +112,7 @@ func loadRuntimePodDiagnostics(req config.ShellLaunchParams, runner seam.OpenKub
 	return pods, nil
 }
 
-func formatRuntimePodDiagnostic(pod RuntimePodDiagnostic) []string {
+func formatRuntimePodDiagnostic(pod model.RuntimePodDiagnostic) []string {
 	name := strings.TrimSpace(pod.Metadata.Name)
 	if name == "" {
 		name = "<unknown>"
@@ -135,7 +136,7 @@ func formatRuntimePodDiagnostic(pod RuntimePodDiagnostic) []string {
 	return lines
 }
 
-func formatRuntimePodConditions(conditions []runtimePodConditionDiagnostic) string {
+func formatRuntimePodConditions(conditions []model.RuntimePodConditionDiagnostic) string {
 	parts := make([]string, 0, len(conditions))
 	for _, condition := range conditions {
 		conditionType := strings.TrimSpace(condition.Type)
@@ -155,7 +156,7 @@ func formatRuntimePodConditions(conditions []runtimePodConditionDiagnostic) stri
 	return strings.Join(parts, ", ")
 }
 
-func formatRuntimeContainerStatus(status runtimeContainerStatusDiagnostic) string {
+func formatRuntimeContainerStatus(status model.RuntimeContainerStatusDiagnostic) string {
 	name := strings.TrimSpace(status.Name)
 	if name == "" {
 		return ""
@@ -170,7 +171,7 @@ func formatRuntimeContainerStatus(status runtimeContainerStatusDiagnostic) strin
 	return strings.Join(parts, ", ")
 }
 
-func formatRuntimeContainerState(label string, state runtimeContainerStateDiagnostic) string {
+func formatRuntimeContainerState(label string, state model.RuntimeContainerStateDiagnostic) string {
 	switch {
 	case state.Waiting != nil:
 		return label + "=waiting" + formatRuntimeStateDetail(state.Waiting.Reason, state.Waiting.Message, "", "", 0)
@@ -206,7 +207,7 @@ func formatRuntimeStateDetail(reason, message, startedAt, finishedAt string, exi
 	return " (" + strings.Join(parts, ", ") + ")"
 }
 
-func formatRuntimePodEvents(req config.ShellLaunchParams, pod RuntimePodDiagnostic, runner seam.OpenKubectlRunnerFunc) []string {
+func formatRuntimePodEvents(req config.ShellLaunchParams, pod model.RuntimePodDiagnostic, runner seam.OpenKubectlRunnerFunc) []string {
 	podName := strings.TrimSpace(pod.Metadata.Name)
 	if podName == "" {
 		return nil
@@ -339,59 +340,7 @@ func singleLineRuntimeDiagnostic(value string) string {
 }
 
 type runtimePodDiagnosticList struct {
-	Items []RuntimePodDiagnostic `json:"items"`
-}
-
-type RuntimePodDiagnostic struct {
-	Metadata struct {
-		Name string `json:"name"`
-	} `json:"metadata"`
-	Status struct {
-		Phase                 string                             `json:"phase"`
-		Reason                string                             `json:"reason"`
-		Message               string                             `json:"message"`
-		Conditions            []runtimePodConditionDiagnostic    `json:"conditions"`
-		InitContainerStatuses []runtimeContainerStatusDiagnostic `json:"initContainerStatuses"`
-		ContainerStatuses     []runtimeContainerStatusDiagnostic `json:"containerStatuses"`
-	} `json:"status"`
-}
-
-type runtimePodConditionDiagnostic struct {
-	Type    string `json:"type"`
-	Status  string `json:"status"`
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
-}
-
-type runtimeContainerStatusDiagnostic struct {
-	Name         string                          `json:"name"`
-	Ready        bool                            `json:"ready"`
-	RestartCount int                             `json:"restartCount"`
-	State        runtimeContainerStateDiagnostic `json:"state"`
-	LastState    runtimeContainerStateDiagnostic `json:"lastState"`
-}
-
-type runtimeContainerStateDiagnostic struct {
-	Waiting    *runtimeContainerWaitingDiagnostic    `json:"waiting"`
-	Running    *runtimeContainerRunningDiagnostic    `json:"running"`
-	Terminated *runtimeContainerTerminatedDiagnostic `json:"terminated"`
-}
-
-type runtimeContainerWaitingDiagnostic struct {
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
-}
-
-type runtimeContainerRunningDiagnostic struct {
-	StartedAt string `json:"startedAt"`
-}
-
-type runtimeContainerTerminatedDiagnostic struct {
-	ExitCode   int    `json:"exitCode"`
-	Reason     string `json:"reason"`
-	Message    string `json:"message"`
-	StartedAt  string `json:"startedAt"`
-	FinishedAt string `json:"finishedAt"`
+	Items []model.RuntimePodDiagnostic `json:"items"`
 }
 
 type runtimePodEventDiagnosticList struct {

@@ -3,10 +3,10 @@ package deploy
 import (
 	"strings"
 
-	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
-func DeployedVersionForSpecs(specs []deploypkg.DeploySpec) string {
+func DeployedVersionForSpecs(specs []seam.DeploySpec) string {
 	version := ""
 	for _, spec := range specs {
 		current := strings.TrimSpace(spec.Deploy.Version)

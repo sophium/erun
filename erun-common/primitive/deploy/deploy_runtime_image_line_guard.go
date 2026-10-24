@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
@@ -105,13 +106,13 @@ func runtimeReleaseBase(version string) (registry.Semver, bool) {
 	return registry.ParseRegistryStableVersion(base)
 }
 
-func guardRuntimeCoordinate(ctx core.Context, target config.OpenResult, chart resolvedRuntimeChart, runtimeChartOverride string, deployInput HelmDeploySpec, explicitLineChange bool) error {
+func guardRuntimeCoordinate(ctx core.Context, target config.OpenResult, chart resolvedRuntimeChart, runtimeChartOverride string, deployInput seam.HelmDeploySpec, explicitLineChange bool) error {
 	if err := guardRuntimeLineSwitch(ctx, target, chart, deployInput.ResolvedRuntimeImage, explicitLineChange); err != nil {
 		return err
 	}
 	name, version := effectiveRuntimeChartCoordinateForImage(chart, runtimeChartOverride)
 	if strings.TrimSpace(version) == "" {
-		version = deployInput.resolvedChartVersion()
+		version = resolvedChartVersion(deployInput)
 	}
 	return guardRuntimeImageNotOlderThanChart(deployInput.ResolvedRuntimeImage, name, version)
 }

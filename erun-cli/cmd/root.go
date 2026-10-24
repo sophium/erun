@@ -81,15 +81,15 @@ func Execute() error {
 type rootDependencies struct {
 	configStore               config.ConfigStore
 	store                     rootStore
-	deployHelmChart           deploypkg.HelmChartDeployerFunc
-	recoveringDeployHelmChart deploypkg.HelmChartDeployerFunc
-	runInit                   func(core.Context, openpkg.BootstrapInitParams) error
+	deployHelmChart           seam.HelmChartDeployerFunc
+	recoveringDeployHelmChart seam.HelmChartDeployerFunc
+	runInit                   func(core.Context, seam.BootstrapInitParams) error
 	runInitForArgs            func(core.Context, []string) error
 	runInitForOpen            func(core.Context, model.OpenParams) error
 	dockerRegistryLogin       seam.DockerRegistryLoginFunc
-	push                      buildpkg.DockerPushFunc
+	push                      seam.DockerPushFunc
 	resolveOpen               func(model.OpenParams) (config.OpenResult, error)
-	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (deploypkg.DeploySpec, error)
+	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error)
 	activateMCP               portfwd.MCPForwarder
 	activateAPI               portfwd.APIForwarder
 	activateSSHD              sshdlink.SSHDActivator
@@ -127,7 +127,7 @@ func (d rootDependencies) resolveOpenResult(params model.OpenParams) (config.Ope
 	return openpkg.ResolveOpen(d.store, params)
 }
 
-func (d rootDependencies) resolveRuntimeDeploySpecForOpenTarget(ctx core.Context, target config.OpenResult, allowLocalBuilds bool) (deploypkg.DeploySpec, error) {
+func (d rootDependencies) resolveRuntimeDeploySpecForOpenTarget(ctx core.Context, target config.OpenResult, allowLocalBuilds bool) (seam.DeploySpec, error) {
 	return resolveRuntimeDeploySpecForOpen(ctx, d.store, config.FindProjectRoot, dockerspec.ResolveDockerBuildContext, deploypkg.ResolveKubernetesDeployContext, time.Now, shared.CurrentBuildInfo(), target, allowLocalBuilds)
 }
 

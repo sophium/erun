@@ -9,9 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
-	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -48,7 +47,7 @@ const (
 // RunRuntimeUsage execs the reading script into the runtime container, and into the
 // erun-dind sidecar when present. The sidecar read and the pod-spec requests read fail
 // soft so the runtime reading is never lost.
-func RunRuntimeUsage(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, podRequests RuntimePodRequestsRunnerFunc, req config.ShellLaunchParams, params model.RuntimeUsageParams) (model.RuntimeUsage, error) {
+func RunRuntimeUsage(ctx core.Context, runner seam.RuntimeContainerCommandRunnerFunc, podRequests RuntimePodRequestsRunnerFunc, req config.ShellLaunchParams, params model.RuntimeUsageParams) (model.RuntimeUsage, error) {
 	interval := clampRuntimeUsageInterval(params.Interval)
 	script := runtimeUsageScript(interval)
 	result, err := diagnosis.RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeUsageContainer, "usage", script)
@@ -56,10 +55,10 @@ func RunRuntimeUsage(ctx core.Context, runner diagnosis.RuntimeContainerCommandR
 		return model.RuntimeUsage{}, err
 	}
 	usesDind := req.Type.UsesDindSidecar()
-	var dindResult kube.RemoteCommandResult
+	var dindResult model.RemoteCommandResult
 	var dindErr error
 	if usesDind {
-		dindResult, dindErr = diagnosis.RunTracedRuntimeContainerCommand(ctx, runner, req, build.RuntimeDindContainerName, "usage-dind", script)
+		dindResult, dindErr = diagnosis.RunTracedRuntimeContainerCommand(ctx, runner, req, model.RuntimeDindContainerName, "usage-dind", script)
 	}
 	// Read after the execs so a dry run traces actions in run order.
 	requests := readRuntimeUsageRequests(ctx, podRequests, req)

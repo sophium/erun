@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 func defaultBootstrapEnvironment(envName string) string {
@@ -132,7 +132,7 @@ func (s *bootstrapRunState) createHostEnvConfig(envProjectRoot string) error {
 	return nil
 }
 
-func initDeployConfig(params open.BootstrapInitParams) configpkg.EnvironmentDeployConfig {
+func initDeployConfig(params seam.BootstrapInitParams) configpkg.EnvironmentDeployConfig {
 	components, given := initComponentsOverride(params)
 	if !given {
 		return configpkg.EnvironmentDeployConfig{}
@@ -142,7 +142,7 @@ func initDeployConfig(params open.BootstrapInitParams) configpkg.EnvironmentDepl
 
 // initComponentsOverride distinguishes an explicitly empty --components, which
 // clears a saved selection, from an omitted flag.
-func initComponentsOverride(params open.BootstrapInitParams) ([]string, bool) {
+func initComponentsOverride(params seam.BootstrapInitParams) ([]string, bool) {
 	if params.Components == nil {
 		return nil, false
 	}
@@ -156,7 +156,7 @@ func describeComponentsSetting(components []string) string {
 	return strings.Join(components, ",")
 }
 
-func seedInitContainerRegistries(params open.BootstrapInitParams, registry string) configpkg.ContainerRegistries {
+func seedInitContainerRegistries(params seam.BootstrapInitParams, registry string) configpkg.ContainerRegistries {
 	if params.ClusterRegistry != nil {
 		return configpkg.ClusterContainerRegistries(*params.ClusterRegistry)
 	}

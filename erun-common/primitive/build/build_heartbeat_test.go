@@ -9,7 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 func TestFormatBuildHeartbeatNamesTheImageAndItsElapsedTime(t *testing.T) {
@@ -139,12 +139,12 @@ func TestExecuteDockerBuildNamesTheImageItIsBuildingWhileItRuns(t *testing.T) {
 	heartbeat := &core.BuildHeartbeat{Now: func() time.Time { return clock }, Emit: func(string) {}, Ticks: make(chan time.Time)}
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard), Progress: heartbeat}
 
-	spec := dockerspec.DockerBuildSpec{
+	spec := seam.DockerBuildSpec{
 		Image:          model.DockerImageReference{Tag: "ghcr.io/sophium/erun-devops:1.0.290", ImageName: "erun-devops"},
 		DockerfilePath: "Dockerfile", ContextDir: ".",
 	}
 	duringBuild := ""
-	build := func(dockerspec.DockerBuildSpec, io.Writer, io.Writer) error {
+	build := func(seam.DockerBuildSpec, io.Writer, io.Writer) error {
 		clock = clock.Add(11 * time.Minute)
 		duringBuild = heartbeat.Line()
 		return nil

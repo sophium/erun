@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	executepkg "github.com/sophium/erun/erun-common/orchestration/execute"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
@@ -124,7 +125,7 @@ func resolveRuntimeBuildExecution(ctx core.Context, runtime runtimecfg.RuntimeCo
 		if build == nil {
 			return dockerspec.BuildExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 		}
-		execution := buildpkg.BuildExecutionSpecFromDockerBuilds([]dockerspec.DockerBuildSpec{*build})
+		execution := buildpkg.BuildExecutionSpecFromDockerBuilds([]seam.DockerBuildSpec{*build})
 		if releaseSpec != nil {
 			execution = buildrun.BuildExecutionSpecWithRelease(execution, *releaseSpec)
 		}
@@ -152,11 +153,11 @@ func resolveRuntimePushExecution(ctx core.Context, runtime runtimecfg.RuntimeCon
 		if err != nil {
 			return dockerspec.DockerPushExecutionSpec{}, err
 		}
-		builds := make([]dockerspec.DockerBuildSpec, 0, 1)
+		builds := make([]seam.DockerBuildSpec, 0, 1)
 		if buildInput != nil {
 			builds = append(builds, *buildInput)
 		}
-		return buildrun.DockerPushExecutionSpecFromSpecs(builds, []dockerspec.DockerPushSpec{pushInput}), nil
+		return buildrun.DockerPushExecutionSpecFromSpecs(builds, []model.DockerPushSpec{pushInput}), nil
 	}
 
 	build, err := buildpkg.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride), target.Platforms)
@@ -168,7 +169,7 @@ func resolveRuntimePushExecution(ctx core.Context, runtime runtimecfg.RuntimeCon
 	}
 	build.Push = true
 
-	return buildrun.DockerPushExecutionSpecFromSpecs([]dockerspec.DockerBuildSpec{*build}, []dockerspec.DockerPushSpec{
+	return buildrun.DockerPushExecutionSpecFromSpecs([]seam.DockerBuildSpec{*build}, []model.DockerPushSpec{
 		buildpkg.NewDockerPushSpec(projectRoot, build.Image),
 	}), nil
 }

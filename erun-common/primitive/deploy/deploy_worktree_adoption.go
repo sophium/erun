@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
@@ -24,7 +25,7 @@ func podWorktreePath(repoName string) string {
 // announceWorktreeVolumeChange reports a deploy that first creates the worktree
 // claim and so relocates an existing worktree between volumes. When the claim
 // cannot be read the notice prints anyway: silence is the failure being avoided.
-func announceWorktreeVolumeChange(ctx core.Context, spec HelmDeploySpec) {
+func announceWorktreeVolumeChange(ctx core.Context, spec seam.HelmDeploySpec) {
 	if spec.WorktreeStorage != WorktreeStoragePVC {
 		return
 	}
@@ -74,7 +75,7 @@ func kubectlGetPVCArgs(contextName, namespace, claim string) []string {
 	return append(args, "get", "pvc", claim, "-o", "name")
 }
 
-func kubectlWorktreeClaimArgs(spec HelmDeploySpec, claim string) []string {
+func kubectlWorktreeClaimArgs(spec seam.HelmDeploySpec, claim string) []string {
 	return kubectlGetPVCArgs(spec.KubernetesContext, spec.Namespace, claim)
 }
 

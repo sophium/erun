@@ -11,8 +11,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -53,11 +51,11 @@ func hasWarningContaining(warnings []string, substr string) bool {
 func TestRunRuntimeUsageDindExecFailureFailsSoft(t *testing.T) {
 	idleRuntimeReading := "cgroup_type=cgroup2fs\nmemory_current=100\nmemory_max=200\nmemory_peak=100\nmemory_oom_kill=0\ncpu_max=100000 100000\ncpu_usage_before=0\ncpu_usage_after=0\ncpu_time_before_ns=1000000000\ncpu_time_after_ns=2000000000\ndisk_workspace=overlay 100 50 50 50% /home/erun"
 	req := config.ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
-	runner := func(_ config.ShellLaunchParams, container, _ string) (kube.RemoteCommandResult, error) {
-		if container == build.RuntimeDindContainerName {
-			return kube.RemoteCommandResult{}, errors.New("container not found")
+	runner := func(_ config.ShellLaunchParams, container, _ string) (model.RemoteCommandResult, error) {
+		if container == model.RuntimeDindContainerName {
+			return model.RemoteCommandResult{}, errors.New("container not found")
 		}
-		return kube.RemoteCommandResult{Stdout: idleRuntimeReading}, nil
+		return model.RemoteCommandResult{Stdout: idleRuntimeReading}, nil
 	}
 
 	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, model.RuntimeUsageParams{Interval: time.Second})
@@ -114,11 +112,11 @@ func runtimeUsageDindReading(cpuMax string, periods, throttled int64) string {
 // An unreadable quota cannot say whether the sidecar is starved, so it must not warn.
 func TestRunRuntimeUsageDoesNotWarnOfThrottlingWithoutAReadableQuota(t *testing.T) {
 	req := config.ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
-	runner := func(_ config.ShellLaunchParams, container, _ string) (kube.RemoteCommandResult, error) {
-		if container == build.RuntimeDindContainerName {
-			return kube.RemoteCommandResult{Stdout: runtimeUsageDindReading("max 100000", 200, 200)}, nil
+	runner := func(_ config.ShellLaunchParams, container, _ string) (model.RemoteCommandResult, error) {
+		if container == model.RuntimeDindContainerName {
+			return model.RemoteCommandResult{Stdout: runtimeUsageDindReading("max 100000", 200, 200)}, nil
 		}
-		return kube.RemoteCommandResult{Stdout: runtimeUsageRuntimeContainerReading()}, nil
+		return model.RemoteCommandResult{Stdout: runtimeUsageRuntimeContainerReading()}, nil
 	}
 	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, model.RuntimeUsageParams{Interval: time.Second})
 	if err != nil {

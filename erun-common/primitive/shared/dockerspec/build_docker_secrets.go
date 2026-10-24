@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 // LoadProjectConfigForDockerSecrets reports ok=false, not an error, without a config.
@@ -97,7 +98,7 @@ func DescribeDockerBuildSecrets(secrets []config.DockerBuildSecret) string {
 
 // ApplyDockerSecrets fails on a missing secret: a Dockerfile's `-f` guard
 // would otherwise silently skip the work and the build would report success.
-func ApplyDockerSecrets(ctx core.Context, projectRoot, environment string, build *DockerBuildSpec) error {
+func ApplyDockerSecrets(ctx core.Context, projectRoot, environment string, build *seam.DockerBuildSpec) error {
 	cfg, ok, err := LoadProjectConfigForDockerSecrets(projectRoot)
 	if err != nil {
 		return err

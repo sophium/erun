@@ -90,7 +90,7 @@ func resolveBuildExecutionTargetAndScript(findProjectRoot seam.ProjectFinderFunc
 	return target, releaseSpec, script, nil
 }
 
-func buildExecutionHasNoBuilds(linuxPackages []model.LinuxPackageSpec, builds []dockerspec.DockerBuildSpec, releaseSpec *model.ReleaseSpec) bool {
+func buildExecutionHasNoBuilds(linuxPackages []model.LinuxPackageSpec, builds []seam.DockerBuildSpec, releaseSpec *model.ReleaseSpec) bool {
 	return len(linuxPackages) == 0 && len(builds) == 0 && releaseSpec == nil
 }
 
@@ -162,12 +162,12 @@ func BuildExecutionUsesBuildScript(execution dockerspec.BuildExecutionSpec) bool
 // releaseDockerPushSpecs pushes every image, including version-pinned wrappers
 // missing from release.DockerImages whose charts still need them; unchanged
 // images are a cheap no-op.
-func releaseDockerPushSpecs(builds []dockerspec.DockerBuildSpec) []dockerspec.DockerPushSpec {
+func releaseDockerPushSpecs(builds []seam.DockerBuildSpec) []model.DockerPushSpec {
 	if len(builds) == 0 {
 		return nil
 	}
 
-	pushes := make([]dockerspec.DockerPushSpec, 0, len(builds))
+	pushes := make([]model.DockerPushSpec, 0, len(builds))
 	for _, build := range builds {
 		pushes = append(pushes, buildpkg.NewDockerPushSpec(build.ContextDir, build.Image))
 	}

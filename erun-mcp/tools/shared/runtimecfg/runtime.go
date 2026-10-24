@@ -5,9 +5,6 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
@@ -22,13 +19,13 @@ type RuntimeConfig struct {
 	Context                        toolio.RuntimeContext
 	Store                          RuntimeStore
 	BuildScriptRunner              seam.BuildScriptRunnerFunc
-	BuildDockerImage               build.DockerImageBuilderFunc
+	BuildDockerImage               seam.DockerImageBuilderFunc
 	PushDockerImage                seam.DockerImagePusherFunc
-	DeployHelmChart                deploy.HelmChartDeployerFunc
+	DeployHelmChart                seam.HelmChartDeployerFunc
 	EnsureKubernetesNamespace      seam.NamespaceEnsurerFunc
 	DeleteKubernetesNamespace      seam.NamespaceDeleterFunc
 	WaitForRemoteRuntime           seam.RemoteRuntimeWaitFunc
-	RunRemoteCommand               kube.RemoteCommandRunnerFunc
+	RunRemoteCommand               seam.RemoteCommandRunnerFunc
 	ResolveRuntimeRegistryVersions seam.RuntimeRegistryVersionResolverFunc
 }
 

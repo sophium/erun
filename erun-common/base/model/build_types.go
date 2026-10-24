@@ -45,3 +45,9 @@ type DockerRegistryAuthError struct {
 	Message  string
 	Err      error
 }
+
+type DockerPushSpec struct {
+	Dir       string
+	Image     DockerImageReference
+	Verbosity int
+}

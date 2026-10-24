@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -44,7 +45,7 @@ func TestApplyGatewayCredentialsSecretSkipsAnOptedOutEnvironment(t *testing.T) {
 	ctx, trace := traceCapturingContext()
 	ctx.DryRun = true
 	no := false
-	spec := HelmDeploySpec{
+	spec := seam.HelmDeploySpec{
 		ReleaseName: "erun-devops",
 		Namespace:   "team-dev",
 		Claude:      config.EnvironmentClaudeConfig{UseGateway: &no},

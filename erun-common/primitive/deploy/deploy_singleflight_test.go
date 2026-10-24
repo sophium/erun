@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 func writeInflightMarkerFile(t *testing.T, path string, record deployInflightRecord) {
@@ -23,8 +24,8 @@ func writeInflightMarkerFile(t *testing.T, path string, record deployInflightRec
 	}
 }
 
-func testDeploySpec() HelmDeploySpec {
-	return HelmDeploySpec{
+func testDeploySpec() seam.HelmDeploySpec {
+	return seam.HelmDeploySpec{
 		ReleaseName:       "acme-app",
 		Namespace:         "acme-ns",
 		KubernetesContext: "acme-ctx",
@@ -32,7 +33,7 @@ func testDeploySpec() HelmDeploySpec {
 	}
 }
 
-func markerPathFor(t *testing.T, configDir string, deploy HelmDeploySpec) string {
+func markerPathFor(t *testing.T, configDir string, deploy seam.HelmDeploySpec) string {
 	t.Helper()
 	deployDir := filepath.Join(configDir, deployInflightDirName)
 	if err := os.MkdirAll(deployDir, 0o755); err != nil {

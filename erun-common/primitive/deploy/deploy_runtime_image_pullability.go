@@ -26,7 +26,7 @@ func autoImagePullSecretName(tenant string) string {
 // mutation: Recreate tears the old pod down first, so an unpullable image takes
 // the env down. A resolved credential is always attached; otherwise a real run
 // probes anonymous pullability and refuses unless it is confirmed pullable.
-func ensureRuntimeImagePullSecret(ctx core.Context, deployInput *HelmDeploySpec, probe seam.AnonymousPullProbeFunc) error {
+func ensureRuntimeImagePullSecret(ctx core.Context, deployInput *seam.HelmDeploySpec, probe seam.AnonymousPullProbeFunc) error {
 	image := strings.TrimSpace(deployInput.ImageOverrides[config.DevopsComponentName])
 	if image == "" {
 		return nil

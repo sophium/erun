@@ -16,11 +16,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 )
 
-type BuildDeployStore interface {
-	seam.DeployStore
-	seam.DockerStore
-}
-
 func resolveDeployTarget(command string, scopesTenantByFlag bool, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target model.DeployTarget) (configpkg.OpenResult, error) {
 	result, err := resolveDeployTargetOpenResult(command, scopesTenantByFlag, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
@@ -104,7 +99,7 @@ func normalizeDeployDependencies(store seam.DeployStore, findProjectRoot seam.Pr
 	return store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now
 }
 
-func NormalizeBuildDeployDependencies(store BuildDeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc) (BuildDeployStore, seam.ProjectFinderFunc, seam.BuildContextResolverFunc, seam.DeployContextResolverFunc, seam.NowFunc) {
+func NormalizeBuildDeployDependencies(store seam.BuildDeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc) (seam.BuildDeployStore, seam.ProjectFinderFunc, seam.BuildContextResolverFunc, seam.DeployContextResolverFunc, seam.NowFunc) {
 	if store == nil {
 		store = configpkg.ConfigStore{}
 	}
@@ -133,7 +128,7 @@ func freezeNow(now seam.NowFunc) seam.NowFunc {
 	return func() time.Time { return frozen }
 }
 
-func ResolveDeployTargetForDockerTarget(store BuildDeployStore, findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (model.DeployTarget, error) {
+func ResolveDeployTargetForDockerTarget(store seam.BuildDeployStore, findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (model.DeployTarget, error) {
 	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return model.DeployTarget{}, err

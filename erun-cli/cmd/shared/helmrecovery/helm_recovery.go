@@ -9,10 +9,11 @@ import (
 
 	"github.com/manifoldco/promptui"
 	promptpkg "github.com/sophium/erun/cmd/shared/prompt"
+	"github.com/sophium/erun/erun-common/base/seam"
 	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-func WrapHelmDeployWithReleaseRecovery(promptRunner promptpkg.PromptRunner, deploy deploypkg.HelmChartDeployerFunc, recoverRelease deploypkg.HelmReleaseRecovererFunc) deploypkg.HelmChartDeployerFunc {
+func WrapHelmDeployWithReleaseRecovery(promptRunner promptpkg.PromptRunner, deploy seam.HelmChartDeployerFunc, recoverRelease seam.HelmReleaseRecovererFunc) seam.HelmChartDeployerFunc {
 	if deploy == nil {
 		return nil
 	}
@@ -20,7 +21,7 @@ func WrapHelmDeployWithReleaseRecovery(promptRunner promptpkg.PromptRunner, depl
 		recoverRelease = deploypkg.ClearHelmReleasePendingOperation
 	}
 
-	return func(params deploypkg.HelmDeployParams) error {
+	return func(params seam.HelmDeployParams) error {
 		err := deploy(params)
 		if err == nil {
 			return nil

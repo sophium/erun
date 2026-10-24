@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/setup"
-	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
 // A token-authenticated registry answers an unauthenticated GET /v2/ with 401.
@@ -56,7 +56,7 @@ func TestErunRegistryRefusesWhenUnreachable(t *testing.T) {
 			}
 		},
 	}}
-	registry, err := runner.ResolveContainerRegistry(open.BootstrapInitParams{ErunRegistry: true}, "acme", "dev", "", "", true)
+	registry, err := runner.ResolveContainerRegistry(seam.BootstrapInitParams{ErunRegistry: true}, "acme", "dev", "", "", true)
 	if err == nil {
 		t.Fatalf("expected --erun-registry to refuse an unreachable registry, got %q", registry)
 	}
@@ -76,7 +76,7 @@ func TestErunRegistryAcceptedWhenAvailable(t *testing.T) {
 			return setup.HostedRegistryStatus{Host: config.HostedRegistryHost, Available: true}
 		},
 	}}
-	registry, err := runner.ResolveContainerRegistry(open.BootstrapInitParams{ErunRegistry: true}, "acme", "dev", "", "", true)
+	registry, err := runner.ResolveContainerRegistry(seam.BootstrapInitParams{ErunRegistry: true}, "acme", "dev", "", "", true)
 	if err != nil {
 		t.Fatalf("an available registry must be accepted: %v", err)
 	}

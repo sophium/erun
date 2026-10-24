@@ -1,0 +1,28 @@
+# The seams the primitives take, and the specs those seams carry, move to
+# base/*, so a package injecting a primitive needs only its types from base.
+base/seam primitive/deploy/deploy.go:HelmChartDeployerFunc
+base/seam primitive/deploy/deploy.go:HelmReleaseRecovererFunc
+base/seam primitive/deploy/deploy.go:HelmDeployParams
+base/seam primitive/deploy/deploy.go:HelmDeploySpec
+base/seam primitive/deploy/deploy.go:HelmReleaseRecoveryParams
+base/seam primitive/deploy/deploy.go:DeploySpec
+base/seam primitive/deploy/deploy_target.go:BuildDeployStore
+base/seam primitive/build/build_types.go:DockerPushFunc
+base/seam primitive/build/build_types.go:DockerImageBuilderFunc
+base/seam primitive/shared/dockerspec/build_types.go:DockerBuildSpec
+base/model primitive/shared/dockerspec/build_types.go:DockerPushSpec
+base/seam infra/kube/init.go:RemoteCommandRunnerFunc
+base/model infra/kube/init.go:RemoteCommandResult
+base/seam infra/cloud/cloud_context.go:CloudContextStore
+base/seam orchestration/diagnosis/doctor.go:RuntimeContainerCommandRunnerFunc
+base/seam command/jobs/outputs.go:RuntimeOutputsRunner
+base/seam command/inputs/inputs.go:RuntimeInputUploadRunner
+base/model primitive/build/doctor.go:RuntimeDindContainerName
+base/seam primitive/open/init.go:BootstrapInitParams
+base/model primitive/open/open_runtime_diagnostics.go:RuntimePodDiagnostic
+base/model primitive/open/open_runtime_diagnostics.go:runtimePodConditionDiagnostic
+base/model primitive/open/open_runtime_diagnostics.go:runtimeContainerStatusDiagnostic
+base/model primitive/open/open_runtime_diagnostics.go:runtimeContainerStateDiagnostic
+base/model primitive/open/open_runtime_diagnostics.go:runtimeContainerWaitingDiagnostic
+base/model primitive/open/open_runtime_diagnostics.go:runtimeContainerRunningDiagnostic
+base/model primitive/open/open_runtime_diagnostics.go:runtimeContainerTerminatedDiagnostic

@@ -224,7 +224,7 @@ type RuntimeResizeDependencies struct {
 	ResolveDockerBuildContext      seam.BuildContextResolverFunc
 	ResolveKubernetesDeployContext seam.DeployContextResolverFunc
 	Now                            seam.NowFunc
-	DeployHelmChart                deploy.HelmChartDeployerFunc
+	DeployHelmChart                seam.HelmChartDeployerFunc
 	// LoadActivityLeases nil reads the local store, correct only inside the environment's pod.
 	LoadActivityLeases func(tenant, environment string, now time.Time) ([]model.EnvironmentActivityLease, error)
 }

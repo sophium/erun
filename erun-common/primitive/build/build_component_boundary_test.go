@@ -50,10 +50,10 @@ func TestComponentDiscoveryNeverReachesE2ESuites(t *testing.T) {
 	}
 }
 
-func testOutcomeBuild(t *testing.T, dockerfile string) dockerspec.DockerBuildSpec {
+func testOutcomeBuild(t *testing.T, dockerfile string) seam.DockerBuildSpec {
 	t.Helper()
 	dir := t.TempDir()
-	return dockerspec.DockerBuildSpec{
+	return seam.DockerBuildSpec{
 		ContextDir:     dir,
 		DockerfilePath: writeTestDockerfile(t, dir, dockerfile),
 		Image:          model.DockerImageReference{ImageName: "api", Tag: "ghcr.io/sophium/api:1.0.0"},
@@ -61,7 +61,7 @@ func testOutcomeBuild(t *testing.T, dockerfile string) dockerspec.DockerBuildSpe
 	}
 }
 
-func runOutcomeBuild(t *testing.T, buildInput dockerspec.DockerBuildSpec, build DockerImageBuilderFunc) (string, error) {
+func runOutcomeBuild(t *testing.T, buildInput seam.DockerBuildSpec, build seam.DockerImageBuilderFunc) (string, error) {
 	t.Helper()
 	var log bytes.Buffer
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log)}
@@ -75,7 +75,7 @@ func TestBuildReportsEachComponentsTestOutcome(t *testing.T) {
 	promoted.Fingerprint = "abc123"
 	promoted.Promote = true
 
-	log, err := runOutcomeBuild(t, promoted, func(input dockerspec.DockerBuildSpec, _, _ io.Writer) error {
+	log, err := runOutcomeBuild(t, promoted, func(input seam.DockerBuildSpec, _, _ io.Writer) error {
 		input.Cache.NotePromoteFallback()
 		return nil
 	})
@@ -93,11 +93,11 @@ func TestConcurrentBuildsReportTestOutcomesInBuildOrder(t *testing.T) {
 	slow.Image.ImageName = "slow"
 	fast := buildSpecFromDockerfile(t, dir, "fast", "debian:bookworm")
 	fast.Image.ImageName = "fast"
-	ordered, dependencies := resolveTestDependencies(t, []dockerspec.DockerBuildSpec{slow, fast})
+	ordered, dependencies := resolveTestDependencies(t, []seam.DockerBuildSpec{slow, fast})
 
 	var released sync.WaitGroup
 	released.Add(1)
-	build := func(spec dockerspec.DockerBuildSpec, _, _ io.Writer) error {
+	build := func(spec seam.DockerBuildSpec, _, _ io.Writer) error {
 		if spec.Image.ImageName == "fast" {
 			released.Done()
 			return nil

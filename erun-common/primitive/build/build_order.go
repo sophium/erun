@@ -6,15 +6,16 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
-func orderedDockerBuildSpecs(builds []dockerspec.DockerBuildSpec) []dockerspec.DockerBuildSpec {
+func orderedDockerBuildSpecs(builds []seam.DockerBuildSpec) []seam.DockerBuildSpec {
 	if len(builds) < 2 {
 		return builds
 	}
 
-	buildsByTag := make(map[string]dockerspec.DockerBuildSpec, len(builds))
+	buildsByTag := make(map[string]seam.DockerBuildSpec, len(builds))
 	orderIndex := make(map[string]int, len(builds))
 	for i, build := range builds {
 		tag := strings.TrimSpace(build.Image.Tag)
@@ -50,7 +51,7 @@ func orderedDockerBuildSpecs(builds []dockerspec.DockerBuildSpec) []dockerspec.D
 		visit(tag)
 	}
 
-	ordered := make([]dockerspec.DockerBuildSpec, 0, len(builds))
+	ordered := make([]seam.DockerBuildSpec, 0, len(builds))
 	for _, tag := range tags {
 		ordered = append(ordered, buildsByTag[tag])
 	}
@@ -71,7 +72,7 @@ func dockerfileConsumesVersion(dockerfilePath string) bool {
 	return dockerfileVersionReferencePattern.Match(data)
 }
 
-func dockerfileLocalBaseImageTags(dockerfilePath string, buildsByTag map[string]dockerspec.DockerBuildSpec) []string {
+func dockerfileLocalBaseImageTags(dockerfilePath string, buildsByTag map[string]seam.DockerBuildSpec) []string {
 	deps := dockerfileLocalBaseImageDeps(dockerfilePath, buildsByTag)
 	tags := make([]string, 0, len(deps))
 	for _, dep := range deps {
@@ -88,7 +89,7 @@ type dockerfileBaseImageDep struct {
 }
 
 // dockerfileLocalBaseImageDeps lists sibling builds a Dockerfile FROMs, in Dockerfile order.
-func dockerfileLocalBaseImageDeps(dockerfilePath string, buildsByTag map[string]dockerspec.DockerBuildSpec) []dockerfileBaseImageDep {
+func dockerfileLocalBaseImageDeps(dockerfilePath string, buildsByTag map[string]seam.DockerBuildSpec) []dockerfileBaseImageDep {
 	data, err := os.ReadFile(dockerfilePath)
 	if err != nil {
 		return nil
@@ -117,12 +118,12 @@ func dockerfileLocalBaseImageDeps(dockerfilePath string, buildsByTag map[string]
 
 // markLocalBaseImageBuilds marks builds whose ${ERUN_VERSION} base this run builds without
 // publishing: the plain base tag exists only after push's manifest assembly.
-func markLocalBaseImageBuilds(builds []dockerspec.DockerBuildSpec) []dockerspec.DockerBuildSpec {
+func markLocalBaseImageBuilds(builds []seam.DockerBuildSpec) []seam.DockerBuildSpec {
 	if len(builds) < 2 {
 		return builds
 	}
 	buildsByTag := dockerBuildsByTag(builds)
-	out := make([]dockerspec.DockerBuildSpec, len(builds))
+	out := make([]seam.DockerBuildSpec, len(builds))
 	copy(out, builds)
 	for i := range out {
 		for _, dep := range dockerfileLocalBaseImageDeps(out[i].DockerfilePath, buildsByTag) {
@@ -139,7 +140,7 @@ func markLocalBaseImageBuilds(builds []dockerspec.DockerBuildSpec) []dockerspec.
 	return out
 }
 
-func dockerfileLocalBaseImageVersionedTags(imageRef string, buildsByTag map[string]dockerspec.DockerBuildSpec) []string {
+func dockerfileLocalBaseImageVersionedTags(imageRef string, buildsByTag map[string]seam.DockerBuildSpec) []string {
 	if !strings.Contains(imageRef, "ERUN_VERSION") {
 		return nil
 	}

@@ -2,11 +2,12 @@ package cloudcli
 
 import (
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 func WithCloudContextPreflight(ctx core.Context, store any) core.Context {
-	cloudStore, ok := store.(cloud.CloudContextStore)
+	cloudStore, ok := store.(seam.CloudContextStore)
 	if !ok {
 		return ctx
 	}

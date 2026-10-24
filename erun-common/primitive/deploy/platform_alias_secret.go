@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
@@ -157,7 +158,7 @@ func ProvisionPlatformAliasSecret(ctx core.Context, store config.CloudReadStore,
 // An env that names one is left alone: the Secret carries the delegating operator's
 // identity, so re-provisioning would silently change who the env acts as. Only the
 // several-aliases ambiguity is traced; having nothing to give stays silent.
-func reconcilePlatformAliasSecret(ctx core.Context, deployInput *HelmDeploySpec) error {
+func reconcilePlatformAliasSecret(ctx core.Context, deployInput *seam.HelmDeploySpec) error {
 	if deployInput == nil || deployInput.ReleaseName != config.RuntimeReleaseName(deployInput.Tenant) {
 		return nil
 	}

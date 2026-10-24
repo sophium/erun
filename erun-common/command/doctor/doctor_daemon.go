@@ -8,9 +8,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
-	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
 )
 
@@ -21,10 +21,10 @@ func ResolveDoctorDockerDaemon(req config.ShellLaunchParams) model.DoctorDockerD
 	case req.Type.UsesDindSidecar():
 		return model.DoctorDockerDaemon{
 			Kind:      model.DoctorDockerDaemonDindSidecar,
-			Container: build.RuntimeDindContainerName,
-			Label:     "the " + build.RuntimeDindContainerName + " sidecar",
+			Container: model.RuntimeDindContainerName,
+			Label:     "the " + model.RuntimeDindContainerName + " sidecar",
 			Where: fmt.Sprintf("container %s of deployment/%s in namespace %s, where this environment's image builds run and where its build images are stored",
-				build.RuntimeDindContainerName, config.RuntimeReleaseName(req.Tenant), req.Namespace),
+				model.RuntimeDindContainerName, config.RuntimeReleaseName(req.Tenant), req.Namespace),
 		}
 	case req.Type == config.EnvironmentTypeHost:
 		return model.DoctorDockerDaemon{
@@ -37,7 +37,7 @@ func ResolveDoctorDockerDaemon(req config.ShellLaunchParams) model.DoctorDockerD
 			Kind:  model.DoctorDockerDaemonNone,
 			Label: "no build daemon",
 			Where: "this environment resolves to type \"runtime\", which installs published versions by reference and never builds: its pod carries no " +
-				build.RuntimeDindContainerName + " sidecar, so it holds no build images to prune. Prune a build environment (a local-agent, remote-agent, or host environment) instead",
+				model.RuntimeDindContainerName + " sidecar, so it holds no build images to prune. Prune a build environment (a local-agent, remote-agent, or host environment) instead",
 		}
 	default:
 		return model.DoctorDockerDaemon{
@@ -228,7 +228,7 @@ func formatDockerStoreBytes(bytes uint64) string {
 	}
 }
 
-func runDoctorDockerSteps(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, daemon model.DoctorDockerDaemon, label string, steps []doctorDockerStep) (DoctorDockerResult, error) {
+func runDoctorDockerSteps(ctx core.Context, runner seam.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, daemon model.DoctorDockerDaemon, label string, steps []doctorDockerStep) (DoctorDockerResult, error) {
 	if daemon.Kind == model.DoctorDockerDaemonHost {
 		return runDoctorDockerStepsLocally(ctx, daemon, steps)
 	}

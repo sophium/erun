@@ -13,6 +13,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
@@ -112,23 +113,23 @@ func loadOpenDefaultEnvironment(store configpkg.OpenStore, tenant string) (strin
 	return tenantConfig.DefaultEnvironment, nil
 }
 
-func InitParamsForOpenArgs(store configpkg.OpenStore, args []string) (BootstrapInitParams, error) {
+func InitParamsForOpenArgs(store configpkg.OpenStore, args []string) (seam.BootstrapInitParams, error) {
 	params, err := OpenParamsForArgs(args)
 	if err != nil {
-		return BootstrapInitParams{}, err
+		return seam.BootstrapInitParams{}, err
 	}
 	return InitParamsForOpenTarget(store, params)
 }
 
-func InitParamsForOpenTarget(store configpkg.OpenStore, params model.OpenParams) (BootstrapInitParams, error) {
+func InitParamsForOpenTarget(store configpkg.OpenStore, params model.OpenParams) (seam.BootstrapInitParams, error) {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
 
 	switch {
 	case tenant != "" && environment != "":
-		return BootstrapInitParams{Tenant: tenant, Environment: environment}, nil
+		return seam.BootstrapInitParams{Tenant: tenant, Environment: environment}, nil
 	case tenant != "":
-		return BootstrapInitParams{Tenant: tenant}, nil
+		return seam.BootstrapInitParams{Tenant: tenant}, nil
 	case environment != "":
 		return initParamsForOpenEnvironmentOnly(store, environment)
 	}
@@ -136,35 +137,35 @@ func InitParamsForOpenTarget(store configpkg.OpenStore, params model.OpenParams)
 	return initParamsForOpenDefaults(store)
 }
 
-func initParamsForOpenEnvironmentOnly(store configpkg.OpenStore, environment string) (BootstrapInitParams, error) {
+func initParamsForOpenEnvironmentOnly(store configpkg.OpenStore, environment string) (seam.BootstrapInitParams, error) {
 	resolvedTenant, err := opentarget.LoadOpenDefaultTenant(store)
 	if err != nil {
 		if errors.Is(err, opentarget.ErrDefaultTenantNotConfigured) || errors.Is(err, configpkg.ErrNotInitialized) {
-			return BootstrapInitParams{Environment: environment, ResolveTenant: true}, nil
+			return seam.BootstrapInitParams{Environment: environment, ResolveTenant: true}, nil
 		}
-		return BootstrapInitParams{}, err
+		return seam.BootstrapInitParams{}, err
 	}
-	return BootstrapInitParams{Tenant: resolvedTenant, Environment: environment}, nil
+	return seam.BootstrapInitParams{Tenant: resolvedTenant, Environment: environment}, nil
 }
 
-func initParamsForOpenDefaults(store configpkg.OpenStore) (BootstrapInitParams, error) {
+func initParamsForOpenDefaults(store configpkg.OpenStore) (seam.BootstrapInitParams, error) {
 	resolvedTenant, err := opentarget.LoadOpenDefaultTenant(store)
 	if err != nil {
 		if errors.Is(err, opentarget.ErrDefaultTenantNotConfigured) || errors.Is(err, configpkg.ErrNotInitialized) {
-			return BootstrapInitParams{ResolveTenant: true}, nil
+			return seam.BootstrapInitParams{ResolveTenant: true}, nil
 		}
-		return BootstrapInitParams{}, err
+		return seam.BootstrapInitParams{}, err
 	}
 
 	defaultEnvironment, err := loadOpenDefaultEnvironment(store, resolvedTenant)
 	if err != nil {
 		if errors.Is(err, opentarget.ErrDefaultEnvironmentNotConfigured) || errors.Is(err, configpkg.ErrNotInitialized) {
-			return BootstrapInitParams{Tenant: resolvedTenant}, nil
+			return seam.BootstrapInitParams{Tenant: resolvedTenant}, nil
 		}
-		return BootstrapInitParams{}, err
+		return seam.BootstrapInitParams{}, err
 	}
 
-	return BootstrapInitParams{Tenant: resolvedTenant, Environment: defaultEnvironment}, nil
+	return seam.BootstrapInitParams{Tenant: resolvedTenant, Environment: defaultEnvironment}, nil
 }
 
 func ResolveOpen(store configpkg.OpenStore, params model.OpenParams) (configpkg.OpenResult, error) {

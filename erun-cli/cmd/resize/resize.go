@@ -14,11 +14,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/spf13/cobra"
 )
 
-func NewResizeCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, deployHelmChart deploy.HelmChartDeployerFunc, resolveOpen envscope.OpenResolver) *cobra.Command {
+func NewResizeCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, deployHelmChart seam.HelmChartDeployerFunc, resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment, cpu, memory, dindCPU, dindMemory, orchestrator string
 	var applyRecommendation, overrideLease bool
 	cmd := &cobra.Command{

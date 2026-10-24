@@ -14,6 +14,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
@@ -144,11 +145,11 @@ func dockerBuildBlamedContainer(getenv func(string) string, runner seam.OpenKube
 	if podName == "" {
 		return "", "", false
 	}
-	memory, found := dockerBuildContainerMemoryLimit(podName, RuntimeDindContainerName, runner)
+	memory, found := dockerBuildContainerMemoryLimit(podName, model.RuntimeDindContainerName, runner)
 	if !found {
 		return "", "", false
 	}
-	return RuntimeDindContainerName, memory, true
+	return model.RuntimeDindContainerName, memory, true
 }
 
 type dockerBuildPodSpecDiagnostic struct {

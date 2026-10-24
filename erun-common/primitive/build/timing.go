@@ -3,12 +3,12 @@ package build
 import (
 	"strings"
 
-	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 // incrementalCacheDecision mirrors traceIncrementalDecision so the timing cache tag never disagrees.
 // applicable is false when the build has no fingerprint, which is not a miss.
-func incrementalCacheDecision(buildInput dockerspec.DockerBuildSpec) (hit, applicable bool, missReason string) {
+func incrementalCacheDecision(buildInput seam.DockerBuildSpec) (hit, applicable bool, missReason string) {
 	if buildInput.Fingerprint == "" {
 		return false, false, ""
 	}
@@ -25,7 +25,7 @@ func incrementalCacheDecision(buildInput dockerspec.DockerBuildSpec) (hit, appli
 	}
 }
 
-func dockerBuildStepName(buildInput dockerspec.DockerBuildSpec) string {
+func dockerBuildStepName(buildInput seam.DockerBuildSpec) string {
 	if name := strings.TrimSpace(buildInput.Image.ImageName); name != "" {
 		return name
 	}

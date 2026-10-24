@@ -9,19 +9,20 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 // Greater than 1 so runDeployStep takes its parallel branch.
 const parallelRaceTestSpecCount = 8
 
 // Fake contexts make the real kubectl call fail fast without a cluster.
-func parallelRaceTestSpecs() []DeploySpec {
-	specs := make([]DeploySpec, parallelRaceTestSpecCount)
+func parallelRaceTestSpecs() []seam.DeploySpec {
+	specs := make([]seam.DeploySpec, parallelRaceTestSpecCount)
 	for i := range specs {
 		name := fmt.Sprintf("component-%d", i)
-		specs[i] = DeploySpec{
+		specs[i] = seam.DeploySpec{
 			DeployContext: model.KubernetesDeployContext{ComponentName: name},
-			Deploy: HelmDeploySpec{
+			Deploy: seam.HelmDeploySpec{
 				ReleaseName:       name,
 				Namespace:         "ns-" + name,
 				KubernetesContext: "ctx-" + name,
@@ -47,7 +48,7 @@ func TestRunDeployStepParallelSpecsShareNoWriter(t *testing.T) {
 		Stderr:    &stderr,
 	}
 
-	err := runDeployStep(ctx, 0, parallelRaceTestSpecs(), func(HelmDeployParams) error {
+	err := runDeployStep(ctx, 0, parallelRaceTestSpecs(), func(seam.HelmDeployParams) error {
 		t.Error("the chart deployer must not run when the namespace ensure refuses")
 		return nil
 	})
@@ -71,7 +72,7 @@ func TestRunDeployStepParallelOutputAttributableToComponent(t *testing.T) {
 	}
 
 	specs := parallelRaceTestSpecs()
-	err := runDeployStep(ctx, 0, specs, func(HelmDeployParams) error { return nil })
+	err := runDeployStep(ctx, 0, specs, func(seam.HelmDeployParams) error { return nil })
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("err = %v, want every spec to fail with the namespace-ensure sentinel", err)
 	}

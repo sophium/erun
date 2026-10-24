@@ -8,11 +8,12 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 // The executed helm command must match the traced one.
 func TestHelmDeployParamsPreservesCommand(t *testing.T) {
-	spec := HelmDeploySpec{
+	spec := seam.HelmDeploySpec{
 		ReleaseName:          "frs-devops",
 		ChartPath:            "oci://ghcr.io/sophium/charts/frs-devops",
 		SubchartKey:          "erun-devops",
@@ -39,8 +40,8 @@ func TestHelmDeployParamsPreservesCommand(t *testing.T) {
 		Platform:             config.PlatformConfig{BaseDomain: "erunpaas.com", Env: "frs-prod", ServicesZone: "frs.erunpaas.com"},
 	}
 
-	traced := spec.command()
-	executed := helmDeployCommandSpec(spec.Params(io.Discard, io.Discard), spec.ChartPath)
+	traced := helmDeployCommand(spec)
+	executed := helmDeployCommandSpec(HelmDeployParamsFor(spec, io.Discard, io.Discard), spec.ChartPath)
 
 	if !reflect.DeepEqual(traced.Args, executed.Args) {
 		t.Fatalf("executed helm command diverges from the traced command (a field was dropped in the Params round-trip):\n  traced:   %v\n  executed: %v", traced.Args, executed.Args)

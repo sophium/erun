@@ -31,7 +31,7 @@ stringData:
 // applyGatewayCredentialsSecret delivers the gateway credential, keeping it out of argv,
 // traces, and helm values. A missing credential errors rather than leave the chart
 // pointing at a missing Secret.
-func applyGatewayCredentialsSecret(ctx core.Context, deployInput HelmDeploySpec) error {
+func applyGatewayCredentialsSecret(ctx core.Context, deployInput seam.HelmDeploySpec) error {
 	// Resolved like the chart values, so the Secret exists exactly when the env reads it.
 	gateway := config.EffectiveGateway(deployInput.Claude, deployInput.OpenRouter)
 	if !gateway.Configured() {
@@ -53,7 +53,7 @@ func applyGatewayCredentialsSecret(ctx core.Context, deployInput HelmDeploySpec)
 
 // pruneGatewayCredentialsSecret removes the credential after a runtime rollout
 // without the gateway; it runs after rollout because the old pod still references it.
-func pruneGatewayCredentialsSecret(ctx core.Context, deployInput HelmDeploySpec) error {
+func pruneGatewayCredentialsSecret(ctx core.Context, deployInput seam.HelmDeploySpec) error {
 	if deployInput.ReleaseName != config.RuntimeReleaseName(deployInput.Tenant) {
 		return nil
 	}

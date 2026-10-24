@@ -9,7 +9,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 var (
@@ -45,7 +44,7 @@ func dockerfileConsumesDindMemoryLimit(dockerfilePath string) bool {
 
 // ApplyDindResourceBuildArgs passes the sidecar's limits because a RUN step's
 // cgroup is a sibling of the sidecar's and cannot read them itself.
-func ApplyDindResourceBuildArgs(store seam.DockerStore, projectRoot, environment string, build *dockerspec.DockerBuildSpec) {
+func ApplyDindResourceBuildArgs(store seam.DockerStore, projectRoot, environment string, build *seam.DockerBuildSpec) {
 	needsCPU := dockerfileConsumesDindCPULimit(build.DockerfilePath)
 	needsMemory := dockerfileConsumesDindMemoryLimit(build.DockerfilePath)
 	if !needsCPU && !needsMemory {

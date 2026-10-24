@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 func formatHelmBool(value bool) string {
@@ -71,7 +72,7 @@ func helmIdleTimezone(config configpkg.EnvironmentIdleConfig) string {
 
 // helmCloudContextSetArgs omits an empty region: the chart turns it into
 // AWS_REGION, and an empty AWS_REGION overrides the pod's own AWS profile.
-func helmCloudContextSetArgs(d HelmDeploySpec) []string {
+func helmCloudContextSetArgs(d seam.HelmDeploySpec) []string {
 	args := []string{
 		"--set-string", "cloudContext.name=" + d.CloudContextName,
 		"--set-string", "cloudContext.provider=" + d.CloudProvider,
@@ -88,7 +89,7 @@ func helmCloudContextSetArgs(d HelmDeploySpec) []string {
 
 // helmRegistrySetArgs guards each value on presence so older charts are
 // unaffected.
-func helmRegistrySetArgs(d HelmDeploySpec) []string {
+func helmRegistrySetArgs(d seam.HelmDeploySpec) []string {
 	var args []string
 	if registry := strings.TrimSpace(d.ContainerRegistry); registry != "" {
 		args = append(args, "--set-string", "containerRegistry="+registry)

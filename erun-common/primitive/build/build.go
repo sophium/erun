@@ -14,7 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
-func ResolveCurrentDockerBuildSpecs(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, target model.DockerCommandTarget) ([]dockerspec.DockerBuildSpec, error) {
+func ResolveCurrentDockerBuildSpecs(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, target model.DockerCommandTarget) ([]seam.DockerBuildSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	buildContexts, err := ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, target)
@@ -22,7 +22,7 @@ func ResolveCurrentDockerBuildSpecs(ctx core.Context, store seam.DockerStore, fi
 		return nil, err
 	}
 
-	builds := make([]dockerspec.DockerBuildSpec, 0, len(buildContexts))
+	builds := make([]seam.DockerBuildSpec, 0, len(buildContexts))
 	for _, buildContext := range buildContexts {
 		build, err := ResolveDockerBuildSpec(ctx, store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 		if err != nil {
@@ -110,12 +110,12 @@ func TraceConfiguredBuildPaths(ctx core.Context, findProjectRoot seam.ProjectFin
 	}
 }
 
-func BuildExecutionSpecFromDockerBuilds(builds []dockerspec.DockerBuildSpec) dockerspec.BuildExecutionSpec {
+func BuildExecutionSpecFromDockerBuilds(builds []seam.DockerBuildSpec) dockerspec.BuildExecutionSpec {
 	return dockerspec.BuildExecutionSpec{DockerBuilds: builds}
 }
 
-func dockerBuildsByTag(builds []dockerspec.DockerBuildSpec) map[string]dockerspec.DockerBuildSpec {
-	buildsByTag := make(map[string]dockerspec.DockerBuildSpec, len(builds))
+func dockerBuildsByTag(builds []seam.DockerBuildSpec) map[string]seam.DockerBuildSpec {
+	buildsByTag := make(map[string]seam.DockerBuildSpec, len(builds))
 	for _, build := range builds {
 		buildsByTag[strings.TrimSpace(build.Image.Tag)] = build
 	}

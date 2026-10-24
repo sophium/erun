@@ -8,6 +8,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -36,7 +37,7 @@ func TestReconcilePlatformAliasSecretRetrofitsAnEnvironmentInitialisedWithoutOne
 	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
-	deployInput := HelmDeploySpec{
+	deployInput := seam.HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
 		ReleaseName: configpkg.RuntimeReleaseName("team"),
@@ -88,7 +89,7 @@ func TestReconcilePlatformAliasSecretLeavesAnEnvironmentThatAlreadyNamesOneAlone
 		t.Fatalf("save env config: %v", err)
 	}
 
-	deployInput := HelmDeploySpec{
+	deployInput := seam.HelmDeploySpec{
 		Tenant:                  "team",
 		Environment:             "dev",
 		ReleaseName:             configpkg.RuntimeReleaseName("team"),
@@ -118,9 +119,9 @@ func TestRetrofittedAliasRecordSurvivesTheDeploysOwnVersionPersistence(t *testin
 	signedInDefaultHostStore(t, testPlatformAliasProvider())
 	mustSaveEnvConfig(t, configpkg.EnvConfig{Name: "dev"})
 
-	spec := DeploySpec{
+	spec := seam.DeploySpec{
 		Target: configpkg.OpenResult{Tenant: "team", Environment: "dev", EnvConfig: mustLoadEnvConfig(t)},
-		Deploy: HelmDeploySpec{
+		Deploy: seam.HelmDeploySpec{
 			Tenant:               "team",
 			Environment:          "dev",
 			ReleaseName:          configpkg.RuntimeReleaseName("team"),

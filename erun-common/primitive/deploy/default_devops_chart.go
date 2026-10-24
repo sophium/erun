@@ -61,7 +61,7 @@ func renderDefaultDevopsChartTemplate(moduleName, appVersion string, data []byte
 	return []byte(content)
 }
 
-func resolveOpenRuntimeDeploySpec(ctx core.Context, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target config.OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
+func resolveOpenRuntimeDeploySpec(ctx core.Context, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target config.OpenResult, allowLocalBuilds bool) (seam.DeploySpec, error) {
 	// Before any --runtime-image override, a RuntimeImage here is a persisted memo, not this invocation's choice.
 	if target.RemoteRepo() {
 		return ResolvePublishedDevopsDeploySpecWithOverrides(ctx, target, "", "", false)
@@ -74,7 +74,7 @@ func resolveOpenRuntimeDeploySpec(ctx core.Context, store seam.DeployStore, find
 			return spec, nil
 		}
 		if !isHelmChartNotFoundForComponent(err) {
-			return DeploySpec{}, err
+			return seam.DeploySpec{}, err
 		}
 	}
 

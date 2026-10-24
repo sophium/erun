@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
@@ -34,7 +35,7 @@ func joinRegistryImage(registry, image string) string {
 
 // RunDeployRegistryCopies mirrors images FROM -> each TO registry, tracing every
 // copy even under --dry-run.
-func RunDeployRegistryCopies(ctx core.Context, execution DeploySpec) error {
+func RunDeployRegistryCopies(ctx core.Context, execution seam.DeploySpec) error {
 	copies, err := ResolveDeployRegistryCopies(execution)
 	if err != nil {
 		return err
@@ -59,7 +60,7 @@ func RunDeployRegistryCopies(ctx core.Context, execution DeploySpec) error {
 	return nil
 }
 
-func ResolveDeployRegistryCopies(execution DeploySpec) ([]registryCopy, error) {
+func ResolveDeployRegistryCopies(execution seam.DeploySpec) ([]registryCopy, error) {
 	list, err := config.DeployTargetContainerRegistries(execution.Target)
 	if err != nil {
 		return nil, err
@@ -85,7 +86,7 @@ func ResolveDeployRegistryCopies(execution DeploySpec) ([]registryCopy, error) {
 	return copies, nil
 }
 
-func deployCopyImages(execution DeploySpec) []string {
+func deployCopyImages(execution seam.DeploySpec) []string {
 	seen := make(map[string]struct{})
 	images := make([]string, 0, 2)
 	add := func(name, version string) {
@@ -114,7 +115,7 @@ func deployCopyImages(execution DeploySpec) []string {
 	return images
 }
 
-func runtimeCopyImage(execution DeploySpec) (string, string) {
+func runtimeCopyImage(execution seam.DeploySpec) (string, string) {
 	if override := strings.TrimSpace(execution.Deploy.ImageOverrides[config.DevopsComponentName]); override != "" {
 		return imageNameVersion(override)
 	}

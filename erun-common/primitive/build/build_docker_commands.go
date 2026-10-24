@@ -23,14 +23,14 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
-func DockerImageBuilder(buildInput dockerspec.DockerBuildSpec, stdout, stderr io.Writer) error {
+func DockerImageBuilder(buildInput seam.DockerBuildSpec, stdout, stderr io.Writer) error {
 	if buildInput.Promote {
 		return promoteDockerImage(buildInput, stdout, stderr)
 	}
 	return runMultiPlatformBuild(buildInput, stdout, stderr)
 }
 
-func runMultiPlatformBuild(buildInput dockerspec.DockerBuildSpec, stdout, stderr io.Writer) error {
+func runMultiPlatformBuild(buildInput seam.DockerBuildSpec, stdout, stderr io.Writer) error {
 	if err := verifyDockerBuildPlatforms(buildInput.Platforms); err != nil {
 		return err
 	}
@@ -59,7 +59,7 @@ func runMultiPlatformBuild(buildInput dockerspec.DockerBuildSpec, stdout, stderr
 
 // buildPlatformImageFromSource builds, tags and pushes one platform, returning the
 // captured build output for step timing.
-func buildPlatformImageFromSource(buildInput dockerspec.DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
+func buildPlatformImageFromSource(buildInput seam.DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
 	platformTag := dockerspec.PlatformSuffixedTag(buildInput.Image.Tag, platform)
 	args := dockerspec.DockerBuildArgs(buildInput, platform)
 	output, err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, buildInput.Verbosity, stdout, stderr)
@@ -75,7 +75,7 @@ func buildPlatformImageFromSource(buildInput dockerspec.DockerBuildSpec, platfor
 	return output, err
 }
 
-func promoteDockerImage(buildInput dockerspec.DockerBuildSpec, stdout, stderr io.Writer) error {
+func promoteDockerImage(buildInput seam.DockerBuildSpec, stdout, stderr io.Writer) error {
 	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
 	for _, platform := range buildInput.Platforms {
 		started := time.Now()
@@ -98,7 +98,7 @@ func promoteDockerImage(buildInput dockerspec.DockerBuildSpec, stdout, stderr io
 
 // promotePlatformImage re-tags and pushes one platform's cached fingerprint image,
 // falling back to a real build when settlePromoteFailure deems the cache untrustworthy.
-func promotePlatformImage(buildInput dockerspec.DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
+func promotePlatformImage(buildInput seam.DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
 	fpTag := dockerspec.FingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
 	platformTag := dockerspec.PlatformSuffixedTag(buildInput.Image.Tag, platform)
 	err := runDockerTag(fpTag, platformTag, stdout, stderr)
@@ -128,7 +128,7 @@ func promoteSourceMissing(fpTag string) bool {
 
 // settlePromoteFailure rebuilds from source when the cached image vanished, the registry
 // reports "unknown blob", or the image is not single-platform; other failures are returned.
-func settlePromoteFailure(buildInput dockerspec.DockerBuildSpec, platform, platformTag, fpTag string, promoteErr error, stdout, stderr io.Writer) (string, error) {
+func settlePromoteFailure(buildInput seam.DockerBuildSpec, platform, platformTag, fpTag string, promoteErr error, stdout, stderr io.Writer) (string, error) {
 	switch {
 	case promoteErr == nil:
 		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s would publish a multi-platform image under a per-arch tag; rebuilding %s from source instead of trusting the cache\n", platformTag, fpTag, platform)
@@ -182,7 +182,7 @@ func isImageIndexMediaType(mediaType string) bool {
 
 // pushPlatformImage publishes each platform as soon as it builds: the containerd store
 // may collect tag-only content before a later push pass runs.
-func pushPlatformImage(buildInput dockerspec.DockerBuildSpec, platformTag string, stdout, stderr io.Writer) error {
+func pushPlatformImage(buildInput seam.DockerBuildSpec, platformTag string, stdout, stderr io.Writer) error {
 	if !buildInput.Push {
 		return nil
 	}
@@ -203,7 +203,7 @@ func assembleMultiPlatformManifest(tag string, perPlatformTags []string, insecur
 	return runDockerSimpleCommandWithVerbosity(pushArgs, verbosity, stdout, stderr)
 }
 
-func tagFingerprintAfterBuild(buildInput dockerspec.DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
+func tagFingerprintAfterBuild(buildInput seam.DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
 	if buildInput.Fingerprint == "" {
 		return nil
 	}
@@ -217,7 +217,7 @@ func tagFingerprintAfterBuild(buildInput dockerspec.DockerBuildSpec, platform st
 
 // tagStableBaseVersionAfterBuild tags a snapshot base locally per arch so wrapper builds
 // can resolve it; no-op for release builds.
-func tagStableBaseVersionAfterBuild(buildInput dockerspec.DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
+func tagStableBaseVersionAfterBuild(buildInput seam.DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
 	target := dockerspec.StableBaseVersionTag(buildInput.Image)
 	if target == "" {
 		return nil

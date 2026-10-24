@@ -18,7 +18,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-func runDeploySpecsPlan(ctx core.Context, executions []DeploySpec, deploy HelmChartDeployerFunc) error {
+func runDeploySpecsPlan(ctx core.Context, executions []seam.DeploySpec, deploy seam.HelmChartDeployerFunc) error {
 	plan, err := loadProjectK8sPlanForDeploy(executions)
 	if err != nil {
 		return err
@@ -34,7 +34,7 @@ func runDeploySpecsPlan(ctx core.Context, executions []DeploySpec, deploy HelmCh
 
 // loadProjectK8sPlanForDeploy reads the plan once: all specs share a repo and
 // environment. A malformed config errors rather than shipping a wrong plan.
-func loadProjectK8sPlanForDeploy(executions []DeploySpec) (configpkg.ProjectK8sConfig, error) {
+func loadProjectK8sPlanForDeploy(executions []seam.DeploySpec) (configpkg.ProjectK8sConfig, error) {
 	for _, execution := range executions {
 		plan, err := loadProjectK8sPlanForRepo(execution.Target.RepoPath, execution.Target.Environment)
 		if err != nil {
@@ -153,7 +153,7 @@ func replayParallelDeployCapture(ctx core.Context, capture *parallelDeployCaptur
 
 // runDeployStep runs serially for one spec or --dry-run so traces stay
 // deterministic.
-func runDeployStep(ctx core.Context, stepIndex int, specs []DeploySpec, deploy HelmChartDeployerFunc) error {
+func runDeployStep(ctx core.Context, stepIndex int, specs []seam.DeploySpec, deploy seam.HelmChartDeployerFunc) error {
 	if len(specs) == 0 {
 		return nil
 	}
@@ -179,7 +179,7 @@ func runDeployStep(ctx core.Context, stepIndex int, specs []DeploySpec, deploy H
 		wg.Add(1)
 		specCtx, capture := isolateContextForParallelDeploy(ctx)
 		captures[i] = capture
-		go func(i int, spec DeploySpec, specCtx core.Context) {
+		go func(i int, spec seam.DeploySpec, specCtx core.Context) {
 			defer wg.Done()
 			errs[i] = RunDeploySpec(specCtx, spec, deploy)
 		}(i, spec, specCtx)
@@ -194,7 +194,7 @@ func runDeployStep(ctx core.Context, stepIndex int, specs []DeploySpec, deploy H
 // chartDependencyBuildPlan builds a local umbrella's declared dependencies, which
 // helm upgrade --install requires in charts/; it pulls only pinned published
 // charts.
-func chartDependencyBuildPlan(ctx core.Context, deployInput HelmDeploySpec) (*helm.CommandSpec, error) {
+func chartDependencyBuildPlan(ctx core.Context, deployInput seam.HelmDeploySpec) (*helm.CommandSpec, error) {
 	chartPath := strings.TrimSpace(deployInput.ChartPath)
 	declares, err := localChartDeclaresDependencies(chartPath)
 	if err != nil || !declares {
@@ -213,7 +213,7 @@ func localChartDeclaresDependencies(chartPath string) (bool, error) {
 }
 
 // Called after the single-flight acquire so deploys never race on charts/.
-func runChartDependencyBuild(ctx core.Context, deployInput HelmDeploySpec, build *helm.CommandSpec, target string) error {
+func runChartDependencyBuild(ctx core.Context, deployInput seam.HelmDeploySpec, build *helm.CommandSpec, target string) error {
 	if build == nil {
 		return nil
 	}
@@ -232,7 +232,7 @@ type publishedValuesPull struct {
 // planPublishedValuesPull unpacks a by-reference umbrella so -f can use its
 // bundled values.<env>.yaml, which helm never applies on its own. The dest is
 // deterministic so repeated deploys trace identically.
-func planPublishedValuesPull(ctx core.Context, deployInput *HelmDeploySpec) *publishedValuesPull {
+func planPublishedValuesPull(ctx core.Context, deployInput *seam.HelmDeploySpec) *publishedValuesPull {
 	ref := strings.TrimSpace(deployInput.ChartPath)
 	if !isOCIChartReference(ref) || strings.TrimSpace(deployInput.SubchartKey) == "" {
 		return nil
@@ -241,7 +241,7 @@ func planPublishedValuesPull(ctx core.Context, deployInput *HelmDeploySpec) *pub
 	dest := filepath.Join(os.TempDir(), "erun-deploy-values-"+chartName)
 	envSlug := strings.ToLower(strings.TrimSpace(deployInput.Environment))
 	deployInput.PulledValuesFilePath = filepath.Join(dest, chartName, "values."+envSlug+".yaml")
-	pull := helm.CommandSpec{Name: "helm", Args: []string{"pull", ref, "--version", deployInput.resolvedChartVersion(), "--untar", "--untardir", dest}}
+	pull := helm.CommandSpec{Name: "helm", Args: []string{"pull", ref, "--version", resolvedChartVersion(*deployInput), "--untar", "--untardir", dest}}
 	ctx.TraceCommand(pull.Dir, pull.Name, pull.Args...)
 	return &publishedValuesPull{command: pull, dest: dest}
 }
@@ -270,7 +270,7 @@ var ensureDeployNamespace seam.NamespaceEnsurerFunc = kube.EnsureKubernetesNames
 
 // applyPreRolloutResources ensures the namespace first: on a first deploy the
 // secret applies below would otherwise fail with "namespaces not found".
-func applyPreRolloutResources(ctx core.Context, deployInput *HelmDeploySpec) error {
+func applyPreRolloutResources(ctx core.Context, deployInput *seam.HelmDeploySpec) error {
 	if !ctx.DryRun {
 		if err := ensureDeployNamespace(deployInput.KubernetesContext, deployInput.Namespace); err != nil {
 			return err
@@ -295,7 +295,7 @@ func applyPreRolloutResources(ctx core.Context, deployInput *HelmDeploySpec) err
 	return recordMCPAuthKeyOnEnv(ctx, *deployInput)
 }
 
-func RunHelmDeploy(ctx core.Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc) error {
+func RunHelmDeploy(ctx core.Context, deployInput seam.HelmDeploySpec, deploy seam.HelmChartDeployerFunc) error {
 	if deploy == nil {
 		return fmt.Errorf("helm deployer is required")
 	}
@@ -317,7 +317,7 @@ func RunHelmDeploy(ctx core.Context, deployInput HelmDeploySpec, deploy HelmChar
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
 	valuesPull := planPublishedValuesPull(ctx, &deployInput)
-	command := deployInput.command()
+	command := helmDeployCommand(deployInput)
 	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
 	tracePodWatchAction(ctx, deployInput.ReleaseName, deployInput.Namespace, deployInput.KubernetesContext)
 
@@ -341,7 +341,7 @@ func RunHelmDeploy(ctx core.Context, deployInput HelmDeploySpec, deploy HelmChar
 	return err
 }
 
-func runHelmDeployExecute(ctx core.Context, deployInput HelmDeploySpec, valuesPull *publishedValuesPull, depBuild *helm.CommandSpec, deploy HelmChartDeployerFunc, target string) error {
+func runHelmDeployExecute(ctx core.Context, deployInput seam.HelmDeploySpec, valuesPull *publishedValuesPull, depBuild *helm.CommandSpec, deploy seam.HelmChartDeployerFunc, target string) error {
 	cleanupValues, err := runPublishedValuesPull(ctx, valuesPull, target)
 	if err != nil {
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
@@ -361,7 +361,7 @@ func runHelmDeployExecute(ctx core.Context, deployInput HelmDeploySpec, valuesPu
 
 // helmDeployTargetLabel names non-runtime releases so a single-component deploy
 // is not mistaken for a full-env redeploy.
-func helmDeployTargetLabel(deployInput HelmDeploySpec) string {
+func helmDeployTargetLabel(deployInput seam.HelmDeploySpec) string {
 	target := deployInput.Tenant + "/" + deployInput.Environment
 	if release := strings.TrimSpace(deployInput.ReleaseName); release != "" && release != configpkg.RuntimeReleaseName(deployInput.Tenant) {
 		target += " · " + release
@@ -374,7 +374,7 @@ func helmDeployTargetLabel(deployInput HelmDeploySpec) string {
 
 // The "==> Deploy of <release> failed" / "==> Deployed <target> in <elapsed>"
 // lines are parsed by the desktop activity queue.
-func runHelmDeployRollout(ctx core.Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc, target string) error {
+func runHelmDeployRollout(ctx core.Context, deployInput seam.HelmDeploySpec, deploy seam.HelmChartDeployerFunc, target string) error {
 	ctx.Info("==> Deploying " + target)
 	ctx.Info("    namespace " + deployInput.Namespace + " on context " + deployInput.KubernetesContext)
 	if timeout := strings.TrimSpace(deployInput.Timeout); timeout != "" {
@@ -400,7 +400,7 @@ func runHelmDeployRollout(ctx core.Context, deployInput HelmDeploySpec, deploy H
 
 // RunDeploySpec installs already-published artifacts; it builds and pushes
 // nothing. SkipHelm avoids rolling unchanged pods.
-func RunDeploySpec(ctx core.Context, execution DeploySpec, deploy HelmChartDeployerFunc) error {
+func RunDeploySpec(ctx core.Context, execution seam.DeploySpec, deploy seam.HelmChartDeployerFunc) error {
 	if execution.SkipHelm {
 		ctx.Trace("deploy: skipping helm upgrade for " + execution.DeployContext.ComponentName + " (all images cached, no rebuild)")
 		return nil

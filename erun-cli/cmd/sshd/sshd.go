@@ -14,13 +14,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/workspace"
-	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/spf13/cobra"
 )
 
-func NewSSHDCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) *cobra.Command {
+func NewSSHDCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error), deployHelmChart seam.HelmChartDeployerFunc, runRemoteCommand seam.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) *cobra.Command {
 	var publicKeyPath string
 	var localPort int
 	target := model.OpenParams{}
@@ -104,7 +103,7 @@ func runSSHDSyncCommand(ctx context.Context, cmdCtx core.Context, result config.
 	return cmdCtx.WriteResult(synced)
 }
 
-func runSSHDInitCommand(ctx core.Context, result config.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, config.EnvConfig) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
+func runSSHDInitCommand(ctx core.Context, result config.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, config.EnvConfig) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error), deployHelmChart seam.HelmChartDeployerFunc, runRemoteCommand seam.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
 	// The desktop's Local shell gives no PTY exit, so the activity entry and recorded outcome
 	// are its only completion signal.
 	ctx.Info(fmt.Sprintf("==> SSHD init %s/%s", result.Tenant, result.Environment))
@@ -116,7 +115,7 @@ func runSSHDInitCommand(ctx core.Context, result config.OpenResult, publicKeyPat
 	return nil
 }
 
-func runSSHDInitForTarget(ctx core.Context, result config.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, config.EnvConfig) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
+func runSSHDInitForTarget(ctx core.Context, result config.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, config.EnvConfig) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error), deployHelmChart seam.HelmChartDeployerFunc, runRemoteCommand seam.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
 	if err := validateSSHDInitDependencies(result, saveEnvConfig, resolveRuntimeDeploySpec, deployHelmChart); err != nil {
 		return err
 	}
@@ -142,7 +141,7 @@ func runSSHDInitForTarget(ctx core.Context, result config.OpenResult, publicKeyP
 	return writeSSHDInitSummary(ctx, result, localConfig)
 }
 
-func validateSSHDInitDependencies(result config.OpenResult, saveEnvConfig func(string, config.EnvConfig) error, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc) error {
+func validateSSHDInitDependencies(result config.OpenResult, saveEnvConfig func(string, config.EnvConfig) error, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error), deployHelmChart seam.HelmChartDeployerFunc) error {
 	if err := open.ValidateSSHDTarget(result); err != nil {
 		return err
 	}
@@ -203,7 +202,7 @@ func saveSSHDEnvConfig(ctx core.Context, result config.OpenResult, updatedEnv co
 	return saveEnvConfig(result.Tenant, updatedEnv)
 }
 
-func deploySSHDConfig(ctx core.Context, result config.OpenResult, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc) error {
+func deploySSHDConfig(ctx core.Context, result config.OpenResult, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (seam.DeploySpec, error), deployHelmChart seam.HelmChartDeployerFunc) error {
 	spec, err := resolveRuntimeDeploySpec(ctx, result, false)
 	if err != nil {
 		return err

@@ -30,7 +30,7 @@ const terraformPlanFile = "apply.tfplan"
 // RunTerraform resolves and, unless dry-run, runs Terraform against a per-env
 // root, tracing everything first. dispatch runs it inside a remote env's own
 // pod; nil defaults to RunRemoteCommand.
-func RunTerraform(ctx core.Context, params model.TerraformParams, store seam.TerraformStore, confirm seam.TerraformConfirmFunc, dispatch kube.RemoteCommandRunnerFunc) (model.TerraformResult, error) {
+func RunTerraform(ctx core.Context, params model.TerraformParams, store seam.TerraformStore, confirm seam.TerraformConfirmFunc, dispatch seam.RemoteCommandRunnerFunc) (model.TerraformResult, error) {
 	if store == nil {
 		store = configpkg.ConfigStore{}
 	}
@@ -228,7 +228,7 @@ func requiresTerraformConfirmation(op model.TerraformOperation) bool {
 
 // dispatchTerraform runs `erun terraform <op>` in the target pod, behind the
 // same confirm gate as a local run.
-func dispatchTerraform(ctx core.Context, target terraformTarget, params model.TerraformParams, confirm seam.TerraformConfirmFunc, dispatch kube.RemoteCommandRunnerFunc) (model.TerraformResult, error) {
+func dispatchTerraform(ctx core.Context, target terraformTarget, params model.TerraformParams, confirm seam.TerraformConfirmFunc, dispatch seam.RemoteCommandRunnerFunc) (model.TerraformResult, error) {
 	if len(params.ExtraArgs) > 0 {
 		return model.TerraformResult{}, fmt.Errorf("terraform %s/%s: extra terraform args are not supported when dispatching %s into %s's own runtime pod from off-environment", target.Tenant, target.Environment, params.Operation, target.Environment)
 	}

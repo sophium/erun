@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
@@ -37,12 +38,12 @@ func RunPushCommand(ctx core.Context, op func(core.Context) error) (err error) {
 	return op(ctx)
 }
 
-func RunDockerPush(ctx core.Context, pushInput dockerspec.DockerPushSpec, push seam.DockerImagePusherFunc) error {
+func RunDockerPush(ctx core.Context, pushInput model.DockerPushSpec, push seam.DockerImagePusherFunc) error {
 	if push == nil {
 		push = dockerregistry.DockerImagePusher
 	}
 	pushInput.Verbosity = ctx.Verbosity
-	command := pushInput.Command()
+	command := dockerspec.DockerPushCommand(pushInput)
 	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
 	if ctx.DryRun {
 		return nil
@@ -179,7 +180,7 @@ func PackageComponentCharts(ctx core.Context, specs []helm.HelmChartPublishSpec)
 
 // ComponentChartPublishVersion skips version-pinned bases; empty lets each chart
 // use its own image version.
-func ComponentChartPublishVersion(builds []dockerspec.DockerBuildSpec) string {
+func ComponentChartPublishVersion(builds []seam.DockerBuildSpec) string {
 	for _, buildInput := range builds {
 		if buildInput.Image.VersionFromBuildDir {
 			continue

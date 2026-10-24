@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
@@ -30,7 +31,7 @@ stringData:
 }
 
 // applyCloudflareCredentialsSecret keeps the token out of argv, the trace, and helm values.
-func applyCloudflareCredentialsSecret(ctx core.Context, deployInput HelmDeploySpec) error {
+func applyCloudflareCredentialsSecret(ctx core.Context, deployInput seam.HelmDeploySpec) error {
 	if !deployInput.CloudflareEnabled || strings.TrimSpace(deployInput.CloudflareSecretName) == "" {
 		return nil
 	}
@@ -60,7 +61,7 @@ func applyCloudflareCredentialsSecret(ctx core.Context, deployInput HelmDeploySp
 }
 
 // applyCloudflareDeployMetadata fills Cloudflare deploy fields; the Secret is applied at execution.
-func applyCloudflareDeployMetadata(store config.CloudReadStore, env config.EnvConfig, deployInput *HelmDeploySpec) {
+func applyCloudflareDeployMetadata(store config.CloudReadStore, env config.EnvConfig, deployInput *seam.HelmDeploySpec) {
 	if deployInput == nil {
 		return
 	}

@@ -9,6 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 )
@@ -150,7 +151,7 @@ func TestReconcilePlatformAliasSecretHonoursTheOperatorsExplicitAlias(t *testing
 		t.Fatalf("save env config: %v", err)
 	}
 
-	deployInput := HelmDeploySpec{
+	deployInput := seam.HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
 		ReleaseName: configpkg.RuntimeReleaseName("team"),
@@ -192,7 +193,7 @@ func TestReconcilePlatformAliasSecretReportsAnAmbiguousHostWithoutTheFlag(t *tes
 		t.Fatalf("save env config: %v", err)
 	}
 
-	deployInput := HelmDeploySpec{
+	deployInput := seam.HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
 		ReleaseName: configpkg.RuntimeReleaseName("team"),
@@ -232,7 +233,7 @@ func TestReconcilePlatformAliasSecretLeavesARecordedEnvironmentAloneOnAnAmbiguou
 		t.Fatalf("save env config: %v", err)
 	}
 
-	deployInput := HelmDeploySpec{
+	deployInput := seam.HelmDeploySpec{
 		Tenant:                  "team",
 		Environment:             "dev",
 		ReleaseName:             configpkg.RuntimeReleaseName("team"),
@@ -267,7 +268,7 @@ func TestReconcilePlatformAliasSecretSaysWhenAnExplicitAliasWasNotUsed(t *testin
 		t.Fatalf("save env config: %v", err)
 	}
 
-	deployInput := HelmDeploySpec{
+	deployInput := seam.HelmDeploySpec{
 		Tenant:                  "team",
 		Environment:             "dev",
 		ReleaseName:             configpkg.RuntimeReleaseName("team"),
@@ -298,7 +299,7 @@ func TestReconcilePlatformAliasSecretReportsAnExplicitAliasOnADeploy(t *testing.
 	}
 
 	const alias = "erun+api.nowhere.example@erun"
-	deployInput := HelmDeploySpec{
+	deployInput := seam.HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
 		ReleaseName: configpkg.RuntimeReleaseName("team"),
@@ -330,7 +331,7 @@ func TestReconcilePlatformAliasSecretScopesItselfToTheRuntimeRelease(t *testing.
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
 	signedInDefaultHostStore(t, testPlatformAliasProvider())
 
-	deployInput := HelmDeploySpec{
+	deployInput := seam.HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
 		ReleaseName: "team-dev-api",

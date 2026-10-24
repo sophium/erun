@@ -9,6 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 // The dry-run harness cannot produce these AWS errors, so the contract is tested here.
@@ -60,7 +61,7 @@ func assertErrorMentions(t *testing.T, err error, expectMsg string, wants ...str
 	}
 }
 
-func powerErrorTestStore() CloudContextStore {
+func powerErrorTestStore() seam.CloudContextStore {
 	return stubCloudContextStore{config: configpkg.ERunConfig{
 		CloudProviders: []model.CloudProviderConfig{{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS, Profile: "dev-profile"}},
 		CloudContexts: []model.CloudContextConfig{{

@@ -21,3 +21,10 @@ type BootstrapInitInteraction struct {
 	DefaultValue string                       `json:"defaultValue,omitempty"`
 	Details      string                       `json:"details,omitempty"`
 }
+
+type (
+	RemoteCommandResult struct {
+		Stdout string
+		Stderr string
+	}
+)

@@ -10,6 +10,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 type awsDescribeInstanceJSON struct {
@@ -46,7 +47,7 @@ type awsDescribeVolumeJSON struct {
 
 // RecoverCloudContextFromAWS rebuilds a lost context record from its surviving EC2 instance.
 // InstanceProfileName and RoleName stay blank: the instance already has a profile.
-func RecoverCloudContextFromAWS(ctx core.Context, store CloudContextStore, params model.RecoverCloudContextParams, deps CloudContextDependencies) (model.RecoverCloudContextResult, error) {
+func RecoverCloudContextFromAWS(ctx core.Context, store seam.CloudContextStore, params model.RecoverCloudContextParams, deps CloudContextDependencies) (model.RecoverCloudContextResult, error) {
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)
 	params.CloudProviderAlias = strings.TrimSpace(params.CloudProviderAlias)
 	params.Region = strings.TrimSpace(params.Region)

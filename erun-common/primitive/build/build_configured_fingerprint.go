@@ -7,13 +7,14 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 // materializeConfiguredFingerprints pulls the fp-tagged images configured fingerprints
 // name so a fresh checkout can promote them; failures fall through to a rebuild.
-func materializeConfiguredFingerprints(ctx core.Context, builds []dockerspec.DockerBuildSpec) (map[string]struct{}, error) {
+func materializeConfiguredFingerprints(ctx core.Context, builds []seam.DockerBuildSpec) (map[string]struct{}, error) {
 	materialized := make(map[string]struct{})
 	configuredByEnv := make(map[string]map[string]string)
 
@@ -63,7 +64,7 @@ func loadConfiguredFingerprints(projectRoot, environment string, cache map[strin
 	return configured, nil
 }
 
-func materializeBuildFingerprints(ctx core.Context, build dockerspec.DockerBuildSpec, hash string, materialized map[string]struct{}) {
+func materializeBuildFingerprints(ctx core.Context, build seam.DockerBuildSpec, hash string, materialized map[string]struct{}) {
 	for _, platform := range build.Platforms {
 		fpTag := dockerspec.FingerprintTag(build.Image, hash, platform)
 		if exists, err := dockerregistry.DockerImageExists(fpTag); err == nil && exists {

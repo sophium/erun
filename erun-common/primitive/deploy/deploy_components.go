@@ -309,7 +309,7 @@ func componentRankByPlan(plan config.ProjectK8sConfig) func(name string) int {
 	}
 }
 
-func groupDeploySpecsByPlan(specs []DeploySpec, plan config.ProjectK8sConfig) [][]DeploySpec {
+func groupDeploySpecsByPlan(specs []seam.DeploySpec, plan config.ProjectK8sConfig) [][]seam.DeploySpec {
 	if len(specs) == 0 {
 		return nil
 	}
@@ -317,9 +317,9 @@ func groupDeploySpecsByPlan(specs []DeploySpec, plan config.ProjectK8sConfig) []
 		return serialDeploySpecGroups(specs)
 	}
 	specsByName, trailing := partitionDeploySpecsByPlan(specs, plan)
-	out := make([][]DeploySpec, 0, len(plan.Deployments)+len(trailing))
+	out := make([][]seam.DeploySpec, 0, len(plan.Deployments)+len(trailing))
 	for _, step := range plan.Deployments {
-		group := make([]DeploySpec, 0, len(step.Components))
+		group := make([]seam.DeploySpec, 0, len(step.Components))
 		for _, name := range step.Components {
 			if spec, ok := specsByName[strings.TrimSpace(name)]; ok {
 				group = append(group, spec)
@@ -330,28 +330,28 @@ func groupDeploySpecsByPlan(specs []DeploySpec, plan config.ProjectK8sConfig) []
 		}
 	}
 	for _, spec := range trailing {
-		out = append(out, []DeploySpec{spec})
+		out = append(out, []seam.DeploySpec{spec})
 	}
 	return out
 }
 
-func serialDeploySpecGroups(specs []DeploySpec) [][]DeploySpec {
-	groups := make([][]DeploySpec, 0, len(specs))
+func serialDeploySpecGroups(specs []seam.DeploySpec) [][]seam.DeploySpec {
+	groups := make([][]seam.DeploySpec, 0, len(specs))
 	for _, spec := range specs {
-		groups = append(groups, []DeploySpec{spec})
+		groups = append(groups, []seam.DeploySpec{spec})
 	}
 	return groups
 }
 
-func partitionDeploySpecsByPlan(specs []DeploySpec, plan config.ProjectK8sConfig) (map[string]DeploySpec, []DeploySpec) {
+func partitionDeploySpecsByPlan(specs []seam.DeploySpec, plan config.ProjectK8sConfig) (map[string]seam.DeploySpec, []seam.DeploySpec) {
 	stepIndex := make(map[string]int)
 	for i, step := range plan.Deployments {
 		for _, name := range step.Components {
 			stepIndex[strings.TrimSpace(name)] = i
 		}
 	}
-	specsByName := make(map[string]DeploySpec, len(specs))
-	var trailing []DeploySpec
+	specsByName := make(map[string]seam.DeploySpec, len(specs))
+	var trailing []seam.DeploySpec
 	for _, spec := range specs {
 		name := strings.TrimSpace(spec.DeployContext.ComponentName)
 		if _, planned := stepIndex[name]; planned {

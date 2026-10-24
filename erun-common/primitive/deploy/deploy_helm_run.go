@@ -14,12 +14,13 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // resolveHelmDeployChartPath returns the chart path and an optional cleanup; an
 // OCI chart is pinned on the command line instead of stamped locally.
-func resolveHelmDeployChartPath(params HelmDeployParams) (string, func(), error) {
+func resolveHelmDeployChartPath(params seam.HelmDeployParams) (string, func(), error) {
 	if strings.TrimSpace(params.Version) == "" || isOCIChartReference(params.ChartPath) {
 		return params.ChartPath, nil, nil
 	}
@@ -30,11 +31,11 @@ func resolveHelmDeployChartPath(params HelmDeployParams) (string, func(), error)
 	return chartPath, cleanup, nil
 }
 
-func helmDeployCommandSpec(params HelmDeployParams, chartPath string) helm.CommandSpec {
+func helmDeployCommandSpec(params seam.HelmDeployParams, chartPath string) helm.CommandSpec {
 	// Built from the traced spec so the executed command matches the trace.
 	spec := params.HelmDeploySpec
 	spec.ChartPath = chartPath
-	return spec.command()
+	return helmDeployCommand(spec)
 }
 
 // helmOutputCapture keeps separate buffers: os/exec only aliases stdout and
@@ -51,7 +52,7 @@ func (c *helmOutputCapture) combined() string {
 
 // configureHelmDeployCmdOutput captures helm output silently, teeing it live at
 // debug verbosity.
-func configureHelmDeployCmdOutput(cmd *exec.Cmd, params HelmDeployParams) (*helmOutputCapture, *strings.Builder) {
+func configureHelmDeployCmdOutput(cmd *exec.Cmd, params seam.HelmDeployParams) (*helmOutputCapture, *strings.Builder) {
 	capture := &helmOutputCapture{stdout: new(bytes.Buffer), stderr: new(bytes.Buffer)}
 	if params.Verbosity >= core.VerbosityDebug {
 		cmd.Stdout = core.TeeWriter(params.Stdout, capture.stdout)
@@ -87,7 +88,7 @@ func interruptHelmDeploy(cmd *exec.Cmd, helmDone <-chan error, grace time.Durati
 
 // runHelmDeployWithPodWatch interrupts helm when the pod watcher reports an early
 // container failure, so the deploy fails fast.
-func runHelmDeployWithPodWatch(cmd *exec.Cmd, params HelmDeployParams) (podWatchOutcome, error) {
+func runHelmDeployWithPodWatch(cmd *exec.Cmd, params seam.HelmDeployParams) (podWatchOutcome, error) {
 	watchCtx, cancelWatch := context.WithCancel(context.Background())
 	defer cancelWatch()
 	watchDone := make(chan podWatchOutcome, 1)
@@ -126,7 +127,7 @@ func runHelmDeployWithPodWatch(cmd *exec.Cmd, params HelmDeployParams) (podWatch
 	return watchOutcome, helmErr
 }
 
-func DeployHelmChart(params HelmDeployParams) error {
+func DeployHelmChart(params seam.HelmDeployParams) error {
 	chartPath, cleanup, err := resolveHelmDeployChartPath(params)
 	if err != nil {
 		return err
@@ -148,7 +149,7 @@ func DeployHelmChart(params HelmDeployParams) error {
 	return classifyHelmDeployResult(params, watchOutcome, helmErr, helmOutput, stderr)
 }
 
-func classifyHelmDeployResult(params HelmDeployParams, watchOutcome podWatchOutcome, helmErr error, helmOutput *helmOutputCapture, stderr *strings.Builder) error {
+func classifyHelmDeployResult(params seam.HelmDeployParams, watchOutcome podWatchOutcome, helmErr error, helmOutput *helmOutputCapture, stderr *strings.Builder) error {
 	if watchOutcome.Failure != nil {
 		failure := watchOutcome.Failure
 		failure.Err = helmErr
@@ -205,7 +206,7 @@ func rolloutRanOutOfWaitWhilePulling(pulling []string) string {
 
 // searchedTenantRuntimeChart returns "" for an unsearched chart and for the erun
 // tenant, whose umbrella is the shared chart.
-func searchedTenantRuntimeChart(params HelmDeployParams) string {
+func searchedTenantRuntimeChart(params seam.HelmDeployParams) string {
 	if len(params.ChartCandidates) == 0 {
 		return ""
 	}
@@ -248,7 +249,7 @@ func tracePodWatchAction(ctx core.Context, releaseName, namespace, kubernetesCon
 	ctx.TraceCommand("", "kubectl", args...)
 }
 
-func ClearHelmReleasePendingOperation(params HelmReleaseRecoveryParams) error {
+func ClearHelmReleasePendingOperation(params seam.HelmReleaseRecoveryParams) error {
 	if strings.TrimSpace(params.ReleaseName) == "" {
 		return fmt.Errorf("helm release name is required")
 	}
@@ -256,7 +257,7 @@ func ClearHelmReleasePendingOperation(params HelmReleaseRecoveryParams) error {
 		return fmt.Errorf("helm release namespace is required")
 	}
 
-	command := params.Command()
+	command := HelmReleaseRecoveryCommand(params)
 	cmd := core.Command(command.Name, command.Args...)
 	capture := new(bytes.Buffer)
 	if params.Verbosity >= core.VerbosityDebug {
@@ -286,9 +287,9 @@ func isHelmReleasePendingOperationMessage(message string) bool {
 
 // runHelmUpgradeWithSelectorRecovery recreates a Deployment whose immutable
 // spec.selector changed and retries once; its PVCs survive the delete.
-func runHelmUpgradeWithSelectorRecovery(ctx core.Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc, target string) error {
+func runHelmUpgradeWithSelectorRecovery(ctx core.Context, deployInput seam.HelmDeploySpec, deploy seam.HelmChartDeployerFunc, target string) error {
 	spinner := core.StartSpinner(ctx.Stderr, "deploying "+target)
-	deployErr := deploy(deployInput.Params(ctx.Stdout, ctx.Stderr))
+	deployErr := deploy(HelmDeployParamsFor(deployInput, ctx.Stdout, ctx.Stderr))
 	spinner.Stop()
 	var immutableSelector *HelmImmutableSelectorError
 	if errors.As(deployErr, &immutableSelector) {
@@ -297,7 +298,7 @@ func runHelmUpgradeWithSelectorRecovery(ctx core.Context, deployInput HelmDeploy
 	return deployErr
 }
 
-func recreateDeploymentAndRetry(ctx core.Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc, deployment string) error {
+func recreateDeploymentAndRetry(ctx core.Context, deployInput seam.HelmDeploySpec, deploy seam.HelmChartDeployerFunc, deployment string) error {
 	ctx.Trace("deploy: Deployment " + deployment + " selector is immutable and changed; deleting it (PVCs preserved) and retrying the upgrade")
 	command := deleteDeploymentCommand(deployment, deployInput.Namespace, deployInput.KubernetesContext)
 	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
@@ -305,7 +306,7 @@ func recreateDeploymentAndRetry(ctx core.Context, deployInput HelmDeploySpec, de
 		return fmt.Errorf("recreate deployment %s: %w", deployment, err)
 	}
 	spinner := core.StartSpinner(ctx.Stderr, "redeploying "+deployInput.ReleaseName)
-	err := deploy(deployInput.Params(ctx.Stdout, ctx.Stderr))
+	err := deploy(HelmDeployParamsFor(deployInput, ctx.Stdout, ctx.Stderr))
 	spinner.Stop()
 	return err
 }

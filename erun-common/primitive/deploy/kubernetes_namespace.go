@@ -5,7 +5,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-func WrapHelmChartDeployerWithNamespaceEnsure(ensure seam.NamespaceEnsurerFunc, deploy HelmChartDeployerFunc) HelmChartDeployerFunc {
+func WrapHelmChartDeployerWithNamespaceEnsure(ensure seam.NamespaceEnsurerFunc, deploy seam.HelmChartDeployerFunc) seam.HelmChartDeployerFunc {
 	if deploy == nil {
 		deploy = DeployHelmChart
 	}
@@ -13,7 +13,7 @@ func WrapHelmChartDeployerWithNamespaceEnsure(ensure seam.NamespaceEnsurerFunc, 
 		return deploy
 	}
 
-	return func(params HelmDeployParams) error {
+	return func(params seam.HelmDeployParams) error {
 		if err := ensure(params.KubernetesContext, params.Namespace); err != nil {
 			return err
 		}

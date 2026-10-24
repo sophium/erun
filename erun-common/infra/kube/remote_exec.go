@@ -3,6 +3,8 @@ package kube
 import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 type RemoteCommandPreview struct {
@@ -28,10 +30,10 @@ func TraceRemoteCommand(ctx core.Context, req config.ShellLaunchParams, label, s
 	ctx.TraceBlock(label, script)
 }
 
-func RunTracedRemoteCommand(ctx core.Context, runner RemoteCommandRunnerFunc, req config.ShellLaunchParams, label, script string) (RemoteCommandResult, error) {
+func RunTracedRemoteCommand(ctx core.Context, runner seam.RemoteCommandRunnerFunc, req config.ShellLaunchParams, label, script string) (model.RemoteCommandResult, error) {
 	TraceRemoteCommand(ctx, req, label, script)
 	if ctx.DryRun {
-		return RemoteCommandResult{}, nil
+		return model.RemoteCommandResult{}, nil
 	}
 	if runner == nil {
 		runner = RunRemoteCommand

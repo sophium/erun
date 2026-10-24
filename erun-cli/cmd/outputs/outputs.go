@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/codesign"
@@ -88,7 +89,7 @@ func addOutputsScopeFlags(cmd *cobra.Command, tenant, environment, dirPath *stri
 	cmd.Flags().StringVar(dirPath, "path", "", "Pod directory to operate on (default: $ERUN_OUTPUTS_DIR, /home/erun/.erun/outputs)")
 }
 
-func runOutputsListCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, dirPath string, limit int, run jobs.RuntimeOutputsRunner) error {
+func runOutputsListCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, dirPath string, limit int, run seam.RuntimeOutputsRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
@@ -143,7 +144,7 @@ type outputsDownloadCLIResult struct {
 	Signing *model.HostArtifactSigning `json:"signing,omitempty"`
 }
 
-func runOutputsDownloadCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, dirPath, name, dest string, force bool, run jobs.RuntimeOutputsRunner) error {
+func runOutputsDownloadCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, dirPath, name, dest string, force bool, run seam.RuntimeOutputsRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err

@@ -6,12 +6,13 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 // guardInPodRuntimeDeploy refuses a runtime-chart deploy from the env's own pod:
 // the in-pod config is a thin projection, so host-owned fields (ports, sshd,
 // resources) would resolve to defaults and could cut the calling channel.
-func guardInPodRuntimeDeploy(env func(string) string, resolvedTarget config.OpenResult, specs []DeploySpec) error {
+func guardInPodRuntimeDeploy(env func(string) string, resolvedTarget config.OpenResult, specs []seam.DeploySpec) error {
 	podTenant, podEnvironment, inPod := core.InjectedRuntimePodIdentity(env)
 	if !inPod {
 		return nil
@@ -27,13 +28,13 @@ func guardInPodRuntimeDeploy(env func(string) string, resolvedTarget config.Open
 		podTenant, podEnvironment, podTenant, podEnvironment, inPodGuardVersionHint(spec.Deploy.Version))
 }
 
-func firstRuntimeChartSpec(specs []DeploySpec) (DeploySpec, bool) {
+func firstRuntimeChartSpec(specs []seam.DeploySpec) (seam.DeploySpec, bool) {
 	for _, spec := range specs {
 		if specDeploysRuntimeChart(spec) {
 			return spec, true
 		}
 	}
-	return DeploySpec{}, false
+	return seam.DeploySpec{}, false
 }
 
 func inPodGuardVersionHint(version string) string {

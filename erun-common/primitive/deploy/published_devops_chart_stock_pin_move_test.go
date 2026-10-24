@@ -5,6 +5,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 func stockPinTarget() config.OpenResult {
@@ -50,7 +51,7 @@ func TestPersistKeepsRecordedVersionAndRunningImageInStep(t *testing.T) {
 		t.Fatalf("resolving the runtime deploy spec: %v", err)
 	}
 	var saved *config.EnvConfig
-	persistOrFatal(t, core.Context{}, []DeploySpec{spec}, capturingSave(new(string), &saved), nil)
+	persistOrFatal(t, core.Context{}, []seam.DeploySpec{spec}, capturingSave(new(string), &saved), nil)
 	if saved == nil {
 		t.Fatalf("the deploy must persist the runtime coordinate it installed")
 	}

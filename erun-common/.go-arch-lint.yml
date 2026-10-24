@@ -192,7 +192,6 @@ deps:
       - infra-gitx
       - infra-remoteinit
       - orchestration-diagnosis
-      - primitive-build
       - primitive-deploy
       - primitive-shared-cloudconfig
       - primitive-shared-diskheadroom
@@ -225,6 +224,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-kube
   command-jobs:
     mayDependOn:
@@ -239,7 +239,6 @@ deps:
       - infra-kube
       - infra-platformclient
       - primitive-build
-      - primitive-open
       - primitive-shared-diskheadroom
       - primitive-shared-gitref
       - primitive-shared-jobexclusive
@@ -301,10 +300,10 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - command-setup
       - infra-cloud
       - infra-platformclient
-      - primitive-open
     canUse:
       - github-com-adrg-xdg
   command-podruntime:
@@ -312,10 +311,10 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - command-doctor
       - infra-activity
       - infra-cloud
-      - infra-kube
       - orchestration-diagnosis
       - primitive-build
       - primitive-deploy
@@ -416,6 +415,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
     canUse:
       - github-com-adrg-xdg
       - k8s-io-api
@@ -480,6 +480,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-cloud
       - infra-kube
       - primitive-open
@@ -505,7 +506,6 @@ deps:
       - base-seam
       - infra-registry
       - orchestration-build
-      - primitive-build
       - primitive-deploy
       - primitive-push
       - primitive-shared-dockerregistry
@@ -573,6 +573,7 @@ deps:
   primitive-push:
     mayDependOn:
       - base-core
+      - base-model
       - base-seam
       - infra-helm
       - infra-registry
@@ -595,6 +596,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-cloud
   primitive-shared-diskheadroom:
     mayDependOn:
@@ -622,6 +624,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-helm
   primitive-shared-gitref:
     mayDependOn:

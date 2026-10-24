@@ -10,7 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
-	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
 type fakeDockerStoreForDindResources struct {
@@ -113,7 +112,7 @@ func TestApplyDindResourceBuildArgsUsesEnvVarsInPod(t *testing.T) {
 		t.Fatalf("write dockerfile: %v", err)
 	}
 
-	build := &dockerspec.DockerBuildSpec{DockerfilePath: dockerfilePath}
+	build := &seam.DockerBuildSpec{DockerfilePath: dockerfilePath}
 	dockerbuild.ApplyDindResourceBuildArgs(config.ConfigStore{}, dir, "dev", build)
 
 	if build.DindCPULimit != "8" {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 func runtimeImagePullTraceContext(dryRun bool) (core.Context, *bytes.Buffer) {
@@ -20,7 +21,7 @@ func TestEnsureRuntimeImagePullSecretRefusesOnInconclusiveProbe(t *testing.T) {
 	useDockerConfigDir(t, t.TempDir())
 
 	ctx, _ := runtimeImagePullTraceContext(false)
-	spec := HelmDeploySpec{
+	spec := seam.HelmDeploySpec{
 		Tenant:         "frs",
 		ImageOverrides: map[string]string{config.DevopsComponentName: "ghcr.io/sophium/frs-devops:1.0.86"},
 	}

@@ -8,7 +8,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
-	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
 	pushpkg "github.com/sophium/erun/erun-common/primitive/push"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
@@ -22,7 +21,7 @@ func BuildExecutionProfile(ctx core.Context) *model.BuildProfileSummary {
 	return &summary
 }
 
-func RunBuildExecutionBuilds(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []deploypkg.DeploySpec, runScript seam.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc) (map[string]struct{}, error) {
+func RunBuildExecutionBuilds(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []seam.DeploySpec, runScript seam.BuildScriptRunnerFunc, build seam.DockerImageBuilderFunc, push seam.DockerPushFunc) (map[string]struct{}, error) {
 	pushedTags := make(map[string]struct{}, len(execution.DockerBuilds)+len(execution.DockerPushes))
 	if execution.Script != nil {
 		if len(deploySpecs) > 0 {
@@ -40,7 +39,7 @@ func RunBuildExecutionBuilds(ctx core.Context, execution dockerspec.BuildExecuti
 	return runDockerBuildExecutionPhase(ctx, execution, deploySpecs, build, push, pushedTags)
 }
 
-func runDockerBuildExecutionPhase(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []deploypkg.DeploySpec, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, pushedTags map[string]struct{}) (map[string]struct{}, error) {
+func runDockerBuildExecutionPhase(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []seam.DeploySpec, build seam.DockerImageBuilderFunc, push seam.DockerPushFunc, pushedTags map[string]struct{}) (map[string]struct{}, error) {
 	if len(execution.DockerPushes) > 0 {
 		err := RunDockerPushExecution(ctx, dockerspec.DockerPushExecutionSpec{Builds: execution.DockerBuilds, Pushes: execution.DockerPushes, ComponentCharts: execution.ComponentCharts}, build, push)
 		if err != nil {
@@ -61,14 +60,14 @@ func runDockerBuildExecutionPhase(ctx core.Context, execution dockerspec.BuildEx
 	return pushedTags, pushpkg.PackageComponentCharts(ctx, execution.ComponentCharts)
 }
 
-func recordDockerPushTags(tags map[string]struct{}, pushes []dockerspec.DockerPushSpec) map[string]struct{} {
+func recordDockerPushTags(tags map[string]struct{}, pushes []model.DockerPushSpec) map[string]struct{} {
 	for _, pushInput := range pushes {
 		tags[pushInput.Image.Tag] = struct{}{}
 	}
 	return tags
 }
 
-func buildAndPushDeployDockerImages(ctx core.Context, builds []dockerspec.DockerBuildSpec, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, pushedTags map[string]struct{}) error {
+func buildAndPushDeployDockerImages(ctx core.Context, builds []seam.DockerBuildSpec, build seam.DockerImageBuilderFunc, push seam.DockerPushFunc, pushedTags map[string]struct{}) error {
 	if err := buildpkg.RunDockerBuildsSequentially(ctx, builds, build); err != nil {
 		return err
 	}
@@ -82,7 +81,7 @@ func buildAndPushDeployDockerImages(ctx core.Context, builds []dockerspec.Docker
 	return nil
 }
 
-func RunDockerPushSpec(ctx core.Context, pushInput dockerspec.DockerPushSpec, buildInput *dockerspec.DockerBuildSpec, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc) error {
+func RunDockerPushSpec(ctx core.Context, pushInput model.DockerPushSpec, buildInput *seam.DockerBuildSpec, build seam.DockerImageBuilderFunc, push seam.DockerPushFunc) error {
 	if buildInput != nil {
 		if err := buildpkg.RunDockerBuild(ctx, *buildInput, build); err != nil {
 			return err
@@ -92,7 +91,7 @@ func RunDockerPushSpec(ctx core.Context, pushInput dockerspec.DockerPushSpec, bu
 		}
 	}
 	if push == nil {
-		push = func(ctx core.Context, pushInput dockerspec.DockerPushSpec) error {
+		push = func(ctx core.Context, pushInput model.DockerPushSpec) error {
 			return pushpkg.RunDockerPush(ctx, pushInput, nil)
 		}
 	}
@@ -102,7 +101,7 @@ func RunDockerPushSpec(ctx core.Context, pushInput dockerspec.DockerPushSpec, bu
 	return helm.PublishComponentChart(ctx, pushInput.Image, pushInput.Image.Version)
 }
 
-func RunDockerPushExecution(ctx core.Context, execution dockerspec.DockerPushExecutionSpec, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc) error {
+func RunDockerPushExecution(ctx core.Context, execution dockerspec.DockerPushExecutionSpec, build seam.DockerImageBuilderFunc, push seam.DockerPushFunc) error {
 	if err := pushpkg.PreflightRegistryPushAccess(ctx, execution); err != nil {
 		return err
 	}

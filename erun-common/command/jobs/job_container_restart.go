@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
@@ -35,7 +35,7 @@ func defaultJobSupervisorContainerRestart(podName, containerName string, runner 
 	if err := runner(kube.KubectlGetPodArgs(podName), &stdout, &stderr); err != nil {
 		return false, "", 0, time.Time{}, false
 	}
-	var pod open.RuntimePodDiagnostic
+	var pod model.RuntimePodDiagnostic
 	if err := json.Unmarshal(stdout.Bytes(), &pod); err != nil {
 		return false, "", 0, time.Time{}, false
 	}
