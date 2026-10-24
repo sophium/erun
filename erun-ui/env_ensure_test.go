@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
 // deploymentAbsentErrorForTest builds the exact "runtime ... is not deployed"
@@ -210,7 +211,7 @@ func waitForFailEpisodeCleared(t *testing.T, app *App, key string, timeout time.
 func capturedEnsureApp(
 	t *testing.T,
 	reconnect func(context.Context, config.OpenResult, func(string)) error,
-	readRunState func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error),
+	readRunState func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error),
 ) (*App, *capturedEmits) {
 	t.Helper()
 	emits := newCapturedEmits()
@@ -305,8 +306,8 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 func TestSurfaceEnsureFailureRendersAStoppedRuntimeAsStopped(t *testing.T) {
 	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
-	}, func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
-		return eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 1}, nil
+	}, func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error) {
+		return lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 1}, nil
 	})
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
 

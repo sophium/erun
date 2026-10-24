@@ -47,13 +47,13 @@ func (s HostedRegistryStatus) Err() error {
 // treating a non-2xx status as down would report every correctly configured
 // registry as missing.
 func ProbeHostedRegistry(ctx context.Context, client *http.Client) HostedRegistryStatus {
-	return probeHostedRegistryAt(ctx, client, "https://"+config.HostedRegistryHost+"/v2/", config.HostedRegistryHost)
+	return ProbeHostedRegistryAt(ctx, client, "https://"+config.HostedRegistryHost+"/v2/", config.HostedRegistryHost)
 }
 
-// probeHostedRegistryAt is ProbeHostedRegistry with the endpoint injected, so a
+// ProbeHostedRegistryAt is ProbeHostedRegistry with the endpoint injected, so a
 // test can exercise the status mapping — in particular that a 401 counts as
 // available — against a real HTTP server instead of the live hostname.
-func probeHostedRegistryAt(ctx context.Context, client *http.Client, url, host string) HostedRegistryStatus {
+func ProbeHostedRegistryAt(ctx context.Context, client *http.Client, url, host string) HostedRegistryStatus {
 	status := HostedRegistryStatus{Host: host}
 	if client == nil {
 		client = &http.Client{Timeout: HostedRegistryProbeTimeout}

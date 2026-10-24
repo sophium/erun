@@ -19,7 +19,7 @@ var errBoom = errors.New("boom")
 // reproduction below drives the real one.
 var errExitedNormally = errors.New("exit status 2")
 
-func fakePodJSONRunner(stdout string, err error) openKubectlRunnerFunc {
+func fakePodJSONRunner(stdout string, err error) OpenKubectlRunnerFunc {
 	return func(args []string, out, errOut io.Writer) error {
 		if err != nil {
 			return err

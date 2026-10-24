@@ -7,7 +7,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/jobs"
 )
 
 type OutputsListInput struct {
@@ -37,14 +38,14 @@ type OutputsDownloadResult struct {
 	Signing *eruncommon.HostArtifactSigning `json:"signing,omitempty"`
 }
 
-func outputsListTool() func(context.Context, *mcp.CallToolRequest, OutputsListInput) (*mcp.CallToolResult, eruncommon.RuntimeOutputsListResult, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input OutputsListInput) (*mcp.CallToolResult, eruncommon.RuntimeOutputsListResult, error) {
-		result, err := eruncommon.ResolveLocalOutputs(eruncommon.RuntimeOutputsParams{
+func outputsListTool() func(context.Context, *mcp.CallToolRequest, OutputsListInput) (*mcp.CallToolResult, jobs.RuntimeOutputsListResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input OutputsListInput) (*mcp.CallToolResult, jobs.RuntimeOutputsListResult, error) {
+		result, err := jobs.ResolveLocalOutputs(jobs.RuntimeOutputsParams{
 			Dir:   outputsDirInput(input.Path),
 			Limit: input.Limit,
 		})
 		if err != nil {
-			return nil, eruncommon.RuntimeOutputsListResult{}, err
+			return nil, jobs.RuntimeOutputsListResult{}, err
 		}
 		return nil, result, nil
 	}
@@ -52,18 +53,18 @@ func outputsListTool() func(context.Context, *mcp.CallToolRequest, OutputsListIn
 
 func outputsDownloadTool() func(context.Context, *mcp.CallToolRequest, OutputsDownloadInput) (*mcp.CallToolResult, OutputsDownloadResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input OutputsDownloadInput) (*mcp.CallToolResult, OutputsDownloadResult, error) {
-		params := eruncommon.RuntimeOutputDownloadParams{
+		params := jobs.RuntimeOutputDownloadParams{
 			Dir:  outputsDirInput(input.Path),
 			Name: input.Name,
 		}
 		if input.Preview {
-			out, err := eruncommon.StatLocalOutput(params)
+			out, err := jobs.StatLocalOutput(params)
 			if err != nil {
 				return nil, OutputsDownloadResult{}, err
 			}
 			return nil, outputsDownloadResult(out, false), nil
 		}
-		out, err := eruncommon.DownloadLocalOutput(params)
+		out, err := jobs.DownloadLocalOutput(params)
 		if err != nil {
 			return nil, OutputsDownloadResult{}, err
 		}
@@ -71,7 +72,7 @@ func outputsDownloadTool() func(context.Context, *mcp.CallToolRequest, OutputsDo
 	}
 }
 
-func outputsDownloadResult(out eruncommon.RuntimeOutputResult, withContent bool) OutputsDownloadResult {
+func outputsDownloadResult(out jobs.RuntimeOutputResult, withContent bool) OutputsDownloadResult {
 	result := OutputsDownloadResult{
 		Name:          out.Name,
 		IsArchive:     out.IsArchive,

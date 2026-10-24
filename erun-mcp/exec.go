@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/jobs"
 )
 
 // RawInput absorbs job_start's command mode (#1246): dir, env, and a
@@ -93,14 +93,14 @@ func execRawBackground(runtime RuntimeConfig, input RawInput) (JobEnvelopeOutput
 	if err != nil {
 		return JobEnvelopeOutput{}, err
 	}
-	supervisor, err := eruncommon.ResolveErunExecutable()
+	supervisor, err := jobs.ResolveErunExecutable()
 	if err != nil {
 		return JobEnvelopeOutput{}, err
 	}
 
 	trace := new(bytes.Buffer)
 	ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, trace, trace)
-	job, err := eruncommon.StartEnvironmentJob(ctx, eruncommon.StartEnvironmentJobParams{
+	job, err := jobs.StartEnvironmentJob(ctx, jobs.StartEnvironmentJobParams{
 		Tenant:         tenant,
 		Environment:    environment,
 		Name:           firstNonEmpty(strings.TrimSpace(input.Name), "exec_raw"),

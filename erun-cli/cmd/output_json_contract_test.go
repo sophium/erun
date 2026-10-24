@@ -12,6 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
@@ -40,9 +42,9 @@ func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 			return writeIdleResult(ctx, activity.EnvironmentIdleStatus{StopEligible: true, SecondsUntilStop: 300}, false)
 		}},
 		{"whip", func(ctx core.Context) error {
-			return writeWhipReport(ctx, common.WhipReport{
+			return writeWhipReport(ctx, orchestrator.WhipReport{
 				DryRun:  true,
-				Results: []common.WhipResult{{Reason: "no candidate"}},
+				Results: []orchestrator.WhipResult{{Reason: "no candidate"}},
 			}, false)
 		}},
 		{"activity lease list", func(ctx core.Context) error {
@@ -55,7 +57,7 @@ func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 			return writeAISessionStatuses(commandCarryingOutput(ctx), []model.AISessionStatus{{SessionID: "s1"}}, false)
 		}},
 		{"list", func(ctx core.Context) error {
-			return writeListResult(ctx, common.ListResult{ConfigDirectory: "/tmp/erun"})
+			return writeListResult(ctx, lifecycle.ListResult{ConfigDirectory: "/tmp/erun"})
 		}},
 		{"context list", func(ctx core.Context) error {
 			return writeCloudContextList(ctx, cloud.CloudContextListResult{CloudContexts: []config.CloudContextStatus{{Status: "running"}}})

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
+	reviewpkg "github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
@@ -129,7 +129,7 @@ func loadReviewDetailComments(ctx context.Context, client *platformclient.Platfo
 		return
 	}
 	detail.Comments = tenantDashboardComments(comments, usernames)
-	detail.UnresolvedThreads = eruncommon.CountUnresolvedThreads(comments)
+	detail.UnresolvedThreads = reviewpkg.CountUnresolvedThreads(comments)
 }
 
 func loadReviewDetailBuilds(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, reviewID, reviewName string, detail *uiReviewDetail) {

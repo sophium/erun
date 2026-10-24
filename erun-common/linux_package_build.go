@@ -103,19 +103,19 @@ func checkLinuxPackagesReleasable(packages []LinuxPackageSpec) error {
 // build) and exports nothing: no image, no tag, nothing to push.
 func linuxPackageCheckArgs(pkg LinuxPackageSpec, target, cgroupParent string) []string {
 	args := []string{"build", "--progress=plain", "--target", target, "--output", "type=cacheonly"}
-	return append(appendCgroupParentArg(args, cgroupParent), "-f", pkg.DockerfilePath, ".")
+	return append(AppendCgroupParentArg(args, cgroupParent), "-f", pkg.DockerfilePath, ".")
 }
 
 func linuxPackageDistArgs(pkg LinuxPackageSpec, version, platform, dest, cgroupParent string) []string {
 	args := []string{"build", "--progress=plain", "--platform", platform, "--target", linuxPackageDistStage, "--build-arg", "ERUN_VERSION=" + version, "--output", "type=local,dest=" + dest}
-	return append(appendCgroupParentArg(args, cgroupParent), "-f", pkg.DockerfilePath, ".")
+	return append(AppendCgroupParentArg(args, cgroupParent), "-f", pkg.DockerfilePath, ".")
 }
 
-// appendCgroupParentArg nests a build's RUN containers under the environment's
+// AppendCgroupParentArg nests a build's RUN containers under the environment's
 // CPU cap (buildContainerCPUCapCgroupParent), as every image build does. A
 // package's test stage is as heavy as any image's, and without it the build
 // escapes the sidecar's limit and can take the whole node.
-func appendCgroupParentArg(args []string, cgroupParent string) []string {
+func AppendCgroupParentArg(args []string, cgroupParent string) []string {
 	if cgroupParent == "" {
 		return args
 	}

@@ -21,6 +21,8 @@ import (
 	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/setup"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	mcppkg "github.com/sophium/erun/erun-common/infra/mcp"
@@ -563,7 +565,7 @@ func TestDiffToolReturnsStructuredGitDiff(t *testing.T) {
 	assertStructuredDiffOutput(t, output, projectRoot)
 }
 
-func assertStructuredDiffOutput(t *testing.T, output eruncommon.DiffResult, projectRoot string) {
+func assertStructuredDiffOutput(t *testing.T, output lifecycle.DiffResult, projectRoot string) {
 	t.Helper()
 
 	if output.WorkingDirectory != projectRoot || output.RawDiff == "" {
@@ -857,7 +859,7 @@ func assertListToolOutput(t *testing.T, output ListToolResult) {
 	}
 }
 
-func assertListEffectiveTarget(t *testing.T, target eruncommon.ListEffectiveTargetResult) {
+func assertListEffectiveTarget(t *testing.T, target lifecycle.ListEffectiveTargetResult) {
 	t.Helper()
 
 	if target.Tenant != "tenant-a" || target.Environment != "dev" {
@@ -1172,7 +1174,7 @@ func TestInitToolReturnsInteractionWhenSharedInitNeedsInput(t *testing.T) {
 	if output.Interaction == nil {
 		t.Fatalf("expected interaction output, got %+v", output)
 	}
-	if output.Interaction.Type != eruncommon.BootstrapInitInteractionConfirmTenant {
+	if output.Interaction.Type != setup.BootstrapInitInteractionConfirmTenant {
 		t.Fatalf("unexpected interaction: %+v", output.Interaction)
 	}
 	if output.Executed {
@@ -1278,7 +1280,7 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 	if output.Interaction == nil {
 		t.Fatalf("expected interaction output, got %+v", output)
 	}
-	if output.Interaction.Type != eruncommon.BootstrapInitInteractionRemoteRepository {
+	if output.Interaction.Type != setup.BootstrapInitInteractionRemoteRepository {
 		t.Fatalf("unexpected interaction: %+v", output.Interaction)
 	}
 }

@@ -582,7 +582,7 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	if buildInput.CgroupParent != "" {
 		args = append(args, "--cgroup-parent", buildInput.CgroupParent)
 	}
-	args = append(args, dockerSecretArgs(buildInput.DockerSecrets)...)
+	args = append(args, DockerSecretArgs(buildInput.DockerSecrets)...)
 	args = append(args, "-f", buildInput.DockerfilePath, ".")
 	return args
 }

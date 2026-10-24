@@ -12,6 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // buildSignatureDocStopwords are filler and verb words stripped before
@@ -314,7 +315,7 @@ func TestOrchestratorSessionEnvVarsAreDocumented(t *testing.T) {
 		section = section[:len(heading)+next]
 	}
 
-	names := eruncommon.OrchestratorSessionEnvVars()
+	names := orchestrator.OrchestratorSessionEnvVars()
 	if len(names) == 0 {
 		t.Fatal("eruncommon.OrchestratorSessionEnvVars() returned nothing; the rest of this test would pass vacuously")
 	}

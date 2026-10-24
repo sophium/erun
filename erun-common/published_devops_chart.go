@@ -181,8 +181,8 @@ func resolvePublishedRuntimeChartReference(ctx core.Context, target config.OpenR
 // a version roll that did not happen.
 func resolveRuntimeChartCoordinate(ctx core.Context, target config.OpenResult, registry, version, reason string, deferToOverride bool) (resolvedRuntimeChart, error) {
 	if named := strings.TrimSpace(target.EnvConfig.RuntimeChart); named != "" {
-		reference, chartVersion := splitChartReferenceVersion(named)
-		chart := resolvedRuntimeChart{reference: reference, name: chartNameFromReference(reference), version: chartVersion}
+		reference, chartVersion := SplitChartReferenceVersion(named)
+		chart := resolvedRuntimeChart{reference: reference, name: ChartName(reference), version: chartVersion}
 		if chartVersion == "" {
 			ctx.Trace("deploy: " + reason + "; using the env's runtime chart " + reference + " at the deploy version " + version)
 			return chart, nil
@@ -551,10 +551,10 @@ func IsOCIChartReference(chartPath string) bool {
 // operator-stated runtime image (that is the whole point of the call), so it
 // must never be discarded for an inferred one.
 func ResolvePublishedDevopsDeploySpec(ctx core.Context, target config.OpenResult, versionOverride string) (DeploySpec, error) {
-	return resolvePublishedDevopsDeploySpec(ctx, target, versionOverride, "", true)
+	return ResolvePublishedDevopsDeploySpecWithOverrides(ctx, target, versionOverride, "", true)
 }
 
-// resolvePublishedDevopsDeploySpec builds the deploy spec for an environment
+// ResolvePublishedDevopsDeploySpecWithOverrides builds the deploy spec for an environment
 // with no local runtime chart, using the published erun-devops chart pinned to
 // the env's runtime version (one version covers both chart and image, published
 // together at release). The published chart is the single contract, replacing
@@ -566,7 +566,7 @@ func ResolvePublishedDevopsDeploySpec(ctx core.Context, target config.OpenResult
 // operator's --runtime-image on this very invocation, rather than merely
 // carried over from a previous deploy's persisted memo -- see
 // resolveDeployRuntimeImage.
-func resolvePublishedDevopsDeploySpec(ctx core.Context, target config.OpenResult, versionOverride, runtimeChartOverride string, runtimeImageExplicit bool) (DeploySpec, error) {
+func ResolvePublishedDevopsDeploySpecWithOverrides(ctx core.Context, target config.OpenResult, versionOverride, runtimeChartOverride string, runtimeImageExplicit bool) (DeploySpec, error) {
 	return resolvePublishedDevopsDeploySpecWithReason(ctx, target, versionOverride, "no local runtime chart", runtimeChartOverride, runtimeImageExplicit)
 }
 
@@ -892,8 +892,8 @@ func (e *PublishedChartNotFoundError) Unwrap() error { return e.Err }
 // actually resolved, not the one about to replace it.
 func effectiveRuntimeChartCoordinateForImage(chart resolvedRuntimeChart, runtimeChartOverride string) (name, version string) {
 	if override := strings.TrimSpace(runtimeChartOverride); override != "" {
-		reference, overrideVersion := splitChartReferenceVersion(override)
-		return chartNameFromReference(reference), overrideVersion
+		reference, overrideVersion := SplitChartReferenceVersion(override)
+		return ChartName(reference), overrideVersion
 	}
 	return chart.name, chart.version
 }
@@ -948,7 +948,7 @@ func resolveDeployRuntimeImage(ctx core.Context, target config.OpenResult, chart
 		ctx.Trace(stale)
 	}
 	defaultImage := defaultDeployRuntimeImage(ctx, registry, version, tenant, chartName)
-	return defaultImage, defaultDeployRuntimeImageBareName(tenant, chartName)
+	return defaultImage, DefaultDeployRuntimeImageBareName(tenant, chartName)
 }
 
 // staleRuntimeImageTrace explains why a saved runtimeimage override cannot be
@@ -970,7 +970,7 @@ func resolveDeployRuntimeImage(ctx core.Context, target config.OpenResult, chart
 // substituting the erun-version-tagged guess pins a tag the tenant's registry
 // may never have published at all.
 func staleRuntimeImageTrace(image, chartName, version, chartVersion string) string {
-	if !runtimeImageIsStockDevops(image) {
+	if !RuntimeImageIsStockDevops(image) {
 		return ""
 	}
 	switch {
@@ -1034,10 +1034,10 @@ func stockRuntimePinMovesWithDeployVersion(tenant string, env config.EnvConfig, 
 // the chart coordinate the same deploy resolved, so the two halves of the
 // coordinate move together or not at all.
 func laggingStockRuntimeImagePin(target config.OpenResult, registry, image, chartName, version string) string {
-	if !runtimeImageIsStockDevops(image) {
+	if !RuntimeImageIsStockDevops(image) {
 		return ""
 	}
-	_, tag, ok := splitImageTag(image)
+	_, tag, ok := SplitImageTag(image)
 	if !ok {
 		return ""
 	}
@@ -1052,7 +1052,7 @@ func laggingStockRuntimeImagePin(target config.OpenResult, registry, image, char
 // registry the deploy resolves runtime images from — the same shape
 // resolveRuntimeImageOverride gives a tagless pin.
 func moveRuntimeImagePinToVersion(image, registry, version string) string {
-	name := stripRuntimeImageTag(image)
+	name := StripRuntimeImageTag(image)
 	if name == "" {
 		return ""
 	}
@@ -1062,14 +1062,14 @@ func moveRuntimeImagePinToVersion(image, registry, version string) string {
 	return name + ":" + strings.TrimSpace(version)
 }
 
-// defaultDeployRuntimeImageBareName names the bare (no registry, no tag)
+// DefaultDeployRuntimeImageBareName names the bare (no registry, no tag)
 // image the deploy's own line publishes: the umbrella's own name, when the
 // tenant deploys its own <tenant>-devops chart, else the tenant's own
 // <tenant>-devops name, which erun-build-env builds and erun push publishes
 // on the tenant's version line. Empty means the deploy has no line of its own
 // to default to (the erun product tenant rides the stock image itself, so it
 // emits no override and the chart's own default wins).
-func defaultDeployRuntimeImageBareName(tenant, chartName string) string {
+func DefaultDeployRuntimeImageBareName(tenant, chartName string) string {
 	if chartName != "" && chartName != config.DevopsComponentName {
 		return chartName
 	}
@@ -1084,7 +1084,7 @@ func defaultDeployRuntimeImageBareName(tenant, chartName string) string {
 // defaultDeployRuntimeImageBareName. Empty means the deploy has no line of
 // its own to default to -- see that function.
 func defaultDeployRuntimeImageName(registry, version, tenant, chartName string) string {
-	name := defaultDeployRuntimeImageBareName(tenant, chartName)
+	name := DefaultDeployRuntimeImageBareName(tenant, chartName)
 	if name == "" {
 		return ""
 	}
@@ -1119,11 +1119,11 @@ func deployRuntimeImageRegistry(target config.OpenResult, chartRegistry string) 
 	return strings.TrimSpace(chartRegistry)
 }
 
-// runtimeImageIsStockDevops reports whether a resolved runtime image reference
+// RuntimeImageIsStockDevops reports whether a resolved runtime image reference
 // names the stock erun-devops image (regardless of registry). A tenant umbrella
 // deploy uses it to detect a stale runtimeimage pin left over from the shared
 // erun-devops chart, which its own version line never publishes.
-func runtimeImageIsStockDevops(image string) bool {
+func RuntimeImageIsStockDevops(image string) bool {
 	_, name, _, ok := parseDockerImageReference(image)
 	return ok && name == config.DefaultRuntimeImageName
 }
@@ -1157,13 +1157,13 @@ func imageReferenceHasTagOrDigest(ref string) bool {
 	return strings.Contains(lastSegment, ":")
 }
 
-// stripRuntimeImageTag drops a trailing tag or digest from an operator-supplied
+// StripRuntimeImageTag drops a trailing tag or digest from an operator-supplied
 // runtime image reference, e.g. for `erun init --runtime-image` to persist. A
 // tagged reference sticks at that tag forever: resolveRuntimeImageOverride
 // already pins a tagless reference to the env's own runtime version on every
 // deploy, so recording the tag is what lets the pin drift from that version and
 // rot, while recording it tagless is self-maintaining.
-func stripRuntimeImageTag(ref string) string {
+func StripRuntimeImageTag(ref string) string {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return ""

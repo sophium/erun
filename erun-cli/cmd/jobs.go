@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
@@ -37,7 +37,7 @@ func newJobsCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobr
 }
 
 func newJobsListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params common.JobListParams
+	var params jobspkg.JobListParams
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List jobs: what is being worked on now, and what recently finished",
@@ -50,7 +50,7 @@ func newJobsListCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 		Example:      "  erun jobs list --status RUNNING\n  erun jobs list --issue sophium/erun#2109",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			jobs, err := common.RunJobList(ctx, store, *alias, params, deps)
+			jobs, err := jobspkg.RunJobList(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}
@@ -84,7 +84,7 @@ func newJobsShowCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			job, err := common.RunJobShow(ctx, store, *alias, args[0], deps)
+			job, err := jobspkg.RunJobShow(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
 			}
@@ -105,7 +105,7 @@ func newJobsShowCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 }
 
 func newJobsStartCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params common.JobClaimParams
+	var params jobspkg.JobClaimParams
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Record that this actor is starting a piece of work",
@@ -126,7 +126,7 @@ func newJobsStartCmd(store config.CloudReadStore, alias *string, deps cloud.Clou
 			"    --summary \"planning the jobs claim fix\" --actor erun/ideas",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			job, err := common.RunJobClaim(ctx, store, *alias, params, deps)
+			job, err := jobspkg.RunJobClaim(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}
@@ -156,7 +156,7 @@ func newJobsStartCmd(store config.CloudReadStore, alias *string, deps cloud.Clou
 }
 
 func newJobsFinishCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params common.JobUpdateParams
+	var params jobspkg.JobUpdateParams
 	cmd := &cobra.Command{
 		Use:   "finish <job-id>",
 		Short: "Report a job's progress or its outcome",
@@ -172,7 +172,7 @@ func newJobsFinishCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
 			params.JobID = args[0]
-			job, err := common.RunJobUpdate(ctx, store, *alias, params, deps)
+			job, err := jobspkg.RunJobUpdate(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}

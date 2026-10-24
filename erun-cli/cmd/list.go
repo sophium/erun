@@ -7,6 +7,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/spf13/cobra"
@@ -71,7 +72,7 @@ func runListCommand(ctx core.Context, store common.ListStore, findProjectRoot co
 		return err
 	}
 
-	result, err := common.ResolveListResult(store, findProjectRoot, common.OpenParams{
+	result, err := lifecycle.ResolveListResult(store, findProjectRoot, common.OpenParams{
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
 	})
@@ -90,8 +91,8 @@ func runListCommand(ctx core.Context, store common.ListStore, findProjectRoot co
 	return writeListResult(ctx, result)
 }
 
-func runListVersionDrift(ctx core.Context, result common.ListResult, versionDriftTenant, gateEnvironment string, failOnDrift bool) error {
-	drift, err := common.ResolveTenantVersionDrift(ctx, result, versionDriftTenant, gateEnvironment)
+func runListVersionDrift(ctx core.Context, result lifecycle.ListResult, versionDriftTenant, gateEnvironment string, failOnDrift bool) error {
+	drift, err := lifecycle.ResolveTenantVersionDrift(ctx, result, versionDriftTenant, gateEnvironment)
 	if err != nil {
 		return err
 	}
@@ -108,8 +109,8 @@ func runListVersionDrift(ctx core.Context, result common.ListResult, versionDrif
 	return versionDriftExitError(drift)
 }
 
-func runListControlPlanes(ctx core.Context, result common.ListResult, erunAlias string, failOnDrift bool) error {
-	drift, err := common.ResolveControlPlaneVersionDrift(ctx, result, erunAlias, cloud.DefaultCloudDependencies(), registry.ResolveDefaultRuntimeRegistryVersions)
+func runListControlPlanes(ctx core.Context, result lifecycle.ListResult, erunAlias string, failOnDrift bool) error {
+	drift, err := lifecycle.ResolveControlPlaneVersionDrift(ctx, result, erunAlias, cloud.DefaultCloudDependencies(), registry.ResolveDefaultRuntimeRegistryVersions)
 	if err != nil {
 		return err
 	}
@@ -134,7 +135,7 @@ func runListControlPlanes(ctx core.Context, result common.ListResult, erunAlias 
 // silently), or a gate environment whose own behind verdict is unresolved or
 // true -- see erun-cli/AGENTS.md § "Exit-Code Contract: Reporting Commands
 // Vs Gating Checks" for why this is opt-in rather than the command's default.
-func versionDriftExitError(drift common.TenantVersionDrift) error {
+func versionDriftExitError(drift lifecycle.TenantVersionDrift) error {
 	var problems []string
 	var behind []string
 	var unresolved []string
@@ -171,7 +172,7 @@ func versionDriftExitError(drift common.TenantVersionDrift) error {
 // of the published version, any plane erun could not reach, any plane
 // advertising a foreign apiUrl, or a baseline erun could not even resolve --
 // none of those confirm a plane is running what erun actually published.
-func controlPlaneVersionDriftExitError(drift common.ControlPlaneVersionDrift) error {
+func controlPlaneVersionDriftExitError(drift lifecycle.ControlPlaneVersionDrift) error {
 	var problems []string
 	if drift.PublishedVersionError != "" {
 		problems = append(problems, "the published version could not be resolved: "+drift.PublishedVersionError)
@@ -200,7 +201,7 @@ func controlPlaneVersionDriftExitError(drift common.ControlPlaneVersionDrift) er
 // actually reached -- the one condition here that is never routine drift, so
 // --fail-on-drift reports it alongside behind/ahead rather than folding it
 // into either.
-func controlPlaneAPIURLMismatches(planes []common.ControlPlaneVersionStatus) []string {
+func controlPlaneAPIURLMismatches(planes []lifecycle.ControlPlaneVersionStatus) []string {
 	var mismatched []string
 	for _, plane := range planes {
 		if plane.AdvertisedAPIURLMismatch != "" {
@@ -216,7 +217,7 @@ func controlPlaneAPIURLMismatches(planes []common.ControlPlaneVersionStatus) []s
 // site stay distinguishable in the --fail-on-drift summary. A surface the
 // plane never advertised contributes nothing: an absent docs site is not a
 // drift finding, it is an absence.
-func classifyControlPlaneVersionDrift(planes []common.ControlPlaneVersionStatus) (unreachable, behind, ahead []string) {
+func classifyControlPlaneVersionDrift(planes []lifecycle.ControlPlaneVersionStatus) (unreachable, behind, ahead []string) {
 	for _, plane := range planes {
 		unreachable, behind, ahead = appendControlPlaneVersionVerdict(unreachable, behind, ahead, plane.Alias, plane.Reachable, plane.Behind, plane.Ahead)
 		for _, surface := range linkedVersionSurfaces(plane) {
@@ -238,7 +239,7 @@ func appendControlPlaneVersionVerdict(unreachable, behind, ahead []string, label
 	return unreachable, behind, ahead
 }
 
-func writeVersionDriftReport(ctx core.Context, drift common.TenantVersionDrift) error {
+func writeVersionDriftReport(ctx core.Context, drift lifecycle.TenantVersionDrift) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Version drift for tenant %s:\n", drift.Tenant); err != nil {
 		return err
 	}
@@ -254,7 +255,7 @@ func writeVersionDriftReport(ctx core.Context, drift common.TenantVersionDrift) 
 	return writeVersionDriftGate(ctx, drift)
 }
 
-func writeVersionDriftEnvironments(ctx core.Context, environments []common.EnvironmentVersionStatus) error {
+func writeVersionDriftEnvironments(ctx core.Context, environments []lifecycle.EnvironmentVersionStatus) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "  environments:"); err != nil {
 		return err
 	}
@@ -281,14 +282,14 @@ func writeVersionDriftEnvironments(ctx core.Context, environments []common.Envir
 // "undetermined" (VersionUnresolved -- neither its cached config nor a live
 // check of its cluster could tell) rather than collapsing both into the same
 // bare token.
-func versionDriftVersionValue(env common.EnvironmentVersionStatus) string {
+func versionDriftVersionValue(env lifecycle.EnvironmentVersionStatus) string {
 	if env.VersionUnresolved {
 		return "undetermined"
 	}
 	return quotedValueOrNone(env.Version)
 }
 
-func writeVersionDriftGate(ctx core.Context, drift common.TenantVersionDrift) error {
+func writeVersionDriftGate(ctx core.Context, drift lifecycle.TenantVersionDrift) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "  gate:"); err != nil {
 		return err
 	}
@@ -323,7 +324,7 @@ func gateVersionUnresolvedMessage(reason string) string {
 	return "gate's own erun version could not be resolved: " + reason
 }
 
-func writeControlPlaneVersionReport(ctx core.Context, drift common.ControlPlaneVersionDrift) error {
+func writeControlPlaneVersionReport(ctx core.Context, drift lifecycle.ControlPlaneVersionDrift) error {
 	if ctx.DryRun {
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: control plane version check planned; see trace for the planes and registry lookup that would be probed.")
 		return err
@@ -357,7 +358,7 @@ func writeControlPlaneVersionReport(ctx core.Context, drift common.ControlPlaneV
 // differ, that gap is exactly the signal that two or more aliases were
 // collapsed into one plane, and a bare "Control planes:" header
 // would hide it.
-func controlPlanesSectionHeader(planes []common.ControlPlaneVersionStatus) string {
+func controlPlanesSectionHeader(planes []lifecycle.ControlPlaneVersionStatus) string {
 	if len(planes) == 0 {
 		return "Control planes:"
 	}
@@ -375,7 +376,7 @@ func pluralCount(n int, singular, plural string) string {
 	return fmt.Sprintf("%d %s", n, plural)
 }
 
-func writeControlPlaneVersionEntry(ctx core.Context, plane common.ControlPlaneVersionStatus) error {
+func writeControlPlaneVersionEntry(ctx core.Context, plane lifecycle.ControlPlaneVersionStatus) error {
 	line := "  - " + plane.Alias + " api-url=" + quotedValueOrNone(plane.APIURL)
 	if !plane.Reachable {
 		line += " reachable=no reason=" + quotedValueOrNone(plane.UnreachableReason)
@@ -403,7 +404,7 @@ func writeControlPlaneVersionEntry(ctx core.Context, plane common.ControlPlaneVe
 // writeControlPlaneLinkedSurfaces renders the plane's own advertised-apiUrl
 // note and every surface it named, nested beneath the plane they were
 // discovered from.
-func writeControlPlaneLinkedSurfaces(ctx core.Context, plane common.ControlPlaneVersionStatus) error {
+func writeControlPlaneLinkedSurfaces(ctx core.Context, plane lifecycle.ControlPlaneVersionStatus) error {
 	// Above the nested surfaces: this is a property of the plane itself, so it
 	// reads with the plane's own line rather than under one of them.
 	if plane.AdvertisedAPIURLMismatch != "" {
@@ -423,7 +424,7 @@ func writeControlPlaneLinkedSurfaces(ctx core.Context, plane common.ControlPlane
 // paired with the label it is reported and classified under.
 type linkedVersionSurface struct {
 	label  string
-	status *common.VersionSurfaceStatus
+	status *lifecycle.VersionSurfaceStatus
 }
 
 // linkedVersionSurfaces lists the surfaces a plane advertises, in the order
@@ -432,7 +433,7 @@ type linkedVersionSurface struct {
 // two cannot disagree about which surfaces a plane has or what they are
 // called -- an absent surface is absent from both, never defaulted into
 // either.
-func linkedVersionSurfaces(plane common.ControlPlaneVersionStatus) []linkedVersionSurface {
+func linkedVersionSurfaces(plane lifecycle.ControlPlaneVersionStatus) []linkedVersionSurface {
 	surfaces := make([]linkedVersionSurface, 0, 2)
 	for _, candidate := range []linkedVersionSurface{
 		{"console", plane.Console},
@@ -448,7 +449,7 @@ func linkedVersionSurfaces(plane common.ControlPlaneVersionStatus) []linkedVersi
 // writeControlPlaneAdditionalAliases names every other configured alias that
 // resolved to this same backend, so collapsing duplicate aliases into one
 // plane never hides which aliases are actually configured.
-func writeControlPlaneAdditionalAliases(ctx core.Context, aliases []common.ControlPlaneAliasRef) error {
+func writeControlPlaneAdditionalAliases(ctx core.Context, aliases []lifecycle.ControlPlaneAliasRef) error {
 	for _, alias := range aliases {
 		if _, err := fmt.Fprintf(ctx.Stdout, "      also reachable as: %s api-url=%s\n", alias.Alias, quotedValueOrNone(alias.APIURL)); err != nil {
 			return err
@@ -461,7 +462,7 @@ func writeControlPlaneAdditionalAliases(ctx core.Context, aliases []common.Contr
 // console or its docs site -- under the plane that advertised it. The two are
 // the same shape deliberately: they answer the same question the same way, and
 // an operator reading the report should not have to learn two of them.
-func writeControlPlaneVersionSurfaceEntry(ctx core.Context, label string, surface common.VersionSurfaceStatus) error {
+func writeControlPlaneVersionSurfaceEntry(ctx core.Context, label string, surface lifecycle.VersionSurfaceStatus) error {
 	line := "    " + label + ": url=" + quotedValueOrNone(surface.URL)
 	if !surface.Reachable {
 		line += " reachable=no reason=" + quotedValueOrNone(surface.UnreachableReason)
@@ -482,7 +483,7 @@ func writeControlPlaneVersionSurfaceEntry(ctx core.Context, label string, surfac
 	return err
 }
 
-func writeListResult(ctx core.Context, result common.ListResult) error {
+func writeListResult(ctx core.Context, result lifecycle.ListResult) error {
 	if err := ctx.WriteResult(result); err != nil {
 		return err
 	}
@@ -548,7 +549,7 @@ func orphanedSSHAliasLine(orphan common.SSHOrphanedAlias) string {
 	return line + ", and it names no port"
 }
 
-func writeListHeaderSections(ctx core.Context, result common.ListResult) error {
+func writeListHeaderSections(ctx core.Context, result lifecycle.ListResult) error {
 	if err := writeListConfigurationSection(ctx, result.ConfigDirectory); err != nil {
 		return err
 	}
@@ -565,7 +566,7 @@ func writeListConfigurationSection(ctx core.Context, configDirectory string) err
 	return writeLabeledValue(ctx, "directory", valueOrNone(configDirectory))
 }
 
-func writeListDefaultsSection(ctx core.Context, defaults common.ListDefaultsResult) error {
+func writeListDefaultsSection(ctx core.Context, defaults lifecycle.ListDefaultsResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Defaults:"); err != nil {
 		return err
 	}
@@ -575,7 +576,7 @@ func writeListDefaultsSection(ctx core.Context, defaults common.ListDefaultsResu
 	return writeLabeledValue(ctx, "environment", valueOrNone(defaults.Environment))
 }
 
-func writeListCurrentDirectorySection(ctx core.Context, current common.ListCurrentDirectoryResult) error {
+func writeListCurrentDirectorySection(ctx core.Context, current lifecycle.ListCurrentDirectoryResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Current Directory:"); err != nil {
 		return err
 	}
@@ -591,7 +592,7 @@ func writeListCurrentDirectorySection(ctx core.Context, current common.ListCurre
 	return writeEffectiveOpen(ctx, current)
 }
 
-func writeListTenants(ctx core.Context, tenants []common.ListTenantResult) error {
+func writeListTenants(ctx core.Context, tenants []lifecycle.ListTenantResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Tenants:"); err != nil {
 		return err
 	}
@@ -608,7 +609,7 @@ func writeListTenants(ctx core.Context, tenants []common.ListTenantResult) error
 	return nil
 }
 
-func writeOrchestrators(ctx core.Context, orchestrators []common.ListOrchestratorResult) error {
+func writeOrchestrators(ctx core.Context, orchestrators []lifecycle.ListOrchestratorResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Orchestrators:"); err != nil {
 		return err
 	}
@@ -624,7 +625,7 @@ func writeOrchestrators(ctx core.Context, orchestrators []common.ListOrchestrato
 	return nil
 }
 
-func writeOrchestratorEntry(ctx core.Context, orchestrator common.ListOrchestratorResult) error {
+func writeOrchestratorEntry(ctx core.Context, orchestrator lifecycle.ListOrchestratorResult) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "  - %s %q\n", orchestrator.ID, orchestrator.Name); err != nil {
 		return err
 	}
@@ -667,7 +668,7 @@ func writeOrchestratorAlias(ctx core.Context, alias string) error {
 // writeOrchestratorLaunchSettings prints the gateway, model and effort the
 // orchestrator records, each only when set, by the same rule as
 // writeOrchestratorAlias: unset is the default launch, not a setting.
-func writeOrchestratorLaunchSettings(ctx core.Context, orchestrator common.ListOrchestratorResult) error {
+func writeOrchestratorLaunchSettings(ctx core.Context, orchestrator lifecycle.ListOrchestratorResult) error {
 	var lines []string
 	if orchestrator.UseGateway {
 		lines = append(lines, "gateway: on")
@@ -715,7 +716,7 @@ func orchestratorEnvRoleLabel(role config.OrchestratorEnvRole) string {
 	return string(role)
 }
 
-func writeOrchestratorEnvEntry(ctx core.Context, env common.ListOrchestratorEnvResult) error {
+func writeOrchestratorEnvEntry(ctx core.Context, env lifecycle.ListOrchestratorEnvResult) error {
 	line := "      - " + env.Tenant + "/" + env.Environment
 	line += " role=" + orchestratorEnvRoleLabel(env.Role)
 	if strings.TrimSpace(env.Directory) != "" {
@@ -725,7 +726,7 @@ func writeOrchestratorEnvEntry(ctx core.Context, env common.ListOrchestratorEnvR
 	return err
 }
 
-func writeEffectiveOpen(ctx core.Context, current common.ListCurrentDirectoryResult) error {
+func writeEffectiveOpen(ctx core.Context, current lifecycle.ListCurrentDirectoryResult) error {
 	if current.Effective == nil {
 		if strings.TrimSpace(current.EffectiveError) != "" {
 			return writeLabeledValue(ctx, "effective target", "unavailable ("+current.EffectiveError+")")
@@ -743,7 +744,7 @@ func writeEffectiveOpen(ctx core.Context, current common.ListCurrentDirectoryRes
 	return writeLabeledValue(ctx, "repo path", current.Effective.RepoPath)
 }
 
-func writeEffectiveOpenBase(ctx core.Context, effective common.ListEffectiveTargetResult) error {
+func writeEffectiveOpenBase(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
 	if err := writeEffectiveTargetIdentity(ctx, effective); err != nil {
 		return err
 	}
@@ -753,7 +754,7 @@ func writeEffectiveOpenBase(ctx core.Context, effective common.ListEffectiveTarg
 	return writeEffectiveTargetPorts(ctx, effective)
 }
 
-func writeEffectiveTargetIdentity(ctx core.Context, effective common.ListEffectiveTargetResult) error {
+func writeEffectiveTargetIdentity(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
 	if err := writeLabeledValue(ctx, "effective target", effective.Tenant+"/"+effective.Environment); err != nil {
 		return err
 	}
@@ -768,11 +769,11 @@ func writeEffectiveTargetIdentity(ctx core.Context, effective common.ListEffecti
 	return nil
 }
 
-func writeEffectiveTargetType(ctx core.Context, effective common.ListEffectiveTargetResult) error {
+func writeEffectiveTargetType(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
 	return writeLabeledValue(ctx, "type", valueOrNone(string(effective.Type)))
 }
 
-func writeEffectiveTargetPorts(ctx core.Context, effective common.ListEffectiveTargetResult) error {
+func writeEffectiveTargetPorts(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
 	if err := writeLabeledValue(ctx, "assigned local port range", portRangeLabel(effective.LocalPorts)); err != nil {
 		return err
 	}
@@ -791,7 +792,7 @@ func writeEffectiveTargetPorts(ctx core.Context, effective common.ListEffectiveT
 	return writeLabeledValue(ctx, "assigned contribute-app local port", fmt.Sprintf("%d (when contribute mode is active and `erun app --headless` is running)", effective.LocalPorts.ContributeApp))
 }
 
-func writeEffectiveOpenSSH(ctx core.Context, effective common.ListEffectiveTargetResult) error {
+func writeEffectiveOpenSSH(ctx core.Context, effective lifecycle.ListEffectiveTargetResult) error {
 	ssh := effective.SSH
 	if err := writeLabeledValue(ctx, "sshd", "on"); err != nil {
 		return err
@@ -805,7 +806,7 @@ func writeEffectiveOpenSSH(ctx core.Context, effective common.ListEffectiveTarge
 	return writeLabeledValue(ctx, "ssh workspace", ssh.WorkspacePath)
 }
 
-func writeTenantEntry(ctx core.Context, tenant common.ListTenantResult) error {
+func writeTenantEntry(ctx core.Context, tenant lifecycle.ListTenantResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, tenantHeaderLine(tenant)); err != nil {
 		return err
 	}
@@ -845,7 +846,7 @@ func writeEnvironmentEntry(ctx core.Context, tenantName string, env common.ListE
 	return nil
 }
 
-func tenantHeaderLine(tenant common.ListTenantResult) string {
+func tenantHeaderLine(tenant lifecycle.ListTenantResult) string {
 	header := "  " + tenant.Name
 	if markers := statusMarkers(tenant.IsDefault, tenant.IsEffective); len(markers) > 0 {
 		header += " [" + strings.Join(markers, ", ") + "]"

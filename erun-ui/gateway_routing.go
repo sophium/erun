@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
 // uiGatewayRouting is one environment whose running pod routes Claude Code
@@ -30,7 +30,7 @@ const gatewayRoutingReadTimeout = 20 * time.Second
 const gatewayRoutingReadConcurrency = 6
 
 // readGatewayRouting is the cluster read, a seam so no test reaches kubectl.
-var readGatewayRouting = eruncommon.ReadGatewayRouting
+var readGatewayRouting = lifecycle.ReadGatewayRouting
 
 // LoadGatewayRoutingDrift lists the environments whose running pod still
 // routes where it was last deployed to rather than where the saved

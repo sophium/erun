@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/jobs"
 )
 
 // AgentInput is job_start's agent mode as its own tool (#1246): a streaming AI
@@ -46,13 +46,13 @@ func agentTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 		// The MCP server is not itself the erun binary, so the supervisor is the
 		// environment's own erun executable; a missing one fails here rather than
 		// producing a handle to nothing.
-		supervisor, err := eruncommon.ResolveErunExecutable()
+		supervisor, err := jobs.ResolveErunExecutable()
 		if err != nil {
 			return nil, JobResult{}, err
 		}
 		trace := new(bytes.Buffer)
 		ctx := runtimeCallContext(input.Preview, 0, nil, trace, trace)
-		job, err := eruncommon.StartEnvironmentJob(ctx, eruncommon.StartEnvironmentJobParams{
+		job, err := jobs.StartEnvironmentJob(ctx, jobs.StartEnvironmentJobParams{
 			Tenant:         tenant,
 			Environment:    environment,
 			Name:           firstNonEmpty(strings.TrimSpace(input.Name), "agent"),

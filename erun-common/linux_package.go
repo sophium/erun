@@ -144,7 +144,7 @@ func resolveCurrentDevopsLinuxDir(findProjectRoot ProjectFinderFunc, dir string,
 		}
 	}
 
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return "", false, err
 	}

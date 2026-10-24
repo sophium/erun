@@ -9,6 +9,7 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
@@ -163,7 +164,7 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			params := common.StartEnvironmentJobParams{
+			params := jobspkg.StartEnvironmentJobParams{
 				Tenant:         tenant,
 				Environment:    environment,
 				Name:           name,
@@ -188,9 +189,9 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "What the work is, shown wherever the environment reports as busy")
 	cmd.Flags().StringVar(&id, "id", "", "Handle to address the job by (defaults to the name)")
 	cmd.Flags().StringVar(&dir, "dir", "", "Working directory in the environment to run the command from")
-	cmd.Flags().StringVar(&agent, "agent", "", "Run an AI tool ("+strings.Join(common.AgentJobTools, " or ")+") in streaming mode, taking the trailing arguments as its prompt")
+	cmd.Flags().StringVar(&agent, "agent", "", "Run an AI tool ("+strings.Join(jobspkg.AgentJobTools, " or ")+") in streaming mode, taking the trailing arguments as its prompt")
 	cmd.Flags().StringArrayVar(&env, "env", nil, "Additional KEY=VALUE environment for the job's process; repeat for several. Not for secrets: values are visible in the job supervisor's argv")
-	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", common.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output; past it output is dropped and the job says so")
+	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", jobspkg.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output; past it output is dropped and the job says so")
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", activity.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL the job renews inside while it runs")
 	cmd.Flags().BoolVar(&handoff, "handoff", false, "Mark this job as deliberately meant to outlive whatever starts it, excluding it from that job's own finish check")
 	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "Claim the environment for this job's lifetime; while it is held, every other job start here is refused and told which job holds it")
@@ -216,7 +217,7 @@ func parseJobEnvFlags(pairs []string) (map[string]string, error) {
 	return out, nil
 }
 
-func runJobStart(cmd *cobra.Command, resolveOpen OpenResolver, params common.StartEnvironmentJobParams) error {
+func runJobStart(cmd *cobra.Command, resolveOpen OpenResolver, params jobspkg.StartEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
@@ -238,7 +239,7 @@ func runJobStart(cmd *cobra.Command, resolveOpen OpenResolver, params common.Sta
 	return ctx.WriteResult(job)
 }
 
-func startJob(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+func startJob(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params jobspkg.StartEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
 	if !environmentTargetsItself() {
 		return startJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
@@ -249,7 +250,7 @@ func startJob(ctx context.Context, commandCtx core.Context, resolveOpen OpenReso
 		return common.EnvironmentJob{}, false, err
 	}
 	params.SupervisorPath = supervisor
-	job, err := common.StartEnvironmentJob(commandCtx, params)
+	job, err := jobspkg.StartEnvironmentJob(commandCtx, params)
 	if err != nil {
 		return common.EnvironmentJob{}, false, err
 	}
@@ -276,7 +277,7 @@ func newJobAttachCmd(resolveOpen OpenResolver) *cobra.Command {
 		Example: "  erun exec job attach --tenant team --environment dev --name overnight-index --pid 4242",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobAttach(cmd, resolveOpen, common.AttachEnvironmentJobParams{
+			return runJobAttach(cmd, resolveOpen, jobspkg.AttachEnvironmentJobParams{
 				Tenant:      tenant,
 				Environment: environment,
 				Name:        name,
@@ -297,7 +298,7 @@ func newJobAttachCmd(resolveOpen OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runJobAttach(cmd *cobra.Command, resolveOpen OpenResolver, params common.AttachEnvironmentJobParams) error {
+func runJobAttach(cmd *cobra.Command, resolveOpen OpenResolver, params jobspkg.AttachEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
@@ -317,11 +318,11 @@ func runJobAttach(cmd *cobra.Command, resolveOpen OpenResolver, params common.At
 	return ctx.WriteResult(job)
 }
 
-func attachJob(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.AttachEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
+func attachJob(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params jobspkg.AttachEnvironmentJobParams) (common.EnvironmentJob, bool, error) {
 	if !environmentTargetsItself() {
 		return attachJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
-	job, err := common.AttachEnvironmentJob(commandCtx, params)
+	job, err := jobspkg.AttachEnvironmentJob(commandCtx, params)
 	if err != nil {
 		return common.EnvironmentJob{}, false, err
 	}
@@ -435,13 +436,13 @@ func readStoredJobStatus(commandCtx core.Context, tenant, environment, id string
 	}
 	now := time.Now()
 	if strings.TrimSpace(id) != "" {
-		job, err := common.LoadEnvironmentJob(tenant, environment, id, now)
+		job, err := jobspkg.LoadEnvironmentJob(tenant, environment, id, now)
 		if err != nil {
 			return common.EnvironmentJob{}, nil, false, err
 		}
 		return job, []common.EnvironmentJob{job}, true, nil
 	}
-	jobs, err := common.LoadEnvironmentJobs(tenant, environment, now)
+	jobs, err := jobspkg.LoadEnvironmentJobs(tenant, environment, now)
 	if err != nil {
 		return common.EnvironmentJob{}, nil, false, err
 	}
@@ -468,7 +469,7 @@ func writeJobList(ctx core.Context, jobs []common.EnvironmentJob) error {
 // recorded: an unknown job says so and says why.
 func jobStatusLine(job common.EnvironmentJob) string {
 	switch job.State {
-	case common.EnvironmentJobStateRunning:
+	case jobspkg.EnvironmentJobStateRunning:
 		return jobRunningLine(job)
 	case common.EnvironmentJobStateExited:
 		return jobExitedLine(job)
@@ -622,7 +623,7 @@ func jobAliveSuffix(job common.EnvironmentJob) string {
 // has emitted nothing yet says so rather than reading as an idle one — the
 // difference is exactly what a caller polling for progress needs.
 func jobAgentSuffix(job common.EnvironmentJob) string {
-	if job.Kind != common.EnvironmentJobKindAgent {
+	if job.Kind != jobspkg.EnvironmentJobKindAgent {
 		return ""
 	}
 	suffix := ", agent " + job.AgentTool
@@ -643,7 +644,7 @@ func jobReinvocationSuffix(job common.EnvironmentJob) string {
 	if job.ReinvocationCount <= 0 {
 		return ""
 	}
-	return fmt.Sprintf(", resumed %d/%d time(s)", job.ReinvocationCount, common.EnvironmentJobMaxReinvocations())
+	return fmt.Sprintf(", resumed %d/%d time(s)", job.ReinvocationCount, jobspkg.EnvironmentJobMaxReinvocations())
 }
 
 func jobOutputSuffix(job common.EnvironmentJob) string {
@@ -704,7 +705,7 @@ func newJobAwaitCmd(resolveOpen OpenResolver) *cobra.Command {
 			"  erun exec job await --tenant team --environment dev --id suite --timeout 10m",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobAwait(cmd, resolveOpen, common.AwaitEnvironmentJobParams{
+			return runJobAwait(cmd, resolveOpen, jobspkg.AwaitEnvironmentJobParams{
 				Tenant:      tenant,
 				Environment: environment,
 				ID:          id,
@@ -714,12 +715,12 @@ func newJobAwaitCmd(resolveOpen OpenResolver) *cobra.Command {
 	}
 	addJobTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&id, "id", "", "Job to wait for")
-	cmd.Flags().DurationVar(&timeout, "timeout", common.DefaultEnvironmentJobAwaitTimeout, fmt.Sprintf("How long to wait before reporting the job as still running (capped at %s; call await again to keep waiting past it)", common.MaxEnvironmentJobAwaitTimeout))
+	cmd.Flags().DurationVar(&timeout, "timeout", jobspkg.DefaultEnvironmentJobAwaitTimeout, fmt.Sprintf("How long to wait before reporting the job as still running (capped at %s; call await again to keep waiting past it)", jobspkg.MaxEnvironmentJobAwaitTimeout))
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runJobAwait(cmd *cobra.Command, resolveOpen OpenResolver, params common.AwaitEnvironmentJobParams) error {
+func runJobAwait(cmd *cobra.Command, resolveOpen OpenResolver, params jobspkg.AwaitEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
@@ -742,22 +743,22 @@ func runJobAwait(cmd *cobra.Command, resolveOpen OpenResolver, params common.Awa
 	return jobAwaitExit(result)
 }
 
-func awaitJob(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.AwaitEnvironmentJobParams) (common.AwaitEnvironmentJobResult, bool, error) {
+func awaitJob(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params jobspkg.AwaitEnvironmentJobParams) (jobspkg.AwaitEnvironmentJobResult, bool, error) {
 	if !environmentTargetsItself() {
 		return awaitJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
 	if commandCtx.DryRun {
 		commandCtx.TraceCommand("", "job", "await", params.Tenant, params.Environment, params.ID)
-		return common.AwaitEnvironmentJobResult{}, false, nil
+		return jobspkg.AwaitEnvironmentJobResult{}, false, nil
 	}
-	result, err := common.AwaitEnvironmentJob(params)
+	result, err := jobspkg.AwaitEnvironmentJob(params)
 	if err != nil {
-		return common.AwaitEnvironmentJobResult{}, false, err
+		return jobspkg.AwaitEnvironmentJobResult{}, false, err
 	}
 	return result, true, nil
 }
 
-func jobAwaitLine(result common.AwaitEnvironmentJobResult) string {
+func jobAwaitLine(result jobspkg.AwaitEnvironmentJobResult) string {
 	if result.TimedOut {
 		return fmt.Sprintf("still running after %ds: %s", result.TimeoutSeconds, result.Job.Name) + jobAliveSuffix(result.Job)
 	}
@@ -767,7 +768,7 @@ func jobAwaitLine(result common.AwaitEnvironmentJobResult) string {
 // jobAwaitExit maps the wait onto the process exit code. Every outcome an
 // orchestrator must distinguish gets its own code, so a shell caller can branch
 // without reading anything back out of a payload.
-func jobAwaitExit(result common.AwaitEnvironmentJobResult) error {
+func jobAwaitExit(result jobspkg.AwaitEnvironmentJobResult) error {
 	switch {
 	case result.TimedOut:
 		return internal.WithExitCode(fmt.Errorf("job %q is still running after %ds", result.Job.ID, result.TimeoutSeconds), jobAwaitTimeoutExitCode)
@@ -823,7 +824,7 @@ func newJobOutputCmd(resolveOpen OpenResolver) *cobra.Command {
 		Example: "  erun exec job output --tenant team --environment dev --id suite --offset 4096",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobOutput(cmd, resolveOpen, common.ReadEnvironmentJobOutputParams{
+			return runJobOutput(cmd, resolveOpen, jobspkg.ReadEnvironmentJobOutputParams{
 				Tenant:      tenant,
 				Environment: environment,
 				ID:          id,
@@ -835,12 +836,12 @@ func newJobOutputCmd(resolveOpen OpenResolver) *cobra.Command {
 	addJobTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&id, "id", "", "Job whose output to read")
 	cmd.Flags().Int64Var(&offset, "offset", 0, "Byte offset to read from, so a poll continues rather than repeats")
-	cmd.Flags().Int64Var(&maxBytes, "max-bytes", common.DefaultEnvironmentJobOutputReadBytes, "Most bytes to return in this read")
+	cmd.Flags().Int64Var(&maxBytes, "max-bytes", jobspkg.DefaultEnvironmentJobOutputReadBytes, "Most bytes to return in this read")
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runJobOutput(cmd *cobra.Command, resolveOpen OpenResolver, params common.ReadEnvironmentJobOutputParams) error {
+func runJobOutput(cmd *cobra.Command, resolveOpen OpenResolver, params jobspkg.ReadEnvironmentJobOutputParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
@@ -865,17 +866,17 @@ func runJobOutput(cmd *cobra.Command, resolveOpen OpenResolver, params common.Re
 	return ctx.WriteResult(output)
 }
 
-func readJobOutput(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.ReadEnvironmentJobOutputParams) (common.EnvironmentJobOutput, bool, error) {
+func readJobOutput(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params jobspkg.ReadEnvironmentJobOutputParams) (jobspkg.EnvironmentJobOutput, bool, error) {
 	if !environmentTargetsItself() {
 		return jobOutputFromEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
 	if commandCtx.DryRun {
 		commandCtx.TraceCommand("", "job", "output", params.Tenant, params.Environment, params.ID)
-		return common.EnvironmentJobOutput{}, false, nil
+		return jobspkg.EnvironmentJobOutput{}, false, nil
 	}
-	output, err := common.ReadEnvironmentJobOutput(params)
+	output, err := jobspkg.ReadEnvironmentJobOutput(params)
 	if err != nil {
-		return common.EnvironmentJobOutput{}, false, err
+		return jobspkg.EnvironmentJobOutput{}, false, err
 	}
 	return output, true, nil
 }
@@ -897,7 +898,7 @@ func newJobCancelCmd(resolveOpen OpenResolver) *cobra.Command {
 			"  erun exec job cancel --tenant team --environment dev --id suite --signal KILL",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobCancel(cmd, resolveOpen, common.CancelEnvironmentJobParams{
+			return runJobCancel(cmd, resolveOpen, jobspkg.CancelEnvironmentJobParams{
 				Tenant:      tenant,
 				Environment: environment,
 				ID:          id,
@@ -912,7 +913,7 @@ func newJobCancelCmd(resolveOpen OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runJobCancel(cmd *cobra.Command, resolveOpen OpenResolver, params common.CancelEnvironmentJobParams) error {
+func runJobCancel(cmd *cobra.Command, resolveOpen OpenResolver, params jobspkg.CancelEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
@@ -936,13 +937,13 @@ func runJobCancel(cmd *cobra.Command, resolveOpen OpenResolver, params common.Ca
 	return ctx.WriteResult(result)
 }
 
-func cancelJob(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.CancelEnvironmentJobParams) (common.CancelEnvironmentJobResult, bool, error) {
+func cancelJob(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params jobspkg.CancelEnvironmentJobParams) (jobspkg.CancelEnvironmentJobResult, bool, error) {
 	if !environmentTargetsItself() {
 		return cancelJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
-	result, err := common.CancelEnvironmentJob(commandCtx, params)
+	result, err := jobspkg.CancelEnvironmentJob(commandCtx, params)
 	if err != nil {
-		return common.CancelEnvironmentJobResult{}, false, err
+		return jobspkg.CancelEnvironmentJobResult{}, false, err
 	}
 	return result, !commandCtx.DryRun, nil
 }
@@ -977,7 +978,7 @@ func newJobSuperviseCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return common.RunEnvironmentJobSupervisor(common.EnvironmentJobSupervisorParams{
+			return jobspkg.RunEnvironmentJobSupervisor(jobspkg.EnvironmentJobSupervisorParams{
 				Tenant:         tenant,
 				Environment:    environment,
 				ID:             id,
@@ -1000,7 +1001,7 @@ func newJobSuperviseCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dir, "dir", "", "Working directory for the work")
 	cmd.Flags().StringVar(&agent, "agent", "", "AI tool the command runs, so its event stream is folded into progress")
 	cmd.Flags().StringArrayVar(&env, "env", nil, "Additional KEY=VALUE environment for the job's process; repeat for several")
-	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", common.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output")
+	cmd.Flags().Int64Var(&maxOutputBytes, "max-output-bytes", jobspkg.DefaultEnvironmentJobOutputLimitBytes, "Cap on captured output")
 	cmd.Flags().DurationVar(&leaseTTL, "lease-ttl", activity.DefaultEnvironmentActivityLeaseTTL, "Activity lease TTL")
 	cmd.Flags().BoolVar(&handoff, "handoff", false, "Mark this job as deliberately meant to outlive whatever starts it")
 	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "This job holds the environment's exclusivity claim, already taken by the start; renew it while the work runs and release it on the way out")

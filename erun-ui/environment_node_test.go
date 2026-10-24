@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -203,7 +204,7 @@ func TestLoadStateSeedsTheNodeReadingOntoEachEnvironment(t *testing.T) {
 		Name:         "petios",
 		Environments: []uiEnvironment{{Name: "develop"}},
 	}}}
-	app.seedEnvironmentNodeSnapshots(&state, eruncommon.ListResult{Tenants: []eruncommon.ListTenantResult{{
+	app.seedEnvironmentNodeSnapshots(&state, lifecycle.ListResult{Tenants: []lifecycle.ListTenantResult{{
 		Name: "petios",
 		Environments: []eruncommon.ListEnvironmentResult{{
 			Name:               "develop",

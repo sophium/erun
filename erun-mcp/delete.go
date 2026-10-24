@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
 type DeleteInput struct {
@@ -26,7 +26,7 @@ func deleteTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 		if err != nil {
 			return nil, JobEnvelopeOutput{}, err
 		}
-		expected := eruncommon.DeleteEnvironmentConfirmation(tenant, environment)
+		expected := lifecycle.DeleteEnvironmentConfirmation(tenant, environment)
 		if expected == "" {
 			return nil, JobEnvelopeOutput{}, errMissingLocalTarget(tenant == "", environment == "")
 		}
@@ -34,13 +34,13 @@ func deleteTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 			return nil, JobEnvelopeOutput{}, fmt.Errorf("delete confirmation must match %q", expected)
 		}
 
-		deleteStore, ok := any(runtime.Store).(eruncommon.DeleteStore)
+		deleteStore, ok := any(runtime.Store).(lifecycle.DeleteStore)
 		if !ok {
 			deleteStore = config.ConfigStore{}
 		}
 
 		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
-			result, err := eruncommon.RunDeleteEnvironment(runCtx, eruncommon.DeleteEnvironmentParams{
+			result, err := lifecycle.RunDeleteEnvironment(runCtx, lifecycle.DeleteEnvironmentParams{
 				Tenant:      tenant,
 				Environment: environment,
 			}, deleteStore, runtime.DeleteKubernetesNamespace)

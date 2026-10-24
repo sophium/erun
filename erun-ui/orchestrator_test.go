@@ -14,8 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-common/command/podruntime"
 )
 
 // newOrchestratorStubStore backs the store with a persistent in-memory root
@@ -92,7 +93,7 @@ func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool)
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		canReachMCPEndpoint:         reachable,
@@ -537,7 +538,7 @@ func TestSpawnOrchestratorSessionExposesOrchestratorID(t *testing.T) {
 			capturedEnv = p.Env
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
@@ -716,7 +717,7 @@ func TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale(t *testing.T) {
 
 func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T) {
 	var seededPrompt string
-	var seededLaunch eruncommon.OrchestratorLaunch
+	var seededLaunch orchestrator.OrchestratorLaunch
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
@@ -725,7 +726,7 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(launch eruncommon.OrchestratorLaunch, _, prompt, _ string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(launch orchestrator.OrchestratorLaunch, _, prompt, _ string) (string, []string, error) {
 			seededPrompt, seededLaunch = prompt, launch
 			return "claude-stub", nil, nil
 		},
@@ -1014,11 +1015,11 @@ func TestOrchestratorSkillsRefreshFromBuildStampedCheckout(t *testing.T) {
 	}
 	// The marker moves with the refresh, so the next launch can still tell this
 	// untouched copy from an edited one.
-	marker, err := os.ReadFile(filepath.Join(filepath.Dir(installed), eruncommon.AgentSkillMarker))
+	marker, err := os.ReadFile(filepath.Join(filepath.Dir(installed), podruntime.AgentSkillMarker))
 	if err != nil {
 		t.Fatalf("read skill marker: %v", err)
 	}
-	want, err := eruncommon.FileSHA256(srcMD)
+	want, err := podruntime.FileSHA256(srcMD)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1356,11 +1357,11 @@ func TestOrchestratorAgentsRefreshFromBuildStampedCheckout(t *testing.T) {
 	}
 	// The marker moves with the refresh, so the next launch can still tell this
 	// untouched copy from an edited one.
-	marker, err := os.ReadFile(installed + eruncommon.AgentFileMarkerSuffix)
+	marker, err := os.ReadFile(installed + podruntime.AgentFileMarkerSuffix)
 	if err != nil {
 		t.Fatalf("read agent marker: %v", err)
 	}
-	want, err := eruncommon.FileSHA256(srcMD)
+	want, err := podruntime.FileSHA256(srcMD)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2028,7 +2029,7 @@ func TestOrchestratorRespawnsAfterCrashOntoTheSameAgent(t *testing.T) {
 			mu.Unlock()
 			return session, nil
 		},
-		resolveOrchestratorLaunch: func(_ eruncommon.OrchestratorLaunch, agentID, initialPrompt, _ string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(_ orchestrator.OrchestratorLaunch, agentID, initialPrompt, _ string) (string, []string, error) {
 			mu.Lock()
 			attached = append(attached, agentID)
 			prompts = append(prompts, initialPrompt)
@@ -2089,7 +2090,7 @@ func TestOrchestratorCleanExitDoesNotRespawn(t *testing.T) {
 			mu.Unlock()
 			return session, nil
 		},
-		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
@@ -2147,7 +2148,7 @@ func TestStopOrchestratorRefusesItsOwnRespawn(t *testing.T) {
 			mu.Unlock()
 			return session, nil
 		},
-		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,

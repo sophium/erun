@@ -539,7 +539,7 @@ func applyRuntimeChartOverride(ctx core.Context, target DeployTarget, spec *Depl
 	if spec.Deploy.ReleaseName != configpkg.RuntimeReleaseName(spec.Target.Tenant) {
 		return
 	}
-	reference, version := splitChartReferenceVersion(override)
+	reference, version := SplitChartReferenceVersion(override)
 	spec.DeployContext.ChartPath = reference
 	spec.Deploy.ChartPath = reference
 	spec.Deploy.ChartVersion = version
@@ -554,7 +554,7 @@ func applyRuntimeChartOverride(ctx core.Context, target DeployTarget, spec *Depl
 	// subchart that is not there -- so the image override and the required
 	// tenant/environment values would land nowhere and the pod would come up
 	// wrong instead of failing loudly.
-	spec.Deploy.SubchartKey = publishedUmbrellaSubchartKey(spec.Target.Tenant, chartNameFromReference(reference))
+	spec.Deploy.SubchartKey = publishedUmbrellaSubchartKey(spec.Target.Tenant, ChartName(reference))
 	if version == "" {
 		ctx.Trace("deploy: runtime chart override " + reference + " at the deploy version")
 		return
@@ -562,9 +562,9 @@ func applyRuntimeChartOverride(ctx core.Context, target DeployTarget, spec *Depl
 	ctx.Trace("deploy: runtime chart override " + reference + " version " + version)
 }
 
-// chartNameFromReference is the chart name a reference addresses -- its last
+// ChartName is the chart name a reference addresses -- its last
 // path segment, the same reading helm gives it.
-func chartNameFromReference(reference string) string {
+func ChartName(reference string) string {
 	return reference[strings.LastIndex(reference, "/")+1:]
 }
 
@@ -572,20 +572,20 @@ func chartNameFromReference(reference string) string {
 // the version it may carry, so every surface reads one the same way -- the deploy
 // that installs it and the desktop that shows what will be installed.
 func SplitChartReference(raw string) (reference, version string) {
-	return splitChartReferenceVersion(raw)
+	return SplitChartReferenceVersion(raw)
 }
 
 // ChartNameFromReference is the chart name a reference addresses, for a caller
 // outside this package that needs to name the chart a deploy will install.
 func ChartNameFromReference(reference string) string {
-	return chartNameFromReference(reference)
+	return ChartName(reference)
 }
 
-// splitChartReferenceVersion separates a chart reference from the version it may
+// SplitChartReferenceVersion separates a chart reference from the version it may
 // carry. Only the last path segment is inspected, so a registry port is not read
 // as a version, and an oci:// scheme is added when absent so the reference is
 // unambiguous to helm.
-func splitChartReferenceVersion(raw string) (string, string) {
+func SplitChartReferenceVersion(raw string) (string, string) {
 	raw = strings.TrimSpace(raw)
 	if !strings.Contains(raw, "://") {
 		raw = "oci://" + raw
@@ -1274,7 +1274,7 @@ func resolveCurrentDeploySpecs(ctx core.Context, store DeployStore, findProjectR
 func finalizeRuntimeChartSpecs(ctx core.Context, target DeployTarget, resolvedTarget configpkg.OpenResult, specs []DeploySpec) error {
 	for i := range specs {
 		applyRuntimeChartOverride(ctx, target, &specs[i])
-		if err := applyMCPAuthToRuntimeSpec(ctx, target, &specs[i]); err != nil {
+		if err := ApplyMCPAuthToRuntimeSpec(ctx, target, &specs[i]); err != nil {
 			return err
 		}
 		if err := guardMCPAuthDowngrade(ctx, target, specs[i].Deploy); err != nil {
@@ -1442,7 +1442,7 @@ func resolvePublishedDeploySpecs(ctx core.Context, store DeployStore, findProjec
 		return nil, err
 	}
 
-	tenantComponents := selectedPublishableComponents(selected, resolvedTarget.Tenant, plan)
+	tenantComponents := SelectedPublishableComponents(selected, resolvedTarget.Tenant, plan)
 	runtimeSelected := deploySelectionIncludesRuntime(selected, resolvedTarget.Tenant)
 
 	// Deploying the tenant's own component charts binds the whole deploy to the
@@ -1560,7 +1560,7 @@ func resolveDeploySpecsForContexts(ctx core.Context, store DeployStore, findProj
 // runtimeImageExplicit is true when the caller's runtime image came from an
 // operator --runtime-image on this invocation, not merely a persisted memo.
 func resolvePublishedDevopsDeploySpecs(ctx core.Context, store DeployStore, resolvedTarget configpkg.OpenResult, versionOverride, runtimeChartOverride string, runtimeImageExplicit bool) ([]DeploySpec, error) {
-	spec, err := resolvePublishedDevopsDeploySpec(ctx, resolvedTarget, versionOverride, runtimeChartOverride, runtimeImageExplicit)
+	spec, err := ResolvePublishedDevopsDeploySpecWithOverrides(ctx, resolvedTarget, versionOverride, runtimeChartOverride, runtimeImageExplicit)
 	if err != nil {
 		return nil, err
 	}
@@ -1942,7 +1942,7 @@ func ResolveOpenRuntimeDeploySpec(ctx core.Context, store DeployStore, findProje
 	// open's heal-redeploy must rethread the env's recorded MCP-auth key too, or
 	// reopening an authenticated env would replace its pod with an
 	// unauthenticated edge.
-	if err := applyMCPAuthToRuntimeSpec(ctx, DeployTarget{Tenant: target.Tenant, Environment: target.Environment}, &spec); err != nil {
+	if err := ApplyMCPAuthToRuntimeSpec(ctx, DeployTarget{Tenant: target.Tenant, Environment: target.Environment}, &spec); err != nil {
 		return DeploySpec{}, err
 	}
 	return spec, nil
@@ -2100,7 +2100,7 @@ func freezeNow(now NowFunc) NowFunc {
 }
 
 func resolveDeployTargetForDockerTarget(store BuildDeployStore, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DeployTarget, error) {
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return DeployTarget{}, err
 	}
@@ -2179,7 +2179,7 @@ func resolveDeployContext(findProjectRoot ProjectFinderFunc, resolveKubernetesDe
 		return context, nil
 	}
 
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, DockerCommandTarget{})
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, DockerCommandTarget{})
 	if err != nil {
 		return KubernetesDeployContext{}, err
 	}
@@ -2343,7 +2343,7 @@ func newHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext Kube
 		InsecureRegistry:    insecureRegistry,
 		RuntimeRegistry:     resolveRuntimeRegistry(target),
 		ContainerRegistries: containerRegistries,
-		Platform:            resolveProjectPlatform(target.RepoPath),
+		Platform:            ResolveProjectPlatform(target.RepoPath),
 		DisableBuildScript:  target.EnvConfig.DisableBuildScript,
 		PlatformAccount:     target.EnvConfig.PlatformAccount,
 		ImagePullSecrets:    append([]string(nil), target.EnvConfig.ImagePullSecrets...),
@@ -2379,7 +2379,7 @@ func resolveProjectContainerRegistry(projectRoot, environment string) string {
 	return registry
 }
 
-// resolveProjectPlatform loads the per-instance platform config from the
+// ResolveProjectPlatform loads the per-instance platform config from the
 // project's .erun/config.yaml and returns it with defaults resolved. Returns a
 // zero PlatformConfig when the project is uninitialized or declares no platform
 // block, so deploy threads no platform.* values for non-platform projects.
@@ -2391,7 +2391,7 @@ func resolveProjectContainerRegistry(projectRoot, environment string) string {
 // chart it deploys ignores the threaded platform.* values (only the platform
 // singletons read them, and open never deploys one). Do not rely on this
 // function having validated the block.
-func resolveProjectPlatform(projectRoot string) configpkg.PlatformConfig {
+func ResolveProjectPlatform(projectRoot string) configpkg.PlatformConfig {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
 		return configpkg.PlatformConfig{}
@@ -2755,7 +2755,7 @@ func prefixHelmSetKeys(args []string, prefix string) {
 	}
 }
 
-func (p HelmReleaseRecoveryParams) command() helm.CommandSpec {
+func (p HelmReleaseRecoveryParams) Command() helm.CommandSpec {
 	args := []string{}
 	if p.Verbosity >= core.VerbosityDebug {
 		args = append(args, "--v=4")
@@ -2879,7 +2879,7 @@ func (e *HelmReleasePendingOperationError) RecoveryCommand() string {
 	if e == nil {
 		return ""
 	}
-	command := e.RecoveryParams(0, nil, nil).command()
+	command := e.RecoveryParams(0, nil, nil).Command()
 	return core.FormatShellCommand(command.Dir, command.Name, command.Args...)
 }
 
@@ -3085,11 +3085,11 @@ func helmClaudeSetArgs(config configpkg.EnvironmentClaudeConfig, gateway *config
 	// ANTHROPIC_BASE_URL, and leaving either on would route the session past the
 	// gateway the environment selected.
 	gatewayOn := configpkg.EffectiveGateway(config, gateway).Configured()
-	useMantle := !gatewayOn && resolveClaudeBool(config.UseMantle, DefaultClaudeUseMantle)
-	useBedrock := !gatewayOn && resolveClaudeBool(config.UseBedrock, DefaultClaudeUseBedrock)
+	useMantle := !gatewayOn && resolveClaudeBool(config.UseMantle, configpkg.DefaultClaudeUseMantle)
+	useBedrock := !gatewayOn && resolveClaudeBool(config.UseBedrock, configpkg.DefaultClaudeUseBedrock)
 	args = append(args, "--set-string", "claude.useMantle="+claudeFlagValue(useMantle))
 	args = append(args, "--set-string", "claude.useBedrock="+claudeFlagValue(useBedrock))
-	if models := formatClaudeModels(config.Models); models != "" {
+	if models := configpkg.FormatClaudeModels(config.Models); models != "" {
 		args = append(args, "--set-string", "claude.availableModels="+escapeHelmSetValue(models))
 	}
 	if config.MaxOutputTokens != nil {
@@ -3103,7 +3103,7 @@ func helmClaudeSetArgs(config configpkg.EnvironmentClaudeConfig, gateway *config
 	// per-environment to name. The value itself never passes through helm.
 	if gateway := configpkg.EffectiveGateway(config, gateway); gateway.Configured() {
 		args = append(args, "--set-string", "claude.openRouterBaseURL="+escapeHelmSetValue(strings.TrimSpace(gateway.BaseURL)))
-		if ids := formatClaudeModels(gateway.ModelIDs()); ids != "" {
+		if ids := configpkg.FormatClaudeModels(gateway.ModelIDs()); ids != "" {
 			args = append(args, "--set-string", "claude.openRouterAvailableModels="+escapeHelmSetValue(ids))
 		}
 		// The pod-wide default, so Claude invoked outside the AI tab (an exec
@@ -3286,7 +3286,7 @@ func resolveConventionDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, proje
 		return resolveProjectRootDevopsK8sDir(findProjectRoot, projectRoot)
 	}
 
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, DockerCommandTarget{})
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, DockerCommandTarget{})
 	if err != nil {
 		return "", false, err
 	}
@@ -3303,7 +3303,7 @@ func resolveConventionDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, proje
 func configuredK8sDirForDeploy(findProjectRoot ProjectFinderFunc, projectRootOverride string) (string, bool, error) {
 	projectRoot := strings.TrimSpace(projectRootOverride)
 	if projectRoot == "" {
-		resolved, err := resolveDockerBuildProjectRoot(findProjectRoot, DockerCommandTarget{})
+		resolved, err := ResolveDockerBuildProjectRoot(findProjectRoot, DockerCommandTarget{})
 		if err != nil {
 			return "", false, err
 		}
@@ -3782,7 +3782,7 @@ func ClearHelmReleasePendingOperation(params HelmReleaseRecoveryParams) error {
 		return fmt.Errorf("helm release namespace is required")
 	}
 
-	command := params.command()
+	command := params.Command()
 	cmd := core.Command(command.Name, command.Args...)
 	capture := new(bytes.Buffer)
 	if params.Verbosity >= core.VerbosityDebug {

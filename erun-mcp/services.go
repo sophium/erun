@@ -5,7 +5,8 @@ import (
 	"io"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/expose"
 )
 
 type ServicesInput struct {
@@ -25,20 +26,20 @@ type ServicesInput struct {
 // act without being able to orient. Each Service comes back with its ports and,
 // when an erun-expose Ingress already fronts it, the public address it has --
 // the same read the desktop's Ports tab renders as its Service picker.
-func servicesTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ServicesInput) (*mcp.CallToolResult, eruncommon.EnvironmentServiceList, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input ServicesInput) (*mcp.CallToolResult, eruncommon.EnvironmentServiceList, error) {
+func servicesTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ServicesInput) (*mcp.CallToolResult, expose.EnvironmentServiceList, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ServicesInput) (*mcp.CallToolResult, expose.EnvironmentServiceList, error) {
 		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
-			return nil, eruncommon.EnvironmentServiceList{}, err
+			return nil, expose.EnvironmentServiceList{}, err
 		}
 		target, err := eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
 		if err != nil {
-			return nil, eruncommon.EnvironmentServiceList{}, err
+			return nil, expose.EnvironmentServiceList{}, err
 		}
 		runCtx := runtimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
-		result, err := eruncommon.RunListEnvironmentServices(runCtx, eruncommon.ShellLaunchParamsFromResult(target))
+		result, err := expose.RunListEnvironmentServices(runCtx, eruncommon.ShellLaunchParamsFromResult(target))
 		if err != nil {
-			return nil, eruncommon.EnvironmentServiceList{}, err
+			return nil, expose.EnvironmentServiceList{}, err
 		}
 		return nil, result, nil
 	}

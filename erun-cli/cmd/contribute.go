@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/spf13/cobra"
 )
@@ -26,7 +26,7 @@ func newContributeCloneCmd(runGit gitx.GitCommandRunnerFunc) *cobra.Command {
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			return common.RunContributeClone(ctx, "", runGit)
+			return review.RunContributeClone(ctx, "", runGit)
 		},
 	}
 	addDryRunFlag(cmd)

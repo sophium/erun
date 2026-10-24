@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	orchestratorpkg "github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // orchestratorTestPort is the port stub the config builder is driven with;
@@ -622,7 +622,7 @@ func orchestratorTestAppWithHostEnv(t *testing.T) *App {
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(orchestratorpkg.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		canReachMCPEndpoint: orchestratorTestAlwaysReachable,

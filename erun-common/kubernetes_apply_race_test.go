@@ -2,13 +2,11 @@ package eruncommon
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
@@ -132,17 +130,6 @@ func kubectlStubRefusals(t *testing.T, dir string) int {
 	return len(strings.Fields(string(raw)))
 }
 
-// kubectlStubAttempts is how many times the stub was invoked, which is how a
-// test sees whether an apply was retried.
-func kubectlStubAttempts(t *testing.T, dir string) int {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(dir, "attempts"))
-	if err != nil {
-		t.Fatalf("read stub attempts: %v", err)
-	}
-	return len(strings.Fields(string(raw)))
-}
-
 // applySharedSecretFromTwoComponents runs the reported scenario: two
 // components of one parallel deploy step apply the same shared secret at the
 // same time, against the rendezvousing stub. It returns the stub's state
@@ -202,94 +189,6 @@ func assertSharedSecretApplied(t *testing.T, dir string) {
 // to lose before the fix and to be retried into the update path after it.
 func TestConcurrentAppliesOfOneSharedSecretBothSucceed(t *testing.T) {
 	assertSharedSecretApplied(t, applySharedSecretFromTwoComponents(t))
-}
-
-// TestSharedSecretApplyIsNotRefusedWhileTheWinnersCreateIsStillPublishing
-// drives the interleaving the reported flake depended on instead of waiting
-// for it: the winner's create has taken the object but has not published it
-// yet when the loser's retry arrives, so the retry that only a rare schedule
-// produced is produced on every run. slowStubPublish is what widens the window
-// the losing create is refused in, from the microseconds between the stub's
-// two steps to a hold the test controls.
-//
-// The window does not exist against a real API server -- the refusal is the
-// server saying the object is already there -- so a retry that lands in it
-// must find the object rather than be refused a second time. Before the stub
-// published the object with the same exclusive operation that claimed it, the
-// loser's retries were refused until its attempts ran out and its component
-// failed, which is the failure the gate hit.
-func TestSharedSecretApplyIsNotRefusedWhileTheWinnersCreateIsStillPublishing(t *testing.T) {
-	slowStubPublish(t, 200*time.Millisecond)
-	assertSharedSecretApplied(t, applySharedSecretFromTwoComponents(t))
-}
-
-// slowStubPublish puts a `cp` on PATH that sleeps before doing its work, which
-// holds a stub invocation between taking the create and publishing the object.
-// The stub resolves `cp` through PATH like any other process, so the shim
-// reaches it without the stub knowing. PATH is restored when the test ends.
-func slowStubPublish(t *testing.T, hold time.Duration) {
-	t.Helper()
-	realCP, err := exec.LookPath("cp")
-	if err != nil {
-		t.Fatalf("locate cp: %v", err)
-	}
-	dir := t.TempDir()
-	shim := "#!/bin/sh\nsleep " + strconv.FormatFloat(hold.Seconds(), 'f', 3, 64) + "\nexec " + shellSingleQuote(realCP) + " \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(dir, "cp"), []byte(shim), 0o755); err != nil {
-		t.Fatalf("write cp shim: %v", err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-}
-
-// A refusal that never stops being a refusal is still an error, reported after
-// the bounded number of attempts. This is what separates a retry from treating
-// AlreadyExists as success: an object that never becomes what the manifest asks
-// for must fail the component rather than be reported as applied.
-func TestSecretApplySurfacesACreateRefusalThatNeverStops(t *testing.T) {
-	isolateKubectlSecretApplyMode(t)
-	dir := writeStatefulKubectlStub(t, alwaysRefusingKubectlStub(`Error from server (AlreadyExists): error when creating "STDIN": secrets "erun-claude-gateway" already exists`))
-
-	err := kube.ApplySecretManifest("orbstack", "team-dev", "gateway credentials secret", sharedSecretManifest, kube.KubectlApplyStdinArgs("team-dev", "orbstack"))
-	if err == nil {
-		t.Fatal("a create refusal that every attempt hit was reported as success")
-	}
-	if !strings.Contains(err.Error(), "AlreadyExists") {
-		t.Fatalf("the refusal was not reported: %v", err)
-	}
-	if got := kubectlStubAttempts(t, dir); got != kube.SecretApplyCreateRaceAttempts {
-		t.Fatalf("attempts = %d, want %d", got, kube.SecretApplyCreateRaceAttempts)
-	}
-}
-
-// alwaysRefusingKubectlStub is a kubectl that counts its invocations and then
-// fails with message on every one of them.
-func alwaysRefusingKubectlStub(message string) func(dir string) string {
-	return func(dir string) string {
-		return `#!/bin/sh
-cat > "` + dir + `/manifest"
-echo x >> "` + dir + `/attempts"
-echo ` + shellSingleQuote(message) + ` >&2
-exit 1
-`
-	}
-}
-
-// Any other refusal is a genuine failure of this apply and must surface on its
-// first occurrence, not be retried behind the operator's back.
-func TestSecretApplyDoesNotRetryAnUnrelatedFailure(t *testing.T) {
-	isolateKubectlSecretApplyMode(t)
-	dir := writeStatefulKubectlStub(t, alwaysRefusingKubectlStub(`Error from server (Forbidden): error when creating "STDIN": secrets "erun-claude-gateway" is forbidden: User cannot create resource`))
-
-	err := kube.ApplySecretManifest("orbstack", "team-dev", "gateway credentials secret", sharedSecretManifest, kube.KubectlApplyStdinArgs("team-dev", "orbstack"))
-	if err == nil {
-		t.Fatal("a forbidden apply was reported as success")
-	}
-	if !strings.Contains(err.Error(), "Forbidden") {
-		t.Fatalf("the refusal was not reported: %v", err)
-	}
-	if got := kubectlStubAttempts(t, dir); got != 1 {
-		t.Fatalf("attempts = %d, want 1: an unrelated failure was retried", got)
-	}
 }
 
 // An apply of a Secret that already exists must still land this manifest's

@@ -7,6 +7,7 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/spf13/cobra"
 )
 
@@ -55,7 +56,7 @@ func runServicesCommand(ctx core.Context, resolveOpen OpenResolver, params commo
 		return err
 	}
 	req := common.ShellLaunchParamsFromResult(result)
-	services, err := common.RunListEnvironmentServices(ctx, req)
+	services, err := expose.RunListEnvironmentServices(ctx, req)
 	if err != nil {
 		return fmt.Errorf("cannot list this environment's Services: %w", err)
 	}
@@ -72,7 +73,7 @@ func runServicesCommand(ctx core.Context, resolveOpen OpenResolver, params commo
 // Service carries its public address on an indented line beneath it, the same
 // shape `erun observe` uses for an Ingress's backends: the Service line stays
 // about what is running, and the address is what the exposure added to it.
-func writeServicesResult(ctx core.Context, result common.EnvironmentServiceList) error {
+func writeServicesResult(ctx core.Context, result expose.EnvironmentServiceList) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Namespace: %s\n", result.Namespace); err != nil {
 		return err
 	}

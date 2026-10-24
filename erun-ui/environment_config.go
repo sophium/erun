@@ -12,6 +12,8 @@ import (
 	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/ai"
+	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -245,7 +247,7 @@ func (a *App) validateWorkspaceSyncConfig(config configpkg.EnvConfig) error {
 	if localPath == "" {
 		return fmt.Errorf("local sync folder is required when workspace sync is enabled")
 	}
-	if err := eruncommon.EnsureLocalWorkspaceSyncTarget(localPath); err != nil {
+	if err := workspace.EnsureLocalWorkspaceSyncTarget(localPath); err != nil {
 		return fmt.Errorf("local sync folder: %w", err)
 	}
 	return nil
@@ -714,26 +716,26 @@ func claudeConfigFromUI(config uiClaudeConfig) configpkg.EnvironmentClaudeConfig
 }
 
 func claudeDefaultsForUI(gateway *configpkg.OpenRouterConfig) uiClaudeDefaults {
-	minTokens, maxTokens := eruncommon.ClaudeMaxOutputTokensRange()
+	minTokens, maxTokens := configpkg.ClaudeMaxOutputTokensRange()
 	gatewayModels := gateway.ModelIDs()
 	if gatewayModels == nil {
 		gatewayModels = []string{}
 	}
 	return uiClaudeDefaults{
-		UseMantle:  eruncommon.DefaultClaudeUseMantle,
-		UseBedrock: eruncommon.DefaultClaudeUseBedrock,
+		UseMantle:  configpkg.DefaultClaudeUseMantle,
+		UseBedrock: configpkg.DefaultClaudeUseBedrock,
 		// The environment's own models, which is what an environment without a
 		// gateway (or one that opted out of it) launches from. The catalog's set
 		// travels separately below, because the Anthropic aliases are not models
 		// a gateway necessarily serves and the catalog's ids are not models an
 		// environment's own sign-in can.
-		Models:          eruncommon.DefaultClaudeAvailableModels(),
-		MaxOutputTokens: eruncommon.DefaultClaudeMaxOutputTokens,
+		Models:          configpkg.DefaultClaudeAvailableModels(),
+		MaxOutputTokens: configpkg.DefaultClaudeMaxOutputTokens,
 		KnownModels:     configpkg.KnownClaudeModels(),
 		MinTokens:       minTokens,
 		MaxTokens:       maxTokens,
-		Effort:          eruncommon.DefaultClaudeEffortLevel,
-		EffortLevels:    eruncommon.ClaudeEffortLevels(),
+		Effort:          ai.DefaultClaudeEffortLevel,
+		EffortLevels:    ai.ClaudeEffortLevels(),
 		// The per-environment gateway controls override an erun-level catalog, so
 		// they are only meaningful when one exists. Resolved from the catalog,
 		// not the environment's effective gateway, so an environment that opted

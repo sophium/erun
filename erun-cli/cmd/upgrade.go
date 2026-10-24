@@ -6,6 +6,7 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/spf13/cobra"
@@ -60,7 +61,7 @@ func newUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver
 			}
 			holder := activity.EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(orchestrator)}
 			deployer := newUpgradeDeployer(store, saveEnvConfig, findProjectRoot, resolveBuildContext, resolveDeployContext, now, buildDockerImage, push, deployHelmChart, target.Force)
-			deployer = common.LeaseGuardedUpgradeDeployer(deployer, overrideLease, holder, nil)
+			deployer = lifecycle.LeaseGuardedUpgradeDeployer(deployer, overrideLease, holder, nil)
 			return runUpgrade(withCloudContextPreflight(commandContext(cmd), store), store, target, deployer)
 		},
 	}
@@ -76,7 +77,7 @@ func newUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver
 	return cmd
 }
 
-func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, versionOverride string, force, fleet bool) (common.UpgradeTarget, error) {
+func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, versionOverride string, force, fleet bool) (lifecycle.UpgradeTarget, error) {
 	if len(args) >= 1 {
 		tenant = args[0]
 	}
@@ -84,9 +85,9 @@ func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, 
 		environment = args[1]
 	}
 	if strings.TrimSpace(environment) != "" && strings.TrimSpace(tenant) == "" {
-		return common.UpgradeTarget{}, fmt.Errorf("environment requires a tenant: pass TENANT ENVIRONMENT or --tenant with --environment")
+		return lifecycle.UpgradeTarget{}, fmt.Errorf("environment requires a tenant: pass TENANT ENVIRONMENT or --tenant with --environment")
 	}
-	return common.UpgradeTarget{
+	return lifecycle.UpgradeTarget{
 		Tenant:          strings.TrimSpace(tenant),
 		Environment:     strings.TrimSpace(environment),
 		VersionOverride: strings.TrimSpace(versionOverride),
@@ -96,7 +97,7 @@ func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, 
 	}, nil
 }
 
-func runUpgrade(ctx core.Context, store common.DeployStore, target common.UpgradeTarget, deploy common.UpgradeItemDeployer) error {
+func runUpgrade(ctx core.Context, store common.DeployStore, target lifecycle.UpgradeTarget, deploy lifecycle.UpgradeItemDeployer) error {
 	// A scoped run (the desktop's per-env Upgrade-all fan-out) captures into
 	// that env's trace log; the cross-tenant global run has no single env to
 	// attribute the trace to.
@@ -108,7 +109,7 @@ func runUpgrade(ctx core.Context, store common.DeployStore, target common.Upgrad
 	ctx.Trace(fmt.Sprintf("upgrade: tenant=%s environment=%s version-override=%s force=%v fleet=%v gate-environment=%s",
 		target.Tenant, target.Environment, target.VersionOverride, target.Force, target.Fleet, target.GateEnvironment))
 
-	plan, err := common.ResolveUpgradePlanForStore(ctx, store, target, common.UpgradeVersionsResolverForStore(store, registry.ResolveRuntimeImageRegistryVersions))
+	plan, err := lifecycle.ResolveUpgradePlanForStore(ctx, store, target, lifecycle.UpgradeVersionsResolverForStore(store, registry.ResolveRuntimeImageRegistryVersions))
 	if err != nil {
 		ctx.Trace("upgrade: plan resolution failed: " + err.Error())
 		return err
@@ -126,7 +127,7 @@ func runUpgrade(ctx core.Context, store common.DeployStore, target common.Upgrad
 			laggingSuffix(item), gateSuffix(item)))
 	}
 
-	result := common.RunUpgradePlan(ctx, plan, deploy)
+	result := lifecycle.RunUpgradePlan(ctx, plan, deploy)
 	if err := printUpgradeDryRunMarker(ctx); err != nil {
 		return err
 	}
@@ -152,8 +153,8 @@ func printUpgradeDryRunMarker(ctx core.Context) error {
 	return err
 }
 
-func newUpgradeDeployer(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, force bool) common.UpgradeItemDeployer {
-	return func(ctx core.Context, item common.UpgradePlanItem) error {
+func newUpgradeDeployer(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, force bool) lifecycle.UpgradeItemDeployer {
+	return func(ctx core.Context, item lifecycle.UpgradePlanItem) error {
 		deployTarget := common.DeployTarget{
 			Tenant:          item.Tenant,
 			Environment:     item.Environment,
@@ -179,21 +180,21 @@ func newUpgradeDeployer(store common.DeployStore, saveEnvConfig common.EnvConfig
 // --gate-environment already include every non-host environment in scope
 // regardless of opt-in, so an empty plan there means the tenant itself has no
 // environment to fill it, not a missed "Upgrade all" opt-in.
-func upgradeScopeReason(target common.UpgradeTarget) string {
+func upgradeScopeReason(target lifecycle.UpgradeTarget) string {
 	if target.Fleet || target.GateEnvironment != "" {
 		return " to roll"
 	}
 	return " opted into Upgrade all"
 }
 
-func gateSuffix(item common.UpgradePlanItem) string {
+func gateSuffix(item lifecycle.UpgradePlanItem) string {
 	if item.IsGate {
 		return "  [gate]"
 	}
 	return ""
 }
 
-func scopeSuffix(target common.UpgradeTarget) string {
+func scopeSuffix(target lifecycle.UpgradeTarget) string {
 	if target.Environment != "" {
 		return fmt.Sprintf(" for %s/%s", target.Tenant, target.Environment)
 	}
@@ -203,7 +204,7 @@ func scopeSuffix(target common.UpgradeTarget) string {
 	return ""
 }
 
-func laggingSuffix(item common.UpgradePlanItem) string {
+func laggingSuffix(item lifecycle.UpgradePlanItem) string {
 	if item.Lagging {
 		return "  (will upgrade)"
 	}

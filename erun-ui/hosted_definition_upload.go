@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/platform"
 )
 
 // hostedDefinitionUploadTimeout bounds the platform write. It matches the drift
@@ -67,7 +67,7 @@ func (a *App) runHostedDefinitionUpload(ctx context.Context, tenant, environment
 	}
 	defer cancel()
 
-	upload, err := eruncommon.PushEnvironmentDefinition(requestCtx, a.deps.store, client, eruncommon.EnvDefinitionPushParams{
+	upload, err := platform.PushEnvironmentDefinition(requestCtx, a.deps.store, client, platform.EnvDefinitionPushParams{
 		Tenant:      tenant,
 		Environment: environment,
 	})

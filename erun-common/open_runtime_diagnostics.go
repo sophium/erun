@@ -12,9 +12,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-type openKubectlRunnerFunc func(args []string, stdout, stderr io.Writer) error
+type OpenKubectlRunnerFunc func(args []string, stdout, stderr io.Writer) error
 
-func runOpenKubectl(args []string, stdout, stderr io.Writer) error {
+func RunOpenKubectl(args []string, stdout, stderr io.Writer) error {
 	cmd := core.Command("kubectl", args...)
 	if stdout != nil {
 		cmd.Stdout = stdout
@@ -25,7 +25,7 @@ func runOpenKubectl(args []string, stdout, stderr io.Writer) error {
 	return cmd.Run()
 }
 
-func enrichShellDeploymentError(req config.ShellLaunchParams, err error, runner openKubectlRunnerFunc) error {
+func enrichShellDeploymentError(req config.ShellLaunchParams, err error, runner OpenKubectlRunnerFunc) error {
 	if err == nil {
 		return nil
 	}
@@ -36,7 +36,7 @@ func enrichShellDeploymentError(req config.ShellLaunchParams, err error, runner 
 	return fmt.Errorf("%w\n\n%s", err, diagnostic)
 }
 
-func shellDeploymentFailureDiagnostic(req config.ShellLaunchParams, runner openKubectlRunnerFunc) string {
+func shellDeploymentFailureDiagnostic(req config.ShellLaunchParams, runner OpenKubectlRunnerFunc) string {
 	if runner == nil {
 		return ""
 	}
@@ -63,7 +63,7 @@ func shellDeploymentFailureDiagnostic(req config.ShellLaunchParams, runner openK
 	return strings.Join(lines, "\n")
 }
 
-func shellReplacementPodReady(req config.ShellLaunchParams, runner openKubectlRunnerFunc) bool {
+func shellReplacementPodReady(req config.ShellLaunchParams, runner OpenKubectlRunnerFunc) bool {
 	if runner == nil {
 		return false
 	}
@@ -79,7 +79,7 @@ func shellReplacementPodReady(req config.ShellLaunchParams, runner openKubectlRu
 	return false
 }
 
-func runtimePodLooksLikeCleanReplacement(pod runtimePodDiagnostic) bool {
+func runtimePodLooksLikeCleanReplacement(pod RuntimePodDiagnostic) bool {
 	if !strings.EqualFold(strings.TrimSpace(pod.Status.Phase), "Running") {
 		return false
 	}
@@ -97,7 +97,7 @@ func runtimePodLooksLikeCleanReplacement(pod runtimePodDiagnostic) bool {
 	return true
 }
 
-func runtimePodConditionTrue(pod runtimePodDiagnostic, conditionType string) bool {
+func runtimePodConditionTrue(pod RuntimePodDiagnostic, conditionType string) bool {
 	for _, condition := range pod.Status.Conditions {
 		if strings.EqualFold(strings.TrimSpace(condition.Type), conditionType) {
 			return strings.EqualFold(strings.TrimSpace(condition.Status), "True")
@@ -106,7 +106,7 @@ func runtimePodConditionTrue(pod runtimePodDiagnostic, conditionType string) boo
 	return false
 }
 
-func loadRuntimePodDiagnostics(req config.ShellLaunchParams, runner openKubectlRunnerFunc) (runtimePodDiagnosticList, error) {
+func loadRuntimePodDiagnostics(req config.ShellLaunchParams, runner OpenKubectlRunnerFunc) (runtimePodDiagnosticList, error) {
 	args := config.KubectlTargetArgs(req)
 	args = append(args, "get", "pods", "-l", "app="+config.RuntimeReleaseName(req.Tenant), "-o", "json")
 	var stdout bytes.Buffer
@@ -125,7 +125,7 @@ func loadRuntimePodDiagnostics(req config.ShellLaunchParams, runner openKubectlR
 	return pods, nil
 }
 
-func formatRuntimePodDiagnostic(pod runtimePodDiagnostic) []string {
+func formatRuntimePodDiagnostic(pod RuntimePodDiagnostic) []string {
 	name := strings.TrimSpace(pod.Metadata.Name)
 	if name == "" {
 		name = "<unknown>"
@@ -220,7 +220,7 @@ func formatRuntimeStateDetail(reason, message, startedAt, finishedAt string, exi
 	return " (" + strings.Join(parts, ", ") + ")"
 }
 
-func formatRuntimePodEvents(req config.ShellLaunchParams, pod runtimePodDiagnostic, runner openKubectlRunnerFunc) []string {
+func formatRuntimePodEvents(req config.ShellLaunchParams, pod RuntimePodDiagnostic, runner OpenKubectlRunnerFunc) []string {
 	podName := strings.TrimSpace(pod.Metadata.Name)
 	if podName == "" {
 		return nil
@@ -247,7 +247,7 @@ func formatRuntimePodEvents(req config.ShellLaunchParams, pod runtimePodDiagnost
 	return lines
 }
 
-func loadRuntimePodEvents(req config.ShellLaunchParams, podName string, runner openKubectlRunnerFunc) ([]runtimePodEventDiagnostic, error) {
+func loadRuntimePodEvents(req config.ShellLaunchParams, podName string, runner OpenKubectlRunnerFunc) ([]runtimePodEventDiagnostic, error) {
 	args := config.KubectlTargetArgs(req)
 	args = append(args, "get", "events", "-o", "json")
 	var stdout bytes.Buffer
@@ -353,10 +353,10 @@ func singleLineRuntimeDiagnostic(value string) string {
 }
 
 type runtimePodDiagnosticList struct {
-	Items []runtimePodDiagnostic `json:"items"`
+	Items []RuntimePodDiagnostic `json:"items"`
 }
 
-type runtimePodDiagnostic struct {
+type RuntimePodDiagnostic struct {
 	Metadata struct {
 		Name string `json:"name"`
 	} `json:"metadata"`

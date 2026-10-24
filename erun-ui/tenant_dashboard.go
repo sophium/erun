@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
+	reviewpkg "github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
@@ -518,7 +518,7 @@ func fetchReviewThreadCountsConcurrently(ctx context.Context, client *platformcl
 			if err != nil {
 				return
 			}
-			count := eruncommon.CountUnresolvedThreads(comments)
+			count := reviewpkg.CountUnresolvedThreads(comments)
 			mu.Lock()
 			counts[reviewID] = count
 			mu.Unlock()

@@ -22,6 +22,8 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
@@ -29,14 +31,14 @@ import (
 )
 
 func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
-	state := stateFromListResult(eruncommon.ListResult{
-		CurrentDirectory: eruncommon.ListCurrentDirectoryResult{
-			Effective: &eruncommon.ListEffectiveTargetResult{
+	state := stateFromListResult(lifecycle.ListResult{
+		CurrentDirectory: lifecycle.ListCurrentDirectoryResult{
+			Effective: &lifecycle.ListEffectiveTargetResult{
 				Tenant:      "erun",
 				Environment: "local",
 			},
 		},
-		Tenants: []eruncommon.ListTenantResult{
+		Tenants: []lifecycle.ListTenantResult{
 			{
 				Name: "erun",
 				Environments: []eruncommon.ListEnvironmentResult{
@@ -80,8 +82,8 @@ func assertEffectiveSelectionEnvironments(t *testing.T, envs []uiEnvironment) {
 }
 
 func TestStateFromListResultOmitsEmptyTenants(t *testing.T) {
-	state := stateFromListResult(eruncommon.ListResult{
-		Tenants: []eruncommon.ListTenantResult{
+	state := stateFromListResult(lifecycle.ListResult{
+		Tenants: []lifecycle.ListTenantResult{
 			{Name: "empty"},
 			{
 				Name: "active",
@@ -580,12 +582,12 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 			ensureCalls++
 			return nil
 		},
-		loadDiff: func(_ context.Context, endpoint, _ string, options uiDiffOptions) (eruncommon.DiffResult, error) {
+		loadDiff: func(_ context.Context, endpoint, _ string, options uiDiffOptions) (lifecycle.DiffResult, error) {
 			gotEndpoint = endpoint
 			if options.Scope != "commit" || options.SelectedCommit != "abc123" {
 				t.Fatalf("unexpected diff options: %+v", options)
 			}
-			return eruncommon.DiffResult{RawDiff: "diff --git a/a.txt b/a.txt\n"}, nil
+			return lifecycle.DiffResult{RawDiff: "diff --git a/a.txt b/a.txt\n"}, nil
 		},
 	})
 
@@ -635,9 +637,9 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 			ensureCalls++
 			return nil
 		},
-		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (eruncommon.DiffResult, error) {
+		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (lifecycle.DiffResult, error) {
 			loadCalls++
-			return eruncommon.DiffResult{}, nil
+			return lifecycle.DiffResult{}, nil
 		},
 	})
 
@@ -689,8 +691,8 @@ func TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return false
 		},
-		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (eruncommon.DiffResult, error) {
-			return eruncommon.DiffResult{}, nil
+		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (lifecycle.DiffResult, error) {
+			return lifecycle.DiffResult{}, nil
 		},
 	})
 
@@ -736,8 +738,8 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 			ensureCalls++
 			return nil
 		},
-		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (eruncommon.DiffResult, error) {
-			return eruncommon.DiffResult{}, errors.New("EOF")
+		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (lifecycle.DiffResult, error) {
+			return lifecycle.DiffResult{}, errors.New("EOF")
 		},
 	})
 
@@ -3263,10 +3265,10 @@ func assertClaudeOverrides(t *testing.T, claude uiClaudeConfig) {
 func assertClaudeDefaults(t *testing.T, defaults uiClaudeDefaults) {
 	t.Helper()
 
-	if defaults.MaxOutputTokens != eruncommon.DefaultClaudeMaxOutputTokens {
+	if defaults.MaxOutputTokens != configpkg.DefaultClaudeMaxOutputTokens {
 		t.Fatalf("expected default max output tokens, got %d", defaults.MaxOutputTokens)
 	}
-	if !equalStringSlices(defaults.Models, eruncommon.DefaultClaudeAvailableModels()) {
+	if !equalStringSlices(defaults.Models, configpkg.DefaultClaudeAvailableModels()) {
 		t.Fatalf("expected default models, got %+v", defaults.Models)
 	}
 	if !equalStringSlices(defaults.KnownModels, configpkg.KnownClaudeModels()) {
@@ -4361,12 +4363,12 @@ func TestListAgentOutputsResolvesEnvAndLists(t *testing.T) {
 	var gotResult configpkg.OpenResult
 	app := NewApp(erunUIDeps{
 		store: store,
-		listAgentOutputs: func(result configpkg.OpenResult, _ eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error) {
+		listAgentOutputs: func(result configpkg.OpenResult, _ jobs.RuntimeOutputsParams) (jobs.RuntimeOutputsListResult, error) {
 			gotResult = result
-			return eruncommon.RuntimeOutputsListResult{
+			return jobs.RuntimeOutputsListResult{
 				Dir:     "/home/erun/.erun/outputs",
 				Total:   1,
-				Entries: []eruncommon.OutputEntry{{Name: "report.pdf", Size: 10}},
+				Entries: []jobs.OutputEntry{{Name: "report.pdf", Size: 10}},
 			}, nil
 		},
 	})

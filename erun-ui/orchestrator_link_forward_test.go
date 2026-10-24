@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
 // orchestratorLinkForwardTestApp wires the same frs/dev remote-agent env
@@ -20,7 +20,7 @@ import (
 func orchestratorLinkForwardTestApp(
 	t *testing.T,
 	reconnect func(context.Context, config.OpenResult, func(string)) error,
-	readRunState func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error),
+	readRunState func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error),
 ) (*App, *capturedEmits) {
 	t.Helper()
 	home := t.TempDir()
@@ -162,8 +162,8 @@ func TestLinkingAStoppedEnvironmentDoesNotForceStartIt(t *testing.T) {
 		func(context.Context, config.OpenResult, func(string)) error {
 			return errors.New("frs/dev is stopped, and a session reconnect does not start it; run `erun open frs dev` to start it again")
 		},
-		func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
-			return eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 0}, nil
+		func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error) {
+			return lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 0}, nil
 		},
 	)
 

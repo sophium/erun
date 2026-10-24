@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/expose"
 )
 
 type ExposeInput struct {
@@ -68,14 +68,14 @@ func exposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 		}
 		projectRoot := firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 
-		exposeStore, ok := any(runtime.Store).(eruncommon.ExposeStore)
+		exposeStore, ok := any(runtime.Store).(expose.ExposeStore)
 		if !ok {
 			exposeStore = config.ConfigStore{}
 		}
 
 		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
 			runCtx.MCPTool = "expose"
-			_, err := eruncommon.RunExposeService(runCtx, eruncommon.ExposeServiceParams{
+			_, err := expose.RunExposeService(runCtx, expose.ExposeServiceParams{
 				Tenant:             tenant,
 				Environment:        environment,
 				Service:            strings.TrimSpace(input.Service),
@@ -89,7 +89,7 @@ func exposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 				SkipIfUnconfigured: input.SkipIfUnconfigured,
 				ServicesZone:       strings.TrimSpace(input.ServicesZone),
 				PlatformNamespace:  strings.TrimSpace(input.PlatformNamespace),
-				TLS: eruncommon.TLSCertParams{
+				TLS: expose.TLSCertParams{
 					DNS01TokenPath:        strings.TrimSpace(input.DNS01TokenFile),
 					DNS01BrokerURL:        strings.TrimSpace(input.DNS01BrokerURL),
 					DNS01WebhookGroupName: strings.TrimSpace(input.DNS01WebhookGroupName),

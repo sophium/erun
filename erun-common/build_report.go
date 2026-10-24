@@ -114,7 +114,7 @@ func resolveBuildReportCommitID(ctx core.Context, projectRoot string) (string, e
 	if strings.TrimSpace(projectRoot) == "" {
 		return "", nil
 	}
-	commitID, _, err := gitResolvedRef(ctx, projectRoot, "HEAD")
+	commitID, _, err := GitResolvedRef(ctx, projectRoot, "HEAD")
 	return commitID, err
 }
 

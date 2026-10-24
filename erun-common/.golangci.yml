@@ -140,6 +140,16 @@ linters:
           deny:
             - pkg: github.com/sophium/erun/erun-common
               desc: infra/mcp may import base/* and infra/kube
+        command:
+          list-mode: lax
+          files: ["**/erun-common/command/**/*.go", "!$test"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common$
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: a command package may import base/*, infra/* and the root package, never another command package
     funlen:
       lines: 100
       statements: 50

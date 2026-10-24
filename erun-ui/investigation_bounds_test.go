@@ -12,6 +12,7 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common"
+	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
@@ -329,7 +330,7 @@ func TestRunningInvestigationIsVisibleAsAnEnvironmentJob(t *testing.T) {
 	info := harness.investigateWithTrackedProcess(t, investigateHelmTimeoutReport, "frs", "dev")
 
 	job := soleEnvironmentJob(t, "frs", "dev")
-	if job.State != eruncommon.EnvironmentJobStateRunning {
+	if job.State != jobspkg.EnvironmentJobStateRunning {
 		t.Fatalf("expected a running job, got %+v", job)
 	}
 	if job.ID != info.ID || job.LeaseID == "" {
@@ -347,7 +348,7 @@ func TestRunningInvestigationIsVisibleAsAnEnvironmentJob(t *testing.T) {
 
 func soleEnvironmentJob(t *testing.T, tenant, environment string) eruncommon.EnvironmentJob {
 	t.Helper()
-	jobs, err := eruncommon.LoadEnvironmentJobs(tenant, environment, time.Now())
+	jobs, err := jobspkg.LoadEnvironmentJobs(tenant, environment, time.Now())
 	if err != nil {
 		t.Fatalf("LoadEnvironmentJobs failed: %v", err)
 	}

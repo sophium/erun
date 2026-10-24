@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // orchestratorAliasTestApp is orchestratorTestApp with one erun-type cloud
@@ -99,7 +99,7 @@ func mustUpdateOrchestrator(t *testing.T, app *App, id, name string, envs []orch
 // made inside it.
 func mustSetOrchestratorAlias(t *testing.T, app *App, id, alias string) {
 	t.Helper()
-	if _, err := eruncommon.SetOrchestratorAlias(core.Context{}, app.deps.store, eruncommon.SetOrchestratorAliasParams{
+	if _, err := orchestrator.SetOrchestratorAlias(core.Context{}, app.deps.store, orchestrator.SetOrchestratorAliasParams{
 		OrchestratorID: id,
 		Alias:          alias,
 	}); err != nil {

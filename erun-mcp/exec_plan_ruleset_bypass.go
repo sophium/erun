@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/review"
 )
 
 // ExecPlanRulesetBypassInput plans narrowing a protected branch's ruleset
@@ -25,23 +25,23 @@ type ExecPlanRulesetBypassInput struct {
 
 // PlanRulesetBypassToolResult is the plan-ruleset-bypass tool's result.
 type PlanRulesetBypassToolResult struct {
-	Preview bool                               `json:"preview"`
-	Result  eruncommon.PlanRulesetBypassResult `json:"result,omitempty"`
-	Trace   []string                           `json:"trace,omitempty"`
+	Preview bool                           `json:"preview"`
+	Result  review.PlanRulesetBypassResult `json:"result,omitempty"`
+	Trace   []string                       `json:"trace,omitempty"`
 }
 
 func execPlanRulesetBypassTool(_ RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecPlanRulesetBypassInput) (*mcp.CallToolResult, PlanRulesetBypassToolResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecPlanRulesetBypassInput) (*mcp.CallToolResult, PlanRulesetBypassToolResult, error) {
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		result, err := eruncommon.PlanRulesetBypass(ctx, eruncommon.PlanRulesetBypassParams{
+		result, err := review.PlanRulesetBypass(ctx, review.PlanRulesetBypassParams{
 			RemoteURL:      input.RemoteURL,
 			RulesetID:      input.RulesetID,
 			TargetBranch:   input.TargetBranch,
 			QueueActorType: input.QueueActorType,
 			QueueActor:     input.QueueActor,
 			OutDir:         input.OutDir,
-		}, eruncommon.PlanRulesetBypassDependencies{})
+		}, review.PlanRulesetBypassDependencies{})
 		if err != nil {
 			return nil, PlanRulesetBypassToolResult{}, err
 		}

@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
@@ -56,7 +55,7 @@ func assertGatewayModelChoices(t *testing.T, config uiEnvironmentConfig) {
 	if !defaults.GatewayConfigured || !equalStringSlices(defaults.GatewayModels, []string{"vendor/model-x"}) || defaults.GatewayDefaultModel != "vendor/model-x" {
 		t.Fatalf("the catalog's models should be offered beside the environment's own, got %+v", defaults)
 	}
-	if !equalStringSlices(defaults.Models, eruncommon.DefaultClaudeAvailableModels()) {
+	if !equalStringSlices(defaults.Models, configpkg.DefaultClaudeAvailableModels()) {
 		t.Fatalf("an environment's own models must not be replaced by the catalog, got %+v", defaults.Models)
 	}
 	if !strings.Contains(config.AILaunchSignature, "--model vendor/model-x") {

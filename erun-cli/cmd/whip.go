@@ -11,6 +11,7 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/spf13/cobra"
 )
@@ -74,13 +75,13 @@ func runWhipCommand(ctx context.Context, commandCtx core.Context, store common.L
 		return err
 	}
 
-	report := common.WhipReport{DryRun: commandCtx.DryRun}
+	report := orchestrator.WhipReport{DryRun: commandCtx.DryRun}
 	// Each target's row is written as it is decided rather than only once the
 	// whole sweep finishes: an unreachable channel can take a full reattach
 	// timeout to answer, and a sweep that showed nothing until the last target
 	// resolved would report an empty pass for as long as one target was slow.
 	// JSON stays a single document on stdout, so it is written at the end.
-	emit := func(result common.WhipResult) error {
+	emit := func(result orchestrator.WhipResult) error {
 		report.Results = append(report.Results, result)
 		if commandWantsJSON(commandCtx, jsonOutput) {
 			return nil
@@ -98,11 +99,11 @@ func runWhipCommand(ctx context.Context, commandCtx core.Context, store common.L
 	// persisted orchestrator too.
 	if !scoped {
 		globalConfig, _, _ := store.LoadERunConfig()
-		whipConfig := common.ResolveWhipConfig(globalConfig.Whip)
+		whipConfig := orchestrator.ResolveWhipConfig(globalConfig.Whip)
 		now := time.Now()
-		for _, candidate := range common.ListWhipOrchestratorCandidates(globalConfig.Orchestrators) {
-			decision, reason := common.DecideWhip(candidate, now, whipConfig, true)
-			if err := emit(common.WhipResult{Candidate: candidate, Decision: decision, Reason: reason}); err != nil {
+		for _, candidate := range orchestrator.ListWhipOrchestratorCandidates(globalConfig.Orchestrators) {
+			decision, reason := orchestrator.DecideWhip(candidate, now, whipConfig, true)
+			if err := emit(orchestrator.WhipResult{Candidate: candidate, Decision: decision, Reason: reason}); err != nil {
 				return err
 			}
 		}
@@ -113,7 +114,7 @@ func runWhipCommand(ctx context.Context, commandCtx core.Context, store common.L
 
 // writeWhipReport picks the wire form once, so the documented global
 // --output json and the command's own --json alias cannot diverge.
-func writeWhipReport(commandCtx core.Context, report common.WhipReport, jsonOutput bool) error {
+func writeWhipReport(commandCtx core.Context, report orchestrator.WhipReport, jsonOutput bool) error {
 	if commandWantsJSON(commandCtx, jsonOutput) {
 		encoder := json.NewEncoder(commandCtx.Stdout)
 		encoder.SetIndent("", "  ")
@@ -173,12 +174,12 @@ func resolveWhipEnvironmentTargets(store common.ListStore, tenant, environment s
 // side. An environment with no reachable edge (nobody has it open in the
 // desktop right now) resolves to "not alive": there is no live session there
 // to push, whether or not this was a dry run.
-func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment string) common.WhipResult {
+func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment string) orchestrator.WhipResult {
 	id := tenant + "/" + environment
-	notAlive := common.WhipResult{
-		Candidate: common.WhipCandidate{Kind: common.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
-		Decision:  common.WhipDecisionNone,
-		Reason:    common.WhipReasonNotAlive,
+	notAlive := orchestrator.WhipResult{
+		Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
+		Decision:  orchestrator.WhipDecisionNone,
+		Reason:    orchestrator.WhipReasonNotAlive,
 	}
 
 	target, err := resolveMCPEdgeTarget(commandCtx, resolveOpen, scopedOpenParams(commandCtx.Command, tenant, environment))
@@ -202,11 +203,11 @@ func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpe
 	// it means the call itself did not work, which is a different problem
 	// asking for different operator action (root AGENTS.md's "Smooth,
 	// Seamless, No Dead Ends" -- distinguish causes before writing copy).
-	failed := func(detail string) common.WhipResult {
-		return common.WhipResult{
-			Candidate: common.WhipCandidate{Kind: common.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
-			Decision:  common.WhipDecisionNone,
-			Reason:    common.WhipReasonCallFailed,
+	failed := func(detail string) orchestrator.WhipResult {
+		return orchestrator.WhipResult{
+			Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
+			Decision:  orchestrator.WhipDecisionNone,
+			Reason:    orchestrator.WhipReasonCallFailed,
 			Error:     detail,
 		}
 	}
@@ -215,11 +216,11 @@ func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpe
 	// brings it up, never a failed call: whip fans out over sessions that are
 	// already live, and this target is simply one of the ones it could not
 	// reach. The sweep reports it and moves on to the next target.
-	channelDown := func(detail string) common.WhipResult {
-		return common.WhipResult{
-			Candidate: common.WhipCandidate{Kind: common.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
-			Decision:  common.WhipDecisionNone,
-			Reason:    common.WhipReasonChannelDown,
+	channelDown := func(detail string) orchestrator.WhipResult {
+		return orchestrator.WhipResult{
+			Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
+			Decision:  orchestrator.WhipDecisionNone,
+			Reason:    orchestrator.WhipReasonChannelDown,
 			Error:     detail,
 		}
 	}
@@ -231,7 +232,7 @@ func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpe
 		}
 		return failed(err.Error())
 	}
-	var decoded common.WhipResult
+	var decoded orchestrator.WhipResult
 	if len(result.Structured) == 0 {
 		return failed(fmt.Sprintf("%s/%s returned no result for whip", tenant, environment))
 	}
@@ -241,13 +242,13 @@ func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpe
 	return decoded
 }
 
-func writeWhipResult(ctx core.Context, result common.WhipResult, dryRun bool) error {
+func writeWhipResult(ctx core.Context, result orchestrator.WhipResult, dryRun bool) error {
 	return writeLabeledValue(ctx, whipResultLabel(result), whipResultValue(result, dryRun))
 }
 
-func whipResultLabel(result common.WhipResult) string {
+func whipResultLabel(result orchestrator.WhipResult) string {
 	switch result.Candidate.Kind {
-	case common.WhipTargetOrchestrator:
+	case orchestrator.WhipTargetOrchestrator:
 		label := strings.TrimSpace(result.Candidate.Name)
 		if label == "" {
 			label = result.Candidate.ID
@@ -258,9 +259,9 @@ func whipResultLabel(result common.WhipResult) string {
 	}
 }
 
-func whipResultValue(result common.WhipResult, dryRun bool) string {
+func whipResultValue(result orchestrator.WhipResult, dryRun bool) string {
 	switch result.Decision {
-	case common.WhipDecisionNudge:
+	case orchestrator.WhipDecisionNudge:
 		if result.Pushed {
 			return fmt.Sprintf("pushed (consecutive nudge %d)", result.Candidate.NudgeCount+1)
 		}
@@ -268,10 +269,10 @@ func whipResultValue(result common.WhipResult, dryRun bool) string {
 			return "push failed: " + result.Error
 		}
 		return "would push (dry-run)"
-	case common.WhipDecisionCap:
+	case orchestrator.WhipDecisionCap:
 		return "capped: stopped nudging after repeated silence"
 	default:
-		if result.Reason == common.WhipReasonCallFailed {
+		if result.Reason == orchestrator.WhipReasonCallFailed {
 			return "call failed: " + result.Error
 		}
 		value := "skipped — " + string(result.Reason)
@@ -281,7 +282,7 @@ func whipResultValue(result common.WhipResult, dryRun bool) string {
 		// A dry run never reattaches, so a channel it could not reach says
 		// nothing yet about whether a real pass would have pushed this target:
 		// name that difference rather than letting the row read as a verdict.
-		if dryRun && result.Reason == common.WhipReasonChannelDown {
+		if dryRun && result.Reason == orchestrator.WhipReasonChannelDown {
 			value += " (a real run reattaches the channel first)"
 		}
 		return value

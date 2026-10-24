@@ -16,6 +16,9 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/ai"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -771,7 +774,7 @@ func ensureOrchestratorSkills() error {
 	if err != nil {
 		return err
 	}
-	_, err = eruncommon.InstallOrRefreshSkills(root, filepath.Join(home, ".claude", "skills"))
+	_, err = podruntime.InstallOrRefreshSkills(root, filepath.Join(home, ".claude", "skills"))
 	return err
 }
 
@@ -887,7 +890,7 @@ func ensureOrchestratorAgents() error {
 	if err != nil {
 		return err
 	}
-	_, err = eruncommon.InstallOrRefreshAgents(root, filepath.Join(home, ".claude", "agents"))
+	_, err = podruntime.InstallOrRefreshAgents(root, filepath.Join(home, ".claude", "agents"))
 	return err
 }
 
@@ -1428,7 +1431,7 @@ const orchestratorNoAskFlag = " --disallowedTools AskUserQuestion"
 // (agentID); the agent, not the PTY, owns the conversation. A transient
 // (Investigate) session has no agent and runs a fresh session in the PTY,
 // seeded with initialPrompt. launch supplies its model and effort.
-func orchestratorLaunchCommand(launch eruncommon.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error) {
+func orchestratorLaunchCommand(launch orchestrator.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error) {
 	if _, err := exec.LookPath(defaultAITool); err != nil {
 		return "", nil, fmt.Errorf("the %q CLI was not found on PATH; install it to run an orchestrator", defaultAITool)
 	}
@@ -1451,7 +1454,7 @@ var claudeAgentIDPattern = regexp.MustCompile(`^[0-9a-f]{6,64}$`)
 // at launch's effort on launch's model. Both are spliced unquoted, which is safe
 // only because eruncommon.ResolveOrchestratorLaunch admits nothing but a plain
 // model token and a known effort level.
-func buildOrchestratorLaunch(goos string, launch eruncommon.OrchestratorLaunch, initialPrompt, mcpConfigPath string) (string, []string) {
+func buildOrchestratorLaunch(goos string, launch orchestrator.OrchestratorLaunch, initialPrompt, mcpConfigPath string) (string, []string) {
 	quote := shellQuote
 	if goos == "windows" {
 		quote = powerShellQuote
@@ -2263,7 +2266,7 @@ func orchestratorSessionEnv(id string, launchEnv []string) []string {
 type orchestratorPTYLaunch struct {
 	dir           string
 	env           []string
-	launch        eruncommon.OrchestratorLaunch
+	launch        orchestrator.OrchestratorLaunch
 	mcpConfigPath string
 	agent         orchestratorAgentLaunch
 	cols          int
@@ -2286,7 +2289,7 @@ func (a *App) prepareOrchestratorAgent(spawn orchestratorSpawn, launch orchestra
 	if err := writeOrchestratorAgentSettings(settingsPath, spawn.launch.launch, launch.env); err != nil {
 		return orchestratorAgentLaunch{}, fmt.Errorf("write the settings for %s's background agent: %w", spawn.id, err)
 	}
-	_, effortFlags := eruncommon.ClaudeBackgroundEffort(spawn.launch.launch.Effort)
+	_, effortFlags := ai.ClaudeBackgroundEffort(spawn.launch.launch.Effort)
 	return a.ensureOrchestratorAgent(orchestratorAgentRequest{
 		spec: orchestratorAgentSpec{
 			id:            spawn.id,

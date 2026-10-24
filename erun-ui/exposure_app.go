@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/expose"
 )
 
 // exposure_app.go is the desktop half of the Ports tab's public-exposure
@@ -63,9 +64,9 @@ func (a *App) ListEnvironmentServices(selection uiSelection) (uiEnvironmentServi
 	if !configured {
 		return uiEnvironmentServiceList{Services: []uiEnvironmentService{}, NotConfiguredReason: notConfiguredReason}, nil
 	}
-	services, err := eruncommon.ListEnvironmentServices(req)
+	services, err := expose.ListEnvironmentServices(req)
 	if err != nil {
-		if errors.Is(err, eruncommon.ErrListEnvironmentServicesForbidden) {
+		if errors.Is(err, expose.ErrListEnvironmentServicesForbidden) {
 			return uiEnvironmentServiceList{Configured: true, Restricted: true, Services: []uiEnvironmentService{}}, nil
 		}
 		return uiEnvironmentServiceList{Configured: true, Error: err.Error(), Services: []uiEnvironmentService{}}, nil
@@ -93,10 +94,10 @@ func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServ
 		return uiExposedService{}, fmt.Errorf("a service name and a target IP are required")
 	}
 	projectRoot := a.exposeProjectRoot()
-	if !eruncommon.ProjectHasExposablePlatform(projectRoot) {
+	if !expose.ProjectHasExposablePlatform(projectRoot) {
 		return uiExposedService{}, fmt.Errorf("this environment's project has no platform block configured, so it cannot be exposed at a public hostname")
 	}
-	result, err := eruncommon.RunExposeService(core.Context{}, eruncommon.ExposeServiceParams{
+	result, err := expose.RunExposeService(core.Context{}, expose.ExposeServiceParams{
 		Tenant:         selection.Tenant,
 		Environment:    selection.Environment,
 		Service:        service,
@@ -123,10 +124,10 @@ func (a *App) UnexposeEnvironment(selection uiSelection) (uiUnexposeResult, erro
 		return uiUnexposeResult{}, err
 	}
 	projectRoot := a.exposeProjectRoot()
-	if !eruncommon.ProjectHasExposablePlatform(projectRoot) {
+	if !expose.ProjectHasExposablePlatform(projectRoot) {
 		return uiUnexposeResult{}, fmt.Errorf("this environment's project has no platform block configured")
 	}
-	result, err := eruncommon.RunUnexposeService(core.Context{}, eruncommon.UnexposeParams{
+	result, err := expose.RunUnexposeService(core.Context{}, expose.UnexposeParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 		ProjectRoot: projectRoot,
@@ -156,7 +157,7 @@ func (a *App) resolveExposureRequest(selection uiSelection) (req configpkg.Shell
 		Namespace:         configpkg.KubernetesNamespaceName(selection.Tenant, selection.Environment),
 		KubernetesContext: strings.TrimSpace(config.KubernetesContext),
 	}
-	if !eruncommon.ProjectHasExposablePlatform(a.exposeProjectRoot()) {
+	if !expose.ProjectHasExposablePlatform(a.exposeProjectRoot()) {
 		return req, false, uiExposureNotConfiguredNoPlatformBlock, nil
 	}
 	return req, true, "", nil
@@ -192,7 +193,7 @@ func toUIExposedServices(services []eruncommon.ExposedService) []uiExposedServic
 	return result
 }
 
-func toUIEnvironmentServices(services []eruncommon.EnvironmentService) []uiEnvironmentService {
+func toUIEnvironmentServices(services []expose.EnvironmentService) []uiEnvironmentService {
 	result := make([]uiEnvironmentService, 0, len(services))
 	for _, service := range services {
 		entry := uiEnvironmentService{Name: service.Name, Type: service.Type}

@@ -12,8 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/ai"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // A persisted orchestrator runs as a Claude Code background agent named after
@@ -255,8 +256,8 @@ func removeOrchestratorAgentFiles(id string) {
 // writeOrchestratorAgentSettings writes the settings file an agent reads every
 // time it starts. It carries the gateway credential when the launch routes
 // through one, so it is private to the operator.
-func writeOrchestratorAgentSettings(path string, launch eruncommon.OrchestratorLaunch, env []string) error {
-	settings, _ := eruncommon.ClaudeBackgroundEffort(launch.Effort)
+func writeOrchestratorAgentSettings(path string, launch orchestrator.OrchestratorLaunch, env []string) error {
+	settings, _ := ai.ClaudeBackgroundEffort(launch.Effort)
 	settings["model"] = launch.Model
 	values := map[string]string{}
 	for _, entry := range env {

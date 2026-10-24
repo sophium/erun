@@ -6,12 +6,12 @@ import (
 	"strings"
 
 	"github.com/manifoldco/promptui"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/spf13/cobra"
 )
 
-func newDeleteCmd(store common.DeleteStore, promptRunner PromptRunner, deleteNamespace common.NamespaceDeleterFunc) *cobra.Command {
+func newDeleteCmd(store lifecycle.DeleteStore, promptRunner PromptRunner, deleteNamespace lifecycle.NamespaceDeleterFunc) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   "delete TENANT ENVIRONMENT",
@@ -32,10 +32,10 @@ func newDeleteCmd(store common.DeleteStore, promptRunner PromptRunner, deleteNam
 	return cmd
 }
 
-func runDeleteCommand(ctx core.Context, store common.DeleteStore, promptRunner PromptRunner, deleteNamespace common.NamespaceDeleterFunc, tenant, environment string, yes bool) error {
+func runDeleteCommand(ctx core.Context, store lifecycle.DeleteStore, promptRunner PromptRunner, deleteNamespace lifecycle.NamespaceDeleterFunc, tenant, environment string, yes bool) error {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	expected := common.DeleteEnvironmentConfirmation(tenant, environment)
+	expected := lifecycle.DeleteEnvironmentConfirmation(tenant, environment)
 	if expected == "" {
 		return fmt.Errorf("tenant and environment must not be empty: run `erun delete TENANT ENVIRONMENT` with both positional arguments set")
 	}
@@ -46,7 +46,7 @@ func runDeleteCommand(ctx core.Context, store common.DeleteStore, promptRunner P
 		}
 	}
 
-	result, err := common.RunDeleteEnvironment(ctx, common.DeleteEnvironmentParams{
+	result, err := lifecycle.RunDeleteEnvironment(ctx, lifecycle.DeleteEnvironmentParams{
 		Tenant:      tenant,
 		Environment: environment,
 	}, store, deleteNamespace)

@@ -21,7 +21,7 @@ func ResolveReviewRepository(ctx core.Context, remoteURL, traceLabel string) (st
 	remote := strings.TrimSpace(remoteURL)
 	if remote == "" {
 		ctx.Trace(traceLabel + ": no repository given; reading origin from the current checkout")
-		origin, err := originRemoteURL()
+		origin, err := OriginRemoteURL()
 		if err != nil {
 			ctx.Trace(traceLabel + ": this checkout has no origin remote")
 			return "", fmt.Errorf("a repository is required to open a review: pass --repository with the repository's remote, or run this from a clone of it")

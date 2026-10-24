@@ -9,9 +9,10 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/observe"
 )
 
-func writeObserveResult(ctx core.Context, result common.ObserveResult) error {
+func writeObserveResult(ctx core.Context, result observe.ObserveResult) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Namespace: %s\n", valueOrNone(result.Namespace)); err != nil {
 		return err
 	}
@@ -42,7 +43,7 @@ func writeObserveResult(ctx core.Context, result common.ObserveResult) error {
 	return writeObserveDrift(ctx, result.Drift)
 }
 
-func writeObservePods(ctx core.Context, pods []common.ObservedPod) error {
+func writeObservePods(ctx core.Context, pods []observe.ObservedPod) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Pods (%d):\n", len(pods)); err != nil {
 		return err
 	}
@@ -66,7 +67,7 @@ func writeObservePods(ctx core.Context, pods []common.ObservedPod) error {
 	return nil
 }
 
-func writeObserveResourceQuotas(ctx core.Context, quotas []common.ObservedResourceQuota) error {
+func writeObserveResourceQuotas(ctx core.Context, quotas []observe.ObservedResourceQuota) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "ResourceQuotas (%d):\n", len(quotas)); err != nil {
 		return err
 	}
@@ -78,7 +79,7 @@ func writeObserveResourceQuotas(ctx core.Context, quotas []common.ObservedResour
 	return nil
 }
 
-func writeObserveLimitRanges(ctx core.Context, limitRanges []common.ObservedLimitRange) error {
+func writeObserveLimitRanges(ctx core.Context, limitRanges []observe.ObservedLimitRange) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "LimitRanges (%d):\n", len(limitRanges)); err != nil {
 		return err
 	}
@@ -182,7 +183,7 @@ func writeObserveCertificateOrders(ctx core.Context, orders []common.ObservedCer
 	return nil
 }
 
-func writeObserveSecrets(ctx core.Context, secrets []common.ObservedSecretCheck) error {
+func writeObserveSecrets(ctx core.Context, secrets []observe.ObservedSecretCheck) error {
 	if len(secrets) == 0 {
 		return nil
 	}

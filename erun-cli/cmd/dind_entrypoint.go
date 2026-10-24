@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/spf13/cobra"
 )
 
@@ -28,7 +28,7 @@ func newDindEntrypointCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return common.RunDindEntrypoint(commandContext(cmd), common.DindEntrypointParams{DockerdArgs: args})
+			return podruntime.RunDindEntrypoint(commandContext(cmd), podruntime.DindEntrypointParams{DockerdArgs: args})
 		},
 	}
 	addDryRunFlag(cmd)

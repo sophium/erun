@@ -5,6 +5,7 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/spf13/cobra"
 )
 
@@ -62,7 +63,7 @@ func newE2ECmd(resolveOpen OpenResolver, findProjectRoot common.ProjectFinderFun
 }
 
 func runE2ECommand(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams, findProjectRoot common.ProjectFinderFunc, component, baseURL, version string) error {
-	plan, err := common.ResolveE2EPlan(findProjectRoot, component)
+	plan, err := e2e.ResolveE2EPlan(findProjectRoot, component)
 	if err != nil {
 		return err
 	}
@@ -77,7 +78,7 @@ func runE2ECommand(ctx core.Context, resolveOpen OpenResolver, params common.Ope
 		return err
 	}
 
-	e2eResult, err := common.RunE2E(ctx, common.E2EParams{
+	e2eResult, err := e2e.RunE2E(ctx, e2e.E2EParams{
 		Plan:        plan,
 		Target:      target,
 		BaseURL:     baseURL,
@@ -97,16 +98,16 @@ func runE2ECommand(ctx core.Context, resolveOpen OpenResolver, params common.Ope
 // --base-url and --version and no --tenant/--environment the URL and version
 // name the target entirely, so no environment is resolved at all: a machine
 // with no tenant configured can still run the suites against, say, production.
-func resolveE2ETarget(resolveOpen OpenResolver, params common.OpenParams, targetNamed bool, baseURL, version string) (common.E2ETarget, error) {
+func resolveE2ETarget(resolveOpen OpenResolver, params common.OpenParams, targetNamed bool, baseURL, version string) (e2e.E2ETarget, error) {
 	if !targetNamed && strings.TrimSpace(baseURL) != "" && strings.TrimSpace(version) != "" {
-		return common.E2ETarget{}, nil
+		return e2e.E2ETarget{}, nil
 	}
 	result, err := resolveOpen(params)
 	if err != nil {
-		return common.E2ETarget{}, err
+		return e2e.E2ETarget{}, err
 	}
 	req := common.ShellLaunchParamsFromResult(result)
-	return common.E2ETarget{
+	return e2e.E2ETarget{
 		Tenant:            req.Tenant,
 		Environment:       req.Environment,
 		Namespace:         req.Namespace,

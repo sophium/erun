@@ -7,9 +7,10 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/podruntime"
 )
 
-func writeUsageResult(ctx core.Context, report common.RuntimeUsageReport) error {
+func writeUsageResult(ctx core.Context, report podruntime.RuntimeUsageReport) error {
 	usage := report.RuntimeUsage
 	if err := writeUsageCPU(ctx, "", usage.CPU); err != nil {
 		return err

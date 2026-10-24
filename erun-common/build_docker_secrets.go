@@ -10,12 +10,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// loadProjectConfigForDockerSecrets reads the project config a build resolves
+// LoadProjectConfigForDockerSecrets reads the project config a build resolves
 // its `docker.secrets` from. It reports ok=false for a project that has no
 // `.erun/config.yaml` at all, which is not an error: such a project declares no
 // secrets, and its docker build command stays byte-for-byte what it was before
 // this key existed.
-func loadProjectConfigForDockerSecrets(projectRoot string) (config.ProjectConfig, bool, error) {
+func LoadProjectConfigForDockerSecrets(projectRoot string) (config.ProjectConfig, bool, error) {
 	if strings.TrimSpace(projectRoot) == "" {
 		return config.ProjectConfig{}, false, nil
 	}
@@ -96,10 +96,10 @@ func validateDockerSecretFields(secret config.DockerBuildSecret) error {
 	return nil
 }
 
-// describeDockerBuildSecrets renders a resolved secret list for a trace line.
+// DescribeDockerBuildSecrets renders a resolved secret list for a trace line.
 // Only references appear here — an id and the variable or path it reads from —
 // so the rendered form is safe to log.
-func describeDockerBuildSecrets(secrets []config.DockerBuildSecret) string {
+func DescribeDockerBuildSecrets(secrets []config.DockerBuildSecret) string {
 	parts := make([]string, 0, len(secrets))
 	for _, secret := range secrets {
 		if secret.Env != "" {
@@ -124,7 +124,7 @@ func describeDockerBuildSecrets(secrets []config.DockerBuildSecret) string {
 // error here names the config key, the id, and the missing variable or path
 // instead, and the remedy is a one-line config or environment change.
 func applyDockerSecrets(ctx core.Context, projectRoot, environment string, build *DockerBuildSpec) error {
-	cfg, ok, err := loadProjectConfigForDockerSecrets(projectRoot)
+	cfg, ok, err := LoadProjectConfigForDockerSecrets(projectRoot)
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func applyDockerSecrets(ctx core.Context, projectRoot, environment string, build
 	}
 
 	build.DockerSecrets = secrets
-	ctx.Trace("build: secrets configured as " + describeDockerBuildSecrets(secrets) +
+	ctx.Trace("build: secrets configured as " + DescribeDockerBuildSecrets(secrets) +
 		" (.erun/config.yaml " + cfg.DockerSecretsOrigin(environment) + ")")
 	return nil
 }
@@ -166,12 +166,12 @@ func validateDockerSecretsAvailable(secrets []config.DockerBuildSecret) error {
 	return nil
 }
 
-// dockerSecretArgs renders each declared build secret as the
+// DockerSecretArgs renders each declared build secret as the
 // `--secret <reference>` pair BuildKit expects, for the docker build argv.
 // Every reference names where the credential comes from — an environment
 // variable, or a path — never what it is, so nothing secret is ever placed on
 // the command line.
-func dockerSecretArgs(secrets []config.DockerBuildSecret) []string {
+func DockerSecretArgs(secrets []config.DockerBuildSecret) []string {
 	args := make([]string, 0, len(secrets)*2)
 	for _, secret := range secrets {
 		args = append(args, "--secret", dockerSecretArg(secret))

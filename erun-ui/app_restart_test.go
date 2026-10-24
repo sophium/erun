@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // restartTestApp is an app whose restart records live in a temp dir and whose
@@ -27,7 +27,7 @@ func restartTestApp(t *testing.T) (*App, string) {
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		orchestratorRestoreDir: restoreDir,

@@ -71,7 +71,7 @@ func resolveOpenRuntimeDeploySpec(ctx core.Context, store DeployStore, findProje
 	// any RuntimeImage read here is a persisted memo, never this invocation's
 	// own explicit choice.
 	if target.RemoteRepo() {
-		return resolvePublishedDevopsDeploySpec(ctx, target, "", "", false)
+		return ResolvePublishedDevopsDeploySpecWithOverrides(ctx, target, "", "", false)
 	}
 
 	for _, componentName := range runtimeComponentNames(target.Tenant) {
@@ -85,7 +85,7 @@ func resolveOpenRuntimeDeploySpec(ctx core.Context, store DeployStore, findProje
 		}
 	}
 
-	return resolvePublishedDevopsDeploySpec(ctx, target, "", "", false)
+	return ResolvePublishedDevopsDeploySpecWithOverrides(ctx, target, "", "", false)
 }
 
 // runtimeComponentNames lists an environment's candidate runtime chart names

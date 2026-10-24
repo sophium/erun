@@ -35,7 +35,7 @@ func stubNetRoots(t *testing.T, iface string, mtu string) (procRoot, sysRoot str
 func TestEgressMTUReadsTheDefaultRoutesInterface(t *testing.T) {
 	procRoot, sysRoot := stubNetRoots(t, "eth0", "1450")
 
-	mtu, iface, ok := egressMTUUnder(procRoot, sysRoot)
+	mtu, iface, ok := EgressMTUUnder(procRoot, sysRoot)
 	if !ok {
 		t.Fatal("expected the default route's MTU to resolve")
 	}
@@ -53,7 +53,7 @@ func TestEgressMTUFailsWithNoDefaultRoute(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(procRoot, "net", "route"), []byte("Iface\tDestination\tGateway\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, ok := egressMTUUnder(procRoot, filepath.Join(root, "sys")); ok {
+	if _, _, ok := EgressMTUUnder(procRoot, filepath.Join(root, "sys")); ok {
 		t.Fatal("with no default route nothing should be claimed")
 	}
 }

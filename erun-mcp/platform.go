@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/platform"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
@@ -40,7 +40,7 @@ func platformWhoamiTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTo
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_whoami"
-		whoami, err := eruncommon.RunPlatformWhoami(ctx, runtime.Store, input.Alias, cloudDependencies())
+		whoami, err := platform.RunPlatformWhoami(ctx, runtime.Store, input.Alias, cloudDependencies())
 		if err != nil {
 			return nil, PlatformWhoamiResult{}, err
 		}
@@ -63,7 +63,7 @@ func platformVersionTool(runtime RuntimeConfig) func(context.Context, *mcp.CallT
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_version"
-		info, err := eruncommon.RunPlatformVersion(ctx, runtime.Store, input.Alias, cloudDependencies())
+		info, err := platform.RunPlatformVersion(ctx, runtime.Store, input.Alias, cloudDependencies())
 		if err != nil {
 			return nil, PlatformVersionResult{}, err
 		}
@@ -99,7 +99,7 @@ func platformTenantCreateTool(runtime RuntimeConfig) func(context.Context, *mcp.
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_tenant_create"
-		tenant, err := eruncommon.RunPlatformCreateTenant(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateTenantParams{
+		tenant, err := platform.RunPlatformCreateTenant(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateTenantParams{
 			Name: input.Name, Type: tenantType, Issuer: input.Issuer,
 			OrgFieldKey: input.OrgFieldKey, OrgFieldValue: input.OrgFieldValue, DisplayName: input.DisplayName,
 		}, cloudDependencies())
@@ -125,7 +125,7 @@ func platformTenantListTool(runtime RuntimeConfig) func(context.Context, *mcp.Ca
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_tenant_list"
-		tenants, err := eruncommon.RunPlatformListTenants(ctx, runtime.Store, input.Alias, cloudDependencies())
+		tenants, err := platform.RunPlatformListTenants(ctx, runtime.Store, input.Alias, cloudDependencies())
 		if err != nil {
 			return nil, PlatformTenantListResult{}, err
 		}
@@ -156,7 +156,7 @@ func platformIdentityOrgCreateTool(runtime RuntimeConfig) func(context.Context, 
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_identity_org_create"
-		org, err := eruncommon.RunPlatformCreateOrg(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateOrgParams{Name: input.Name}, cloudDependencies())
+		org, err := platform.RunPlatformCreateOrg(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateOrgParams{Name: input.Name}, cloudDependencies())
 		if err != nil {
 			return nil, PlatformIdentityOrgResult{}, err
 		}
@@ -190,7 +190,7 @@ func platformTenantRepairOrgMappingTool(runtime RuntimeConfig) func(context.Cont
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_tenant_repair-org-mapping"
-		issuer, err := eruncommon.RunPlatformRepairTenantIssuerOrgMapping(ctx, runtime.Store, input.Alias, platformclient.PlatformRepairTenantIssuerOrgMappingParams{
+		issuer, err := platform.RunPlatformRepairTenantIssuerOrgMapping(ctx, runtime.Store, input.Alias, platformclient.PlatformRepairTenantIssuerOrgMappingParams{
 			TenantID: input.TenantID, Issuer: input.Issuer, OrgFieldKey: input.OrgFieldKey, OrgFieldValue: input.OrgFieldValue,
 		}, cloudDependencies())
 		if err != nil {
@@ -223,7 +223,7 @@ func platformUserEnrollTool(runtime RuntimeConfig) func(context.Context, *mcp.Ca
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_user_enroll"
-		user, err := eruncommon.RunPlatformCreateUser(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateUserParams{
+		user, err := platform.RunPlatformCreateUser(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateUserParams{
 			Username: input.Username, Issuer: input.Issuer, Subject: input.Subject, TenantID: input.TenantID,
 			RoleIDs: input.RoleIDs,
 		}, cloudDependencies())
@@ -258,7 +258,7 @@ func platformUserGrantRoleTool(runtime RuntimeConfig) func(context.Context, *mcp
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_user_grant-role"
-		err := eruncommon.RunPlatformGrantUserRole(ctx, runtime.Store, input.Alias, platformclient.PlatformGrantUserRoleParams{
+		err := platform.RunPlatformGrantUserRole(ctx, runtime.Store, input.Alias, platformclient.PlatformGrantUserRoleParams{
 			UserID: input.UserID, RoleID: input.RoleID,
 		}, cloudDependencies())
 		if err != nil {
@@ -284,7 +284,7 @@ func platformUserListTool(runtime RuntimeConfig) func(context.Context, *mcp.Call
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_user_list"
-		users, err := eruncommon.RunPlatformListUsers(ctx, runtime.Store, input.Alias, platformclient.PlatformListUsersParams{TenantID: input.TenantID}, cloudDependencies())
+		users, err := platform.RunPlatformListUsers(ctx, runtime.Store, input.Alias, platformclient.PlatformListUsersParams{TenantID: input.TenantID}, cloudDependencies())
 		if err != nil {
 			return nil, PlatformUserListResult{}, err
 		}
@@ -307,7 +307,7 @@ func platformEnvListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallT
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_env_list"
-		environments, err := eruncommon.RunPlatformListEnvironments(ctx, runtime.Store, input.Alias, cloudDependencies())
+		environments, err := platform.RunPlatformListEnvironments(ctx, runtime.Store, input.Alias, cloudDependencies())
 		if err != nil {
 			return nil, PlatformEnvListResult{}, err
 		}
@@ -334,7 +334,7 @@ func platformEnvGetTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTo
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_env_get"
-		environment, err := eruncommon.RunPlatformGetEnvironment(ctx, runtime.Store, input.Alias, input.EnvironmentID, cloudDependencies())
+		environment, err := platform.RunPlatformGetEnvironment(ctx, runtime.Store, input.Alias, input.EnvironmentID, cloudDependencies())
 		if err != nil {
 			return nil, PlatformEnvResult{}, err
 		}
@@ -359,7 +359,7 @@ func platformEnvRegisterTool(runtime RuntimeConfig) func(context.Context, *mcp.C
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_env_register"
-		environment, err := eruncommon.RunPlatformRegisterEnvironment(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateEnvironmentParams{
+		environment, err := platform.RunPlatformRegisterEnvironment(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateEnvironmentParams{
 			Name: input.Name, Type: input.Type, ContextID: input.ContextID,
 			KubernetesContext: input.KubernetesContext, RuntimeVersion: input.RuntimeVersion,
 		}, cloudDependencies())
@@ -384,7 +384,7 @@ func platformEnvDeployTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_env_deploy"
-		environment, err := eruncommon.RunPlatformDeployEnvironment(ctx, runtime.Store, input.Alias, input.EnvironmentID, platformclient.PlatformDeployEnvironmentParams{Version: input.Version}, cloudDependencies())
+		environment, err := platform.RunPlatformDeployEnvironment(ctx, runtime.Store, input.Alias, input.EnvironmentID, platformclient.PlatformDeployEnvironmentParams{Version: input.Version}, cloudDependencies())
 		if err != nil {
 			return nil, PlatformEnvResult{}, err
 		}
@@ -405,7 +405,7 @@ func platformEnvStopTool(runtime RuntimeConfig) func(context.Context, *mcp.CallT
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_env_stop"
-		environment, err := eruncommon.RunPlatformStopEnvironment(ctx, runtime.Store, input.Alias, input.EnvironmentID, cloudDependencies())
+		environment, err := platform.RunPlatformStopEnvironment(ctx, runtime.Store, input.Alias, input.EnvironmentID, cloudDependencies())
 		if err != nil {
 			return nil, PlatformEnvResult{}, err
 		}
@@ -441,7 +441,7 @@ func platformEnvDeleteTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_env_delete"
-		environment, err := eruncommon.RunPlatformDeleteEnvironment(ctx, runtime.Store, input.Alias, input.EnvironmentID, cloudDependencies())
+		environment, err := platform.RunPlatformDeleteEnvironment(ctx, runtime.Store, input.Alias, input.EnvironmentID, cloudDependencies())
 		if err != nil {
 			return nil, PlatformEnvResult{}, err
 		}
@@ -464,7 +464,7 @@ func platformContextListTool(runtime RuntimeConfig) func(context.Context, *mcp.C
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_context_list"
-		contexts, err := eruncommon.RunPlatformListContexts(ctx, runtime.Store, input.Alias, cloudDependencies())
+		contexts, err := platform.RunPlatformListContexts(ctx, runtime.Store, input.Alias, cloudDependencies())
 		if err != nil {
 			return nil, PlatformContextListResult{}, err
 		}
@@ -491,7 +491,7 @@ func platformContextGetTool(runtime RuntimeConfig) func(context.Context, *mcp.Ca
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_context_get"
-		cloudContext, err := eruncommon.RunPlatformGetContext(ctx, runtime.Store, input.Alias, input.ContextID, cloudDependencies())
+		cloudContext, err := platform.RunPlatformGetContext(ctx, runtime.Store, input.Alias, input.ContextID, cloudDependencies())
 		if err != nil {
 			return nil, PlatformContextResult{}, err
 		}
@@ -527,7 +527,7 @@ func platformContextCreateTool(runtime RuntimeConfig) func(context.Context, *mcp
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_context_create"
-		result, err := eruncommon.RunPlatformCreateContext(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateContextParams{
+		result, err := platform.RunPlatformCreateContext(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateContextParams{
 			Name: input.Name, CloudProviderAlias: input.CloudProviderAlias, Region: input.Region,
 			InstanceType: input.InstanceType, DiskType: input.DiskType, DiskSizeGB: input.DiskSizeGB, Preview: input.PlanOnly,
 		}, cloudDependencies())
@@ -575,7 +575,7 @@ func platformProvisionTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_provision"
-		result, err := eruncommon.RunPlatformProvision(ctx, runtime.Store, input.Alias, params, cloudDependencies())
+		result, err := platform.RunPlatformProvision(ctx, runtime.Store, input.Alias, params, cloudDependencies())
 		if err != nil {
 			return nil, PlatformProvisionResult{}, err
 		}

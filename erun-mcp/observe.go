@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/observe"
 )
 
 type ObserveSecretCheckInput struct {
@@ -26,26 +27,26 @@ type ObserveInput struct {
 // observeTool is read-only by construction: RunObservation issues only
 // `kubectl get`, so this tool carries the erun:read capability rather than
 // erun:admin (see mcpReadOnlyTools), unlike raw or doctor's recovery actions.
-func observeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ObserveInput) (*mcp.CallToolResult, eruncommon.ObserveResult, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input ObserveInput) (*mcp.CallToolResult, eruncommon.ObserveResult, error) {
+func observeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ObserveInput) (*mcp.CallToolResult, observe.ObserveResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ObserveInput) (*mcp.CallToolResult, observe.ObserveResult, error) {
 		target, err := resolveObserveOpenResult(runtime, input)
 		if err != nil {
-			return nil, eruncommon.ObserveResult{}, err
+			return nil, observe.ObserveResult{}, err
 		}
 		req := eruncommon.ShellLaunchParamsFromResult(target)
 		runCtx := runtimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
-		result, err := eruncommon.RunObservation(runCtx, req, eruncommon.ObserveParams{Secrets: observeSecretChecksFromInput(input.Secrets)})
+		result, err := observe.RunObservation(runCtx, req, observe.ObserveParams{Secrets: observeSecretChecksFromInput(input.Secrets)})
 		if err != nil {
-			return nil, eruncommon.ObserveResult{}, err
+			return nil, observe.ObserveResult{}, err
 		}
 		return nil, result, nil
 	}
 }
 
-func observeSecretChecksFromInput(inputs []ObserveSecretCheckInput) []eruncommon.ObserveSecretCheck {
-	checks := make([]eruncommon.ObserveSecretCheck, 0, len(inputs))
+func observeSecretChecksFromInput(inputs []ObserveSecretCheckInput) []observe.ObserveSecretCheck {
+	checks := make([]observe.ObserveSecretCheck, 0, len(inputs))
 	for _, in := range inputs {
-		checks = append(checks, eruncommon.ObserveSecretCheck{Name: strings.TrimSpace(in.Name), Key: strings.TrimSpace(in.Key)})
+		checks = append(checks, observe.ObserveSecretCheck{Name: strings.TrimSpace(in.Name), Key: strings.TrimSpace(in.Key)})
 	}
 	return checks
 }

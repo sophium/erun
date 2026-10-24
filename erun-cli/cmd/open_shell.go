@@ -10,12 +10,13 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"golang.org/x/term"
 )
 
 type OpenShellRunner func(core.Context, config.ShellLaunchParams) error
 
-const desktopAppSessionEnvVar = common.DesktopSessionEnvVar
+const desktopAppSessionEnvVar = orchestrator.DesktopSessionEnvVar
 
 func newOpenShellRunner(waitForShellDeployment func(config.ShellLaunchParams) error, execShell common.ShellLauncherFunc) OpenShellRunner {
 	if waitForShellDeployment == nil {

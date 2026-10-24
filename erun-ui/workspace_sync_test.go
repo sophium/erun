@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/workspace"
 )
 
 func TestStartWorkspaceSyncForSelectionRequiresRemoteSSHDWorkspaceSync(t *testing.T) {
-	called := make(chan eruncommon.WorkspaceSyncParams, 1)
+	called := make(chan workspace.WorkspaceSyncParams, 1)
 	app := NewApp(erunUIDeps{
 		store: workspaceSyncStore(true),
 		canConnectLocalPort: func(int) bool {
@@ -23,9 +23,9 @@ func TestStartWorkspaceSyncForSelectionRequiresRemoteSSHDWorkspaceSync(t *testin
 		workspaceSyncReady: func(context.Context, string) error {
 			return nil
 		},
-		syncWorkspace: func(_ context.Context, params eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
 			called <- params
-			return eruncommon.WorkspaceSyncResult{FilesCopied: 2}, nil
+			return workspace.WorkspaceSyncResult{FilesCopied: 2}, nil
 		},
 		workspaceSyncInterval: time.Hour,
 	})
@@ -44,7 +44,7 @@ func TestStartWorkspaceSyncForSelectionRequiresRemoteSSHDWorkspaceSync(t *testin
 }
 
 func TestStartWorkspaceSyncForSelectionSkipsWhenSSHDWorkspaceSyncDisabled(t *testing.T) {
-	called := make(chan eruncommon.WorkspaceSyncParams, 1)
+	called := make(chan workspace.WorkspaceSyncParams, 1)
 	app := NewApp(erunUIDeps{
 		store: workspaceSyncStore(false),
 		canConnectLocalPort: func(int) bool {
@@ -56,9 +56,9 @@ func TestStartWorkspaceSyncForSelectionSkipsWhenSSHDWorkspaceSyncDisabled(t *tes
 		workspaceSyncReady: func(context.Context, string) error {
 			return nil
 		},
-		syncWorkspace: func(_ context.Context, params eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
 			called <- params
-			return eruncommon.WorkspaceSyncResult{}, nil
+			return workspace.WorkspaceSyncResult{}, nil
 		},
 		workspaceSyncInterval: time.Hour,
 	})
@@ -74,7 +74,7 @@ func TestStartWorkspaceSyncForSelectionSkipsWhenSSHDWorkspaceSyncDisabled(t *tes
 }
 
 func TestStartSessionStartsConfiguredWorkspaceSync(t *testing.T) {
-	called := make(chan eruncommon.WorkspaceSyncParams, 1)
+	called := make(chan workspace.WorkspaceSyncParams, 1)
 	app := NewApp(erunUIDeps{
 		store:          workspaceSyncStore(true),
 		resolveCLIPath: func() string { return "/tmp/erun" },
@@ -90,9 +90,9 @@ func TestStartSessionStartsConfiguredWorkspaceSync(t *testing.T) {
 		workspaceSyncReady: func(context.Context, string) error {
 			return nil
 		},
-		syncWorkspace: func(_ context.Context, params eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
 			called <- params
-			return eruncommon.WorkspaceSyncResult{FilesCopied: 2}, nil
+			return workspace.WorkspaceSyncResult{FilesCopied: 2}, nil
 		},
 		workspaceSyncInterval: time.Hour,
 	})
@@ -120,7 +120,7 @@ func TestSaveEnvironmentConfigPersistsWorkspaceSyncLocalPath(t *testing.T) {
 	env := store.envs["frs/dev"]
 	env.SSHD.WorkspaceSync.LocalPath = ""
 	store.envs["frs/dev"] = env
-	started := make(chan eruncommon.WorkspaceSyncParams, 1)
+	started := make(chan workspace.WorkspaceSyncParams, 1)
 	app := NewApp(erunUIDeps{
 		store: store,
 		canConnectLocalPort: func(int) bool {
@@ -132,9 +132,9 @@ func TestSaveEnvironmentConfigPersistsWorkspaceSyncLocalPath(t *testing.T) {
 		workspaceSyncReady: func(context.Context, string) error {
 			return nil
 		},
-		syncWorkspace: func(_ context.Context, params eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
 			started <- params
-			return eruncommon.WorkspaceSyncResult{}, nil
+			return workspace.WorkspaceSyncResult{}, nil
 		},
 		workspaceSyncInterval: time.Hour,
 	})
@@ -212,16 +212,16 @@ func TestLoadEnvironmentConfigTreatsEnabledWorkspaceSyncWithoutLocalPathAsOff(t 
 }
 
 func TestStartWorkspaceSyncForConfiguredEnvsStartsEnabledEnvs(t *testing.T) {
-	called := make(chan eruncommon.WorkspaceSyncParams, 1)
+	called := make(chan workspace.WorkspaceSyncParams, 1)
 	app := NewApp(erunUIDeps{
 		store:                 workspaceSyncStore(true),
 		canConnectLocalPort:   func(int) bool { return true },
 		canReachMCPEndpoint:   func(int) bool { return true },
 		workspaceSyncReady:    func(context.Context, string) error { return nil },
 		workspaceSyncInterval: time.Hour,
-		syncWorkspace: func(_ context.Context, params eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
 			called <- params
-			return eruncommon.WorkspaceSyncResult{FilesCopied: 1}, nil
+			return workspace.WorkspaceSyncResult{FilesCopied: 1}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -251,12 +251,12 @@ func TestReconcileWorkspaceSyncForConfiguredEnvsStopsAnUnlinkedEnv(t *testing.T)
 		canReachMCPEndpoint:   func(int) bool { return true },
 		workspaceSyncReady:    func(context.Context, string) error { return nil },
 		workspaceSyncInterval: time.Millisecond,
-		syncWorkspace: func(context.Context, eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error) {
+		syncWorkspace: func(context.Context, workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
 			select {
 			case passed <- struct{}{}:
 			default:
 			}
-			return eruncommon.WorkspaceSyncResult{}, nil
+			return workspace.WorkspaceSyncResult{}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -281,16 +281,16 @@ func TestReconcileWorkspaceSyncForConfiguredEnvsStopsAnUnlinkedEnv(t *testing.T)
 }
 
 func TestStartWorkspaceSyncForConfiguredEnvsSkipsDisabledEnvs(t *testing.T) {
-	called := make(chan eruncommon.WorkspaceSyncParams, 1)
+	called := make(chan workspace.WorkspaceSyncParams, 1)
 	app := NewApp(erunUIDeps{
 		store:                 workspaceSyncStore(false),
 		canConnectLocalPort:   func(int) bool { return true },
 		canReachMCPEndpoint:   func(int) bool { return true },
 		workspaceSyncReady:    func(context.Context, string) error { return nil },
 		workspaceSyncInterval: time.Hour,
-		syncWorkspace: func(_ context.Context, params eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
 			called <- params
-			return eruncommon.WorkspaceSyncResult{}, nil
+			return workspace.WorkspaceSyncResult{}, nil
 		},
 	})
 	defer app.shutdown(context.Background())

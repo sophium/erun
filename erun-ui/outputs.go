@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -21,30 +22,30 @@ func quietOutputsContext() core.Context {
 	}
 }
 
-func listAgentOutputsViaRuntime(result config.OpenResult, params eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error) {
+func listAgentOutputsViaRuntime(result config.OpenResult, params jobs.RuntimeOutputsParams) (jobs.RuntimeOutputsListResult, error) {
 	req := eruncommon.ShellLaunchParamsFromResult(result)
-	return eruncommon.ResolveRuntimeOutputs(quietOutputsContext(), req, params, kube.RunRemoteCommand)
+	return jobs.ResolveRuntimeOutputs(quietOutputsContext(), req, params, kube.RunRemoteCommand)
 }
 
-func downloadAgentOutputViaRuntime(result config.OpenResult, params eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error) {
+func downloadAgentOutputViaRuntime(result config.OpenResult, params jobs.RuntimeOutputDownloadParams) (jobs.RuntimeOutputResult, error) {
 	req := eruncommon.ShellLaunchParamsFromResult(result)
-	return eruncommon.DownloadRuntimeOutput(quietOutputsContext(), req, params, kube.RunRemoteCommand)
+	return jobs.DownloadRuntimeOutput(quietOutputsContext(), req, params, kube.RunRemoteCommand)
 }
 
 // ListAgentOutputs lists the files an agent produced in the selected env's runtime pod, newest-first.
-func (a *App) ListAgentOutputs(selection uiSelection) (eruncommon.RuntimeOutputsListResult, error) {
+func (a *App) ListAgentOutputs(selection uiSelection) (jobs.RuntimeOutputsListResult, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("list agent outputs", selection.Tenant, selection.Environment); err != nil {
-		return eruncommon.RuntimeOutputsListResult{}, err
+		return jobs.RuntimeOutputsListResult{}, err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return eruncommon.RuntimeOutputsListResult{}, err
+		return jobs.RuntimeOutputsListResult{}, err
 	}
-	return a.deps.listAgentOutputs(result, eruncommon.RuntimeOutputsParams{})
+	return a.deps.listAgentOutputs(result, jobs.RuntimeOutputsParams{})
 }
 
 // DownloadAgentOutput downloads one entry from the selected env's runtime pod
@@ -69,7 +70,7 @@ func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, e
 	if err != nil {
 		return "", err
 	}
-	out, err := a.deps.downloadAgentOutput(result, eruncommon.RuntimeOutputDownloadParams{Name: name})
+	out, err := a.deps.downloadAgentOutput(result, jobs.RuntimeOutputDownloadParams{Name: name})
 	if err != nil {
 		return "", err
 	}

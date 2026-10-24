@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/setup"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/internal"
 )
@@ -27,7 +27,7 @@ func TestExitCodeForKeepsTheOutcomesDistinct(t *testing.T) {
 		t.Fatalf("unresolvable alias exit %d, want %d", got, platformAliasUnusableExitCode)
 	}
 
-	refusal := internal.WithExitCode(eruncommon.TenantSelectionUnavailableError{Tenants: []string{"erun", "frs"}}, 128)
+	refusal := internal.WithExitCode(setup.TenantSelectionUnavailableError{Tenants: []string{"erun", "frs"}}, 128)
 	if got := exitCodeFor(refusal); got != 128 {
 		t.Fatalf("tenant refusal exit %d, want 128", got)
 	}

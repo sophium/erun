@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // TestDecodeWhipMCPResultNilStructuredContentIsAnError is the red-then-green
@@ -17,7 +17,7 @@ func TestDecodeWhipMCPResultNilStructuredContentIsAnError(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected a nil StructuredContent to be an error, got result %+v", result)
 	}
-	if result.Candidate.ID != "" || result.Decision != eruncommon.WhipDecisionNone {
+	if result.Candidate.ID != "" || result.Decision != orchestrator.WhipDecisionNone {
 		t.Fatalf("expected a zero result alongside the error, got %+v", result)
 	}
 }
@@ -70,14 +70,14 @@ func TestDecodeWhipMCPResultPassesThroughARealResult(t *testing.T) {
 	result, err := decodeWhipMCPResult(&mcp.CallToolResult{
 		StructuredContent: map[string]any{
 			"candidate": map[string]any{"kind": "environment", "id": "erun/ux", "name": "erun/ux"},
-			"decision":  eruncommon.WhipDecisionNudge,
+			"decision":  orchestrator.WhipDecisionNudge,
 			"pushed":    true,
 		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Candidate.ID != "erun/ux" || result.Decision != eruncommon.WhipDecisionNudge || !result.Pushed {
+	if result.Candidate.ID != "erun/ux" || result.Decision != orchestrator.WhipDecisionNudge || !result.Pushed {
 		t.Fatalf("got %+v, want a passthrough of the decoded result", result)
 	}
 }

@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
@@ -47,7 +47,7 @@ func TestVerifyLeaseJobIDsClearsAJobIDWithNoJobBehindIt(t *testing.T) {
 	const tenant = "erun"
 	const environment = "ux"
 
-	if _, err := eruncommon.AttachEnvironmentJob(core.Context{}, eruncommon.AttachEnvironmentJobParams{
+	if _, err := jobs.AttachEnvironmentJob(core.Context{}, jobs.AttachEnvironmentJobParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          "gate-9",

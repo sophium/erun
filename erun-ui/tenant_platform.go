@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/platform"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
@@ -324,7 +325,7 @@ type uiPlatformUser struct {
 // the administrator hand-off (enrollERunPlatformUserError,
 // tenant_platform_error.go) rather than surfaced as the raw platform error.
 func (a *App) EnrollERunPlatformUser(input uiPlatformUserEnrollInput) (uiPlatformUser, error) {
-	user, err := eruncommon.RunPlatformCreateUser(core.Context{}, a.deps.store, strings.TrimSpace(input.Alias), platformclient.PlatformCreateUserParams{
+	user, err := platform.RunPlatformCreateUser(core.Context{}, a.deps.store, strings.TrimSpace(input.Alias), platformclient.PlatformCreateUserParams{
 		Username: strings.TrimSpace(input.Username),
 		Issuer:   strings.TrimSpace(input.Issuer),
 		Subject:  strings.TrimSpace(input.Subject),

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
+	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
@@ -44,7 +44,7 @@ func jobsListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "jobs_list"
-		jobs, err := eruncommon.RunJobList(ctx, runtime.Store, input.Alias, eruncommon.JobListParams{
+		jobs, err := jobspkg.RunJobList(ctx, runtime.Store, input.Alias, jobspkg.JobListParams{
 			Status:        input.Status,
 			EnvironmentID: input.EnvironmentID,
 			IssueRef:      input.IssueRef,
@@ -71,7 +71,7 @@ func jobsShowTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "jobs_show"
-		job, err := eruncommon.RunJobShow(ctx, runtime.Store, input.Alias, input.JobID, cloudDependencies())
+		job, err := jobspkg.RunJobShow(ctx, runtime.Store, input.Alias, input.JobID, cloudDependencies())
 		if err != nil {
 			return nil, PlatformJobResult{}, err
 		}
@@ -105,7 +105,7 @@ func jobsStartTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "jobs_start"
-		job, err := eruncommon.RunJobClaim(ctx, runtime.Store, input.Alias, eruncommon.JobClaimParams{
+		job, err := jobspkg.RunJobClaim(ctx, runtime.Store, input.Alias, jobspkg.JobClaimParams{
 			Environment: input.Environment,
 			JobType:     input.JobType,
 			IssueRef:    input.IssueRef,
@@ -139,7 +139,7 @@ func jobsFinishTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "jobs_finish"
-		job, err := eruncommon.RunJobUpdate(ctx, runtime.Store, input.Alias, eruncommon.JobUpdateParams{
+		job, err := jobspkg.RunJobUpdate(ctx, runtime.Store, input.Alias, jobspkg.JobUpdateParams{
 			JobID:      input.JobID,
 			Status:     input.Status,
 			Summary:    input.Summary,

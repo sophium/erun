@@ -962,7 +962,7 @@ func TestParseDockerSize(t *testing.T) {
 		{"not-a-size", 0, false},
 	}
 	for _, tc := range cases {
-		got, ok := parseDockerSize(tc.in)
+		got, ok := ParseDockerSize(tc.in)
 		if ok != tc.ok {
 			t.Errorf("parseDockerSize(%q) ok = %v, want %v", tc.in, ok, tc.ok)
 			continue

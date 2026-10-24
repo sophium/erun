@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
@@ -90,7 +90,7 @@ func (p *forwardRepairProbe) reconnect() error {
 func forwardRepairTestApp(
 	t *testing.T,
 	probe *forwardRepairProbe,
-	readRunState func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error),
+	readRunState func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error),
 ) (*App, *capturedEmits) {
 	t.Helper()
 	seedMCPForward(t, "erun", "remote", forwardRepairTestPort)
@@ -457,8 +457,8 @@ func TestStoppedEnvironmentIsNotResurrected(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			probe := &forwardRepairProbe{forwardDropped: testCase.dropped}
 			app, emits := forwardRepairTestApp(t, probe,
-				func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
-					return eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 0}, nil
+				func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error) {
+					return lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 0}, nil
 				})
 
 			for range forwardRepairAttempts + 2 {

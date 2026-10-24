@@ -6,6 +6,7 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/observe"
 	"github.com/spf13/cobra"
 )
 
@@ -54,8 +55,8 @@ func newObserveCmd(resolveOpen OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func parseObserveSecretChecks(raw []string) ([]common.ObserveSecretCheck, error) {
-	checks := make([]common.ObserveSecretCheck, 0, len(raw))
+func parseObserveSecretChecks(raw []string) ([]observe.ObserveSecretCheck, error) {
+	checks := make([]observe.ObserveSecretCheck, 0, len(raw))
 	for _, entry := range raw {
 		name, key, found := strings.Cut(entry, "=")
 		name = strings.TrimSpace(name)
@@ -63,18 +64,18 @@ func parseObserveSecretChecks(raw []string) ([]common.ObserveSecretCheck, error)
 		if !found || name == "" || key == "" {
 			return nil, fmt.Errorf("--secret must be name=key, got %q", entry)
 		}
-		checks = append(checks, common.ObserveSecretCheck{Name: name, Key: key})
+		checks = append(checks, observe.ObserveSecretCheck{Name: name, Key: key})
 	}
 	return checks, nil
 }
 
-func runObserveCommand(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams, checks []common.ObserveSecretCheck) error {
+func runObserveCommand(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams, checks []observe.ObserveSecretCheck) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
 	req := common.ShellLaunchParamsFromResult(result)
-	observed, err := common.RunObservation(ctx, req, common.ObserveParams{Secrets: checks})
+	observed, err := observe.RunObservation(ctx, req, observe.ObserveParams{Secrets: checks})
 	if err != nil {
 		return err
 	}

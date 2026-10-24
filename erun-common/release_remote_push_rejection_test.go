@@ -78,7 +78,7 @@ func releasePushTestContext() core.Context {
 func TestReleasePushRejectionOfDevelopIsNotAttributedToMainHavingMoved(t *testing.T) {
 	runGit, calls := recordingReleasePushRunner(developRejection)
 
-	err := runReleaseBranchPush(releasePushTestContext(), releasePushTestSpec(), releasePushTestCommand(t.TempDir()), runGit)
+	err := RunReleaseBranchPush(releasePushTestContext(), releasePushTestSpec(), releasePushTestCommand(t.TempDir()), runGit)
 	if err == nil {
 		t.Fatal("a rejected develop must fail the release")
 	}
@@ -117,7 +117,7 @@ func assertNoUnrequestedRemediation(t *testing.T, calls [][]string) {
 func TestReleasePushRetryRebasesTheBaseBranchThatActuallyMoved(t *testing.T) {
 	runGit, calls := recordingReleasePushRunner(movedMainRejection)
 
-	if err := runReleaseBranchPush(releasePushTestContext(), releasePushTestSpec(), releasePushTestCommand(t.TempDir()), runGit); err != nil {
+	if err := RunReleaseBranchPush(releasePushTestContext(), releasePushTestSpec(), releasePushTestCommand(t.TempDir()), runGit); err != nil {
 		t.Fatalf("a base branch that moved must still be absorbed, got: %v", err)
 	}
 

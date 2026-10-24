@@ -156,7 +156,7 @@ type runtimeDeploymentContainer struct {
 	} `json:"env"`
 }
 
-// runtimeDeploymentContainerEnvNames returns the environment variable names the
+// RuntimeDeploymentContainerEnvNames returns the environment variable names the
 // named container's template declares. found is false when the template carries
 // no such container, which is a shape this read does not recognise rather than
 // an environment that carries nothing.
@@ -165,7 +165,7 @@ type runtimeDeploymentContainer struct {
 // has with this read: the credential itself arrives as a secretKeyRef, so the
 // container's environment is the one place erun can check for the routing
 // variable without ever handling the secret's value.
-func runtimeDeploymentContainerEnvNames(raw []byte, container string) (names []string, found bool) {
+func RuntimeDeploymentContainerEnvNames(raw []byte, container string) (names []string, found bool) {
 	var doc runtimeDeploymentDoc
 	if json.Unmarshal(raw, &doc) != nil {
 		return nil, false
@@ -216,13 +216,13 @@ func inspectRuntimeAgentCredentials(ctx core.Context, req config.ShellLaunchPara
 
 	args := runtimeDeploymentEnvArgs(req)
 	ctx.TraceCommand("", "kubectl", args...)
-	stdout, stderr, err := runObserveKubectl(args)
+	stdout, stderr, err := RunObserveKubectl(args)
 	if err != nil {
 		status := ResolveRuntimeAgentCredentialStatus(params)
-		status.ReadError = fmt.Sprintf("read the runtime pod template: %v", kubectlErrorMessage(err, stderr))
+		status.ReadError = fmt.Sprintf("read the runtime pod template: %v", KubectlErrorMessage(err, stderr))
 		return status
 	}
-	names, found := runtimeDeploymentContainerEnvNames(stdout, config.DevopsComponentName)
+	names, found := RuntimeDeploymentContainerEnvNames(stdout, config.DevopsComponentName)
 	if !found {
 		status := ResolveRuntimeAgentCredentialStatus(params)
 		status.ReadError = fmt.Sprintf("the runtime deployment %q declares no %q container", config.RuntimeReleaseName(req.Tenant), config.DevopsComponentName)

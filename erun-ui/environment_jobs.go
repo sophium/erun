@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
@@ -45,7 +46,7 @@ func (a *App) LoadEnvironmentJobs(tenant, environment string) ([]uiEnvironmentJo
 		return nil, err
 	}
 	if !useMCP {
-		jobs, err := eruncommon.LoadEnvironmentJobs(tenant, environment, time.Now())
+		jobs, err := jobspkg.LoadEnvironmentJobs(tenant, environment, time.Now())
 		if err != nil {
 			return nil, err
 		}
@@ -70,7 +71,7 @@ func (a *App) ReadEnvironmentJobOutput(input uiJobOutputInput) (uiEnvironmentJob
 	if maxBytes <= 0 {
 		maxBytes = defaultJobOutputPageBytes
 	}
-	params := eruncommon.ReadEnvironmentJobOutputParams{
+	params := jobspkg.ReadEnvironmentJobOutputParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -82,7 +83,7 @@ func (a *App) ReadEnvironmentJobOutput(input uiJobOutputInput) (uiEnvironmentJob
 		return uiEnvironmentJobOutput{}, err
 	}
 	if !useMCP {
-		page, err := eruncommon.ReadEnvironmentJobOutput(params)
+		page, err := jobspkg.ReadEnvironmentJobOutput(params)
 		if err != nil {
 			return uiEnvironmentJobOutput{}, err
 		}
@@ -105,7 +106,7 @@ func (a *App) CancelEnvironmentJob(input uiCancelJobInput) (uiEnvironmentJob, er
 	if tenant == "" || environment == "" || id == "" {
 		return uiEnvironmentJob{}, fmt.Errorf("tenant, environment, and job id are required")
 	}
-	params := eruncommon.CancelEnvironmentJobParams{
+	params := jobspkg.CancelEnvironmentJobParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -116,7 +117,7 @@ func (a *App) CancelEnvironmentJob(input uiCancelJobInput) (uiEnvironmentJob, er
 		return uiEnvironmentJob{}, err
 	}
 	if !useMCP {
-		cancel, err := eruncommon.CancelEnvironmentJob(core.Context{}, params)
+		cancel, err := jobspkg.CancelEnvironmentJob(core.Context{}, params)
 		if err != nil {
 			return uiEnvironmentJob{}, err
 		}
@@ -180,7 +181,7 @@ func environmentJobsToUI(jobs []eruncommon.EnvironmentJob) []uiEnvironmentJob {
 	return out
 }
 
-func jobOutputToUI(page eruncommon.EnvironmentJobOutput) uiEnvironmentJobOutput {
+func jobOutputToUI(page jobspkg.EnvironmentJobOutput) uiEnvironmentJobOutput {
 	return uiEnvironmentJobOutput{
 		Job:        environmentJobToUI(page.Job),
 		Offset:     page.Offset,

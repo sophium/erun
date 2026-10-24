@@ -146,7 +146,7 @@ func TestResolveClaudeLaunchModelWithGateway(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := resolveClaudeLaunchModel(tc.config, gateway); got != tc.want {
+			if got := ResolveClaudeLaunchModel(tc.config, gateway); got != tc.want {
 				t.Fatalf("resolveClaudeLaunchModel(%+v, gateway) = %q, want %q", tc.config, got, tc.want)
 			}
 		})
@@ -305,7 +305,7 @@ openrouter:
 	// It is refused as an environment choice even where no catalog lists it at
 	// all, because the refusal is a property of the model rather than of a row
 	// somebody remembered to annotate.
-	if got := resolveClaudeLaunchModel(configpkg.EnvironmentClaudeConfig{DefaultModel: model("deepseek/deepseek-v4.1-flash")}, &configpkg.OpenRouterConfig{BaseURL: "https://x"}); got != "" {
+	if got := ResolveClaudeLaunchModel(configpkg.EnvironmentClaudeConfig{DefaultModel: model("deepseek/deepseek-v4.1-flash")}, &configpkg.OpenRouterConfig{BaseURL: "https://x"}); got != "" {
 		t.Fatalf("an unlisted known-undriveable choice resolved to %q, want no model at all", got)
 	}
 }

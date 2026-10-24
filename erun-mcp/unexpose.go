@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/expose"
 )
 
 type UnexposeInput struct {
@@ -41,14 +41,14 @@ func unexposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 		}
 		projectRoot := firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 
-		exposeStore, ok := any(runtime.Store).(eruncommon.ExposeStore)
+		exposeStore, ok := any(runtime.Store).(expose.ExposeStore)
 		if !ok {
 			exposeStore = config.ConfigStore{}
 		}
 
 		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
 			runCtx.MCPTool = "unexpose"
-			_, err := eruncommon.RunUnexposeService(runCtx, eruncommon.UnexposeParams{
+			_, err := expose.RunUnexposeService(runCtx, expose.UnexposeParams{
 				Tenant:             tenant,
 				Environment:        environment,
 				ProjectRoot:        projectRoot,

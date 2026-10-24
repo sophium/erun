@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
@@ -140,7 +140,7 @@ func disagreeingSnapshotRegistry(t *testing.T, tenantSnapshot, defaultSnapshot s
 	}
 }
 
-func assertCandidateVersions(t *testing.T, candidates []eruncommon.UpgradeVersionCandidate, want ...string) {
+func assertCandidateVersions(t *testing.T, candidates []lifecycle.UpgradeVersionCandidate, want ...string) {
 	t.Helper()
 
 	versions := map[string]bool{}

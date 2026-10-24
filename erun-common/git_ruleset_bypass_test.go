@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -123,44 +121,4 @@ func TestReleasePushStaysSilentWhenNoRuleWasBypassed(t *testing.T) {
 	if got := out.String(); strings.Contains(got, "bypassing") {
 		t.Errorf("an ordinary release push must not be reported as a bypass, got:\n%s", got)
 	}
-}
-
-// installBypassNoticeHook gives a bare remote GitHub's own answer to a push: a
-// pre-receive hook whose stderr git relays to the pushing side in the same
-// `remote: `-prefixed, blank-line-separated notice GitHub writes. Only a
-// receiving remote ever produces that notice, so a hook is the one way to make
-// a real `git push` carry a bypass -- which is what makes the claim push's
-// report reachable without an injected git seam to stand in for its remote.
-func installBypassNoticeHook(t *testing.T, remote, ref string) {
-	t.Helper()
-	hook := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' 'Bypassed rule violations for %s:' '' '- Changes must be made through a pull request.' '' >&2\nexit 0\n", ref)
-	if err := os.WriteFile(filepath.Join(remote, "hooks", "pre-receive"), []byte(hook), 0o755); err != nil {
-		t.Fatalf("install the bypass-notice hook: %v", err)
-	}
-}
-
-// TestReleaseClaimPushReportsAGitHubRulesetBypass drives the repository-global
-// claim push against a real remote, because that is the one push erun makes
-// with no injected git seam to stand in for one. It is the independently-driven
-// half of this report: the release-stage tests above stub git's stderr, so this
-// is what proves the notice survives a real push's own stderr plumbing, and
-// that the claim ref -- which lands on the same origin as the release's own
-// refs -- is not the push left silent.
-func TestReleaseClaimPushReportsAGitHubRulesetBypass(t *testing.T) {
-	repo := newAgentJobTestRepo(t)
-	remote := newBareRemoteForTest(t, repo)
-	ref := releaseRepoClaimRef("1.4.2")
-	installBypassNoticeHook(t, remote, ref)
-
-	var out bytes.Buffer
-	ctx := releaseBypassTestContext(&out)
-
-	sha, err := core.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatalf("resolve the commit the claim push names: %v", err)
-	}
-	if err := gitPushCreateRef(ctx, repo, "origin", strings.TrimSpace(string(sha)), ref); err != nil {
-		t.Fatalf("a bypass is not a failure, so it must not be reported as an error: %v", err)
-	}
-	assertBypassReported(t, out.String(), ref)
 }

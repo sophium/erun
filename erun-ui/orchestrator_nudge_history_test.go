@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // nudgeOrchestratorOnce drives one pacing nudge into id's live session via the
@@ -197,7 +197,7 @@ func TestOrchestratorNudgeHistoryUnreadableFileIsReportedNotSilentlyZeroed(t *te
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,

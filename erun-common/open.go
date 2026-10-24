@@ -44,7 +44,7 @@ var (
 )
 
 const (
-	defaultShellLaunchWaitTimeout     = "2m0s"
+	DefaultShellLaunchWaitTimeout     = "2m0s"
 	remoteShellReattachDeployExitCode = 75
 	remoteShellTakenOverExitCode      = 76
 )
@@ -577,13 +577,13 @@ func LocalShellSetupScript(result configpkg.OpenResult) string {
 
 func WaitForShellDeployment(req configpkg.ShellLaunchParams) error {
 	if configpkg.CurrentExecutionMode(kube.KubectlDeploymentWaitExecutionOperation) == configpkg.ExecutionModeLibrary {
-		if err := kube.LibraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, configpkg.RuntimeReleaseName(req.Tenant), defaultShellLaunchWaitTimeout); err != nil {
-			return enrichShellDeploymentError(req, err, runOpenKubectl)
+		if err := kube.LibraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, configpkg.RuntimeReleaseName(req.Tenant), DefaultShellLaunchWaitTimeout); err != nil {
+			return enrichShellDeploymentError(req, err, RunOpenKubectl)
 		}
 		return nil
 	}
-	if err := runOpenKubectl(kubectlDeploymentWaitArgs(req), io.Discard, os.Stderr); err != nil {
-		return enrichShellDeploymentError(req, err, runOpenKubectl)
+	if err := RunOpenKubectl(KubectlDeploymentWaitArgs(req), io.Discard, os.Stderr); err != nil {
+		return enrichShellDeploymentError(req, err, RunOpenKubectl)
 	}
 	return nil
 }
@@ -621,10 +621,10 @@ func ExecShell(req configpkg.ShellLaunchParams) error {
 		if isShellTakenOverExit(err) {
 			return ErrShellSessionTakenOver
 		}
-		if isShellReplacementExit(err) && shellReplacementPodReady(req, runOpenKubectl) {
+		if isShellReplacementExit(err) && shellReplacementPodReady(req, RunOpenKubectl) {
 			return ErrShellPodReplaced
 		}
-		return enrichShellDeploymentError(req, err, runOpenKubectl)
+		return enrichShellDeploymentError(req, err, RunOpenKubectl)
 	}
 	return nil
 }
@@ -646,7 +646,7 @@ func PreviewShellLaunch(req configpkg.ShellLaunchParams) (ShellLaunchPreview, er
 
 	return ShellLaunchPreview{
 		SeedArgs: seedArgs,
-		WaitArgs: kubectlDeploymentWaitArgs(req),
+		WaitArgs: KubectlDeploymentWaitArgs(req),
 		ExecArgs: kubectlExecArgs(req, script),
 		Script:   script,
 	}, nil
@@ -684,9 +684,9 @@ func APIDeploymentName(tenant string) string {
 	return TenantResourcePrefix(tenant) + "-api"
 }
 
-func kubectlDeploymentWaitArgs(req configpkg.ShellLaunchParams) []string {
+func KubectlDeploymentWaitArgs(req configpkg.ShellLaunchParams) []string {
 	args := configpkg.KubectlTargetArgs(req)
-	args = append(args, "wait", "--for=condition=Available", "--timeout", defaultShellLaunchWaitTimeout, "deployment/"+configpkg.RuntimeReleaseName(req.Tenant))
+	args = append(args, "wait", "--for=condition=Available", "--timeout", DefaultShellLaunchWaitTimeout, "deployment/"+configpkg.RuntimeReleaseName(req.Tenant))
 	return args
 }
 

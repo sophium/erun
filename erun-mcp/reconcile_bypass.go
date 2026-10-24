@@ -5,14 +5,14 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/review"
 )
 
 // ReconcileBypassToolResult is the reconcile-bypass tool's result.
 type ReconcileBypassToolResult struct {
-	Preview bool                             `json:"preview"`
-	Result  eruncommon.ReconcileBypassResult `json:"result,omitempty"`
-	Trace   []string                         `json:"trace,omitempty"`
+	Preview bool                         `json:"preview"`
+	Result  review.ReconcileBypassResult `json:"result,omitempty"`
+	Trace   []string                     `json:"trace,omitempty"`
 }
 
 type ExecReconcileBypassInput struct {
@@ -29,13 +29,13 @@ func execReconcileBypassTool(runtime RuntimeConfig) func(context.Context, *mcp.C
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "exec_reconcile-bypass"
-		result, err := eruncommon.ReconcileBypass(ctx, runtime.Store, input.Alias, eruncommon.ReconcileBypassParams{
+		result, err := review.ReconcileBypass(ctx, runtime.Store, input.Alias, review.ReconcileBypassParams{
 			RemoteURL:      input.RemoteURL,
 			RulesetID:      input.RulesetID,
 			TargetBranch:   input.TargetBranch,
 			Since:          input.Since,
 			ExpectedActors: input.ExpectedActors,
-		}, cloudDependencies(), eruncommon.ReconcileBypassDependencies{})
+		}, cloudDependencies(), review.ReconcileBypassDependencies{})
 		if err != nil {
 			return nil, ReconcileBypassToolResult{}, err
 		}

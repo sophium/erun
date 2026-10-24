@@ -17,7 +17,7 @@ func ResolveDockerImageReference(ctx core.Context, store DockerStore, findProjec
 		return helm.DockerImageReference{}, err
 	}
 
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return helm.DockerImageReference{}, err
 	}
@@ -103,7 +103,7 @@ func parseDockerImageReference(image string) (registry, imageName, version strin
 }
 
 func resolveDockerBuildSpec(ctx core.Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, buildContext DockerBuildContext, target DockerCommandTarget) (DockerBuildSpec, error) {
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return DockerBuildSpec{}, err
 	}

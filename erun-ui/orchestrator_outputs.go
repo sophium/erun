@@ -6,7 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -48,12 +49,12 @@ func ensureOrchestratorOutputsDir(id string) (string, error) {
 // newest-first. It reads the filesystem directly — there is no pod to exec into
 // — through the same resolver the in-pod MCP server uses, so the read-model the
 // dialog renders is identical for both.
-func (a *App) ListOrchestratorOutputs(id string) (eruncommon.RuntimeOutputsListResult, error) {
+func (a *App) ListOrchestratorOutputs(id string) (jobs.RuntimeOutputsListResult, error) {
 	dir, err := orchestratorOutputsDir(id)
 	if err != nil {
-		return eruncommon.RuntimeOutputsListResult{}, err
+		return jobs.RuntimeOutputsListResult{}, err
 	}
-	return eruncommon.ResolveLocalOutputs(eruncommon.RuntimeOutputsParams{Dir: dir})
+	return jobs.ResolveLocalOutputs(jobs.RuntimeOutputsParams{Dir: dir})
 }
 
 // DownloadOrchestratorOutput saves one entry through a native Save dialog and
@@ -70,7 +71,7 @@ func (a *App) DownloadOrchestratorOutput(id, name string) (string, error) {
 	if a.ctx == nil {
 		return "", fmt.Errorf("application context is not ready")
 	}
-	out, err := eruncommon.DownloadLocalOutput(eruncommon.RuntimeOutputDownloadParams{Dir: dir, Name: name})
+	out, err := jobs.DownloadLocalOutput(jobs.RuntimeOutputDownloadParams{Dir: dir, Name: name})
 	if err != nil {
 		return "", err
 	}
@@ -104,7 +105,7 @@ func (a *App) RunOrchestratorOutputOnHost(id, name string) error {
 	}
 	// Reuse the download resolver's containment check rather than re-deriving
 	// it: it already refuses a name that climbs out of the outputs directory.
-	entry, err := eruncommon.StatLocalOutput(eruncommon.RuntimeOutputDownloadParams{Dir: dir, Name: name})
+	entry, err := jobs.StatLocalOutput(jobs.RuntimeOutputDownloadParams{Dir: dir, Name: name})
 	if err != nil {
 		return err
 	}

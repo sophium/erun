@@ -13,7 +13,7 @@ import (
 // never carries it either.
 func TestGitCommitsAheadIncludesGitStderr(t *testing.T) {
 	nonRepo := t.TempDir()
-	_, err := gitCommitsAhead(testTraceContext(false), nonRepo, "a", "b")
+	_, err := GitCommitsAhead(testTraceContext(false), nonRepo, "a", "b")
 	if err == nil {
 		t.Fatal("expected an error for a non-git directory")
 	}

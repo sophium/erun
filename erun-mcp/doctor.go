@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/doctor"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -197,7 +198,7 @@ func runDoctorTenantEnvActions(runtime RuntimeConfig, input DoctorInput, runCtx 
 	// A host environment's daemon is this machine's own, so an unreachable
 	// cluster says nothing about it -- see the CLI's
 	// runDoctorCleanupActions for the same distinction.
-	if diagnosis.ClusterUnreachable && eruncommon.ResolveDoctorDockerDaemon(req).Kind != eruncommon.DoctorDockerDaemonHost {
+	if diagnosis.ClusterUnreachable && doctor.ResolveDoctorDockerDaemon(req).Kind != doctor.DoctorDockerDaemonHost {
 		if err := writeDoctorPodUnreachableSkip(runCtx, "Docker storage"); err != nil {
 			return err
 		}
@@ -312,7 +313,7 @@ func runDoctorAliasRepairs(runtime RuntimeConfig, input DoctorInput, runCtx core
 			report.UnresolvedAliases = append(report.UnresolvedAliases, alias)
 			continue
 		}
-		params := eruncommon.RepairOrphanedAliasParams{
+		params := doctor.RepairOrphanedAliasParams{
 			Orphan:        orphan,
 			SSOStartURL:   strings.TrimSpace(entry.SSOStartURL),
 			SSORegion:     strings.TrimSpace(entry.SSORegion),
@@ -321,7 +322,7 @@ func runDoctorAliasRepairs(runtime RuntimeConfig, input DoctorInput, runCtx core
 			OIDCIssuerURL: strings.TrimSpace(entry.OIDCIssuerURL),
 			SkipLogin:     entry.SkipLogin,
 		}
-		if _, err := eruncommon.RepairOrphanedAlias(runCtx, runtime.Store, params, cloud.CloudDependencies{}); err != nil {
+		if _, err := doctor.RepairOrphanedAlias(runCtx, runtime.Store, params, cloud.CloudDependencies{}); err != nil {
 			return fmt.Errorf("repair alias %s: %w", alias, err)
 		}
 		report.RepairedAliases = append(report.RepairedAliases, alias)
@@ -403,8 +404,8 @@ func writeDoctorPodUnreachableSkip(runCtx core.Context, header string) error {
 // carries the next step — unless the caller asked for a prune against it, which
 // cannot run at all: that one fails the call, the same as the CLI refusing it.
 func writeDoctorInspection(runCtx core.Context, target config.OpenResult, req config.ShellLaunchParams, pruneRequested bool) error {
-	inspection, err := eruncommon.RunDoctorInspection(runCtx, nil, req)
-	var unavailable eruncommon.DoctorDockerDaemonUnavailableError
+	inspection, err := doctor.RunDoctorInspection(runCtx, nil, req)
+	var unavailable doctor.DoctorDockerDaemonUnavailableError
 	daemonUnavailable := errors.As(err, &unavailable)
 	if daemonUnavailable && pruneRequested {
 		return err
@@ -418,7 +419,7 @@ func writeDoctorInspection(runCtx core.Context, target config.OpenResult, req co
 	if _, err := fmt.Fprintf(runCtx.Stdout, "Target: %s/%s\n", target.Tenant, target.Environment); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(runCtx.Stdout, eruncommon.DoctorDockerDaemonLine(inspection.Daemon)); err != nil {
+	if _, err := fmt.Fprintln(runCtx.Stdout, doctor.DoctorDockerDaemonLine(inspection.Daemon)); err != nil {
 		return err
 	}
 	return writeDoctorOutput(runCtx, inspection.Stdout, inspection.Stderr)
@@ -429,11 +430,11 @@ func writeDoctorInspection(runCtx core.Context, target config.OpenResult, req co
 func runDoctorRecoveryToolActions(runCtx core.Context, input DoctorInput, req config.ShellLaunchParams) error {
 	for _, action := range deployRecoveryActionsFromInput(input) {
 		if !runCtx.DryRun {
-			if _, err := fmt.Fprintf(runCtx.Stdout, "Running: %s\n", eruncommon.DeployRecoveryActionDescription(action)); err != nil {
+			if _, err := fmt.Fprintf(runCtx.Stdout, "Running: %s\n", doctor.DeployRecoveryActionDescription(action)); err != nil {
 				return err
 			}
 		}
-		output, err := eruncommon.RunDeployRecovery(runCtx, req, action)
+		output, err := doctor.RunDeployRecovery(runCtx, req, action)
 		if err != nil {
 			return err
 		}
@@ -462,7 +463,7 @@ func runDoctorToolActions(runCtx core.Context, input DoctorInput, req config.She
 		if err := writeDoctorAction(runCtx, req, action); err != nil {
 			return err
 		}
-		output, err := eruncommon.RunDoctorAction(runCtx, nil, req, action)
+		output, err := doctor.RunDoctorAction(runCtx, nil, req, action)
 		if err != nil {
 			return err
 		}
@@ -470,7 +471,7 @@ func runDoctorToolActions(runCtx core.Context, input DoctorInput, req config.She
 			if err := writeDoctorOutput(runCtx, output.Stdout, output.Stderr); err != nil {
 				return err
 			}
-			if summary := eruncommon.DoctorPruneSummary(output); summary != "" {
+			if summary := doctor.DoctorPruneSummary(output); summary != "" {
 				if _, err := fmt.Fprintln(runCtx.Stdout, summary); err != nil {
 					return err
 				}
@@ -483,12 +484,12 @@ func runDoctorToolActions(runCtx core.Context, input DoctorInput, req config.She
 // writeDoctorAction names the action and the daemon it acts on: an action run
 // against a daemon that does not hold this environment's build images reclaims
 // nothing, and the reader has to be able to tell which daemon ran.
-func writeDoctorAction(runCtx core.Context, req config.ShellLaunchParams, action eruncommon.DoctorAction) error {
+func writeDoctorAction(runCtx core.Context, req config.ShellLaunchParams, action doctor.DoctorAction) error {
 	if runCtx.DryRun {
 		return nil
 	}
 	_, err := fmt.Fprintf(runCtx.Stdout, "Running: %s\n",
-		eruncommon.DoctorActionDescriptionOn(action, eruncommon.ResolveDoctorDockerDaemon(req)))
+		doctor.DoctorActionDescriptionOn(action, doctor.ResolveDoctorDockerDaemon(req)))
 	return err
 }
 
@@ -519,16 +520,16 @@ func resolveDoctorOpenResult(runtime RuntimeConfig, input DoctorInput) (config.O
 	return eruncommon.ResolveDoctorTarget(runtime.Store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
 }
 
-func doctorActionsFromInput(input DoctorInput) []eruncommon.DoctorAction {
-	actions := make([]eruncommon.DoctorAction, 0, 3)
+func doctorActionsFromInput(input DoctorInput) []doctor.DoctorAction {
+	actions := make([]doctor.DoctorAction, 0, 3)
 	if input.PruneImages {
-		actions = append(actions, eruncommon.DoctorActionPruneImages)
+		actions = append(actions, doctor.DoctorActionPruneImages)
 	}
 	if input.PruneBuildCache {
-		actions = append(actions, eruncommon.DoctorActionPruneBuildCache)
+		actions = append(actions, doctor.DoctorActionPruneBuildCache)
 	}
 	if input.PruneContainers {
-		actions = append(actions, eruncommon.DoctorActionPruneContainers)
+		actions = append(actions, doctor.DoctorActionPruneContainers)
 	}
 	return actions
 }
@@ -540,7 +541,7 @@ func runDoctorConfigSync(runCtx core.Context) error {
 	if err != nil {
 		return err
 	}
-	inspection, err := eruncommon.InspectRuntimeConfigSync(eruncommon.ResolveRuntimeConfigHome(homeDir), os.Getenv)
+	inspection, err := doctor.InspectRuntimeConfigSync(doctor.ResolveRuntimeConfigHome(homeDir), os.Getenv)
 	if err != nil {
 		return err
 	}
@@ -555,5 +556,5 @@ func runDoctorConfigSync(runCtx core.Context) error {
 		runCtx.Trace(fmt.Sprintf("doctor: in-pod config drift %s %s on-disk=%q injected=%q [%s]",
 			field.Scope, field.Key, field.OnDisk, field.Injected, field.Kind))
 	}
-	return eruncommon.RunRuntimeConfigSync(runCtx, inspection)
+	return doctor.RunRuntimeConfigSync(runCtx, inspection)
 }

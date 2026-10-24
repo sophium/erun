@@ -1,36 +1,11 @@
 package eruncommon
 
 import (
-	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/adrg/xdg"
-	"github.com/sophium/erun/erun-common/infra/kube"
 )
-
-// seedPortForwardStateFileForTest writes a forward's on-disk state file
-// directly, mirroring the shape `erun open` writes, without touching the env
-// config -- the caller decides separately whether to seed a config the
-// tenant/environment resolves against.
-func seedPortForwardStateFileForTest(t *testing.T, tenant, environment string, port int) {
-	t.Helper()
-	path, err := kube.PortForwardStatePath("mcp", tenant, environment)
-	if err != nil {
-		t.Fatalf("PortForwardStatePath: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	data, err := json.Marshal(kube.PortForwardState{Tenant: tenant, Environment: environment, LocalPort: port})
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-}
 
 // redirectConfigHomeForTest points the on-disk config store (and therefore
 // PortForwardStatePath/ConfigStore) at a fresh temp root. adrg/xdg caches

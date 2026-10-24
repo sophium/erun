@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
 // stubGatewayRouting answers the cluster read from a table keyed by
@@ -18,16 +18,16 @@ func stubGatewayRouting(t *testing.T, deployed map[string]string, failing map[st
 	var mu sync.Mutex
 	var asked []string
 	previous := readGatewayRouting
-	readGatewayRouting = func(_ context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (eruncommon.GatewayRouting, bool, error) {
+	readGatewayRouting = func(_ context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (lifecycle.GatewayRouting, bool, error) {
 		key := tenant + "/" + env.Name
 		mu.Lock()
 		asked = append(asked, key)
 		mu.Unlock()
 		if failing[key] {
-			return eruncommon.GatewayRouting{}, false, errors.New("cluster unreachable")
+			return lifecycle.GatewayRouting{}, false, errors.New("cluster unreachable")
 		}
 		url, found := deployed[key]
-		return eruncommon.GatewayRouting{Deployed: url, Wanted: eruncommon.WantedGatewayEndpoint(env.Claude, catalog)}, found, nil
+		return lifecycle.GatewayRouting{Deployed: url, Wanted: lifecycle.WantedGatewayEndpoint(env.Claude, catalog)}, found, nil
 	}
 	t.Cleanup(func() { readGatewayRouting = previous })
 	return &asked

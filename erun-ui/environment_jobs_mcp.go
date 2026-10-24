@@ -7,7 +7,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/jobs"
 )
 
 // loadEnvironmentJobsFromMCP lists an environment's retained jobs from its own
@@ -47,11 +48,11 @@ func loadEnvironmentJobsFromMCP(ctx context.Context, endpoint, bearer string) ([
 
 // readEnvironmentJobOutputFromMCP pages through one job's captured output on
 // the pod that ran it.
-func readEnvironmentJobOutputFromMCP(ctx context.Context, endpoint, bearer string, params eruncommon.ReadEnvironmentJobOutputParams) (eruncommon.EnvironmentJobOutput, error) {
+func readEnvironmentJobOutputFromMCP(ctx context.Context, endpoint, bearer string, params jobs.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
-		return eruncommon.EnvironmentJobOutput{}, err
+		return jobs.EnvironmentJobOutput{}, err
 	}
 	defer func() {
 		_ = session.Close()
@@ -66,27 +67,27 @@ func readEnvironmentJobOutputFromMCP(ctx context.Context, endpoint, bearer strin
 		},
 	})
 	if err != nil {
-		return eruncommon.EnvironmentJobOutput{}, formatJobMCPError("job_output", err)
+		return jobs.EnvironmentJobOutput{}, formatJobMCPError("job_output", err)
 	}
 
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		return eruncommon.EnvironmentJobOutput{}, err
+		return jobs.EnvironmentJobOutput{}, err
 	}
-	var output eruncommon.EnvironmentJobOutput
+	var output jobs.EnvironmentJobOutput
 	if err := json.Unmarshal(data, &output); err != nil {
-		return eruncommon.EnvironmentJobOutput{}, err
+		return jobs.EnvironmentJobOutput{}, err
 	}
 	return output, nil
 }
 
 // cancelEnvironmentJobFromMCP signals the job's work on the pod that runs it.
 // Not idle-probed: cancelling a job is a real action, not a diagnostic read.
-func cancelEnvironmentJobFromMCP(ctx context.Context, endpoint, bearer string, params eruncommon.CancelEnvironmentJobParams) (eruncommon.CancelEnvironmentJobResult, error) {
+func cancelEnvironmentJobFromMCP(ctx context.Context, endpoint, bearer string, params jobs.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
-		return eruncommon.CancelEnvironmentJobResult{}, err
+		return jobs.CancelEnvironmentJobResult{}, err
 	}
 	defer func() {
 		_ = session.Close()
@@ -100,18 +101,18 @@ func cancelEnvironmentJobFromMCP(ctx context.Context, endpoint, bearer string, p
 		},
 	})
 	if err != nil {
-		return eruncommon.CancelEnvironmentJobResult{}, formatJobMCPError("job_cancel", err)
+		return jobs.CancelEnvironmentJobResult{}, formatJobMCPError("job_cancel", err)
 	}
 
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		return eruncommon.CancelEnvironmentJobResult{}, err
+		return jobs.CancelEnvironmentJobResult{}, err
 	}
 	var payload struct {
-		Cancel eruncommon.CancelEnvironmentJobResult `json:"cancel"`
+		Cancel jobs.CancelEnvironmentJobResult `json:"cancel"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return eruncommon.CancelEnvironmentJobResult{}, err
+		return jobs.CancelEnvironmentJobResult{}, err
 	}
 	return payload.Cancel, nil
 }

@@ -32,10 +32,10 @@ type ObservedHelmRelease struct {
 	Error string `json:"error,omitempty"`
 }
 
-// observeHelmStatusArgs builds a read-only `helm status <release> -o json`
+// ObserveHelmStatusArgs builds a read-only `helm status <release> -o json`
 // invocation, mirroring doctor's helmStatusArgs (doctor_deploy.go) with a JSON
 // output flag added so observe can parse it instead of only displaying it.
-func observeHelmStatusArgs(req config.ShellLaunchParams) []string {
+func ObserveHelmStatusArgs(req config.ShellLaunchParams) []string {
 	args := []string{"status", config.RuntimeReleaseName(req.Tenant)}
 	if strings.TrimSpace(req.Namespace) != "" {
 		args = append(args, "--namespace", req.Namespace)
@@ -46,12 +46,12 @@ func observeHelmStatusArgs(req config.ShellLaunchParams) []string {
 	return append(args, "-o", "json")
 }
 
-// observeHelmListArgs builds a read-only `helm list -o json` invocation
+// ObserveHelmListArgs builds a read-only `helm list -o json` invocation
 // filtered to exactly the runtime release. `helm status -o json` carries no
 // chart metadata at all (its top-level keys are apply_method, config, info,
 // manifest, name, namespace, version — no chart), so observe reads chart and
 // appVersion from list instead, which does carry them.
-func observeHelmListArgs(req config.ShellLaunchParams, releaseName string) []string {
+func ObserveHelmListArgs(req config.ShellLaunchParams, releaseName string) []string {
 	args := []string{"list", "--filter", "^" + regexp.QuoteMeta(releaseName) + "$"}
 	if strings.TrimSpace(req.Namespace) != "" {
 		args = append(args, "--namespace", req.Namespace)
@@ -100,11 +100,11 @@ func splitHelmChartNameVersion(chart string) (name, version string, ok bool) {
 	return match[1], match[2], true
 }
 
-// fetchObservedHelmRelease reads the runtime release's status. A missing
+// FetchObservedHelmRelease reads the runtime release's status. A missing
 // release and a failed read are both reported as Found: false, distinguished
 // by Error: a missing release means "confirmed nothing deployed", a non-empty
 // Error means "could not tell" plus what to do about it.
-func fetchObservedHelmRelease(args, listArgs []string, releaseName, namespace string) *ObservedHelmRelease {
+func FetchObservedHelmRelease(args, listArgs []string, releaseName, namespace string) *ObservedHelmRelease {
 	raw, stderr, err := runObserveHelm(args)
 	if err != nil {
 		if isHelmReleaseNotFound(stderr) {

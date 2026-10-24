@@ -34,9 +34,10 @@ this file for the conventions below.
 
 https://github.com/sophium/erun/issues/2741 splits this module into layers so
 an edit recompiles only its dependents and the compiler enforces primitive
-independence. The base and infra layers are in place (`base/*`, `infra/*`);
-everything else is still the root package `eruncommon` until its step lands,
-and new code is written so it would already sit in one layer:
+independence. The base, infra and command layers are in place (`base/*`,
+`infra/*`, `command/*`); the primitives and their orchestration are still the
+root package `eruncommon` until their step lands, and new code is written so
+it would already sit in one layer:
 
 ```
 erun-common/
@@ -44,7 +45,7 @@ erun-common/
   infra/         kube/ helm/ gitx/ registry/ platformclient/ cloud/ activity/ mcp/ mcpauth/ mcptools/
   primitive/     build/ push/ deploy/ open/ release/
   orchestration/ build --release, --deploy, --push: compositions of primitives
-  command/       mergequeue/ review/ jobs/ lifecycle/ setup/ doctor/ observe/ terraform/ e2e/ orchestrator/ podruntime/
+  command/       ai/ doctor/ e2e/ expose/ jobs/ lifecycle/ mergequeue/ observe/ orchestrator/ platform/ podruntime/ review/ setup/ terraform/ workspace/
 ```
 
 | Layer | May depend on |
@@ -54,7 +55,7 @@ erun-common/
 | `infra/*` | `base/*`; another `infra/*` only where its depguard rule names it |
 | `primitive/*` | `base/*`, `infra/*`; never another primitive |
 | `orchestration` | `base/*`, `infra/*`, `primitive/*` |
-| `command/*` | anything below; never another `command/*` |
+| `command/*` | anything below, and the root package until the primitives leave it; never another `command/*` |
 | erun-backend-api | `base/*`, `infra/{cloud,mcpauth,mcptools,platformclient}` only |
 
 - depguard in `.golangci.yml` enforces the table for every layer that exists:
@@ -63,6 +64,17 @@ erun-common/
   registry and mcp → kube; mcpauth → mcptools; cloud → activity,
   platformclient), so a new edge between external systems is a reviewed
   config change. erun-backend-api's own `.golangci.yml` holds its row.
+- The command rule holds production files only. A test may import a sibling
+  command where it pins a contract between the two, and only there:
+  `expose` → `observe` (`TestSharedReadsNameTheReadAndTheOperationNamesItself`),
+  `orchestrator` → `ai` (the launch effort levels), `platform` → `setup`
+  (`TestErunRegistry*`), `podruntime` → `doctor`
+  (`TestRuntimeBootConfigCloudContextDefaults`).
+- A test whose helper is this test binary re-executed registers that helper
+  from an `init` in its own file (`reentryHelpers`, in each package's suite
+  `TestMain`), so it keeps working from whichever package its file is in.
+  Tests that read a sibling module find the repository with `erunRepoRoot`,
+  never by a fixed `../` depth.
 - Move declarations between packages with `go run ./cmd/pkgmove`, never by
   hand. `plan -map` simulates a map (the import graph it makes, every cycle
   with the references that hold it, the fields it would export); `apply`

@@ -3,22 +3,19 @@ package eruncommon
 import (
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
-	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/core"
 	"gopkg.in/yaml.v3"
 )
 
-// remoteInitMarkerBaseDir roots the per-tenant/env bootstrap markers that let a
+// RemoteInitMarkerBaseDir roots the per-tenant/env bootstrap markers that let a
 // later `erun doctor` tell a deliberate --no-git init from one interrupted before
 // the git checkout finished, and recover the repository URL to finish that work.
 // Per-tenant/env scoping avoids marker collisions when tenants share one $HOME.
-const remoteInitMarkerBaseDir = ".erun"
+const RemoteInitMarkerBaseDir = ".erun"
 
-const remoteInitMarkerFilename = "bootstrap.yaml"
+const RemoteInitMarkerFilename = "bootstrap.yaml"
 
 // RemoteInitMarker captures the intent of `erun init --remote` so a
 // later doctor invocation can detect what was supposed to happen and
@@ -36,7 +33,7 @@ type RemoteInitMarker struct {
 
 // RemoteInitMarkerPath returns the marker path for the given tenant/environment under homeDir.
 func RemoteInitMarkerPath(homeDir, tenant, environment string) string {
-	return filepath.Join(homeDir, remoteInitMarkerBaseDir, tenant, environment, remoteInitMarkerFilename)
+	return filepath.Join(homeDir, RemoteInitMarkerBaseDir, tenant, environment, RemoteInitMarkerFilename)
 }
 
 // LoadRemoteInitMarker reads the tenant/environment marker under homeDir. The found
@@ -79,28 +76,4 @@ func SaveRemoteInitMarker(homeDir string, marker RemoteInitMarker) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)
-}
-
-// remoteInitMarkerWriteScript renders the shell snippet that writes the marker inside
-// the runtime pod. No heredoc escaping is needed: tenant, environment, and repository
-// values are constrained to a narrow character set upstream (parseRemoteRepositorySpec
-// and the bootstrap validators), so none can forge the closing sentinel.
-func remoteInitMarkerWriteScript(marker RemoteInitMarker) string {
-	data, err := yaml.Marshal(&marker)
-	if err != nil {
-		data = []byte(fmt.Sprintf("bootstrap_complete: %t\n", marker.BootstrapComplete))
-	}
-	// Pod-side path: this script runs in the Linux runtime pod, so join with the
-	// forward-slash path package, never the host's OS-native filepath (which on
-	// Windows would emit .erun\<tenant>\<env>).
-	relativeDir := path.Join(remoteInitMarkerBaseDir, marker.Tenant, marker.Environment)
-	dir := "$HOME/" + relativeDir
-	target := dir + "/" + remoteInitMarkerFilename
-	return strings.Join([]string{
-		fmt.Sprintf("mkdir -p %s", core.ShellQuote(dir)),
-		fmt.Sprintf("cat > %s <<'__ERUN_BOOTSTRAP_MARKER__'", core.ShellQuote(target)),
-		strings.TrimRight(string(data), "\n"),
-		"__ERUN_BOOTSTRAP_MARKER__",
-		fmt.Sprintf("chmod 600 %s", core.ShellQuote(target)),
-	}, "\n")
 }

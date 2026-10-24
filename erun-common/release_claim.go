@@ -27,7 +27,7 @@ import (
 // whole worktree, means two releases of different versions in the same
 // environment never collide.
 const (
-	// releaseVersionClaimTTL is generous relative to a real release's build
+	// ReleaseVersionClaimTTL is generous relative to a real release's build
 	// time (multi-arch image builds routinely run past ten minutes) so a
 	// live release is never mistaken for an abandoned one. Renewal keeps a
 	// running release well inside it. A claim whose holder stops renewing —
@@ -35,10 +35,10 @@ const (
 	// environment that recorded it as soon as that environment can see the
 	// holder is gone; this TTL is the slower path, and the only one left for
 	// a holder in another environment (see releaseRepoClaimHeld).
-	releaseVersionClaimTTL = 20 * time.Minute
+	ReleaseVersionClaimTTL = 20 * time.Minute
 	// releaseVersionClaimRenewalInterval keeps the renewal comfortably
 	// inside the TTL, the same margin the job-lease heartbeat uses.
-	releaseVersionClaimRenewalInterval = releaseVersionClaimTTL / 3
+	releaseVersionClaimRenewalInterval = ReleaseVersionClaimTTL / 3
 )
 
 // releaseVersionClaimScope names the exclusive lease scope a release of
@@ -58,18 +58,18 @@ func releaseVersionClaimID(version string, pid int) string {
 	return fmt.Sprintf("release-%s-%d", core.SanitizeForFilename(strings.TrimSpace(version)), pid)
 }
 
-// takeReleaseVersionClaim is the thin wrapper over the exclusive activity
+// TakeReleaseVersionClaim is the thin wrapper over the exclusive activity
 // lease that names the claim's shape, kept separate from claimReleaseVersion
 // so the refuse/reclaim behavior can be exercised directly against a
 // controlled clock rather than through a real release run.
-func takeReleaseVersionClaim(tenant, environment, version string, holder activity.EnvironmentActivityLeaseHolder, pid int, now time.Time) (activity.EnvironmentActivityLease, error) {
+func TakeReleaseVersionClaim(tenant, environment, version string, holder activity.EnvironmentActivityLeaseHolder, pid int, now time.Time) (activity.EnvironmentActivityLease, error) {
 	return activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant:      tenant,
 		Environment: environment,
 		Name:        "release " + strings.TrimSpace(version),
 		ID:          releaseVersionClaimID(version, pid),
 		PID:         pid,
-		TTL:         releaseVersionClaimTTL,
+		TTL:         ReleaseVersionClaimTTL,
 		Exclusive:   true,
 		Scope:       releaseVersionClaimScope(version),
 		Holder:      holder,
@@ -89,7 +89,7 @@ func releaseVersionClaimRefusalError(version string, err error) error {
 		strings.TrimSpace(version), conflict.Holder.Holder.String())
 }
 
-// claimReleaseVersion takes both claims that stand in for "I am releasing
+// ClaimReleaseVersion takes both claims that stand in for "I am releasing
 // this version" — the local exclusive lease (environment-scoped: keeps this
 // environment from idling out mid-release and is visible to `erun` lease
 // listings) and the repository-global claim on a remote ref (release_repo_claim.go:
@@ -104,7 +104,7 @@ func releaseVersionClaimRefusalError(version string, err error) error {
 // Off-pod (a developer's own laptop) there is exactly one caller by
 // construction, so this is a no-op — refusing a solo release against itself
 // would be a false positive, not a safety net.
-func claimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) string) (func(), error) {
+func ClaimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) string) (func(), error) {
 	tenant, environment, ok := core.InjectedRuntimePodIdentity(env)
 	if !ok {
 		return func() {}, nil
@@ -122,7 +122,7 @@ func claimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) st
 	// holding it is gone. Read before this attempt takes its own local claim
 	// below, so a live local holder it finds is necessarily somebody else's.
 	localHolderAlive := func() bool {
-		held, err := environmentHasLiveReleaseHolder(tenant, environment, spec.Version, time.Now())
+		held, err := EnvironmentHasLiveReleaseHolder(tenant, environment, spec.Version, time.Now())
 		if err != nil {
 			// A store that cannot be read is not evidence that the holder is
 			// gone: it cannot clear the claim, so the claim stands.
@@ -131,13 +131,13 @@ func claimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) st
 		return held
 	}
 
-	repoSHA, err := takeReleaseRepoClaim(ctx, spec.ProjectRoot, environment, spec.Version, holder, time.Now(), localHolderAlive)
+	repoSHA, err := TakeReleaseRepoClaim(ctx, spec.ProjectRoot, environment, spec.Version, holder, time.Now(), localHolderAlive)
 	if err != nil {
 		return nil, err
 	}
 	repo := &releaseRepoClaimHandle{sha: repoSHA}
 
-	if _, err := takeReleaseVersionClaim(tenant, environment, spec.Version, holder, pid, time.Time{}); err != nil {
+	if _, err := TakeReleaseVersionClaim(tenant, environment, spec.Version, holder, pid, time.Time{}); err != nil {
 		releaseRepoClaimIfHeld(ctx, spec, repo)
 		return nil, releaseVersionClaimRefusalError(spec.Version, err)
 	}
@@ -169,7 +169,7 @@ func claimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) st
 	}, nil
 }
 
-// environmentHasLiveReleaseHolder reports whether the environment still holds a
+// EnvironmentHasLiveReleaseHolder reports whether the environment still holds a
 // live local exclusive claim on version's release scope — by any holder, so the
 // caller must ask before taking its own.
 //
@@ -180,7 +180,7 @@ func claimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) st
 // claim — reads as absent rather than as held. A holder this cannot disprove
 // (an unreadable store) is reported as present, so a claim is only ever
 // reclaimed on evidence and never on the absence of an answer.
-func environmentHasLiveReleaseHolder(tenant, environment, version string, now time.Time) (bool, error) {
+func EnvironmentHasLiveReleaseHolder(tenant, environment, version string, now time.Time) (bool, error) {
 	held, err := activity.LoadEnvironmentActivityLeases(tenant, environment, now)
 	if err != nil {
 		return false, err
@@ -219,13 +219,13 @@ func (h *releaseRepoClaimHandle) set(sha string) {
 // renewal keeps the last-known sha and tries again next tick rather than
 // tearing down a release over a transient push failure.
 func renewReleaseClaims(ctx core.Context, spec ReleaseSpec, tenant, environment string, holder activity.EnvironmentActivityLeaseHolder, pid int, repo *releaseRepoClaimHandle) {
-	_, _ = takeReleaseVersionClaim(tenant, environment, spec.Version, holder, pid, time.Time{})
+	_, _ = TakeReleaseVersionClaim(tenant, environment, spec.Version, holder, pid, time.Time{})
 
 	sha := repo.get()
 	if sha == "" {
 		return
 	}
-	if renewed, err := renewReleaseRepoClaim(ctx, spec.ProjectRoot, environment, spec.Version, holder, time.Now(), sha); err == nil {
+	if renewed, err := RenewReleaseRepoClaim(ctx, spec.ProjectRoot, environment, spec.Version, holder, time.Now(), sha); err == nil {
 		repo.set(renewed)
 	}
 }

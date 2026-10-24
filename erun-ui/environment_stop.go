@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
 // environment_stop.go is the desktop half of the stop/wake lifecycle. Stopping
@@ -38,7 +39,7 @@ func (a *App) StopEnvironment(selection uiSelection) (uiEnvironmentStopResult, e
 	// and `erun open` now wakes a stopped env — so without the latch the
 	// reconnect would undo the stop before the cluster read could see it.
 	a.markRuntimeStopped(selection)
-	stopped, err := a.deps.stopEnvironmentRuntime(core.Context{}, eruncommon.StopEnvironmentParams{
+	stopped, err := a.deps.stopEnvironmentRuntime(core.Context{}, lifecycle.StopEnvironmentParams{
 		Result:        result,
 		SaveEnvConfig: a.deps.store.SaveEnvConfig,
 	})
@@ -68,7 +69,7 @@ func (a *App) StopEnvironment(selection uiSelection) (uiEnvironmentStopResult, e
 // outcomes. Those are the pods still visible afterwards, and a pod that
 // outlives a stop with no explanation reads as the stop having failed — most of
 // all on the already-stopped outcome, where nothing else changed at all.
-func stopEnvironmentNotice(result eruncommon.StopEnvironmentResult) string {
+func stopEnvironmentNotice(result lifecycle.StopEnvironmentResult) string {
 	kept := stopEnvironmentKeptComponents(result)
 	if result.AlreadyStopped {
 		return fmt.Sprintf("%s/%s was already stopped.%s Open it to start it again.", result.Tenant, result.Environment, kept)
@@ -84,7 +85,7 @@ func stopEnvironmentNotice(result eruncommon.StopEnvironmentResult) string {
 // stopEnvironmentKeptComponents renders the components the stop left holding
 // their capacity, or "" when the environment deploys none: a runtime-only
 // environment has nothing to explain and must not gain a sentence saying so.
-func stopEnvironmentKeptComponents(result eruncommon.StopEnvironmentResult) string {
+func stopEnvironmentKeptComponents(result lifecycle.StopEnvironmentResult) string {
 	if len(result.RemainingComponents) == 0 {
 		return ""
 	}
@@ -151,20 +152,20 @@ func (a *App) runtimeStoppedForSelection(selection uiSelection) bool {
 // Deployment and reads what the cluster reports about it. The reconnect gate
 // and the Runtime tab's own reading share this one resolution so the two can
 // never disagree about which Deployment "this environment's runtime" is.
-func (a *App) readRuntimeRunStateForSelection(selection uiSelection) (config.OpenResult, eruncommon.RuntimeRunState, error) {
+func (a *App) readRuntimeRunStateForSelection(selection uiSelection) (config.OpenResult, lifecycle.RuntimeRunState, error) {
 	if a.deps.store == nil || a.deps.readRuntimeRunState == nil {
-		return config.OpenResult{}, eruncommon.RuntimeRunState{}, errors.New("the Kubernetes reader is not wired")
+		return config.OpenResult{}, lifecycle.RuntimeRunState{}, errors.New("the Kubernetes reader is not wired")
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      strings.TrimSpace(selection.Tenant),
 		Environment: strings.TrimSpace(selection.Environment),
 	})
 	if err != nil {
-		return config.OpenResult{}, eruncommon.RuntimeRunState{}, err
+		return config.OpenResult{}, lifecycle.RuntimeRunState{}, err
 	}
 	state, err := a.deps.readRuntimeRunState(
 		core.Context{},
-		eruncommon.RuntimeScaleTargetForResult(result),
+		lifecycle.RuntimeScaleTargetForResult(result),
 	)
 	return result, state, err
 }
@@ -211,7 +212,7 @@ func (a *App) LoadRuntimeRunState(selection uiSelection) (uiRuntimeRunState, err
 	state.DesiredReplicas = read.DesiredReplicas
 	state.ReadyReplicas = read.ReadyReplicas
 	state.Stopped = read.Stopped()
-	state.RemainingComponents = eruncommon.StopRemainingComponents(resolved)
+	state.RemainingComponents = lifecycle.StopRemainingComponents(resolved)
 	return state, nil
 }
 
@@ -230,5 +231,5 @@ func (a *App) runtimeStopRemainingComponents(selection uiSelection) []string {
 	if err != nil {
 		return nil
 	}
-	return eruncommon.StopRemainingComponents(result)
+	return lifecycle.StopRemainingComponents(result)
 }

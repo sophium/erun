@@ -10,6 +10,10 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/expose"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/mergequeue"
+	"github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/spf13/cobra"
@@ -281,7 +285,7 @@ func runExecPushCommand(ctx core.Context, findProjectRoot common.ProjectFinderFu
 	// that already has. A dry run traces the check it would make without
 	// making it, the same way the push itself is traced.
 	if ctx.DryRun {
-		common.WarnPushedBranchWithoutReview(ctx, store, cloudDeps, common.PushedBranchReviewNoticeParams{
+		review.WarnPushedBranchWithoutReview(ctx, store, cloudDeps, review.PushedBranchReviewNoticeParams{
 			ProjectRoot: projectRoot,
 			Branch:      result.Branch,
 			Remote:      result.Remote,
@@ -289,7 +293,7 @@ func runExecPushCommand(ctx core.Context, findProjectRoot common.ProjectFinderFu
 		return nil
 	}
 	ctx.Info(fmt.Sprintf("Pushed %s to %s (%s).", result.Branch, result.Remote, result.Commit))
-	common.WarnPushedBranchWithoutReview(ctx, store, cloudDeps, common.PushedBranchReviewNoticeParams{
+	review.WarnPushedBranchWithoutReview(ctx, store, cloudDeps, review.PushedBranchReviewNoticeParams{
 		ProjectRoot: projectRoot,
 		Branch:      result.Branch,
 		Remote:      result.Remote,
@@ -332,10 +336,10 @@ func runExecMergeCommand(ctx core.Context, findProjectRoot common.ProjectFinderF
 	if err != nil {
 		return err
 	}
-	result, err := common.MergeWorkingTreeBranch(ctx, projectRoot, common.MergeWorkingTreeBranchParams{
+	result, err := mergequeue.MergeWorkingTreeBranch(ctx, projectRoot, mergequeue.MergeWorkingTreeBranchParams{
 		TargetBranch: targetBranch,
 		Remote:       remote,
-	}, common.MergeWorkingTreeBranchDependencies{})
+	}, mergequeue.MergeWorkingTreeBranchDependencies{})
 	if err != nil {
 		return err
 	}
@@ -430,12 +434,12 @@ func runExecGateMergeCommand(ctx core.Context, findProjectRoot common.ProjectFin
 	if err != nil {
 		return err
 	}
-	result, err := common.GateMergeWorkingTree(ctx, projectRoot, common.GateMergeWorkingTreeParams{
+	result, err := mergequeue.GateMergeWorkingTree(ctx, projectRoot, mergequeue.GateMergeWorkingTreeParams{
 		Sources:      sources,
 		TargetBranch: targetBranch,
 		Remote:       remote,
 		UnderLeaseID: underLease,
-	}, common.GateMergeWorkingTreeDependencies{})
+	}, mergequeue.GateMergeWorkingTreeDependencies{})
 	if err != nil {
 		return err
 	}
@@ -447,7 +451,7 @@ func runExecGateMergeCommand(ctx core.Context, findProjectRoot common.ProjectFin
 
 // readGateMergeSources reads one NUL-separated commit message per source
 // branch from stdin, in the same order as the --source flags.
-func readGateMergeSources(ctx core.Context, sourceBranches []string) ([]common.GateMergeSource, error) {
+func readGateMergeSources(ctx core.Context, sourceBranches []string) ([]mergequeue.GateMergeSource, error) {
 	stdin, err := io.ReadAll(ctx.Stdin)
 	if err != nil {
 		return nil, fmt.Errorf("read commit message(s) from stdin: %w", err)
@@ -456,9 +460,9 @@ func readGateMergeSources(ctx core.Context, sourceBranches []string) ([]common.G
 	if len(messages) != len(sourceBranches) {
 		return nil, fmt.Errorf("expected %d NUL-separated commit message(s) on stdin (one per --source), got %d", len(sourceBranches), len(messages))
 	}
-	sources := make([]common.GateMergeSource, len(sourceBranches))
+	sources := make([]mergequeue.GateMergeSource, len(sourceBranches))
 	for i, branch := range sourceBranches {
-		sources[i] = common.GateMergeSource{Branch: branch, Message: messages[i]}
+		sources[i] = mergequeue.GateMergeSource{Branch: branch, Message: messages[i]}
 	}
 	return sources, nil
 }
@@ -477,7 +481,7 @@ func gateMergeCarriedTrailerSummary(trailers []string) string {
 // reportGateMergeResult prints each landed and skipped source, then refuses
 // if the batch landed nothing at all — there is nothing to build against an
 // unchanged target.
-func reportGateMergeResult(ctx core.Context, result common.GateMergeWorkingTreeResult) error {
+func reportGateMergeResult(ctx core.Context, result mergequeue.GateMergeWorkingTreeResult) error {
 	for _, landed := range result.Landed {
 		ctx.Info(fmt.Sprintf("Squash-merged %s/%s onto %s (%s), carrying %s.",
 			result.Remote, landed.SourceBranch, result.TargetBranch, landed.Commit,
@@ -534,14 +538,14 @@ func newExecReportCommitStatusCmd() *cobra.Command {
 }
 
 func runExecReportCommitStatusCommand(ctx core.Context, commit, state, statusCtx, description, targetURL, remoteURL string) error {
-	result, err := common.ReportCommitStatus(ctx, common.ReportCommitStatusParams{
+	result, err := review.ReportCommitStatus(ctx, review.ReportCommitStatusParams{
 		RemoteURL:   remoteURL,
 		Commit:      commit,
-		State:       common.ReportCommitStatusState(state),
+		State:       review.ReportCommitStatusState(state),
 		Context:     statusCtx,
 		Description: description,
 		TargetURL:   targetURL,
-	}, common.ReportCommitStatusDependencies{})
+	}, review.ReportCommitStatusDependencies{})
 	if err != nil {
 		return err
 	}
@@ -589,13 +593,13 @@ func newExecClosePRCmd() *cobra.Command {
 }
 
 func runExecClosePRCommand(ctx core.Context, branch, target, remoteURL, gatedCommit, landingCommit string) error {
-	result, err := common.ClosePullRequest(ctx, common.ClosePullRequestParams{
+	result, err := review.ClosePullRequest(ctx, review.ClosePullRequestParams{
 		RemoteURL:     remoteURL,
 		Branch:        branch,
 		TargetBranch:  target,
 		GatedCommit:   gatedCommit,
 		LandingCommit: landingCommit,
-	}, common.ClosePullRequestDependencies{})
+	}, review.ClosePullRequestDependencies{})
 	if err != nil {
 		return err
 	}
@@ -640,7 +644,7 @@ func newExecReconcileBypassCmd(store config.CloudReadStore, deps cloud.CloudDepe
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runExecReconcileBypassCommand(commandContext(cmd), store, alias, common.ReconcileBypassParams{
+			return runExecReconcileBypassCommand(commandContext(cmd), store, alias, review.ReconcileBypassParams{
 				RemoteURL:      remoteURL,
 				RulesetID:      rulesetID,
 				TargetBranch:   targetBranch,
@@ -665,7 +669,7 @@ func newExecReconcileBypassCmd(store config.CloudReadStore, deps cloud.CloudDepe
 // identity can already push, and writes the payload each stage and the
 // rollback apply — it never changes repository settings itself.
 func newExecPlanRulesetBypassCmd() *cobra.Command {
-	var params common.PlanRulesetBypassParams
+	var params review.PlanRulesetBypassParams
 	cmd := &cobra.Command{
 		Use:   "plan-ruleset-bypass",
 		Short: "Plan narrowing a ruleset's bypass grant to one non-human queue identity",
@@ -701,8 +705,8 @@ func newExecPlanRulesetBypassCmd() *cobra.Command {
 	return cmd
 }
 
-func runExecPlanRulesetBypassCommand(ctx core.Context, params common.PlanRulesetBypassParams) error {
-	result, err := common.PlanRulesetBypass(ctx, params, common.PlanRulesetBypassDependencies{})
+func runExecPlanRulesetBypassCommand(ctx core.Context, params review.PlanRulesetBypassParams) error {
+	result, err := review.PlanRulesetBypass(ctx, params, review.PlanRulesetBypassDependencies{})
 	if err != nil {
 		return err
 	}
@@ -722,7 +726,7 @@ func runExecPlanRulesetBypassCommand(ctx core.Context, params common.PlanRuleset
 // operator runs: apply, verify, and — if any of it goes wrong — revert. A plan
 // that named the edit without naming its verification and its way back would
 // be exactly the dead end this command exists to avoid.
-func writeRulesetBypassPlan(ctx core.Context, result common.PlanRulesetBypassResult) error {
+func writeRulesetBypassPlan(ctx core.Context, result review.PlanRulesetBypassResult) error {
 	out := new(strings.Builder)
 	fmt.Fprintf(out, "Ruleset %d (%q) on %s/%s\n", result.RulesetID, result.RulesetName, result.Owner, result.Repo)
 	fmt.Fprintf(out, "  bypass actors today (%d):\n", len(result.CurrentBypassActors))
@@ -802,7 +806,7 @@ func newExecRouteCheckCmd(store config.CloudReadStore, deps cloud.CloudDependenc
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runExecRouteCheckCommand(commandContext(cmd), store, alias, common.RouteCheckParams{
+			return runExecRouteCheckCommand(commandContext(cmd), store, alias, expose.RouteCheckParams{
 				RoutesDir: routesDir,
 			}, deps)
 		},
@@ -814,8 +818,8 @@ func newExecRouteCheckCmd(store config.CloudReadStore, deps cloud.CloudDependenc
 	return cmd
 }
 
-func runExecRouteCheckCommand(ctx core.Context, store config.CloudReadStore, alias string, params common.RouteCheckParams, deps cloud.CloudDependencies) error {
-	result, err := common.RunRouteCheck(ctx, store, alias, params, deps)
+func runExecRouteCheckCommand(ctx core.Context, store config.CloudReadStore, alias string, params expose.RouteCheckParams, deps cloud.CloudDependencies) error {
+	result, err := expose.RunRouteCheck(ctx, store, alias, params, deps)
 	if err != nil {
 		return err
 	}
@@ -837,7 +841,7 @@ func runExecRouteCheckCommand(ctx core.Context, store config.CloudReadStore, ali
 // writeRouteCheckReport prints one line per missing route -- the loud
 // failure this command exists to surface -- and a summary line always, so a
 // clean run is visibly clean rather than silent.
-func writeRouteCheckReport(ctx core.Context, result common.RouteCheckResult) error {
+func writeRouteCheckReport(ctx core.Context, result expose.RouteCheckResult) error {
 	if !result.PlaneReachable {
 		_, err := fmt.Fprintf(ctx.Stdout, "%s did not answer the sanity probe (%s); no routes were checked.\n",
 			result.APIURL, result.UnreachableReason)
@@ -862,7 +866,7 @@ func writeRouteCheckReport(ctx core.Context, result common.RouteCheckResult) err
 // complete) a non-zero exit, after the full report has already printed --
 // the same "print everything, then fail loudly" shape reconcileBypassExitError
 // uses.
-func routeCheckExitError(result common.RouteCheckResult) error {
+func routeCheckExitError(result expose.RouteCheckResult) error {
 	if !result.PlaneReachable {
 		return fmt.Errorf("route-check: %s did not answer the sanity probe (%s); refusing to report on an unreachable plane",
 			result.APIURL, result.UnreachableReason)
@@ -880,8 +884,8 @@ func routeCheckExitError(result common.RouteCheckResult) error {
 	return fmt.Errorf("of %d route(s) checked on %s: %s", result.RoutesChecked, result.APIURL, strings.Join(problems, "; "))
 }
 
-func runExecReconcileBypassCommand(ctx core.Context, store config.CloudReadStore, alias string, params common.ReconcileBypassParams, deps cloud.CloudDependencies) error {
-	result, err := common.ReconcileBypass(ctx, store, alias, params, deps, common.ReconcileBypassDependencies{})
+func runExecReconcileBypassCommand(ctx core.Context, store config.CloudReadStore, alias string, params review.ReconcileBypassParams, deps cloud.CloudDependencies) error {
+	result, err := review.ReconcileBypass(ctx, store, alias, params, deps, review.ReconcileBypassDependencies{})
 	if err != nil {
 		return err
 	}
@@ -904,7 +908,7 @@ func runExecReconcileBypassCommand(ctx core.Context, store config.CloudReadStore
 // non-zero exit, naming both rather than collapsing them: content nobody
 // built and an identity nobody expected are different problems with different
 // remedies.
-func reconcileBypassExitError(result common.ReconcileBypassResult) error {
+func reconcileBypassExitError(result review.ReconcileBypassResult) error {
 	var problems []string
 	if result.Unreconciled > 0 {
 		problems = append(problems, fmt.Sprintf("%d have no successful build and no release tag accounting for them",
@@ -920,7 +924,7 @@ func reconcileBypassExitError(result common.ReconcileBypassResult) error {
 		len(result.Pushes), result.TargetBranch, strings.Join(problems, "; "))
 }
 
-func writeReconcileBypassReport(ctx core.Context, result common.ReconcileBypassResult) error {
+func writeReconcileBypassReport(ctx core.Context, result review.ReconcileBypassResult) error {
 	if len(result.Pushes) == 0 {
 		_, err := fmt.Fprintf(ctx.Stdout, "No bypassed pushes found for %s/%s ruleset %d on %s.\n",
 			result.Owner, result.Repo, result.RulesetID, result.TargetBranch)
@@ -968,17 +972,17 @@ func runExecDiffCommand(ctx core.Context, findProjectRoot common.ProjectFinderFu
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(result)
 	}
-	return common.WriteRawDiff(ctx.Stdout, result)
+	return lifecycle.WriteRawDiff(ctx.Stdout, result)
 }
 
-func resolveExecDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc, opts execDiffOptions) (common.DiffResult, error) {
+func resolveExecDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc, opts execDiffOptions) (lifecycle.DiffResult, error) {
 	if opts.Scope == "" && opts.SelectedCommit == "" {
-		return common.ResolveGitDiff(projectRoot, runGit)
+		return lifecycle.ResolveGitDiff(projectRoot, runGit)
 	}
 	if opts.SelectedCommit != "" && opts.Scope != "commit" {
-		return common.DiffResult{}, fmt.Errorf("--selected-commit requires --scope=commit")
+		return lifecycle.DiffResult{}, fmt.Errorf("--selected-commit requires --scope=commit")
 	}
-	return common.ResolveGitDiffWithOptions(projectRoot, common.DiffOptions{
+	return lifecycle.ResolveGitDiffWithOptions(projectRoot, lifecycle.DiffOptions{
 		Scope:          opts.Scope,
 		SelectedCommit: opts.SelectedCommit,
 	}, runGit)

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // erun#1699: an orchestrator that dispatched work to a linked environment and
@@ -119,7 +119,7 @@ const orchestratorPacingReasonEnvBusy orchestratorPacingReason = "env-busy"
 // same "about an hour" already named in the cap notice) rather than a new
 // knob: a busy lane cannot buy more patience than the ordinary cap already
 // grants an orchestrator with no linked work at all.
-func orchestratorPacingEnvBusyBound(cfg eruncommon.WhipConfig) time.Duration {
+func orchestratorPacingEnvBusyBound(cfg orchestrator.WhipConfig) time.Duration {
 	return cfg.StaleAfter * time.Duration(cfg.MaxNudges)
 }
 
