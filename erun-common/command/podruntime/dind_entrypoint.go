@@ -9,7 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	mtupkg "github.com/sophium/erun/erun-common/primitive/build/mtu"
 )
 
 // dindDockerdEntrypoint prepends dockerd when its first argument starts with '-'.
@@ -44,7 +44,7 @@ func dindEntrypointUnsupportedError(goos string) error {
 func runDindEntrypoint(ctx core.Context, params model.DindEntrypointParams, host dindEntrypointHost) error {
 	args := params.DockerdArgs
 	// The dind image has no iproute2, so read procfs/sysfs.
-	if mtu, _, ok := build.EgressMTUUnder(host.procRoot, host.sysRoot); ok {
+	if mtu, _, ok := mtupkg.EgressMTUUnder(host.procRoot, host.sysRoot); ok {
 		ctx.Info(fmt.Sprintf("erun-dind: bridging containers at the pod network's MTU %d", mtu))
 		args = append([]string{"--mtu=" + strconv.Itoa(mtu)}, args...)
 	} else {

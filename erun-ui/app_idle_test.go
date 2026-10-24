@@ -9,7 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	openpkg "github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 func TestMergeNewerActivityMarkersPrefersLocalTerminalActivity(t *testing.T) {
@@ -404,7 +404,7 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
 
-	result, err := openpkg.ResolveOpen(store, model.OpenParams{Tenant: "erun", Environment: "remote"})
+	result, err := resolve.ResolveOpen(store, model.OpenParams{Tenant: "erun", Environment: "remote"})
 	if err != nil {
 		t.Fatalf("ResolveOpen failed: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusStopped)
 
-	result, err := openpkg.ResolveOpen(store, model.OpenParams{Tenant: "erun", Environment: "remote"})
+	result, err := resolve.ResolveOpen(store, model.OpenParams{Tenant: "erun", Environment: "remote"})
 	if err != nil {
 		t.Fatalf("ResolveOpen failed: %v", err)
 	}

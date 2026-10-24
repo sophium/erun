@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcp"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 // uiExecCommitInput.Branch is verified server-side and refused on mismatch.
@@ -57,7 +57,7 @@ func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (model.
 	if err != nil {
 		return model.CommitWorkingTreeResult{}, err
 	}
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -94,7 +94,7 @@ func (a *App) ExecPush(selection uiSelection, input uiExecPushInput) (model.Push
 	if branch == "" {
 		return model.PushWorkingTreeBranchResult{}, fmt.Errorf("branch is required")
 	}
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

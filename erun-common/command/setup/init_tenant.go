@@ -9,7 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
 )
 
 func (s *bootstrapRunState) loadTenants() ([]model.TenantConfig, error) {
@@ -84,7 +84,7 @@ func (s *bootstrapRunState) defaultTenantCandidate() (string, string, error) {
 	tenant := s.params.Tenant
 	projectRoot := s.params.ProjectRoot
 	if s.params.RemoteWorktree() {
-		return tenant, open.RemoteWorktreePathForRepoName(tenant), nil
+		return tenant, runtimeref.RemoteWorktreePathForRepoName(tenant), nil
 	}
 	if tenant != "" && projectRoot != "" {
 		return tenant, projectRoot, nil
@@ -124,7 +124,7 @@ func (s *bootstrapRunState) resolveTenant() error {
 		s.tenant = project.tenant
 	}
 	if s.params.RemoteWorktree() {
-		s.params.ProjectRoot = open.RemoteWorktreePathForRepoName(s.tenant)
+		s.params.ProjectRoot = runtimeref.RemoteWorktreePathForRepoName(s.tenant)
 	}
 	return nil
 }

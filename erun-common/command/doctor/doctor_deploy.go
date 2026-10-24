@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	recoverypkg "github.com/sophium/erun/erun-common/primitive/deploy/recovery"
 )
 
 // DeployRecoveryActionPromptLabel is the confirm prompt shown before the action runs.
@@ -73,14 +73,14 @@ func RunDeployRecovery(ctx core.Context, req config.ShellLaunchParams, action mo
 			KubernetesContext: strings.TrimSpace(req.KubernetesContext),
 			Verbosity:         ctx.Verbosity,
 		}
-		ctx.TraceCommand("", deploy.HelmReleaseRecoveryCommand(recovery).Name, deploy.HelmReleaseRecoveryCommand(recovery).Args...)
+		ctx.TraceCommand("", recoverypkg.HelmReleaseRecoveryCommand(recovery).Name, recoverypkg.HelmReleaseRecoveryCommand(recovery).Args...)
 		if ctx.DryRun {
 			return "", nil
 		}
 		var out bytes.Buffer
 		recovery.Stdout = &out
 		recovery.Stderr = &out
-		err := deploy.ClearHelmReleasePendingOperation(recovery)
+		err := recoverypkg.ClearHelmReleasePendingOperation(recovery)
 		return strings.TrimSpace(out.String()), err
 	case model.DeployRecoveryRollback:
 		args := helmRollbackArgs(req)

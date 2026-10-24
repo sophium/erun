@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
 )
 
 // Usage is read from the runtime container's cgroup v2 files over `kubectl exec`, since
@@ -78,7 +78,7 @@ func RunRuntimeUsage(ctx core.Context, runner seam.RuntimeContainerCommandRunner
 // restart-reset cgroup counters cannot. Retained figures are scored against the current
 // limit, so raising runtimepod clears the peak warning.
 func applyRetainedUsageWarnings(usage model.RuntimeUsage) model.RuntimeUsage {
-	history, err := deploy.LoadRuntimeUsageHistory(usage.Tenant, usage.Environment)
+	history, err := runtimeusage.LoadRuntimeUsageHistory(usage.Tenant, usage.Environment)
 	if err != nil {
 		// No readable history means nothing observed yet, not a warning.
 		return usage
@@ -91,7 +91,7 @@ func applyRetainedUsageWarnings(usage model.RuntimeUsage) model.RuntimeUsage {
 	return usage
 }
 
-func retainedMemoryUsageWarnings(memory model.RuntimeMemoryUsage, history deploy.RuntimeUsageHistory) []string {
+func retainedMemoryUsageWarnings(memory model.RuntimeMemoryUsage, history runtimeusage.RuntimeUsageHistory) []string {
 	if memory.Unavailable != "" || memory.Unlimited || memory.LimitBytes <= 0 {
 		return nil
 	}
@@ -308,17 +308,17 @@ func runtimeBuildThrottleWarnings(dind *model.RuntimeDindUsage) []string {
 
 // runtimeBuildThrottleIsStarvation shares sizing's ratio but not its period floor.
 func runtimeBuildThrottleIsStarvation(throttled, periods int64) bool {
-	return periods >= runtimeBuildThrottleMinPeriods && float64(throttled) >= float64(periods)*deploy.RuntimeSizingThrottleRatio
+	return periods >= runtimeBuildThrottleMinPeriods && float64(throttled) >= float64(periods)*runtimeusage.RuntimeSizingThrottleRatio
 }
 
 // scope prefixes warnings so runtime and erun-dind crossings are distinguishable.
 func runtimeMemoryUsageWarnings(scope string, memory model.RuntimeMemoryUsage) []string {
 	var warnings []string
 	if memory.Unavailable == "" && !memory.Unlimited && memory.LimitBytes > 0 {
-		if memory.PercentOfLimit >= deploy.RuntimeUsageMemoryWarnPercent {
+		if memory.PercentOfLimit >= runtimeusage.RuntimeUsageMemoryWarnPercent {
 			warnings = append(warnings, fmt.Sprintf(
 				"%smemory is at %.0f%% of its %s limit (warns at %.0f%%)",
-				scope, memory.PercentOfLimit, core.FormatMebibytes(memory.LimitBytes), deploy.RuntimeUsageMemoryWarnPercent))
+				scope, memory.PercentOfLimit, core.FormatMebibytes(memory.LimitBytes), runtimeusage.RuntimeUsageMemoryWarnPercent))
 		}
 		if memory.PeakObserved {
 			peakPercent := 100 * float64(memory.PeakBytes) / float64(memory.LimitBytes)

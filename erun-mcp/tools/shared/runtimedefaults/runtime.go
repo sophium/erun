@@ -4,9 +4,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/build/dockerimage"
+	"github.com/sophium/erun/erun-common/primitive/build/script"
+	"github.com/sophium/erun/erun-common/primitive/deploy/helmrun"
+	"github.com/sophium/erun/erun-common/primitive/open/podwait"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
@@ -21,16 +22,16 @@ func normalizeRuntimeConfigBuildDefaults(cfg runtimecfg.RuntimeConfig) runtimecf
 		cfg.Store = config.ConfigStore{}
 	}
 	if cfg.BuildScriptRunner == nil {
-		cfg.BuildScriptRunner = build.BuildScriptRunner
+		cfg.BuildScriptRunner = script.BuildScriptRunner
 	}
 	if cfg.BuildDockerImage == nil {
-		cfg.BuildDockerImage = build.DockerImageBuilder
+		cfg.BuildDockerImage = dockerimage.DockerImageBuilder
 	}
 	if cfg.PushDockerImage == nil {
 		cfg.PushDockerImage = dockerregistry.DockerImagePusher
 	}
 	if cfg.DeployHelmChart == nil {
-		cfg.DeployHelmChart = deploy.DeployHelmChart
+		cfg.DeployHelmChart = helmrun.DeployHelmChart
 	}
 	return cfg
 }
@@ -40,9 +41,9 @@ func normalizeRuntimeConfigRemoteDefaults(cfg runtimecfg.RuntimeConfig) runtimec
 	if namespaceEnsurer == nil {
 		namespaceEnsurer = kube.EnsureKubernetesNamespace
 	}
-	cfg.DeployHelmChart = deploy.WrapHelmChartDeployerWithNamespaceEnsure(namespaceEnsurer, cfg.DeployHelmChart)
+	cfg.DeployHelmChart = helmrun.WrapHelmChartDeployerWithNamespaceEnsure(namespaceEnsurer, cfg.DeployHelmChart)
 	if cfg.WaitForRemoteRuntime == nil {
-		cfg.WaitForRemoteRuntime = open.WaitForShellDeployment
+		cfg.WaitForRemoteRuntime = podwait.WaitForShellDeployment
 	}
 	if cfg.RunRemoteCommand == nil {
 		cfg.RunRemoteCommand = kube.RunRemoteCommand

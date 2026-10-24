@@ -5,7 +5,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
 )
 
 const (
@@ -42,11 +42,11 @@ func memoryVerdict(t *testing.T, recommendation model.RuntimeSizingRecommendatio
 
 func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
 	limit := 6 * testGiB
-	history := deploy.RuntimeUsageHistory{
+	history := runtimeusage.RuntimeUsageHistory{
 		Samples:                 []model.RuntimeUsage{saturatingReading(1024*1024*1024, limit)},
 		ObservedPeakMemoryBytes: 1024 * 1024 * 1024,
 	}
-	fromHistory, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history})
+	fromHistory, ok := runtimeusage.RecommendRuntimeSizing(runtimeusage.RuntimeSizingParams{History: history})
 	if !ok {
 		t.Fatal("a retained sample produced no recommendation")
 	}
@@ -55,7 +55,7 @@ func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
 	}
 
 	live := saturatingReading(limit*99/100, limit)
-	fromBoth, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history, Live: &live})
+	fromBoth, ok := runtimeusage.RecommendRuntimeSizing(runtimeusage.RuntimeSizingParams{History: history, Live: &live})
 	if !ok {
 		t.Fatal("the live reading produced no recommendation")
 	}
@@ -64,7 +64,7 @@ func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
 		t.Fatalf("a reading at 99%% of the limit was scored as %q (%s)", verdict.Action, verdict.Reason)
 	}
 
-	raise, ok := deploy.RuntimeMemoryRaiseVerdict(limit, live.Memory.PeakBytes, 0, model.NamespaceResourceQuota{})
+	raise, ok := runtimeusage.RuntimeMemoryRaiseVerdict(limit, live.Memory.PeakBytes, 0, model.NamespaceResourceQuota{})
 	if !ok {
 		t.Fatal("the raise helper disagrees with the recommendation it is the only source of")
 	}
@@ -76,13 +76,13 @@ func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
 
 func TestLiveReadingIsTheSizeScoredAgainst(t *testing.T) {
 	oldLimit := 3 * testGiB
-	history := deploy.RuntimeUsageHistory{
+	history := runtimeusage.RuntimeUsageHistory{
 		Samples:                 []model.RuntimeUsage{saturatingReading(1024*1024*1024, oldLimit)},
 		ObservedPeakMemoryBytes: 1024 * 1024 * 1024,
 	}
 	live := saturatingReading(1024*1024*1024, testMemoryWarn)
 
-	recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history, Live: &live})
+	recommendation, ok := runtimeusage.RecommendRuntimeSizing(runtimeusage.RuntimeSizingParams{History: history, Live: &live})
 	if !ok {
 		t.Fatal("no recommendation")
 	}

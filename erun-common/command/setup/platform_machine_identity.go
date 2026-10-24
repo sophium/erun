@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/platformalias"
 )
 
 // A machine identity uses the same Secret, keys and mount as the delegated alias
@@ -38,16 +38,16 @@ func provisionMachineIdentitySecret(ctx core.Context, store config.CloudReadStor
 	if err != nil || !ok {
 		return "", false, err
 	}
-	entry, err := deploy.RenderPlatformAliasEntry(provisioned.provider)
+	entry, err := platformalias.RenderPlatformAliasEntry(provisioned.provider)
 	if err != nil {
 		return "", false, err
 	}
 	ref := machineIdentityClientSecretRef(provisioned.provider.Alias)
-	name := deploy.PlatformAliasSecretName(tenant)
+	name := platformalias.PlatformAliasSecretName(tenant)
 	args := kube.KubectlApplyStdinArgs(namespace, kubernetesContext)
 	ctx.Trace("apply machine identity secret " + name + " (identity " + provisioned.subject + ", client secret redacted)")
 	ctx.TraceCommand("", "kubectl", args...)
-	manifest := deploy.RenderPlatformAliasSecret(name, namespace, entry, cloud.CloudSecretFileName(ref), provisioned.clientSecret)
+	manifest := platformalias.RenderPlatformAliasSecret(name, namespace, entry, cloud.CloudSecretFileName(ref), provisioned.clientSecret)
 	if err := kube.ApplySecretManifest(kubernetesContext, namespace, "machine identity secret", manifest, args); err != nil {
 		return "", false, err
 	}
@@ -85,8 +85,8 @@ func resolveMachineIdentity(ctx core.Context, store config.CloudReadStore, envir
 // machineIdentityPlatformClient authenticates as this host's alias; nothing
 // about it reaches the environment.
 func machineIdentityPlatformClient(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies) (*platformclient.PlatformClient, model.CloudProviderConfig, bool, error) {
-	provider, _, ok, err := deploy.ResolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
-	if err != nil && !deploy.HostAliasSelected(ctx.PlatformAlias) && deploy.IsPlatformAliasAmbiguity(err) {
+	provider, _, ok, err := platformalias.ResolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
+	if err != nil && !platformalias.HostAliasSelected(ctx.PlatformAlias) && platformalias.IsPlatformAliasAmbiguity(err) {
 		// Ambiguous aliases: fall back; the delegated path reports the ambiguity.
 		return nil, model.CloudProviderConfig{}, false, nil
 	}

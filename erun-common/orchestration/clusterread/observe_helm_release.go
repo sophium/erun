@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/observe"
 )
 
 // ObserveHelmStatusArgs builds `helm status <release> -o json`.
@@ -68,10 +68,10 @@ func splitHelmChartNameVersion(chart string) (name, version string, ok bool) {
 func FetchObservedHelmRelease(args, listArgs []string, releaseName, namespace string) *model.ObservedHelmRelease {
 	raw, stderr, err := runObserveHelm(args)
 	if err != nil {
-		if deploy.IsHelmReleaseNotFound(stderr) {
+		if observe.IsHelmReleaseNotFound(stderr) {
 			return &model.ObservedHelmRelease{Name: releaseName}
 		}
-		return &model.ObservedHelmRelease{Name: releaseName, Error: deploy.ObserveHelmReadErrorMessage(releaseName, namespace, stderr, err)}
+		return &model.ObservedHelmRelease{Name: releaseName, Error: observe.ObserveHelmReadErrorMessage(releaseName, namespace, stderr, err)}
 	}
 	var status helmStatusOutput
 	if jsonErr := json.Unmarshal(raw, &status); jsonErr != nil {
@@ -99,7 +99,7 @@ func FetchObservedHelmRelease(args, listArgs []string, releaseName, namespace st
 func populateObservedChartFields(release *model.ObservedHelmRelease, listArgs []string, releaseName, namespace string) {
 	raw, stderr, err := runObserveHelm(listArgs)
 	if err != nil {
-		release.Error = appendObserveHelmReleaseError(release.Error, "could not determine chart/appVersion: "+deploy.ObserveHelmReadErrorMessage(releaseName, namespace, stderr, err))
+		release.Error = appendObserveHelmReleaseError(release.Error, "could not determine chart/appVersion: "+observe.ObserveHelmReadErrorMessage(releaseName, namespace, stderr, err))
 		return
 	}
 	var entries []helmListEntry

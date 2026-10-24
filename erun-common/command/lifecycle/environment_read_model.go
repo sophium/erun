@@ -11,8 +11,8 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	diagnosispkg "github.com/sophium/erun/erun-common/orchestration/diagnosis"
-	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	deploydiagnosis "github.com/sophium/erun/erun-common/primitive/deploy/diagnosis"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 // EnvironmentLifecycleInputs carries an explicit observed bit per signal so a zero value is
@@ -73,7 +73,7 @@ func resolveWorkloadLifecycleState(in EnvironmentLifecycleInputs) model.Environm
 
 // ResolveEnvironmentHealth runs no commands; the caller supplies a real diagnosis.
 func ResolveEnvironmentHealth(rootConfig model.RootConfigInspection, deploy model.DeployDiagnosisResult) model.EnvironmentHealth {
-	recovery, _ := deploypkg.RecommendedDeployRecovery(deploy)
+	recovery, _ := deploydiagnosis.RecommendedDeployRecovery(deploy)
 	return model.EnvironmentHealth{RootConfig: rootConfig, Deploy: deploy, RecommendedRecovery: recovery}
 }
 
@@ -103,7 +103,7 @@ func AssembleEnvironmentReadModel(tenant string, environment ListEnvironmentResu
 	}
 	if health != nil {
 		inputs.DeployHealthObserved = true
-		_, needsRecovery := deploypkg.RecommendedDeployRecovery(health.Deploy)
+		_, needsRecovery := deploydiagnosis.RecommendedDeployRecovery(health.Deploy)
 		inputs.DeployHealthy = !needsRecovery
 	}
 	return EnvironmentReadModel{
@@ -131,7 +131,7 @@ func ResolveEnvironmentDetail(store seam.ListStore, tenant, environment string) 
 	if err != nil {
 		return ListEnvironmentResult{}, err
 	}
-	effective, effectiveErr := open.ResolveOpen(store, model.OpenParams{Tenant: tenant, Environment: environment})
+	effective, effectiveErr := resolve.ResolveOpen(store, model.OpenParams{Tenant: tenant, Environment: environment})
 	portAllocations, err := config.ResolveAllEnvironmentLocalPorts(store)
 	if err != nil {
 		return ListEnvironmentResult{}, err
@@ -175,7 +175,7 @@ func ResolveEnvironmentReadModel(ctx core.Context, store seam.ListStore, tenant,
 			return EnvironmentReadModel{}, err
 		}
 		request := cloud.ShellLaunchParamsFromResult(openResult)
-		diagnosis := deploypkg.RunDeployDiagnosis(ctx, request)
+		diagnosis := deploydiagnosis.RunDeployDiagnosis(ctx, request)
 		resolved := ResolveEnvironmentHealth(rootConfig, diagnosis)
 		health = &resolved
 	}

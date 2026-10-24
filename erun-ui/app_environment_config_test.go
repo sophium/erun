@@ -9,7 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
+	componentspkg "github.com/sophium/erun/erun-common/primitive/deploy/components"
 )
 
 func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
@@ -176,7 +176,7 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 		},
 	})
 
-	names := func(components []deploypkg.DeployableComponent) []string {
+	names := func(components []componentspkg.DeployableComponent) []string {
 		out := make([]string, 0, len(components))
 		for _, component := range components {
 			out = append(out, component.Name)
@@ -240,7 +240,7 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 		},
 	})
 
-	names := func(components []deploypkg.DeployableComponent) []string {
+	names := func(components []componentspkg.DeployableComponent) []string {
 		out := make([]string, 0, len(components))
 		for _, component := range components {
 			out = append(out, component.Name)

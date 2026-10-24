@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/mcp"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
 
@@ -117,7 +117,7 @@ func (a *App) CancelEnvironmentJob(input uiCancelJobInput) (uiEnvironmentJob, er
 
 // jobsReachability picks the MCP edge, the local store, or an unreachable error.
 func (a *App) jobsReachability(tenant, environment string) (config.OpenResult, bool, error) {
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      tenant,
 		Environment: environment,
 	})

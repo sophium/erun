@@ -16,7 +16,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 	"github.com/sophium/erun/erun-mcp/tools/shared/activityrec"
 	"github.com/sophium/erun/erun-mcp/tools/shared/callerid"
 	"github.com/sophium/erun/erun-mcp/tools/shared/edgeauth"
@@ -111,7 +111,7 @@ func attachInitialSize(r *http.Request) (cols, rows int) {
 func runAttachSession(conn *websocket.Conn, runtime runtimecfg.RuntimeConfig, session string, cols, rows int) {
 	defer func() { _ = conn.Close() }()
 
-	socket := open.RemoteAppSessionSocketPath(runtime.Context.Tenant, runtime.Context.Environment, session)
+	socket := appsession.RemoteAppSessionSocketPath(runtime.Context.Tenant, runtime.Context.Environment, session)
 	// Nothing in the image creates the session directory, and this edge can be a
 	// fresh pod's first attach.
 	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
@@ -119,7 +119,7 @@ func runAttachSession(conn *websocket.Conn, runtime runtimecfg.RuntimeConfig, se
 		sendAttachOutcome(conn, model.AISessionAttachOutcomeUnknown)
 		return
 	}
-	script := strings.Join(open.RemoteAppSessionAttachLines(socket, attachRedraw, attachDefaultLaunchCommand), "\n")
+	script := strings.Join(appsession.RemoteAppSessionAttachLines(socket, attachRedraw, attachDefaultLaunchCommand), "\n")
 	cmd := exec.Command("sh", "-c", script)
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
@@ -155,7 +155,7 @@ func pumpPTYToWebSocket(conn *websocket.Conn, ptmx *os.File, cmd *exec.Cmd, done
 		}
 	}
 	exitCode, known := attachExitCode(cmd)
-	sendAttachOutcome(conn, open.ResolveAISessionAttachOutcome(exitCode, known))
+	sendAttachOutcome(conn, appsession.ResolveAISessionAttachOutcome(exitCode, known))
 	// The session ended on its own; unblock the WS->PTY pump.
 	_ = conn.Close()
 }

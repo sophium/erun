@@ -13,7 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 )
 
 // emcp runs inside the environment's pod, so pushing a nudge is a local dtach exec.
@@ -32,7 +32,7 @@ var whipNudgeSleep = time.Sleep
 
 // environmentWhipSessionAlive runs RemoteAppSessionHeartbeatScript's /proc scan locally.
 func environmentWhipSessionAlive(runner WhipCommandRunner, tenant, environment string) (bool, error) {
-	socket := open.RemoteAppSessionSocketPath(tenant, environment, WhipEnvironmentAgentSessionID)
+	socket := appsession.RemoteAppSessionSocketPath(tenant, environment, WhipEnvironmentAgentSessionID)
 	script := strings.Join(append(activitypkg.RemoteAppSessionMasterScanLines(socket), `printf '%s' "$master_pid"`), "\n")
 	out, err := runner("sh", "-c", script)
 	if err != nil {
@@ -45,7 +45,7 @@ func environmentWhipSessionAlive(runner WhipCommandRunner, tenant, environment s
 // them. dtach has no "send text" mode, so each write attaches with stdin and detaches on EOF;
 // `timeout` bounds an attach the far side never drains.
 func pushEnvironmentWhipNudge(runner WhipCommandRunner, tenant, environment, text string, settle time.Duration) error {
-	socket := shellSingleQuote(open.RemoteAppSessionSocketPath(tenant, environment, WhipEnvironmentAgentSessionID))
+	socket := shellSingleQuote(appsession.RemoteAppSessionSocketPath(tenant, environment, WhipEnvironmentAgentSessionID))
 
 	textScript := fmt.Sprintf("printf %%s %s | timeout 5 dtach -a %s -r none", shellSingleQuote(text), socket)
 	if _, err := runner("sh", "-c", textScript); err != nil {

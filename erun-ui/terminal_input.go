@@ -11,7 +11,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 func (a *App) SendSessionInput(sessionID int, data string) error {
@@ -84,7 +84,7 @@ func (a *App) SavePastedFile(sessionID int, payload pastedFilePayload) (pastedFi
 		return pastedFileResult{}, fmt.Errorf("no active terminal session")
 	}
 
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      managed.selection.Tenant,
 		Environment: managed.selection.Environment,
 	})

@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
@@ -78,5 +78,5 @@ func resolveUsageOpenResult(runtime runtimecfg.RuntimeConfig, input UsageInput) 
 	if err != nil {
 		return config.OpenResult{}, err
 	}
-	return open.ResolveOpen(runtime.Store, model.OpenParams{Tenant: tenant, Environment: environment})
+	return resolve.ResolveOpen(runtime.Store, model.OpenParams{Tenant: tenant, Environment: environment})
 }

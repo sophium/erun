@@ -6,7 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/spec"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 )
 
@@ -17,8 +17,8 @@ func resolveProjectDockerModuleDir(findProjectRoot seam.ProjectFinderFunc, targe
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return "", false, err
 	}
-	if dockerDir, ok, err := build.ResolveComponentAwareDockerDir(projectRoot, target.Component); err != nil || ok {
+	if dockerDir, ok, err := spec.ResolveComponentAwareDockerDir(projectRoot, target.Component); err != nil || ok {
 		return dockerDir, ok, err
 	}
-	return build.ResolveProjectRootDevopsDockerDir(findProjectRoot, filepath.Clean(projectRoot))
+	return spec.ResolveProjectRootDevopsDockerDir(findProjectRoot, filepath.Clean(projectRoot))
 }

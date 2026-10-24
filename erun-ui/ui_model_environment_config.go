@@ -2,7 +2,7 @@ package main
 
 import (
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/components"
 )
 
 type uiSSHDConfig struct {
@@ -53,8 +53,8 @@ type uiContainerRegistryCluster struct {
 
 // uiDeployComponents is what a deploy at a chosen version would roll out.
 type uiDeployComponents struct {
-	Components   []deploy.DeployableComponent `json:"components"`
-	RuntimeChart uiRuntimeChartPlan           `json:"runtimeChart"`
+	Components   []components.DeployableComponent `json:"components"`
+	RuntimeChart uiRuntimeChartPlan               `json:"runtimeChart"`
 }
 
 type uiEnvironmentConfig struct {

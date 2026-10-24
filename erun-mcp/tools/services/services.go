@@ -8,7 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
@@ -28,7 +28,7 @@ func ServicesTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.C
 		if err != nil {
 			return nil, model.EnvironmentServiceList{}, err
 		}
-		target, err := open.ResolveOpen(runtime.Store, model.OpenParams{Tenant: tenant, Environment: environment})
+		target, err := resolve.ResolveOpen(runtime.Store, model.OpenParams{Tenant: tenant, Environment: environment})
 		if err != nil {
 			return nil, model.EnvironmentServiceList{}, err
 		}

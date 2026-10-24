@@ -15,7 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 const runtimeUsageTimeout = 10 * time.Second
@@ -42,7 +42,7 @@ func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selec
 	if store == nil {
 		return uiRuntimeUsage{}, fmt.Errorf("configuration store is unavailable")
 	}
-	result, err := open.ResolveOpen(store, model.OpenParams{
+	result, err := resolve.ResolveOpen(store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

@@ -8,7 +8,8 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	componentspkg "github.com/sophium/erun/erun-common/primitive/deploy/components"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeimage"
 )
 
 func defaultBootstrapEnvironment(envName string) string {
@@ -87,7 +88,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		CloudProviderAlias: cloudProviderAlias,
 		ManagedCloud:       managedCloud,
 		RuntimeVersion:     s.params.ResolvedRuntimeVersion(),
-		RuntimeImage:       deploy.StripRuntimeImageTag(s.params.RuntimeImage),
+		RuntimeImage:       runtimeimage.StripRuntimeImageTag(s.params.RuntimeImage),
 		RuntimeRegistry:    strings.TrimSpace(s.params.RuntimeRegistry),
 		// Without it, a redeploy drops the MCP edge to unauthenticated.
 		MCPAuthPublicKeyPath: strings.TrimSpace(s.params.MCPAuthPublicKeyPath),
@@ -146,7 +147,7 @@ func initComponentsOverride(params seam.BootstrapInitParams) ([]string, bool) {
 	if params.Components == nil {
 		return nil, false
 	}
-	return deploy.NormalizeComponentNames(*params.Components), true
+	return componentspkg.NormalizeComponentNames(*params.Components), true
 }
 
 func describeComponentsSetting(components []string) string {

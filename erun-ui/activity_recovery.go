@@ -7,7 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/recovery"
 )
 
 // activityRecoveryResult's Output is shown verbatim, even on failure.
@@ -25,7 +25,7 @@ func (a *App) RecoverPendingHelmRelease(id string) activityRecoveryResult {
 		return *errResult
 	}
 	var stdout, stderr bytes.Buffer
-	err := deploy.ClearHelmReleasePendingOperation(seam.HelmReleaseRecoveryParams{
+	err := recovery.ClearHelmReleasePendingOperation(seam.HelmReleaseRecoveryParams{
 		ReleaseName:       strings.TrimSpace(entry.Release),
 		Namespace:         strings.TrimSpace(entry.Namespace),
 		KubernetesContext: strings.TrimSpace(entry.KubernetesContext),

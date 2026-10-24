@@ -12,7 +12,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/seam"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	executepkg "github.com/sophium/erun/erun-common/orchestration/execute"
-	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/fingerprint"
+	"github.com/sophium/erun/erun-common/primitive/build/releasespec"
+	"github.com/sophium/erun/erun-common/primitive/build/spec"
 	"github.com/sophium/erun/erun-common/primitive/push"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 	"github.com/sophium/erun/erun-mcp/tools/shared/clouddeps"
@@ -113,23 +115,23 @@ func resolveRuntimeBuildExecution(ctx core.Context, runtime runtimecfg.RuntimeCo
 	}
 
 	if component != "" {
-		target, releaseSpec, err := buildpkg.ResolveDockerBuildTarget(findProjectRoot, target)
+		target, releaseSpec, err := releasespec.ResolveDockerBuildTarget(findProjectRoot, target)
 		if err != nil {
 			return dockerspec.BuildExecutionSpec{}, err
 		}
 
-		build, err := buildpkg.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, environment, component, target.VersionOverride, target.Platforms)
+		build, err := spec.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, environment, component, target.VersionOverride, target.Platforms)
 		if err != nil {
 			return dockerspec.BuildExecutionSpec{}, err
 		}
 		if build == nil {
 			return dockerspec.BuildExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 		}
-		execution := buildpkg.BuildExecutionSpecFromDockerBuilds([]seam.DockerBuildSpec{*build})
+		execution := spec.BuildExecutionSpecFromDockerBuilds([]seam.DockerBuildSpec{*build})
 		if releaseSpec != nil {
 			execution = buildrun.BuildExecutionSpecWithRelease(execution, *releaseSpec)
 		}
-		return buildpkg.ApplyIncrementalToBuildExecution(ctx, execution, noIncremental)
+		return fingerprint.ApplyIncrementalToBuildExecution(ctx, execution, noIncremental)
 	}
 
 	return buildrun.ResolveBuildExecution(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
@@ -160,7 +162,7 @@ func resolveRuntimePushExecution(ctx core.Context, runtime runtimecfg.RuntimeCon
 		return buildrun.DockerPushExecutionSpecFromSpecs(builds, []model.DockerPushSpec{pushInput}), nil
 	}
 
-	build, err := buildpkg.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride), target.Platforms)
+	build, err := spec.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride), target.Platforms)
 	if err != nil {
 		return dockerspec.DockerPushExecutionSpec{}, err
 	}
@@ -170,6 +172,6 @@ func resolveRuntimePushExecution(ctx core.Context, runtime runtimecfg.RuntimeCon
 	build.Push = true
 
 	return buildrun.DockerPushExecutionSpecFromSpecs([]seam.DockerBuildSpec{*build}, []model.DockerPushSpec{
-		buildpkg.NewDockerPushSpec(projectRoot, build.Image),
+		spec.NewDockerPushSpec(projectRoot, build.Image),
 	}), nil
 }

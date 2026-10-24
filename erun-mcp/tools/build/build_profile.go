@@ -6,7 +6,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/profile"
 )
 
 type BuildProfileInput struct {
@@ -27,13 +27,13 @@ const buildProfileMCPCommandName = "build"
 func BuildProfileTool() func(context.Context, *mcp.CallToolRequest, BuildProfileInput) (*mcp.CallToolResult, BuildProfileResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input BuildProfileInput) (*mcp.CallToolResult, BuildProfileResult, error) {
 		if input.ID == "" {
-			records, err := build.ListTimingRecords(buildProfileMCPCommandName, input.Limit)
+			records, err := profile.ListTimingRecords(buildProfileMCPCommandName, input.Limit)
 			if err != nil {
 				return nil, BuildProfileResult{}, err
 			}
 			return nil, BuildProfileResult{Records: records}, nil
 		}
-		record, err := build.LoadTimingRecord(buildProfileMCPCommandName, input.ID)
+		record, err := profile.LoadTimingRecord(buildProfileMCPCommandName, input.ID)
 		if err != nil {
 			return nil, BuildProfileResult{}, err
 		}

@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/helmspec"
 	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 )
 
@@ -348,7 +348,7 @@ func exposePlatformConfigured(params ExposeServiceParams) bool {
 // ProjectHasExposablePlatform reports whether projectRoot declares enough of a
 // platform block for expose to resolve a hostname.
 func ProjectHasExposablePlatform(projectRoot string) bool {
-	platform := deploy.ResolveProjectPlatform(projectRoot)
+	platform := helmspec.ResolveProjectPlatform(projectRoot)
 	return !platform.IsZero() && strings.TrimSpace(platform.ServicesZone) != "" && strings.TrimSpace(platform.Env) != ""
 }
 
@@ -417,7 +417,7 @@ func resolveExposePlatformCoordinates(params ExposeServiceParams, store seam.Exp
 		return zone, config.NormalizeNamespaceName(namespace), opentarget.TenantResourcePrefix(platTenant) + "-powerdns", "", nil
 	}
 
-	platform := deploy.ResolveProjectPlatform(params.ProjectRoot)
+	platform := helmspec.ResolveProjectPlatform(params.ProjectRoot)
 	if platform.IsZero() || strings.TrimSpace(platform.ServicesZone) == "" {
 		return "", "", "", "", fmt.Errorf("a platform block with a base domain is required in .erun/config.yaml (the services zone tenant hostnames live under)")
 	}

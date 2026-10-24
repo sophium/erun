@@ -6,7 +6,7 @@ import (
 	"sort"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/observe"
 )
 
 type ServiceList struct {
@@ -29,9 +29,9 @@ type ServiceItem struct {
 
 // FetchObservedServices errors name the read, not "observe:": callers other than observe use it.
 func FetchObservedServices(args []string) ([]model.ObservedService, error) {
-	raw, stderr, err := deploy.RunObserveKubectl(args)
+	raw, stderr, err := observe.RunObserveKubectl(args)
 	if err != nil {
-		return nil, fmt.Errorf("get service: %w", deploy.KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("get service: %w", observe.KubectlErrorMessage(err, stderr))
 	}
 	var list ServiceList
 	if err := json.Unmarshal(raw, &list); err != nil {

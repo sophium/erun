@@ -10,8 +10,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/helm"
-	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/build/fingerprint"
+	specpkg "github.com/sophium/erun/erun-common/primitive/build/spec"
+	"github.com/sophium/erun/erun-common/primitive/deploy/chartfiles"
 	"github.com/sophium/erun/erun-common/primitive/push"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
@@ -29,7 +30,7 @@ func resolveComponentChartSpecs(builds []seam.DockerBuildSpec) ([]helm.HelmChart
 	if version == "" || registry == "" || projectRoot == "" {
 		return nil, nil
 	}
-	contexts, err := deploy.DiscoverComponentChartDirs(projectRoot)
+	contexts, err := chartfiles.DiscoverComponentChartDirs(projectRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +69,7 @@ func ResolveDockerPushExecution(ctx core.Context, store seam.DockerStore, findPr
 	store, findProjectRoot, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 	target = publishDockerTarget(target)
 
-	buildContexts, err := buildpkg.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, target)
+	buildContexts, err := specpkg.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, target)
 	if err != nil {
 		return dockerspec.DockerPushExecutionSpec{}, err
 	}
@@ -77,16 +78,16 @@ func ResolveDockerPushExecution(ctx core.Context, store seam.DockerStore, findPr
 	pushes := make([]model.DockerPushSpec, 0, len(buildContexts))
 	for _, buildContext := range buildContexts {
 		// A multi-arch image has no arch-less tag to `docker push`, so the build publishes it.
-		build, err := buildpkg.ResolveDockerBuildSpec(ctx, store, findProjectRoot, resolveBuildContext, now, buildContext, target)
+		build, err := specpkg.ResolveDockerBuildSpec(ctx, store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 		if err != nil {
 			return dockerspec.DockerPushExecutionSpec{}, err
 		}
 		build.Push = true
 		builds = append(builds, build)
-		pushes = append(pushes, buildpkg.NewDockerPushSpec(buildContext.Dir, build.Image))
+		pushes = append(pushes, specpkg.NewDockerPushSpec(buildContext.Dir, build.Image))
 	}
 
-	builds, err = buildpkg.ApplyIncrementalToDockerBuilds(ctx, builds, target.NoIncremental)
+	builds, err = fingerprint.ApplyIncrementalToDockerBuilds(ctx, builds, target.NoIncremental)
 	if err != nil {
 		return dockerspec.DockerPushExecutionSpec{}, err
 	}
@@ -111,16 +112,16 @@ func ResolveDockerPushSpec(ctx core.Context, store seam.DockerStore, findProject
 		return model.DockerPushSpec{}, nil, fmt.Errorf("dockerfile not found in current directory")
 	}
 
-	resolvedBuild, err := buildpkg.ResolveDockerBuildSpec(ctx, store, findProjectRoot, resolveBuildContext, now, buildContext, target)
+	resolvedBuild, err := specpkg.ResolveDockerBuildSpec(ctx, store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 	if err != nil {
 		return model.DockerPushSpec{}, nil, err
 	}
 	resolvedBuild.Push = true
-	incremental, err := buildpkg.ApplyIncrementalToDockerBuilds(ctx, []seam.DockerBuildSpec{resolvedBuild}, target.NoIncremental)
+	incremental, err := fingerprint.ApplyIncrementalToDockerBuilds(ctx, []seam.DockerBuildSpec{resolvedBuild}, target.NoIncremental)
 	if err != nil {
 		return model.DockerPushSpec{}, nil, err
 	}
 	resolvedBuild = incremental[0]
 
-	return buildpkg.NewDockerPushSpec(buildContext.Dir, resolvedBuild.Image), &resolvedBuild, nil
+	return specpkg.NewDockerPushSpec(buildContext.Dir, resolvedBuild.Image), &resolvedBuild, nil
 }

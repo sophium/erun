@@ -8,7 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -91,7 +91,7 @@ func (a *App) SetContributeMode(selection uiSelection, on bool) (uiContributeSta
 }
 
 func (a *App) runEnsureErunClone(selection uiSelection) error {
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -126,7 +126,7 @@ func (a *App) resolveContributeAppPort(selection uiSelection) (int, error) {
 	if !a.GetContributeMode(selection) {
 		return 0, fmt.Errorf("contribute mode is not enabled for %s/%s", selection.Tenant, selection.Environment)
 	}
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

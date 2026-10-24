@@ -15,7 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/spf13/cobra"
 )
 
@@ -67,7 +67,7 @@ func newCloudRefreshCmd(store cloudCommandStoreInterface, deps cloud.CloudDepend
 }
 
 func runCloudRefreshCommand(ctx core.Context, store cloudCommandStoreInterface, tenant, environment string, deps cloud.CloudDependencies) error {
-	result, err := open.ResolveOpen(store, model.OpenParams{Tenant: tenant, Environment: environment})
+	result, err := resolve.ResolveOpen(store, model.OpenParams{Tenant: tenant, Environment: environment})
 	if err != nil {
 		return err
 	}

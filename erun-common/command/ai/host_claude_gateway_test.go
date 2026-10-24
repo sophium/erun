@@ -5,14 +5,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/gateway"
 )
 
 // stubClaudeSettings isolates the settings read from the host machine.
 func stubClaudeSettings(t *testing.T, body string) {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv(deploy.ClaudeConfigDirEnv, dir)
+	t.Setenv(gateway.ClaudeConfigDirEnv, dir)
 	if body == "" {
 		return
 	}
@@ -121,14 +121,14 @@ func TestHostClaudeGatewayCredentialWithoutSettings(t *testing.T) {
 func TestHostClaudeSettingsEnvFindsTheCredentialInTheSameRead(t *testing.T) {
 	// Gateway and key must come from one read of the settings file.
 	stubClaudeSettings(t, `{"env":{"ANTHROPIC_BASE_URL":"https://openrouter.ai/api","ANTHROPIC_AUTH_TOKEN":"sk-or-v1-abc"}}`)
-	env, err := deploy.HostClaudeSettingsEnv()
+	env, err := gateway.HostClaudeSettingsEnv()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if env["ANTHROPIC_BASE_URL"] != "https://openrouter.ai/api" {
 		t.Fatalf("base URL = %q", env["ANTHROPIC_BASE_URL"])
 	}
-	if got, ok := deploy.GatewayCredentialFromEnv(env); !ok || got != "sk-or-v1-abc" {
+	if got, ok := gateway.GatewayCredentialFromEnv(env); !ok || got != "sk-or-v1-abc" {
 		t.Fatalf("credential = (%q, %v), want the token from the same read", got, ok)
 	}
 }

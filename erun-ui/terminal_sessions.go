@@ -13,7 +13,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcp"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 func (a *App) OpenIDE(selection uiSelection, ide string) error {
@@ -42,7 +42,7 @@ func (a *App) OpenIDE(selection uiSelection, ide string) error {
 }
 
 func (a *App) resolveOpenIDEParams(selection uiSelection, ide string) (startTerminalSessionParams, error) {
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -83,7 +83,7 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (model.Diff
 	if err := errMissingTenantOrEnvironment("load diff", selection.Tenant, selection.Environment); err != nil {
 		return model.DiffResult{}, err
 	}
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

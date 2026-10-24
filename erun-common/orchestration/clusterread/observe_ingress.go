@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/observe"
 )
 
 type ingressList struct {
@@ -41,9 +41,9 @@ type ingressItem struct {
 
 // FetchObservedIngresses errors name the read, not "observe:": callers other than observe use it.
 func FetchObservedIngresses(args []string) ([]model.ObservedIngress, error) {
-	raw, stderr, err := deploy.RunObserveKubectl(args)
+	raw, stderr, err := observe.RunObserveKubectl(args)
 	if err != nil {
-		return nil, fmt.Errorf("get ingress: %w", deploy.KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("get ingress: %w", observe.KubectlErrorMessage(err, stderr))
 	}
 	var list ingressList
 	if err := json.Unmarshal(raw, &list); err != nil {

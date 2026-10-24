@@ -17,8 +17,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
+	"github.com/sophium/erun/erun-common/primitive/open/appsession"
+	"github.com/sophium/erun/erun-common/primitive/open/shell"
 	"github.com/spf13/cobra"
 )
 
@@ -59,7 +60,7 @@ func resolveOpenTarget(
 	if err := refuseOpenForHostEnvironment(result); err != nil {
 		return config.OpenResult{}, false, err
 	}
-	result, err = open.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
+	result, err = shell.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
 	if err != nil {
 		return config.OpenResult{}, false, err
 	}
@@ -208,7 +209,7 @@ func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, o
 		checkKubernetesDeployment: checkKubernetesDeployment,
 		resolveRuntimeDeploySpec:  resolveRuntimeDeploySpec,
 		deployHelmChart:           deployHelmChart,
-		resolveDeployedVersion:    deploy.ResolveDeployedHelmReleaseVersion,
+		resolveDeployedVersion:    runtimeversion.ResolveDeployedHelmReleaseVersion,
 		activateMCP:               activateMCP,
 		activateAPI:               activateAPI,
 		activateSSHD:              activateSSHD,
@@ -421,7 +422,7 @@ func (r *resolvedOpenRunner) emitNoShellSetup() error {
 }
 
 func (r *resolvedOpenRunner) traceShellPreview(shellReq config.ShellLaunchParams) {
-	if preview, err := open.PreviewShellLaunch(shellReq); err == nil {
+	if preview, err := shell.PreviewShellLaunch(shellReq); err == nil {
 		if len(preview.SeedArgs) > 0 {
 			r.ctx.TraceCommand("", "kubectl", preview.SeedArgs...)
 			r.ctx.Trace("open: SSH private key streamed to the runtime pod on stdin (kept off the command line)")
@@ -441,15 +442,15 @@ func (r *resolvedOpenRunner) traceShellPreview(shellReq config.ShellLaunchParams
 func (r *resolvedOpenRunner) runShellLoop(shellReq config.ShellLaunchParams) error {
 	for {
 		err := r.openShell(r.ctx, shellReq)
-		if errors.Is(err, open.ErrShellPodReplaced) {
+		if errors.Is(err, shell.ErrShellPodReplaced) {
 			continue
 		}
-		if errors.Is(err, open.ErrShellSessionTakenOver) {
+		if errors.Is(err, shell.ErrShellSessionTakenOver) {
 			// Another window took over this session; the notice stops the desktop's reconnect loop.
-			r.ctx.Info(open.ShellSessionTakenOverNotice)
+			r.ctx.Info(appsession.ShellSessionTakenOverNotice)
 			return nil
 		}
-		if !errors.Is(err, open.ErrShellReattachDeploy) {
+		if !errors.Is(err, shell.ErrShellReattachDeploy) {
 			return err
 		}
 		if r.runManagedDeploy == nil {

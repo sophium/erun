@@ -10,7 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/jobhost"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
@@ -147,7 +147,7 @@ func reserveEnvironmentJobID(ctx core.Context, dir, id string) error {
 	if !ok {
 		return nil
 	}
-	resolved := reconcileEnvironmentJob(dir, existing, time.Now(), activity.ProcessAlive, build.CurrentJobHostname())
+	resolved := reconcileEnvironmentJob(dir, existing, time.Now(), activity.ProcessAlive, jobhost.CurrentJobHostname())
 	if !resolved.Finished() {
 		return fmt.Errorf("job %q is already running (pid %d); pass a different id or cancel it first", id, resolved.PID)
 	}

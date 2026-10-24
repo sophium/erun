@@ -6,7 +6,7 @@ import (
 	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/profile"
 	"github.com/spf13/cobra"
 )
 
@@ -44,7 +44,7 @@ func newBuildProfileCmd() *cobra.Command {
 
 func runBuildProfileCommand(ctx core.Context, id string, limit int) error {
 	if id == "" {
-		summaries, err := build.ListTimingRecords(buildProfileCommandName, limit)
+		summaries, err := profile.ListTimingRecords(buildProfileCommandName, limit)
 		if err != nil {
 			return err
 		}
@@ -53,7 +53,7 @@ func runBuildProfileCommand(ctx core.Context, id string, limit int) error {
 		}
 		return writeBuildProfileListText(ctx, summaries)
 	}
-	record, err := build.LoadTimingRecord(buildProfileCommandName, id)
+	record, err := profile.LoadTimingRecord(buildProfileCommandName, id)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func writeBuildProfileListText(ctx core.Context, summaries []model.TimingRecordS
 }
 
 func writeBuildProfileDetailText(ctx core.Context, record model.TimingRecord) error {
-	for _, row := range build.RenderTimingRecordRows(record) {
+	for _, row := range profile.RenderTimingRecordRows(record) {
 		if _, err := fmt.Fprintln(ctx.Stdout, row); err != nil {
 			return err
 		}

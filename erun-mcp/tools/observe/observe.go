@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/observe"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
@@ -59,5 +59,5 @@ func resolveObserveOpenResult(runtime runtimecfg.RuntimeConfig, input ObserveInp
 	if err != nil {
 		return config.OpenResult{}, err
 	}
-	return open.ResolveOpen(runtime.Store, model.OpenParams{Tenant: tenant, Environment: environment})
+	return resolve.ResolveOpen(runtime.Store, model.OpenParams{Tenant: tenant, Environment: environment})
 }

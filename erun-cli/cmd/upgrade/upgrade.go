@@ -12,7 +12,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/run"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
+	"github.com/sophium/erun/erun-common/primitive/deploy/spec"
 	"github.com/spf13/cobra"
 )
 
@@ -160,14 +162,14 @@ func newUpgradeDeployer(store seam.DeployStore, saveEnvConfig seam.EnvConfigSave
 			VersionOverride: item.Target,
 			Force:           force,
 		}
-		specs, err := deploypkg.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
+		specs, err := spec.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 		if err != nil {
 			return err
 		}
-		if err := deploypkg.RunDeploySpecs(ctx, specs, deployHelmChart); err != nil {
+		if err := run.RunDeploySpecs(ctx, specs, deployHelmChart); err != nil {
 			return err
 		}
-		if err := deploypkg.PersistRuntimeVersionFromDeploySpecs(ctx, specs, saveEnvConfig, deploypkg.ResolveDeployedHelmReleaseVersion); err != nil {
+		if err := runtimeversion.PersistRuntimeVersionFromDeploySpecs(ctx, specs, saveEnvConfig, runtimeversion.ResolveDeployedHelmReleaseVersion); err != nil {
 			return err
 		}
 		deploynotice.NoticeStaleRuntimePortForwards(ctx, specs)

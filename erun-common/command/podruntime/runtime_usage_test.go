@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
 )
 
 // Each threshold must fire exactly at its boundary and stay silent below it.
@@ -166,7 +166,7 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 	}
 
 	t.Run("a retained kill and near-limit peak keep warning after a restart", func(t *testing.T) {
-		history := deploy.RuntimeUsageHistory{Restarts: 25, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
+		history := runtimeusage.RuntimeUsageHistory{Restarts: 25, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
 
 		warnings := retainedMemoryUsageWarnings(restarted, history)
 		if !hasWarningContaining(warnings, "retained history recorded 1 OOM kill") {
@@ -183,7 +183,7 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 			LimitBytes: limit, PercentOfLimit: 100 * float64(52428800) / float64(limit),
 			OOMKillsObserved: true,
 		}
-		for _, history := range []deploy.RuntimeUsageHistory{
+		for _, history := range []runtimeusage.RuntimeUsageHistory{
 			{},
 			{Restarts: 3, ObservedPeakMemoryBytes: 104857600},
 		} {
@@ -197,7 +197,7 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 		// The signal is re-derived every read, so acting on it clears it.
 		raised := restarted
 		raised.LimitBytes = 9663676416 // 9216Mi
-		history := deploy.RuntimeUsageHistory{Restarts: 25, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
+		history := runtimeusage.RuntimeUsageHistory{Restarts: 25, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
 
 		warnings := retainedMemoryUsageWarnings(raised, history)
 		if hasWarningContaining(warnings, "retained memory peak reached") {
@@ -209,7 +209,7 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 	})
 
 	t.Run("an uninterrupted container is not warned twice", func(t *testing.T) {
-		history := deploy.RuntimeUsageHistory{Restarts: 0, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
+		history := runtimeusage.RuntimeUsageHistory{Restarts: 0, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
 
 		if warnings := retainedMemoryUsageWarnings(unrestarted, history); len(warnings) != 0 {
 			t.Errorf("live counters already cover this container, got %v", warnings)
@@ -236,7 +236,7 @@ func TestApplyRetainedUsageWarningsReadsTheEnvironmentHistory(t *testing.T) {
 		t.Fatalf("no retained history must not manufacture a warning, got %v", warnings)
 	}
 
-	history := AppendRuntimeUsageSample(deploy.RuntimeUsageHistory{}, model.RuntimeUsage{
+	history := AppendRuntimeUsageSample(runtimeusage.RuntimeUsageHistory{}, model.RuntimeUsage{
 		Memory: model.RuntimeMemoryUsage{LimitBytes: 6442450944, PeakBytes: 6443237376, PeakObserved: true, OOMKills: 1, OOMKillsObserved: true},
 	}, time.Now())
 	if err := SaveRuntimeUsageHistory("erun", "code3", history); err != nil {

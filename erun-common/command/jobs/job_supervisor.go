@@ -10,7 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/jobhost"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 )
@@ -102,7 +102,7 @@ func registerEnvironmentJob(params model.EnvironmentJobSupervisorParams) (*jobRe
 		LogPath:          environmentJobLogPath(dir, id),
 		OutputLimitBytes: limit,
 		LeaseID:          environmentJobLeaseID(id),
-		Hostname:         build.CurrentJobHostname(),
+		Hostname:         jobhost.CurrentJobHostname(),
 		// The explicit override wins; otherwise ERUN_JOB_ID inherited from a parent job.
 		StartedByJobID: core.FirstNonEmptyString(strings.TrimSpace(params.StartedByJobID), strings.TrimSpace(os.Getenv(jobstate.EnvironmentJobIDEnvVar))),
 		Handoff:        params.Handoff,

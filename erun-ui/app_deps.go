@@ -15,7 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/gateway"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -95,7 +95,7 @@ func withDefaultOrchestratorLaunchDeps(deps erunUIDeps) erunUIDeps {
 		deps.claudeAgents = newDefaultClaudeAgents()
 	}
 	if deps.resolveGatewayCredential == nil {
-		deps.resolveGatewayCredential = deploy.ResolveGatewayCredential
+		deps.resolveGatewayCredential = gateway.ResolveGatewayCredential
 	}
 	return deps
 }

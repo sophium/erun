@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/orchestration/release"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
@@ -39,7 +39,7 @@ func PublishTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.Ca
 				return dockerspec.DockerBuildContextAtDir(workDir)
 			}
 			resolveDeployContext := func() (model.KubernetesDeployContext, error) {
-				return deploy.KubernetesDeployContextAtDir(workDir), nil
+				return kubecheck.KubernetesDeployContextAtDir(workDir), nil
 			}
 			target := model.DeployTarget{
 				Tenant:          strings.TrimSpace(runtime.Context.Tenant),

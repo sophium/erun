@@ -8,7 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	diagnosispkg "github.com/sophium/erun/erun-common/primitive/deploy/diagnosis"
 )
 
 // The recovery prompt is skipped under --dry-run, so the integration goldens
@@ -53,7 +53,7 @@ func TestRecommendedDeployRecovery(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			action, ok := deploy.RecommendedDeployRecovery(model.DeployDiagnosisResult{HelmStatus: tc.helmStatus, HelmReadError: tc.helmReadError})
+			action, ok := diagnosispkg.RecommendedDeployRecovery(model.DeployDiagnosisResult{HelmStatus: tc.helmStatus, HelmReadError: tc.helmReadError})
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
 			}
@@ -88,7 +88,7 @@ func TestRunDeployDiagnosisRecordsHelmReadError(t *testing.T) {
 	writeDoctorHelmStub(t, "", `Error from server (Forbidden): secrets is forbidden: User "jane" cannot list resource "secrets"`, 1)
 	writeKubectlStub(t, "", 0)
 
-	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+	diagnosis := diagnosispkg.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
 
 	if diagnosis.HelmReadError == "" {
 		t.Fatalf("expected a non-empty HelmReadError for a failed RBAC read")
@@ -96,7 +96,7 @@ func TestRunDeployDiagnosisRecordsHelmReadError(t *testing.T) {
 	if !strings.Contains(diagnosis.HelmReadError, "not authorized") {
 		t.Fatalf("HelmReadError must explain the RBAC cause, got %q", diagnosis.HelmReadError)
 	}
-	if action, ok := deploy.RecommendedDeployRecovery(diagnosis); ok {
+	if action, ok := diagnosispkg.RecommendedDeployRecovery(diagnosis); ok {
 		t.Fatalf("recommended action = %q, ok = true; want no recovery recommended for an unreadable release", action)
 	}
 }
@@ -106,12 +106,12 @@ func TestRunDeployDiagnosisMissingReleaseHasNoReadError(t *testing.T) {
 	writeDoctorHelmStub(t, "", "Error: release: not found", 1)
 	writeKubectlStub(t, "", 0)
 
-	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+	diagnosis := diagnosispkg.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
 
 	if diagnosis.HelmReadError != "" {
 		t.Fatalf("expected no HelmReadError for a confirmed-missing release, got %q", diagnosis.HelmReadError)
 	}
-	if action, ok := deploy.RecommendedDeployRecovery(diagnosis); ok {
+	if action, ok := diagnosispkg.RecommendedDeployRecovery(diagnosis); ok {
 		t.Fatalf("recommended action = %q, ok = true; want no recovery recommended for a missing release", action)
 	}
 }
@@ -121,12 +121,12 @@ func TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback(t *testing.T) {
 	writeDoctorHelmStub(t, "NAME: team-devops\nSTATUS: failed\nREVISION: 5", "", 0)
 	writeKubectlStub(t, "", 0)
 
-	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+	diagnosis := diagnosispkg.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
 
 	if diagnosis.HelmReadError != "" {
 		t.Fatalf("expected no HelmReadError for a genuinely failed release, got %q", diagnosis.HelmReadError)
 	}
-	action, ok := deploy.RecommendedDeployRecovery(diagnosis)
+	action, ok := diagnosispkg.RecommendedDeployRecovery(diagnosis)
 	if !ok || action != model.DeployRecoveryRollback {
 		t.Fatalf("action = %q, ok = %v; want (%q, true) for a genuinely failed release", action, ok, model.DeployRecoveryRollback)
 	}
@@ -137,7 +137,7 @@ func TestRunDeployDiagnosisRunsPodsProbeWhenHelmReadFailsForOtherReasons(t *test
 	writeDoctorHelmStub(t, "", `Error from server (Forbidden): secrets is forbidden: User "jane" cannot list resource "secrets"`, 1)
 	writeKubectlStub(t, "", 0)
 
-	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+	diagnosis := diagnosispkg.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
 
 	if diagnosis.ClusterUnreachable {
 		t.Fatalf("expected ClusterUnreachable = false for an RBAC read failure, got true")
@@ -148,7 +148,7 @@ func TestRunDeployDiagnosisDetectsUnreachableFromPodsProbe(t *testing.T) {
 	writeDoctorHelmStub(t, "NAME: team-devops\nSTATUS: deployed", "", 0)
 	writeKubectlStub(t, "Unable to connect to the server: dial tcp 10.0.0.1:6443: i/o timeout", 1)
 
-	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+	diagnosis := diagnosispkg.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
 
 	if !diagnosis.ClusterUnreachable {
 		t.Fatalf("expected ClusterUnreachable = true when the pods probe hits an unreachable API server, got false")

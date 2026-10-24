@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/observe"
 )
 
 // Deliberately partial parses, so kubectl version drift does not break observe.
@@ -45,9 +45,9 @@ type limitRangeLimitEntry struct {
 }
 
 func fetchObservedResourceQuotas(args []string) ([]model.ObservedResourceQuota, error) {
-	raw, stderr, err := deploy.RunObserveKubectl(args)
+	raw, stderr, err := observe.RunObserveKubectl(args)
 	if err != nil {
-		return nil, fmt.Errorf("observe: get resourcequota: %w", deploy.KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("observe: get resourcequota: %w", observe.KubectlErrorMessage(err, stderr))
 	}
 	var list resourceQuotaList
 	if err := json.Unmarshal(raw, &list); err != nil {
@@ -61,9 +61,9 @@ func fetchObservedResourceQuotas(args []string) ([]model.ObservedResourceQuota, 
 }
 
 func fetchObservedLimitRanges(args []string) ([]model.ObservedLimitRange, error) {
-	raw, stderr, err := deploy.RunObserveKubectl(args)
+	raw, stderr, err := observe.RunObserveKubectl(args)
 	if err != nil {
-		return nil, fmt.Errorf("observe: get limitrange: %w", deploy.KubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("observe: get limitrange: %w", observe.KubectlErrorMessage(err, stderr))
 	}
 	var list limitRangeList
 	if err := json.Unmarshal(raw, &list); err != nil {

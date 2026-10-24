@@ -16,7 +16,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
 )
 
 var (
@@ -64,7 +64,7 @@ func launchIDEURI(ctx core.Context, result config.OpenResult, uri string) error 
 }
 
 func vscodeRemoteFolderURI(result config.OpenResult) string {
-	info := open.SSHConnectionInfoForResult(result)
+	info := sshconn.SSHConnectionInfoForResult(result)
 	return "vscode://vscode-remote/ssh-remote+" + url.PathEscape(info.HostAlias) + (&url.URL{Path: info.WorkspacePath}).EscapedPath()
 }
 
@@ -130,7 +130,7 @@ func startIDEURICommand(ctx core.Context, command string, args []string) (string
 func formatIDEOpenError(ideName string, hostOS model.HostOS, result config.OpenResult, technical string, err error, extra string) error {
 	parts := []string{
 		fmt.Sprintf("%s launcher failed on %s.", ideName, hostOSLabel(hostOS)),
-		fmt.Sprintf("Fallback: connect manually in JetBrains over SSH to host %q and open %q.", open.SSHConnectionInfoForResult(result).HostAlias, open.SSHConnectionInfoForResult(result).WorkspacePath),
+		fmt.Sprintf("Fallback: connect manually in JetBrains over SSH to host %q and open %q.", sshconn.SSHConnectionInfoForResult(result).HostAlias, sshconn.SSHConnectionInfoForResult(result).WorkspacePath),
 	}
 	if extra = strings.TrimSpace(extra); extra != "" {
 		parts = append(parts, extra)

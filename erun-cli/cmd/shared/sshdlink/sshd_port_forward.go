@@ -13,7 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
 )
 
 const sshdPortForwardStartupTimeout = 5 * time.Second
@@ -31,7 +31,7 @@ type sshdPortForwardState struct {
 }
 
 func EnsureSSHDPortForward(ctx core.Context, result config.OpenResult) (model.SSHConnectionInfo, error) {
-	info := open.SSHConnectionInfoForResult(result)
+	info := sshconn.SSHConnectionInfoForResult(result)
 	statePath, err := sshdPortForwardStatePath(result.Tenant, result.Environment, ctx.DryRun)
 	if err != nil {
 		return model.SSHConnectionInfo{}, err

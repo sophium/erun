@@ -6,7 +6,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/ailaunch"
 )
 
 // EndAISessions ends the env's AI sessions, desktop and pod side, so the next
@@ -24,7 +24,7 @@ func (a *App) EndAISessions(selection uiSelection) (bool, error) {
 		if config, _, err := a.deps.store.LoadERunConfig(); err == nil {
 			gateway = config.OpenRouter
 		}
-		launch := open.AISessionLaunchCommand(envConfig.AITool, envConfig.Claude, gateway, selection.Tenant, selection.Environment)
+		launch := ailaunch.AISessionLaunchCommand(envConfig.AITool, envConfig.Claude, gateway, selection.Tenant, selection.Environment)
 		if launch == strings.TrimSpace(envConfig.AITool) {
 			return false, nil
 		}

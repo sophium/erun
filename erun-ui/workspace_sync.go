@@ -9,7 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/workspace"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
 )
 
 const defaultWorkspaceSyncInterval = 2 * time.Second
@@ -32,7 +33,7 @@ func (a *App) startWorkspaceSyncForSelection(selection uiSelection) {
 	if selection.Tenant == "" || selection.Environment == "" {
 		return
 	}
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -152,8 +153,8 @@ func (a *App) stopWorkspaceSyncForKey(key string) {
 
 func (a *App) runWorkspaceSyncLoop(ctx context.Context, key string, selection uiSelection, result config.OpenResult, localPath string) {
 	params := workspace.WorkspaceSyncParams{
-		HostAlias:  open.SSHConnectionInfoForResult(result).HostAlias,
-		RemotePath: open.SSHConnectionInfoForResult(result).WorkspacePath,
+		HostAlias:  sshconn.SSHConnectionInfoForResult(result).HostAlias,
+		RemotePath: sshconn.SSHConnectionInfoForResult(result).WorkspacePath,
 		LocalPath:  localPath,
 	}
 	for {

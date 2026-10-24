@@ -14,8 +14,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/deploy/helmrun"
+	"github.com/sophium/erun/erun-common/primitive/open/podwait"
 )
 
 var (
@@ -399,13 +399,13 @@ func (s BootstrapRunner) withStoreDefaults() BootstrapRunner {
 
 func (s BootstrapRunner) withRuntimeDefaults() BootstrapRunner {
 	if s.WaitForRemoteRuntime == nil {
-		s.WaitForRemoteRuntime = open.WaitForShellDeployment
+		s.WaitForRemoteRuntime = podwait.WaitForShellDeployment
 	}
 	if s.RunRemoteCommand == nil {
 		s.RunRemoteCommand = kube.RunRemoteCommand
 	}
 	if s.DeployHelmChart == nil {
-		s.DeployHelmChart = deploy.DeployHelmChart
+		s.DeployHelmChart = helmrun.DeployHelmChart
 	}
 	if s.Sleep == nil {
 		s.Sleep = time.Sleep

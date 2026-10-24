@@ -12,7 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/classify"
 )
 
 // buildSignatureDocStopwords are stripped before matching: the docs paraphrase
@@ -193,7 +193,7 @@ func TestBuildInfrastructureSignaturesAreDocumented(t *testing.T) {
 	}
 	docWords := normalizedWordSet(string(data))
 
-	signatures := build.BuildInconclusiveSignatures()
+	signatures := classify.BuildInconclusiveSignatures()
 	if len(signatures) == 0 {
 		t.Fatal("eruncommon.BuildInconclusiveSignatures() returned nothing; the rest of this test would pass vacuously")
 	}

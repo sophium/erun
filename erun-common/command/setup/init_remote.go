@@ -13,7 +13,9 @@ import (
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/remoteinit"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/primitive/deploy/mcpauth"
+	"github.com/sophium/erun/erun-common/primitive/deploy/published"
+	"github.com/sophium/erun/erun-common/primitive/deploy/run"
 )
 
 type remoteRepositoryState struct {
@@ -179,15 +181,15 @@ func (s BootstrapRunner) ensureRemoteRuntime(target config.OpenResult, req confi
 	}
 	// Pass cluster: entries as-is; the chart expands them in-pod. Host-concretizing
 	// pins the build registry to an unreachable localhost port-forward.
-	spec, err := deploy.ResolvePublishedDevopsDeploySpecWithOverrides(s.Context, target, runtimeVersion, "", runtimeImageStated)
+	spec, err := published.ResolvePublishedDevopsDeploySpecWithOverrides(s.Context, target, runtimeVersion, "", runtimeImageStated)
 	if err != nil {
 		return err
 	}
 	// Carry the MCP-auth key so the desktop need not redeploy right after init.
-	if err := deploy.ApplyMCPAuthToRuntimeSpec(s.Context, model.DeployTarget{Tenant: target.Tenant, MCPAuthPublicKeyPath: mcpAuthPublicKeyPath}, &spec); err != nil {
+	if err := mcpauth.ApplyMCPAuthToRuntimeSpec(s.Context, model.DeployTarget{Tenant: target.Tenant, MCPAuthPublicKeyPath: mcpAuthPublicKeyPath}, &spec); err != nil {
 		return err
 	}
-	if err := deploy.RunDeploySpec(s.Context, spec, s.DeployHelmChart); err != nil {
+	if err := run.RunDeploySpec(s.Context, spec, s.DeployHelmChart); err != nil {
 		return err
 	}
 

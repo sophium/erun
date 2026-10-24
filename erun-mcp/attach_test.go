@@ -14,7 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/appsession"
 	"github.com/sophium/erun/erun-mcp/tools/attach"
 	"github.com/sophium/erun/erun-mcp/tools/shared/edgeauth"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
@@ -169,7 +169,7 @@ func TestAttachRefusesWithoutAttachCapabilityBeforeUpgrade(t *testing.T) {
 		t.Fatalf("status = %d, want %d", status, http.StatusForbidden)
 	}
 
-	socket := open.RemoteAppSessionSocketPath(runtime.Context.Tenant, runtime.Context.Environment, "denied")
+	socket := appsession.RemoteAppSessionSocketPath(runtime.Context.Tenant, runtime.Context.Environment, "denied")
 	if _, statErr := os.Stat(socket); !os.IsNotExist(statErr) {
 		t.Fatalf("attach subprocess ran despite the refusal: socket %q exists (stat err %v)", socket, statErr)
 	}

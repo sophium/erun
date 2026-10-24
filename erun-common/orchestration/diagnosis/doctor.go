@@ -10,11 +10,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 func ResolveDoctorTarget(store config.OpenStore, params model.OpenParams) (config.OpenResult, error) {
-	return open.ResolveOpen(store, params)
+	return resolve.ResolveOpen(store, params)
 }
 
 func PreviewRuntimeContainerCommand(req config.ShellLaunchParams, container, script string) kube.RemoteCommandPreview {

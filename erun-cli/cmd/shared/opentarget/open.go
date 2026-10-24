@@ -7,13 +7,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 	"github.com/sophium/erun/internal"
 )
 
 func ResolveOpenArgs(command string, args []string, resolveOpen func(model.OpenParams) (config.OpenResult, error)) (model.OpenParams, config.OpenResult, error) {
-	params, err := open.OpenParamsForArgs(args)
+	params, err := resolve.OpenParamsForArgs(args)
 	if err != nil {
 		return model.OpenParams{}, config.OpenResult{}, err
 	}
@@ -25,7 +25,7 @@ func ResolveOpenArgs(command string, args []string, resolveOpen func(model.OpenP
 }
 
 func ResolveOpenParams(command string, args []string, overrides model.OpenParams) (model.OpenParams, error) {
-	params, err := open.OpenParamsForArgs(args)
+	params, err := resolve.OpenParamsForArgs(args)
 	if err != nil {
 		return model.OpenParams{}, err
 	}

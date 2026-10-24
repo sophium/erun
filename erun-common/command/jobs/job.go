@@ -15,7 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/jobhost"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
 	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
@@ -156,12 +156,12 @@ func LoadEnvironmentJob(tenant, environment, id string, now time.Time) (jobstate
 		}
 		return jobstate.EnvironmentJob{}, err
 	}
-	return reconcileEnvironmentJob(dir, job, normalizeJobNow(now), activity.ProcessAlive, build.CurrentJobHostname()), nil
+	return reconcileEnvironmentJob(dir, job, normalizeJobNow(now), activity.ProcessAlive, jobhost.CurrentJobHostname()), nil
 }
 
 // LoadEnvironmentJobs returns every retained job, newest first, pruning aged-out records.
 func LoadEnvironmentJobs(tenant, environment string, now time.Time) ([]jobstate.EnvironmentJob, error) {
-	return loadEnvironmentJobs(tenant, environment, normalizeJobNow(now), activity.ProcessAlive, build.CurrentJobHostname())
+	return loadEnvironmentJobs(tenant, environment, normalizeJobNow(now), activity.ProcessAlive, jobhost.CurrentJobHostname())
 }
 
 func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(int) bool, hostname string) ([]jobstate.EnvironmentJob, error) {
@@ -311,7 +311,7 @@ func environmentJobChildren(dir, parentID string, now time.Time) []jobstate.Envi
 	if err != nil {
 		return nil
 	}
-	hostname := build.CurrentJobHostname()
+	hostname := jobhost.CurrentJobHostname()
 	var children []jobstate.EnvironmentJob
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {

@@ -19,7 +19,8 @@ import (
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	deployrun "github.com/sophium/erun/erun-common/orchestration/deploy"
 	"github.com/sophium/erun/erun-common/orchestration/execute"
-	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/dockerimage"
+	"github.com/sophium/erun/erun-common/primitive/build/registrylogin"
 	pushpkg "github.com/sophium/erun/erun-common/primitive/push"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
@@ -93,7 +94,7 @@ func runBuildCommand(ctx core.Context, store seam.DockerStore, findProjectRoot s
 			buildInput,
 			func(buildInput seam.DockerBuildSpec, stdout, stderr io.Writer) error {
 				if buildDockerImage == nil {
-					return buildpkg.DockerImageBuilder(buildInput, stdout, stderr)
+					return dockerimage.DockerImageBuilder(buildInput, stdout, stderr)
 				}
 				return buildDockerImage(buildInput, stdout, stderr)
 			},
@@ -174,7 +175,7 @@ func pushBuildWithRetry(ctx core.Context, buildDockerImage seam.DockerImageBuild
 			buildInput,
 			func(buildInput seam.DockerBuildSpec, stdout, stderr io.Writer) error {
 				if buildDockerImage == nil {
-					return buildpkg.DockerImageBuilder(buildInput, stdout, stderr)
+					return dockerimage.DockerImageBuilder(buildInput, stdout, stderr)
 				}
 				return buildDockerImage(buildInput, stdout, stderr)
 			},
@@ -360,7 +361,7 @@ func addPushCommandTargetFlags(cmd *cobra.Command, target *model.DockerCommandTa
 // handleNamespaceAuthError re-authenticates as the namespace owner, escalating to
 // `gh auth refresh`, which cannot complete headless (device code).
 func handleNamespaceAuthError(authErr model.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
-	if !dockerregistry.IsDockerCreatePackageDenied(authErr.Message) && !buildpkg.IsDockerScopeDenied(authErr.Message) {
+	if !dockerregistry.IsDockerCreatePackageDenied(authErr.Message) && !registrylogin.IsDockerScopeDenied(authErr.Message) {
 		return false, nil
 	}
 	finalErr := retryAfterNamespaceLogin(authErr, retry, stdout, stderr)
@@ -392,7 +393,7 @@ func retryAfterNamespaceLogin(authErr model.DockerRegistryAuthError, retry func(
 }
 
 func retryAfterScopeRefresh(authErr model.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) error {
-	ok, refreshErr := buildpkg.RefreshGHCRPackageScopes(authErr.Tag, stdin, stdout, stderr)
+	ok, refreshErr := registrylogin.RefreshGHCRPackageScopes(authErr.Tag, stdin, stdout, stderr)
 	if refreshErr != nil {
 		return refreshErr
 	}
@@ -407,7 +408,7 @@ func scopeStillDenied(err error) bool {
 	if !errors.As(err, &authErr) {
 		return false
 	}
-	return buildpkg.IsDockerScopeDenied(authErr.Message)
+	return registrylogin.IsDockerScopeDenied(authErr.Message)
 }
 
 func printCreatePackageGuidance(out io.Writer, tag, registry string) {
@@ -467,7 +468,7 @@ func promptDockerLoginRetry(run promptpkg.SelectRunner, registry string) (bool, 
 	if helmrecovery.IsTrueishEnv("ERUN_AUTO_LOGIN_ON_PUSH") {
 		return true, nil
 	}
-	label := fmt.Sprintf("Docker push requires login to %s", buildpkg.DockerRegistryDisplayName(registry))
+	label := fmt.Sprintf("Docker push requires login to %s", registrylogin.DockerRegistryDisplayName(registry))
 	prompt := promptui.Select{
 		Label: label,
 		Items: []string{loginAndRetryPushOption, cancelPushOption},

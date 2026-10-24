@@ -10,7 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	openpkg "github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
 )
 
 func TestLoadAndSaveTenantConfig(t *testing.T) {
@@ -260,7 +260,7 @@ func TestApplyCloudContextStatusesToCachePreservesKnownStatusOnTransientUnknown(
 }
 
 func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
-	projectRoot := openpkg.RemoteWorktreePathForRepoName("frs")
+	projectRoot := runtimeref.RemoteWorktreePathForRepoName("frs")
 	rootConfig := &configpkg.ERunConfig{
 		CloudContexts: []model.CloudContextConfig{{
 			Name:               "team-context",

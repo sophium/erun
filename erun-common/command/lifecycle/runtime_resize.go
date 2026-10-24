@@ -10,8 +10,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/deploy/run"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeusage"
+	"github.com/sophium/erun/erun-common/primitive/deploy/runtimeversion"
+	"github.com/sophium/erun/erun-common/primitive/deploy/spec"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 )
 
 // apply-recommendation sizes only the runtime pod, so it combines freely with dind values.
@@ -242,9 +245,9 @@ func traceRuntimeSizingRecommendation(ctx core.Context, tenant, environment stri
 		return
 	}
 	for _, verdict := range recommendation.Verdicts {
-		ctx.Trace(fmt.Sprintf("resize: %s/%s sizing: %s", tenant, environment, deploy.FormatRuntimeSizingVerdict(verdict)))
+		ctx.Trace(fmt.Sprintf("resize: %s/%s sizing: %s", tenant, environment, runtimeusage.FormatRuntimeSizingVerdict(verdict)))
 	}
-	ctx.Trace(fmt.Sprintf("resize: %s/%s sizing-evidence: %s", tenant, environment, deploy.FormatRuntimeSizingEvidence(*recommendation)))
+	ctx.Trace(fmt.Sprintf("resize: %s/%s sizing-evidence: %s", tenant, environment, runtimeusage.FormatRuntimeSizingEvidence(*recommendation)))
 }
 
 func traceRuntimeResizeOverriddenLeases(ctx core.Context, tenant, environment string, leases []model.EnvironmentActivityLease) {
@@ -262,7 +265,7 @@ func applyRuntimeResize(ctx core.Context, deps RuntimeResizeDependencies, tenant
 		return fmt.Errorf("resize: saving the new runtime pod size: %w", err)
 	}
 
-	specs, err := deploy.ResolveCurrentDeploySpecs(ctx, deps.Store, deps.FindProjectRoot, deps.ResolveDockerBuildContext, deps.ResolveKubernetesDeployContext, deps.Now, model.DeployTarget{
+	specs, err := spec.ResolveCurrentDeploySpecs(ctx, deps.Store, deps.FindProjectRoot, deps.ResolveDockerBuildContext, deps.ResolveKubernetesDeployContext, deps.Now, model.DeployTarget{
 		Tenant:      tenant,
 		Environment: environment,
 		RepoPath:    target.RepoPath,
@@ -270,15 +273,15 @@ func applyRuntimeResize(ctx core.Context, deps RuntimeResizeDependencies, tenant
 	if err != nil {
 		return err
 	}
-	if err := deploy.RunDeploySpecs(ctx, specs, deps.DeployHelmChart); err != nil {
+	if err := run.RunDeploySpecs(ctx, specs, deps.DeployHelmChart); err != nil {
 		return err
 	}
-	return deploy.PersistRuntimeVersionFromDeploySpecs(ctx, specs, deps.SaveEnvConfig, deploy.ResolveDeployedHelmReleaseVersion)
+	return runtimeversion.PersistRuntimeVersionFromDeploySpecs(ctx, specs, deps.SaveEnvConfig, runtimeversion.ResolveDeployedHelmReleaseVersion)
 }
 
 // RunRuntimeResize checks occupancy and, outside dry-run, persists the sizing and rolls the pod once.
 func RunRuntimeResize(ctx core.Context, deps RuntimeResizeDependencies, params model.RuntimeResizeParams) (model.RuntimeResizeResult, error) {
-	target, err := open.ResolveOpen(deps.Store, model.OpenParams{
+	target, err := resolve.ResolveOpen(deps.Store, model.OpenParams{
 		Tenant:                    strings.TrimSpace(params.Tenant),
 		Environment:               strings.TrimSpace(params.Environment),
 		UseDefaultTenant:          strings.TrimSpace(params.Tenant) == "",

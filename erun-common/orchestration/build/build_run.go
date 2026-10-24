@@ -7,7 +7,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/helm"
-	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
+	"github.com/sophium/erun/erun-common/primitive/build/linuxpkgcheck"
+	"github.com/sophium/erun/erun-common/primitive/build/run"
+	"github.com/sophium/erun/erun-common/primitive/build/script"
+	"github.com/sophium/erun/erun-common/primitive/build/spec"
 	pushpkg "github.com/sophium/erun/erun-common/primitive/push"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
@@ -27,13 +30,13 @@ func RunBuildExecutionBuilds(ctx core.Context, execution dockerspec.BuildExecuti
 		if len(deploySpecs) > 0 {
 			return nil, fmt.Errorf("build deploy is not supported for project build scripts")
 		}
-		return pushedTags, buildpkg.RunScriptSpec(ctx, *execution.Script, runScript)
+		return pushedTags, script.RunScriptSpec(ctx, *execution.Script, runScript)
 	}
 	if execution.Release != nil {
-		if err := buildpkg.ExportReleaseLinuxPackages(ctx, *execution.Release); err != nil {
+		if err := linuxpkgcheck.ExportReleaseLinuxPackages(ctx, *execution.Release); err != nil {
 			return nil, err
 		}
-	} else if err := buildpkg.RunLinuxPackageChecks(ctx, execution.LinuxPackages); err != nil {
+	} else if err := linuxpkgcheck.RunLinuxPackageChecks(ctx, execution.LinuxPackages); err != nil {
 		return nil, err
 	}
 	return runDockerBuildExecutionPhase(ctx, execution, deploySpecs, build, push, pushedTags)
@@ -54,7 +57,7 @@ func runDockerBuildExecutionPhase(ctx core.Context, execution dockerspec.BuildEx
 		// A builds-here --deploy deploys charts from the working tree, so validate rather than publish.
 		return pushedTags, pushpkg.PackageComponentCharts(ctx, execution.ComponentCharts)
 	}
-	if err := buildpkg.RunDockerBuilds(ctx, execution.DockerBuilds, build); err != nil {
+	if err := run.RunDockerBuilds(ctx, execution.DockerBuilds, build); err != nil {
 		return pushedTags, err
 	}
 	return pushedTags, pushpkg.PackageComponentCharts(ctx, execution.ComponentCharts)
@@ -68,11 +71,11 @@ func recordDockerPushTags(tags map[string]struct{}, pushes []model.DockerPushSpe
 }
 
 func buildAndPushDeployDockerImages(ctx core.Context, builds []seam.DockerBuildSpec, build seam.DockerImageBuilderFunc, push seam.DockerPushFunc, pushedTags map[string]struct{}) error {
-	if err := buildpkg.RunDockerBuildsSequentially(ctx, builds, build); err != nil {
+	if err := run.RunDockerBuildsSequentially(ctx, builds, build); err != nil {
 		return err
 	}
 	for _, buildInput := range builds {
-		pushInput := buildpkg.NewDockerPushSpec(buildInput.ContextDir, buildInput.Image)
+		pushInput := spec.NewDockerPushSpec(buildInput.ContextDir, buildInput.Image)
 		if err := RunDockerPushSpec(ctx, pushInput, nil, build, push); err != nil {
 			return err
 		}
@@ -83,7 +86,7 @@ func buildAndPushDeployDockerImages(ctx core.Context, builds []seam.DockerBuildS
 
 func RunDockerPushSpec(ctx core.Context, pushInput model.DockerPushSpec, buildInput *seam.DockerBuildSpec, build seam.DockerImageBuilderFunc, push seam.DockerPushFunc) error {
 	if buildInput != nil {
-		if err := buildpkg.RunDockerBuild(ctx, *buildInput, build); err != nil {
+		if err := run.RunDockerBuild(ctx, *buildInput, build); err != nil {
 			return err
 		}
 		if buildInput.Push {
@@ -105,7 +108,7 @@ func RunDockerPushExecution(ctx core.Context, execution dockerspec.DockerPushExe
 	if err := pushpkg.PreflightRegistryPushAccess(ctx, execution); err != nil {
 		return err
 	}
-	if err := buildpkg.RunDockerBuildsSequentially(ctx, execution.Builds, build); err != nil {
+	if err := run.RunDockerBuildsSequentially(ctx, execution.Builds, build); err != nil {
 		return err
 	}
 	builtAndPushedTags := make(map[string]struct{}, len(execution.Builds))

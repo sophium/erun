@@ -13,7 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/open"
+	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -41,7 +41,7 @@ func (a *App) ListAgentOutputs(selection uiSelection) (model.RuntimeOutputsListR
 	if err := errMissingTenantOrEnvironment("list agent outputs", selection.Tenant, selection.Environment); err != nil {
 		return model.RuntimeOutputsListResult{}, err
 	}
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -63,7 +63,7 @@ func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, e
 	if a.ctx == nil {
 		return "", fmt.Errorf("application context is not ready")
 	}
-	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
+	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
