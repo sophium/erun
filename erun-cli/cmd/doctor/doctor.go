@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/manifoldco/promptui"
 	"github.com/sophium/erun/cmd/shared"
@@ -17,7 +16,6 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
-	jetbrainsconfig "github.com/sophium/erun/internal/jetbrainsconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -36,13 +34,6 @@ type doctorOptions struct {
 	codeCommitSSHKeyID         string
 	syncConfig                 bool
 	repairWorkspaceSync        bool
-}
-
-type jetBrainsGatewayDoctorRepair struct {
-	optionsDir  string
-	configID    string
-	projectPath string
-	idePath     string
 }
 
 func NewDoctorCmd(resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), configStore config.ConfigStore, cloudDeps cloud.CloudDependencies, cloudContextDeps cloud.CloudContextDependencies, promptRunner shared.PromptRunner) *cobra.Command {
@@ -221,12 +212,16 @@ func reportProjectConfigAndExecutionModes(ctx core.Context, result config.OpenRe
 // repository, no config file at all) is not reported; only a config that
 // resolves yet is untracked is worth flagging here.
 func reportProjectConfigTracked(ctx core.Context, result config.OpenResult) error {
-	present, ignored, err := config.ProjectConfigGitIgnored(ctx, result.RepoPath)
-	if err != nil || !present || !ignored {
+	if !projectConfigGitIgnored(ctx, result.RepoPath) {
 		return nil
 	}
-	_, err = fmt.Fprintf(ctx.Stdout, "== Project config ==\n.erun/config.yaml exists but is excluded by .gitignore: it resolves on this machine only, and nowhere else. Fix: %s.\n\n", config.ProjectConfigGitIgnoreFix)
+	_, err := fmt.Fprintf(ctx.Stdout, "== Project config ==\n.erun/config.yaml exists but is excluded by .gitignore: it resolves on this machine only, and nowhere else. Fix: %s.\n\n", config.ProjectConfigGitIgnoreFix)
 	return err
+}
+
+func projectConfigGitIgnored(ctx core.Context, repoPath string) bool {
+	present, ignored, err := config.ProjectConfigGitIgnored(ctx, repoPath)
+	return err == nil && present && ignored
 }
 
 // runDoctorPostSyncActions runs the JetBrains Gateway repair and then the
@@ -549,91 +544,6 @@ func runSelectedDoctorAction(ctx core.Context, req config.ShellLaunchParams, act
 	return nil
 }
 
-func runSelectedJetBrainsGatewayRepair(ctx core.Context, promptRunner shared.PromptRunner, result config.OpenResult, options doctorOptions) (bool, error) {
-	repair, ok, err := jetBrainsGatewayDoctorRepairForResult(result)
-	if err != nil {
-		return false, err
-	}
-	if !ok {
-		if options.repairJetBrainsGateway {
-			_, err := fmt.Fprintln(ctx.Stdout, "No cached JetBrains Gateway backend metadata found for this environment.")
-			return true, err
-		}
-		return false, nil
-	}
-
-	selected, err := shouldRepairJetBrainsGateway(ctx, promptRunner, result, options)
-	if err != nil {
-		return false, err
-	}
-	if !selected {
-		return false, nil
-	}
-	return runJetBrainsGatewayRepair(ctx, repair)
-}
-
-func shouldRepairJetBrainsGateway(ctx core.Context, promptRunner shared.PromptRunner, result config.OpenResult, options doctorOptions) (bool, error) {
-	if options.repairJetBrainsGateway {
-		return true, nil
-	}
-	if promptRunner == nil || ctx.DryRun {
-		return false, nil
-	}
-	return doctorConfirm(ctx, promptRunner, fmt.Sprintf("Clear cached JetBrains Gateway backend metadata for %s/%s?", result.Tenant, result.Environment),
-		"Re-run with --repair-jetbrains-gateway to run it without a prompt.")
-}
-
-func runJetBrainsGatewayRepair(ctx core.Context, repair jetBrainsGatewayDoctorRepair) (bool, error) {
-	if _, err := fmt.Fprintf(ctx.Stdout, "Running: Clear cached JetBrains Gateway backend metadata\n"); err != nil {
-		return false, err
-	}
-	if _, err := fmt.Fprintf(ctx.Stdout, "Cached backend path: %s\n", repair.idePath); err != nil {
-		return false, err
-	}
-	if ctx.DryRun {
-		_, err := fmt.Fprintf(ctx.Stdout, "Would clear latest used IDE metadata in %s\n", repair.optionsDir)
-		return true, err
-	}
-	changed, err := jetbrainsconfig.ClearRecentProjectLatestUsedIDE(repair.optionsDir, repair.configID, repair.projectPath)
-	if err != nil {
-		return false, err
-	}
-	if !changed {
-		_, err := fmt.Fprintln(ctx.Stdout, "No JetBrains Gateway metadata changed.")
-		return true, err
-	}
-	_, err = fmt.Fprintln(ctx.Stdout, "Cleared cached JetBrains Gateway backend metadata. Open IntelliJ again to let Gateway select or redeploy the backend.")
-	return true, err
-}
-
-func jetBrainsGatewayDoctorRepairForResult(result config.OpenResult) (jetBrainsGatewayDoctorRepair, bool, error) {
-	optionsDir, err := shared.ResolveIntelliJOptionsDir(shared.CurrentHostOS())
-	if err != nil {
-		return jetBrainsGatewayDoctorRepair{}, false, nil
-	}
-	info := open.SSHConnectionInfoForResult(result)
-	configID := jetbrainsconfig.StableConfigID(info.HostAlias)
-	projectPath := strings.TrimSpace(info.WorkspacePath)
-	recent, found, err := jetbrainsconfig.FindRecentProject(optionsDir, configID, projectPath)
-	if err != nil {
-		return jetBrainsGatewayDoctorRepair{}, false, err
-	}
-	idePath := strings.TrimSpace(recent.LatestUsedIDE.PathToIDE)
-	if !found || idePath == "" {
-		return jetBrainsGatewayDoctorRepair{}, false, nil
-	}
-	return jetBrainsGatewayDoctorRepair{
-		optionsDir:  optionsDir,
-		configID:    configID,
-		projectPath: projectPath,
-		idePath:     idePath,
-	}, true, nil
-}
-
-func doctorOnlySelectedJetBrainsGatewayRepair(options doctorOptions) bool {
-	return options.repairJetBrainsGateway && !options.pruneImages && !options.pruneBuildCache && !options.pruneContainers
-}
-
 func selectedDoctorActions(ctx core.Context, promptRunner shared.PromptRunner, result config.OpenResult, options doctorOptions, dryRun bool) ([]doctor.DoctorAction, error) {
 	selected := make([]doctor.DoctorAction, 0, 3)
 	if options.pruneImages {
@@ -731,104 +641,6 @@ func writeOptionalDoctorPromptsSkipped(ctx core.Context, result config.OpenResul
 	}
 	_, err := fmt.Fprintln(ctx.Stdout, "Pass --prune-images, --prune-build-cache, or --prune-containers to run one explicitly.")
 	return err
-}
-
-func runDoctorInRuntime(ctx core.Context, promptRunner shared.PromptRunner, options doctorOptions) error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	// --sync-config short-circuits before remote-init: config drift is more
-	// fundamental (a wrong type mis-drives everything downstream), and gating it
-	// here leaves plain in-pod `erun doctor` output byte-for-byte unchanged.
-	if options.syncConfig {
-		return runRuntimeConfigSync(ctx, promptRunner, options, doctor.ResolveRuntimeConfigHome(homeDir))
-	}
-	inspection, err := doctor.InspectRemoteInit(homeDir, os.Getenv)
-	if err != nil {
-		return err
-	}
-	if err := doctor.WriteRemoteInitInspectionReport(ctx, inspection); err != nil {
-		return err
-	}
-	if handled, err := writeRemoteInitShortCircuit(ctx, inspection); handled || err != nil {
-		return err
-	}
-	proceed, err := confirmRemoteInitFinish(ctx, promptRunner, options)
-	if err != nil || !proceed {
-		return err
-	}
-	updated, err := doctor.RunRemoteInitFinish(ctx, inspection, doctor.RemoteInitFinishParams{
-		HomeDir:            homeDir,
-		RepositoryURL:      options.remoteRepositoryURL,
-		CodeCommitSSHKeyID: options.codeCommitSSHKeyID,
-		Sleep:              time.Sleep,
-	}, remoteInitPromptFunc(promptRunner))
-	if err != nil {
-		return err
-	}
-	return writeRemoteInitFinishReport(ctx, updated)
-}
-
-func writeRemoteInitShortCircuit(ctx core.Context, inspection doctor.RemoteInitInspection) (bool, error) {
-	if inspection.Complete() {
-		_, err := fmt.Fprintln(ctx.Stdout, "Remote init is complete; nothing to finish.")
-		return true, err
-	}
-	if len(inspection.MissingItems()) == 0 {
-		_, err := fmt.Fprintln(ctx.Stdout, "No missing remote-init artifacts detected, but the bootstrap marker is incomplete. Re-run `erun init --remote` from your local machine to refresh the marker.")
-		return true, err
-	}
-	return false, nil
-}
-
-func confirmRemoteInitFinish(ctx core.Context, promptRunner shared.PromptRunner, options doctorOptions) (bool, error) {
-	if options.finishRemoteInit {
-		return true, nil
-	}
-	if ctx.DryRun || promptRunner == nil {
-		_, err := fmt.Fprintln(ctx.Stdout, "Run `erun doctor --finish-remote-init` inside this pod to finish the missing steps.")
-		return false, err
-	}
-	return doctorConfirm(ctx, promptRunner, "Finish missing remote-init steps now",
-		"Re-run with --finish-remote-init to run it without a prompt.")
-}
-
-func remoteInitPromptFunc(promptRunner shared.PromptRunner) doctor.RemoteInitFinishPrompt {
-	return func(label string) (string, error) {
-		if promptRunner == nil {
-			return "", errors.New("interactive prompt is unavailable; pass --remote-repository-url and --codecommit-ssh-key-id when applicable")
-		}
-		return doctorRemoteInitPrompt(promptRunner, label)
-	}
-}
-
-func writeRemoteInitFinishReport(ctx core.Context, updated doctor.RemoteInitInspection) error {
-	if ctx.DryRun {
-		_, err := fmt.Fprintln(ctx.Stdout, "Dry-run: would finish remote init by running the steps traced above.")
-		return err
-	}
-	if _, err := fmt.Fprintln(ctx.Stdout, "Remote init finished."); err != nil {
-		return err
-	}
-	return doctor.WriteRemoteInitInspectionReport(ctx, updated)
-}
-
-func doctorRemoteInitPrompt(run shared.PromptRunner, label string) (string, error) {
-	prompt := promptui.Prompt{
-		Label: label,
-		Validate: func(input string) error {
-			if strings.TrimSpace(input) == "" {
-				return fmt.Errorf("%s is required", label)
-			}
-			return nil
-		},
-	}
-	result, err := run(prompt)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(result), nil
 }
 
 func writeDoctorCommandOutput(ctx core.Context, stdout, stderr string) error {

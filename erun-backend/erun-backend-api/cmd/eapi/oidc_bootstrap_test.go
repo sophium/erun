@@ -144,7 +144,9 @@ func (c *fakeCore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"id":"p1"}`))
 	default:
 		c.nextID++
-		_ = json.NewEncoder(w).Encode(map[string]string{"clientId": "cid-" + strconv.Itoa(c.nextID)})
+		if err := json.NewEncoder(w).Encode(map[string]string{"clientId": "cid-" + strconv.Itoa(c.nextID)}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 	}
 }
 

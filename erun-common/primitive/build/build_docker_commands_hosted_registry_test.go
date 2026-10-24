@@ -123,17 +123,20 @@ func TestDockerRegistryLoginWithHostedRegistryFallsThroughForOtherRegistries(t *
 }
 
 func TestIsHostedRegistry(t *testing.T) {
-	cases := map[string]bool{
-		config.HostedRegistryHost:    true,
-		"REGISTRY.ERUNPAAS.COM":      true,
-		" registry.erunpaas.com ":    true,
-		"registry.erunpaas.com/acme": false,
-		"ghcr.io":                    false,
-		"":                           false,
+	cases := []struct {
+		registry string
+		want     bool
+	}{
+		{config.HostedRegistryHost, true},
+		{"REGISTRY.ERUNPAAS.COM", true},
+		{" registry.erunpaas.com ", true},
+		{"registry.erunpaas.com/acme", false},
+		{"ghcr.io", false},
+		{"", false},
 	}
-	for registry, want := range cases {
-		if got := isHostedRegistry(registry); got != want {
-			t.Errorf("isHostedRegistry(%q) = %v, want %v", registry, got, want)
+	for _, tc := range cases {
+		if got := isHostedRegistry(tc.registry); got != tc.want {
+			t.Errorf("isHostedRegistry(%q) = %v, want %v", tc.registry, got, tc.want)
 		}
 	}
 }

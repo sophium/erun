@@ -29,7 +29,9 @@ FROM build AS test
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/golangci-lint \
+    go mod tidy -diff && \
     go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.2.2 run ./... && \
+    go run github.com/fe3dback/go-arch-lint@v1.19.0 check --project-path . && \
     go test -count=1 ./...
 
 # Cross-compiles with CGO disabled, so the compiler runs natively on the build

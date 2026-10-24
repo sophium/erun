@@ -41,14 +41,15 @@ func TestJobPresenceLeaseRecordsInitiator(t *testing.T) {
 		t.Fatalf("load leases: %v", err)
 	}
 	leaseID := environmentJobLeaseID(id)
-	var found *activity.EnvironmentActivityLease
-	for i := range leases {
-		if leases[i].ID == leaseID {
-			found = &leases[i]
+	var found activity.EnvironmentActivityLease
+	var ok bool
+	for _, lease := range leases {
+		if lease.ID == leaseID {
+			found, ok = lease, true
 			break
 		}
 	}
-	if found == nil {
+	if !ok {
 		t.Fatalf("job's own presence lease %q not found among %+v", leaseID, leases)
 	}
 	if found.Holder.Orchestrator != "erun-devops" {

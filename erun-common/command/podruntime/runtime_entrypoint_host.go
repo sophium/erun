@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -35,12 +34,12 @@ func writeRuntimeKubeconfig(_ core.Context, boot runtimeBoot, _ *runtimeSupervis
 	caFile := filepath.Join(boot.serviceAccountDir, "ca.crt")
 	namespaceFile := filepath.Join(boot.serviceAccountDir, "namespace")
 	for _, required := range []string{tokenFile, caFile, namespaceFile} {
-		if _, err := os.Stat(required); err != nil {
+		if !pathExists(required) {
 			return nil // no mounted service account: nothing to point at
 		}
 	}
-	namespace, err := os.ReadFile(namespaceFile)
-	if err != nil {
+	namespace, ok := readFileIfReadable(namespaceFile)
+	if !ok {
 		return nil
 	}
 	server := "https://" + boot.get("KUBERNETES_SERVICE_HOST") + ":" + boot.getOr("KUBERNETES_SERVICE_PORT_HTTPS", "443")
@@ -74,10 +73,13 @@ func describeRuntimeSSHPermissions(boot runtimeBoot) string {
 // directly in ~/.ssh is treated as private.
 func normalizeRuntimeSSHPermissions(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	dir := boot.path(".ssh")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
+	if entries, err := os.ReadDir(dir); err == nil {
+		restrictRuntimeSSHModes(dir, entries)
 	}
+	return nil
+}
+
+func restrictRuntimeSSHModes(dir string, entries []os.DirEntry) {
 	_ = os.Chmod(dir, 0o700)
 	for _, entry := range entries {
 		if !entry.Type().IsRegular() {
@@ -89,7 +91,6 @@ func normalizeRuntimeSSHPermissions(_ core.Context, boot runtimeBoot, _ *runtime
 		}
 		_ = os.Chmod(filepath.Join(dir, entry.Name()), mode)
 	}
-	return nil
 }
 
 func describeRuntimeOutputsDir(boot runtimeBoot) string {
@@ -117,7 +118,7 @@ func describeRuntimeGitSafeDirectory(boot runtimeBoot) string {
 // init reaps each zombie it does not own, and a child it reaps before os/exec
 // waits for it reports "no child processes" instead of its exit status.
 func ensureRuntimeGitSafeDirectory(_ core.Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
-	if _, err := exec.LookPath("git"); err != nil {
+	if !onPath("git") {
 		return nil
 	}
 	repoDir := boot.repoDir()
@@ -159,20 +160,23 @@ func ensureRuntimeSource(ctx core.Context, boot runtimeBoot, supervisor *runtime
 	if err := os.MkdirAll(filepath.Dir(repoDir), 0o755); err != nil {
 		return err
 	}
-	if err := supervisor.run(core.Command("git", "clone", url, repoDir)); err != nil {
+	if err := supervisor.run(core.Command("git", "clone", url, repoDir)); err == nil {
+		checkOutRuntimeSourceRef(ctx, boot.get("ERUN_REPO_REF"), repoDir, supervisor)
+	} else {
 		ctx.Info("erun: failed to clone runtime source from " + url + "; continuing without mounted source")
-		return nil
 	}
-	ref := boot.get("ERUN_REPO_REF")
+	return nil
+}
+
+func checkOutRuntimeSourceRef(ctx core.Context, ref, repoDir string, supervisor *runtimeSupervisor) {
 	if ref == "" {
-		return nil
+		return
 	}
 	checkout := core.Command("git", "checkout", "-q", ref)
 	checkout.Dir = repoDir
 	if err := supervisor.run(checkout); err != nil {
 		ctx.Info("erun: could not check out " + ref + "; runtime source left at the default branch")
 	}
-	return nil
 }
 
 func describeRuntimeReleaseLink(boot runtimeBoot) string {

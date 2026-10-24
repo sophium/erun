@@ -35,37 +35,41 @@ func RunCloudInitAWSCommand(ctx core.Context, store cloud.CloudStore, promptRunn
 		return err
 	}
 	if ctx.DryRun {
-		if strings.TrimSpace(params.Profile) == "" {
-			traceAWSConfigureSetPlan(ctx, params, "erun-sso-<timestamp>")
-		}
-		args := []string{"sso", "login"}
-		if strings.TrimSpace(params.Profile) != "" {
-			args = append(args, "--profile", strings.TrimSpace(params.Profile))
-		} else {
-			args = append(args, "--profile", "erun-sso-<timestamp>")
-		}
-		if !params.SkipLogin {
-			ctx.TraceCommand("", "aws", args...)
-		}
-		identityArgs := []string{"sts", "get-caller-identity", "--output", "json"}
-		if strings.TrimSpace(params.Profile) != "" {
-			identityArgs = append(identityArgs, "--profile", strings.TrimSpace(params.Profile))
-		} else {
-			identityArgs = append(identityArgs, "--profile", "erun-sso-<timestamp>")
-		}
-		ctx.TraceCommand("", "aws", identityArgs...)
-		traceAWSEnableOIDCCommand(ctx, strings.TrimSpace(params.Profile))
-		traceAWSBearerTokenPlan(ctx, params, configpkg.CloudProviderBearerAudience)
-		ctx.Trace("write erun root cloud provider alias")
-		ctx.Trace("write cloud provider OIDC issuer resolved from AWS web identity token")
-		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: AWS cloud provider initialization planned.")
-		return err
+		return traceAWSCloudInitDryRun(ctx, params)
 	}
 	provider, err := cloud.InitAWSCloudProvider(ctx, store, params, deps)
 	if err != nil {
 		return err
 	}
 	return WriteCloudProviderSaved(ctx, provider)
+}
+
+func traceAWSCloudInitDryRun(ctx core.Context, params cloud.InitAWSCloudProviderParams) error {
+	if strings.TrimSpace(params.Profile) == "" {
+		traceAWSConfigureSetPlan(ctx, params, "erun-sso-<timestamp>")
+	}
+	args := []string{"sso", "login"}
+	if strings.TrimSpace(params.Profile) != "" {
+		args = append(args, "--profile", strings.TrimSpace(params.Profile))
+	} else {
+		args = append(args, "--profile", "erun-sso-<timestamp>")
+	}
+	if !params.SkipLogin {
+		ctx.TraceCommand("", "aws", args...)
+	}
+	identityArgs := []string{"sts", "get-caller-identity", "--output", "json"}
+	if strings.TrimSpace(params.Profile) != "" {
+		identityArgs = append(identityArgs, "--profile", strings.TrimSpace(params.Profile))
+	} else {
+		identityArgs = append(identityArgs, "--profile", "erun-sso-<timestamp>")
+	}
+	ctx.TraceCommand("", "aws", identityArgs...)
+	traceAWSEnableOIDCCommand(ctx, strings.TrimSpace(params.Profile))
+	traceAWSBearerTokenPlan(ctx, params, configpkg.CloudProviderBearerAudience)
+	ctx.Trace("write erun root cloud provider alias")
+	ctx.Trace("write cloud provider OIDC issuer resolved from AWS web identity token")
+	_, err := fmt.Fprintln(ctx.Stdout, "Dry run: AWS cloud provider initialization planned.")
+	return err
 }
 
 func promptAWSInitParams(promptRunner PromptRunner, params cloud.InitAWSCloudProviderParams) (cloud.InitAWSCloudProviderParams, error) {

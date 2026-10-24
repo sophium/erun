@@ -96,7 +96,8 @@ func (f *fakeManagementAPI) serve(w http.ResponseWriter, r *http.Request) {
 func (f *fakeManagementAPI) createProject(w http.ResponseWriter, body map[string]any) {
 	f.nextID++
 	id := fmt.Sprintf("id%d", f.nextID)
-	f.projects = append(f.projects, fakeProject{ID: id, Name: body["name"].(string)})
+	name, _ := body["name"].(string)
+	f.projects = append(f.projects, fakeProject{ID: id, Name: name})
 	writeJSON(w, map[string]any{"id": id})
 }
 
@@ -111,7 +112,7 @@ func (f *fakeManagementAPI) searchApps(w http.ResponseWriter) {
 func (f *fakeManagementAPI) createApp(w http.ResponseWriter, body map[string]any) {
 	f.nextID++
 	id := fmt.Sprintf("id%d", f.nextID)
-	name := body["name"].(string)
+	name, _ := body["name"].(string)
 	delete(body, "name")
 	body["clientId"] = "cid-" + id
 	f.apps = append(f.apps, &fakeOIDCApp{ID: id, Name: name, Config: body})
@@ -168,7 +169,9 @@ func (f *fakeManagementAPI) appNamed(name string) *fakeOIDCApp {
 
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(value)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 // seedApp registers a pre-existing project and app, the shape a real platform
@@ -251,7 +254,10 @@ func stringList(t *testing.T, value any) []string {
 	if value == nil {
 		return nil
 	}
-	encoded, _ := json.Marshal(value)
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("encode %v: %v", value, err)
+	}
 	var out []string
 	if err := json.Unmarshal(encoded, &out); err != nil {
 		t.Fatalf("decode %v: %v", value, err)

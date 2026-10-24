@@ -255,7 +255,7 @@ echo "/dev/fake       419430400 314572800  104857600     75% `+root+`"`))
 
 	logs := &strings.Builder{}
 	if err := awaitDiskHeadroomPreflight(t, core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)},
-		func(ctx core.Context) error { return EnsureBuildDiskHeadroom(ctx) }); err != nil {
+		EnsureBuildDiskHeadroom); err != nil {
 		t.Fatalf("a build must proceed on a healthy disk, got %v", err)
 	}
 

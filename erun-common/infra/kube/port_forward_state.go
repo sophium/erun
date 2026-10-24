@@ -314,7 +314,7 @@ func readPortForwardStateFile(path string) (PortForwardState, bool) {
 // not fail on a file it cannot inspect, which is the behaviour the port-forward
 // state removal has always had.
 func removeFileIfPresent(ctx core.Context, path string) error {
-	if _, err := os.Stat(path); err != nil {
+	if !pathStats(path) {
 		return nil
 	}
 	ctx.TraceCommand("", "rm", "-f", path)
@@ -325,6 +325,11 @@ func removeFileIfPresent(ctx core.Context, path string) error {
 		return err
 	}
 	return nil
+}
+
+func pathStats(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // LoadPortForwardState reads a forward's state. A missing file is reported as

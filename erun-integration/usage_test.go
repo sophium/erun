@@ -13,556 +13,588 @@ import (
 
 func TestUsage(t *testing.T) {
 	t.Parallel()
-	t.Run("help", func(t *testing.T) {
-		setup := env.New(t)
-		result := erun.Run(t, []string{"usage", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "usage/help", normalize.Apply(result.Combined))
-	})
+	t.Run("help", testUsageHelp)
 
-	t.Run("dry_run", func(t *testing.T) {
-		// --dry-run must trace the kubectl exec into the erun-devops container
-		// and the reading script it would run, at the default 1s CPU sample
-		// interval, without executing anything. team/dev is build-capable
-		// (carries the erun-dind sidecar), so a second traced exec into that
-		// container must appear too -- per erun-integration/AGENTS.md's
-		// dry-run contract, every action this command would take needs its
-		// own trace line, and reading the sidecar is now one of them.
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"usage", "--dry-run", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "usage/dry_run", normalize.Apply(result.Combined))
-	})
+	t.Run("dry_run", testUsageDryRun)
 
-	t.Run("dry_run_custom_interval", func(t *testing.T) {
-		// --interval changes the sample window baked into the traced script's
-		// `sleep` line — the golden pins the flag actually reaching the plan,
-		// for both the runtime container and the dind sidecar exec.
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"usage", "--interval", "2.5", "--dry-run", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "usage/dry_run_custom_interval", normalize.Apply(result.Combined))
-	})
+	t.Run("dry_run_custom_interval", testUsageDryRunCustomInterval)
 
-	t.Run("dry_run_missing_tenant", func(t *testing.T) {
-		// No tenant configured at all: resolution fails before any kubectl call
-		// is even planned, matching observe's equivalent scenario.
-		setup := env.New(t)
-		result := erun.Run(t, []string{"usage", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected a non-zero exit with no tenant configured, got 0: %s", result.Combined)
-		}
-		golden.Equal(t, "usage/dry_run_missing_tenant", normalize.Apply(result.Combined))
-	})
+	t.Run("dry_run_missing_tenant", testUsageDryRunMissingTenant)
 
-	// real_run_reports_cgroup_v2_usage is the scenario a metrics-server-based
-	// design gets wrong: the reading has to come from inside the container's
-	// own cgroup v2 accounting, not from a cluster add-on. The dry-run trace
-	// alone cannot prove parsing correctness, so this stubs `kubectl exec` to
-	// answer with a canned reading — the decision input dry-run cannot supply,
-	// per erun-integration/AGENTS.md's "stubs as dry-run decision input" — and
-	// asserts on the parsed JSON.
-	t.Run("real_run_reports_cgroup_v2_usage", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		stubs := setup.Cwd + "/stubs"
-		stubUsageKubectlExec(t, stubs, []string{
+	t.Run("real_run_reports_cgroup_v2_usage", testUsageRealRunReportsCgroupV2Usage)
+
+	t.Run("real_run_reports_the_scheduler_request", testUsageRealRunReportsTheSchedulerRequest)
+
+	t.Run("real_run_runtime_env_omits_builds_caveat", testUsageRealRunRuntimeEnvOmitsBuildsCaveat)
+
+	t.Run("real_run_local_agent_env_states_the_builds_caveat", testUsageRealRunLocalAgentEnvStatesTheBuildsCaveat)
+
+	t.Run("real_run_warns_when_the_sidecars_throttling_is_material", testUsageRealRunWarnsWhenTheSidecarsThrottlingIsMaterial)
+
+	t.Run("real_run_cgroup_v1_reports_unavailable_not_an_error", testUsageRealRunCgroupV1ReportsUnavailableNotAnError)
+
+	t.Run("real_run_warns_near_the_memory_limit", testUsageRealRunWarnsNearTheMemoryLimit)
+
+	t.Run("real_run_disk_warning_names_the_node_shared_scope", testUsageRealRunDiskWarningNamesTheNodeSharedScope)
+
+	t.Run("real_run_unreadable_peak_renders_unavailable_not_zero", testUsageRealRunUnreadablePeakRendersUnavailableNotZero)
+
+	t.Run("real_run_unreadable_peak_json_omits_peak_fields", testUsageRealRunUnreadablePeakJSONOmitsPeakFields)
+
+	t.Run("real_run_dind_sidecar_usage_reported_separately", testUsageRealRunDinDSidecarUsageReportedSeparately)
+
+	t.Run("real_run_genuine_zero_peak_renders_unchanged", testUsageRealRunGenuineZeroPeakRendersUnchanged)
+}
+
+func testUsageHelp(t *testing.T) {
+	setup := env.New(t)
+	result := erun.Run(t, []string{"usage", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	golden.Equal(t, "usage/help", normalize.Apply(result.Combined))
+}
+
+func testUsageDryRun(t *testing.T) {
+	// --dry-run must trace the kubectl exec into the erun-devops container
+	// and the reading script it would run, at the default 1s CPU sample
+	// interval, without executing anything. team/dev is build-capable
+	// (carries the erun-dind sidecar), so a second traced exec into that
+	// container must appear too -- per erun-integration/AGENTS.md's
+	// dry-run contract, every action this command would take needs its
+	// own trace line, and reading the sidecar is now one of them.
+	setup := env.New(t)
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	result := erun.Run(t, []string{"usage", "--dry-run", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	golden.Equal(t, "usage/dry_run", normalize.Apply(result.Combined))
+}
+
+func testUsageDryRunCustomInterval(t *testing.T) {
+	// --interval changes the sample window baked into the traced script's
+	// `sleep` line — the golden pins the flag actually reaching the plan,
+	// for both the runtime container and the dind sidecar exec.
+	setup := env.New(t)
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	result := erun.Run(t, []string{"usage", "--interval", "2.5", "--dry-run", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	golden.Equal(t, "usage/dry_run_custom_interval", normalize.Apply(result.Combined))
+}
+
+func testUsageDryRunMissingTenant(t *testing.T) {
+	// No tenant configured at all: resolution fails before any kubectl call
+	// is even planned, matching observe's equivalent scenario.
+	setup := env.New(t)
+	result := erun.Run(t, []string{"usage", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode == 0 {
+		t.Fatalf("expected a non-zero exit with no tenant configured, got 0: %s", result.Combined)
+	}
+	golden.Equal(t, "usage/dry_run_missing_tenant", normalize.Apply(result.Combined))
+}
+
+// real_run_reports_cgroup_v2_usage is the scenario a metrics-server-based
+// design gets wrong: the reading has to come from inside the container's
+// own cgroup v2 accounting, not from a cluster add-on. The dry-run trace
+// alone cannot prove parsing correctness, so this stubs `kubectl exec` to
+// answer with a canned reading — the decision input dry-run cannot supply,
+// per erun-integration/AGENTS.md's "stubs as dry-run decision input" — and
+// asserts on the parsed JSON.
+func testUsageRealRunReportsCgroupV2Usage(t *testing.T) {
+	setup := env.New(t)
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	stubs := setup.Cwd + "/stubs"
+	stubUsageKubectlExec(t, stubs, []string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=413589504",
+		"memory_max=2147483648",
+		"memory_peak=1027301376",
+		"memory_oom_kill=0",
+		"cpu_max=100000 100000",
+		"cpu_usage_before=581511501",
+		"cpu_usage_after=581611501",
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"cpu_periods=376556",
+		"cpu_throttled_periods=425",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+		"disk_own_used_kb=44040192",
+	})
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+	result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	// The watched mount is normalize.Apply's own <HOME> safety-net rule
+	// (any /home/<user> path, not just the test's actual HOME), so the
+	// snapshot cannot distinguish "/home/erun" from any other home
+	// directory. Assert the literal, un-normalized value once here.
+	if !strings.Contains(result.Combined, `"mount": "/home/erun"`) {
+		t.Fatalf("expected the watched mount to be the literal /home/erun, got:\n%s", result.Combined)
+	}
+	// nr_periods/nr_throttled are the CPU-starvation signal
+	// RuntimeUsageHistory derives its throttle ratio from, so a consumer
+	// can read the ratio rather than take a warning's word for it. These
+	// counters are cumulative for the container's lifetime, and 425 of
+	// 376,556 is 0.11% -- a residue, not starvation -- which is why this
+	// reading carries no build-throttling warning while the materially
+	// throttled scenario below does.
+	if !strings.Contains(result.Combined, `"periods": 376556`) || !strings.Contains(result.Combined, `"throttledPeriods": 425`) {
+		t.Fatalf("expected cpu.periods/throttledPeriods parsed from cpu.stat, got:\n%s", result.Combined)
+	}
+	// nodeShared and ownUsedBytes: the mount's total/used/percent are the
+	// node's, not this environment's, and ownUsedBytes is the figure
+	// scoped to this environment alone.
+	if !strings.Contains(result.Combined, `"nodeShared": true`) || !strings.Contains(result.Combined, `"ownUsedBytes": 45097156608`) {
+		t.Fatalf("expected nodeShared and ownUsedBytes parsed from du, got:\n%s", result.Combined)
+	}
+	golden.Equal(t, "usage/real_run_reports_cgroup_v2_usage", normalize.Apply(result.Combined))
+}
+
+// real_run_reports_the_scheduler_request is the scenario this reading
+// exists for: every sizing surface reported only the cgroup *limit*, which
+// reserves nothing, so an environment capped at 27Gi that reserves 1Gi read
+// as if it held 27Gi. The request is not a cgroup file -- it lives in the
+// pod spec alone -- so this stubs `kubectl get pods -o json` (the decision
+// input dry-run cannot supply) and asserts the parsed reading and the text
+// an operator reads it from.
+func testUsageRealRunReportsTheSchedulerRequest(t *testing.T) {
+	setup := env.New(t)
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	stubs := setup.Cwd + "/stubs"
+	stubUsageKubectlExec(t, stubs, []string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=413589504",
+		"memory_max=28991029248",
+		"memory_peak=1027301376",
+		"memory_oom_kill=0",
+		"cpu_max=1400000 100000",
+		"cpu_usage_before=581511501",
+		"cpu_usage_after=581611501",
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"cpu_periods=376556",
+		"cpu_throttled_periods=425",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+		"disk_own_used_kb=44040192",
+	})
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+	jsonRun := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	if jsonRun.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", jsonRun.ExitCode, jsonRun.Combined)
+	}
+	// 0.25 CPU declared in cores on the runtime container and 250m declared
+	// in millicores on the sidecar land on the same number, and the pod's
+	// own reservation is the two summed -- not the sum of the limits the
+	// same JSON carries beside them.
+	for _, want := range []string{
+		`"cpuMilli": 250`,
+		`"memoryBytes": 1073741824`,
+		`"cpuMilli": 500`,
+		`"memoryBytes": 2147483648`,
+	} {
+		if !strings.Contains(jsonRun.Combined, want) {
+			t.Fatalf("expected %s parsed from the pod spec, got:\n%s", want, jsonRun.Combined)
+		}
+	}
+	textRun := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	if textRun.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", textRun.ExitCode, textRun.Combined)
+	}
+	golden.Equal(t, "usage/real_run_reports_the_scheduler_request", normalize.Apply(textRun.Combined))
+}
+
+// real_run_runtime_env_omits_builds_caveat is the negative case: a
+// runtime-type env has no erun-dind sidecar (every image build for it
+// happens elsewhere, never in this pod), so the reading is the whole
+// story and must not carry the "excludes builds" caveat that a
+// build-capable env's own reading (the scenario above) does carry. Locks
+// EnvironmentType.UsesDindSidecar's runtime=false branch end-to-end
+// through the real command, not just the unit-level predicate.
+func testUsageRealRunRuntimeEnvOmitsBuildsCaveat(t *testing.T) {
+	setup := env.New(t)
+	fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
+	stubs := setup.Cwd + "/stubs"
+	stubUsageKubectlExec(t, stubs, []string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=413589504",
+		"memory_max=2147483648",
+		"memory_peak=1027301376",
+		"memory_oom_kill=0",
+		"cpu_max=100000 100000",
+		"cpu_usage_before=581511501",
+		"cpu_usage_after=581611501",
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"cpu_periods=376556",
+		"cpu_throttled_periods=425",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+		"disk_own_used_kb=44040192",
+	})
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+	result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if strings.Contains(result.Combined, "excludesBuilds") {
+		t.Fatalf("a runtime-type env has no dind sidecar and must not report excludesBuilds, got:\n%s", result.Combined)
+	}
+	golden.Equal(t, "usage/real_run_runtime_env_omits_builds_caveat", normalize.Apply(result.Combined))
+}
+
+// real_run_local_agent_env_states_the_builds_caveat is the positive
+// sibling: a build-capable env (local-agent/remote-agent) carries the
+// erun-dind sidecar every image build actually runs in, a separate cgroup
+// this reading cannot see, so the JSON output must say so rather than let
+// a busy build read as an idle environment.
+func testUsageRealRunLocalAgentEnvStatesTheBuildsCaveat(t *testing.T) {
+	setup := env.New(t)
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	stubs := setup.Cwd + "/stubs"
+	stubUsageKubectlExec(t, stubs, []string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=413589504",
+		"memory_max=2147483648",
+		"memory_peak=1027301376",
+		"memory_oom_kill=0",
+		"cpu_max=100000 100000",
+		"cpu_usage_before=581511501",
+		"cpu_usage_after=581611501",
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"cpu_periods=376556",
+		"cpu_throttled_periods=425",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+		"disk_own_used_kb=44040192",
+	})
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+	result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if !strings.Contains(result.Combined, "erun-dind sidecar") {
+		t.Fatalf("a build-capable env must state the builds-excluded caveat, got:\n%s", result.Combined)
+	}
+	// The Disk line names the node-shared scope, and the own-usage line
+	// beneath it is the figure scoped to this environment alone.
+	if !strings.Contains(result.Combined, "Disk (node, shared):") || !strings.Contains(result.Combined, "this environment's own usage:") {
+		t.Fatalf("expected the node-shared disk label and the own-usage line, got:\n%s", result.Combined)
+	}
+	golden.Equal(t, "usage/real_run_local_agent_env_states_the_builds_caveat", normalize.Apply(result.Combined))
+}
+
+// real_run_warns_when_the_sidecars_throttling_is_material is the firing
+// half of the same verdict, and the reason the warning exists at all: a
+// sidecar whose own cap is genuinely binding is the starvation that turns
+// a lint step into a timeout, and it must still be named. The sidecar's
+// counters here are materially throttled -- 4,000 of its 20,000 periods
+// -- while the runtime container beside it stays at the immaterial 0.11%
+// the scenario above carries, so the two readings differ in the one way
+// that decides the verdict rather than in every way at once.
+func testUsageRealRunWarnsWhenTheSidecarsThrottlingIsMaterial(t *testing.T) {
+	setup := env.New(t)
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	stubs := setup.Cwd + "/stubs"
+	stubUsageKubectlExecPerContainer(t, stubs,
+		[]string{
 			"cgroup_type=cgroup2fs",
-			"memory_current=413589504",
-			"memory_max=2147483648",
-			"memory_peak=1027301376",
+			"memory_current=104857600",
+			"memory_max=24696061952",
+			"memory_peak=104857600",
 			"memory_oom_kill=0",
-			"cpu_max=100000 100000",
-			"cpu_usage_before=581511501",
-			"cpu_usage_after=581611501",
+			"cpu_max=1200000 100000",
+			"cpu_usage_before=1000000",
+			"cpu_usage_after=1003000",
 			"cpu_time_before_ns=1000000000",
 			"cpu_time_after_ns=2000000000",
 			"cpu_periods=376556",
 			"cpu_throttled_periods=425",
 			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
 			"disk_own_used_kb=44040192",
-		})
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
-		result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		// The watched mount is normalize.Apply's own <HOME> safety-net rule
-		// (any /home/<user> path, not just the test's actual HOME), so the
-		// snapshot cannot distinguish "/home/erun" from any other home
-		// directory. Assert the literal, un-normalized value once here.
-		if !strings.Contains(result.Combined, `"mount": "/home/erun"`) {
-			t.Fatalf("expected the watched mount to be the literal /home/erun, got:\n%s", result.Combined)
-		}
-		// nr_periods/nr_throttled are the CPU-starvation signal
-		// RuntimeUsageHistory derives its throttle ratio from, so a consumer
-		// can read the ratio rather than take a warning's word for it. These
-		// counters are cumulative for the container's lifetime, and 425 of
-		// 376,556 is 0.11% -- a residue, not starvation -- which is why this
-		// reading carries no build-throttling warning while the materially
-		// throttled scenario below does.
-		if !strings.Contains(result.Combined, `"periods": 376556`) || !strings.Contains(result.Combined, `"throttledPeriods": 425`) {
-			t.Fatalf("expected cpu.periods/throttledPeriods parsed from cpu.stat, got:\n%s", result.Combined)
-		}
-		// nodeShared and ownUsedBytes: the mount's total/used/percent are the
-		// node's, not this environment's, and ownUsedBytes is the figure
-		// scoped to this environment alone.
-		if !strings.Contains(result.Combined, `"nodeShared": true`) || !strings.Contains(result.Combined, `"ownUsedBytes": 45097156608`) {
-			t.Fatalf("expected nodeShared and ownUsedBytes parsed from du, got:\n%s", result.Combined)
-		}
-		golden.Equal(t, "usage/real_run_reports_cgroup_v2_usage", normalize.Apply(result.Combined))
-	})
-
-	// real_run_reports_the_scheduler_request is the scenario this reading
-	// exists for: every sizing surface reported only the cgroup *limit*, which
-	// reserves nothing, so an environment capped at 27Gi that reserves 1Gi read
-	// as if it held 27Gi. The request is not a cgroup file -- it lives in the
-	// pod spec alone -- so this stubs `kubectl get pods -o json` (the decision
-	// input dry-run cannot supply) and asserts the parsed reading and the text
-	// an operator reads it from.
-	t.Run("real_run_reports_the_scheduler_request", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		stubs := setup.Cwd + "/stubs"
-		stubUsageKubectlExec(t, stubs, []string{
+		},
+		[]string{
 			"cgroup_type=cgroup2fs",
-			"memory_current=413589504",
-			"memory_max=28991029248",
-			"memory_peak=1027301376",
+			"memory_current=2040109465",
+			"memory_max=15032385536",
+			"memory_peak=3435973836",
 			"memory_oom_kill=0",
-			"cpu_max=1400000 100000",
-			"cpu_usage_before=581511501",
-			"cpu_usage_after=581611501",
+			"cpu_max=400000 100000",
+			"cpu_usage_before=1000000",
+			"cpu_usage_after=2900000",
 			"cpu_time_before_ns=1000000000",
 			"cpu_time_after_ns=2000000000",
-			"cpu_periods=376556",
-			"cpu_throttled_periods=425",
+			"cpu_periods=20000",
+			"cpu_throttled_periods=4000",
 			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-			"disk_own_used_kb=44040192",
-		})
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
-		jsonRun := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if jsonRun.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", jsonRun.ExitCode, jsonRun.Combined)
-		}
-		// 0.25 CPU declared in cores on the runtime container and 250m declared
-		// in millicores on the sidecar land on the same number, and the pod's
-		// own reservation is the two summed -- not the sum of the limits the
-		// same JSON carries beside them.
-		for _, want := range []string{
-			`"cpuMilli": 250`,
-			`"memoryBytes": 1073741824`,
-			`"cpuMilli": 500`,
-			`"memoryBytes": 2147483648`,
-		} {
-			if !strings.Contains(jsonRun.Combined, want) {
-				t.Fatalf("expected %s parsed from the pod spec, got:\n%s", want, jsonRun.Combined)
-			}
-		}
-		textRun := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if textRun.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", textRun.ExitCode, textRun.Combined)
-		}
-		golden.Equal(t, "usage/real_run_reports_the_scheduler_request", normalize.Apply(textRun.Combined))
-	})
+		},
+	)
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+	result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if !strings.Contains(result.Combined, "the build was throttled in 4000 of 20000 cgroup periods") {
+		t.Fatalf("a materially throttled sidecar must still be named as starvation, got:\n%s", result.Combined)
+	}
+	golden.Equal(t, "usage/real_run_warns_when_the_sidecars_throttling_is_material", normalize.Apply(result.Combined))
+}
 
-	// real_run_runtime_env_omits_builds_caveat is the negative case: a
-	// runtime-type env has no erun-dind sidecar (every image build for it
-	// happens elsewhere, never in this pod), so the reading is the whole
-	// story and must not carry the "excludes builds" caveat that a
-	// build-capable env's own reading (the scenario above) does carry. Locks
-	// EnvironmentType.UsesDindSidecar's runtime=false branch end-to-end
-	// through the real command, not just the unit-level predicate.
-	t.Run("real_run_runtime_env_omits_builds_caveat", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedRuntimeTenantEnv(t, setup, "team", "prod")
-		stubs := setup.Cwd + "/stubs"
-		stubUsageKubectlExec(t, stubs, []string{
+func testUsageRealRunCgroupV1ReportsUnavailableNotAnError(t *testing.T) {
+	// A cluster whose runtime image predates cgroup v2 (or any host where
+	// /sys/fs/cgroup is not cgroup2fs) must still succeed: CPU and memory
+	// report their own unavailability, matching the fail-soft posture
+	// runtime_resources.go already takes for kubectl-top-less clusters.
+	setup := env.New(t)
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	stubs := setup.Cwd + "/stubs"
+	stubUsageKubectlExec(t, stubs, []string{
+		"cgroup_type=tmpfs",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+	})
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+	result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	// No disk_own_used_kb line was stubbed (e.g. `du`/`timeout` missing or
+	// the walk failed) -- own usage must report unavailable, not a
+	// fabricated zero, independently of cgroup type.
+	if strings.Contains(result.Combined, `"ownUsedBytes"`) || strings.Contains(result.Combined, `"ownUsageObserved"`) {
+		t.Fatalf("an unread own-usage figure must omit both ownUsedBytes and ownUsageObserved, got:\n%s", result.Combined)
+	}
+	golden.Equal(t, "usage/real_run_cgroup_v1_reports_unavailable_not_an_error", normalize.Apply(result.Combined))
+}
+
+// real_run_warns_near_the_memory_limit is the "an agent notices it is
+// heading for an OOM kill before it is killed" case: a reading nobody
+// acts on is decoration, so a threshold crossing must show up as a named
+// warning field rather than requiring the caller to compute the
+// percentage itself.
+func testUsageRealRunWarnsNearTheMemoryLimit(t *testing.T) {
+	setup := env.New(t)
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	stubs := setup.Cwd + "/stubs"
+	stubUsageKubectlExec(t, stubs, []string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=1932735283", // ~90% of 2048Mi
+		"memory_max=2147483648",
+		"memory_peak=2100000000", // ~98% peak: also crosses the peak threshold
+		"memory_oom_kill=1",
+		"cpu_max=100000 100000",
+		"cpu_usage_before=0",
+		"cpu_usage_after=0",
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"disk_workspace=overlay 198234112 99999999 99117056 95% /home/erun",
+		"disk_own_used_kb=10000000",
+	})
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+	result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	golden.Equal(t, "usage/real_run_warns_near_the_memory_limit", normalize.Apply(result.Combined))
+	if !strings.Contains(result.Combined, "\"warnings\"") {
+		t.Fatalf("expected a warnings field in the JSON output, got:\n%s", result.Combined)
+	}
+}
+
+// real_run_disk_warning_names_the_node_shared_scope is the disk sibling of
+// the memory-limit scenario above: the mount's used/total cross the
+// warning threshold, and the warning text must name the node-shared scope
+// so an operator does not clean up an environment that is not the real
+// cause of a shared-node disk pressure warning.
+func testUsageRealRunDiskWarningNamesTheNodeSharedScope(t *testing.T) {
+	setup := env.New(t)
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	stubs := setup.Cwd + "/stubs"
+	stubUsageKubectlExec(t, stubs, []string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=413589504",
+		"memory_max=2147483648",
+		"memory_peak=1027301376",
+		"memory_oom_kill=0",
+		"cpu_max=100000 100000",
+		"cpu_usage_before=0",
+		"cpu_usage_after=0",
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		// used/total = 178410701/198234112 = 90.0%, at the warn threshold.
+		"disk_workspace=overlay 198234112 178410701 19823411 90% /home/erun",
+		"disk_own_used_kb=10000000",
+	})
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+	result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if !strings.Contains(result.Combined, "node disk is at 90%") || !strings.Contains(result.Combined, "shared with every environment on this node") {
+		t.Fatalf("expected the disk warning to name the node-shared scope, got:\n%s", result.Combined)
+	}
+	golden.Equal(t, "usage/real_run_disk_warning_names_the_node_shared_scope", normalize.Apply(result.Combined))
+}
+
+// real_run_unreadable_peak_renders_unavailable_not_zero: an unreadable
+// memory.peak (an older cgroup v2 kernel, or cgroup v1) must render as
+// unavailable, not as a measured "peak 0B" -- the reassuring wrong answer
+// for the least known state.
+func testUsageRealRunUnreadablePeakRendersUnavailableNotZero(t *testing.T) {
+	setup := env.New(t)
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	stubs := setup.Cwd + "/stubs"
+	stubUsageKubectlExec(t, stubs, []string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=413589504",
+		"memory_max=2147483648",
+		"memory_peak=",
+		"memory_oom_kill=0",
+		"cpu_max=100000 100000",
+		"cpu_usage_before=0",
+		"cpu_usage_after=0",
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+	})
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+	result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if strings.Contains(result.Combined, "peak 0B") {
+		t.Fatalf("an unreadable peak must never render as a measured 0B, got:\n%s", result.Combined)
+	}
+	golden.Equal(t, "usage/real_run_unreadable_peak_renders_unavailable_not_zero", normalize.Apply(result.Combined))
+}
+
+// real_run_unreadable_peak_json_omits_peak_fields is the JSON-mode sibling
+// of the scenario above: the wire shape must let a consumer tell "peak not
+// readable here" from "peak is zero" (peakObserved's presence), and the
+// close-to-OOM warning must not compute a percentage from a reading it
+// never took, even though current usage alone is nowhere near either
+// threshold in this fixture.
+func testUsageRealRunUnreadablePeakJSONOmitsPeakFields(t *testing.T) {
+	setup := env.New(t)
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	stubs := setup.Cwd + "/stubs"
+	stubUsageKubectlExec(t, stubs, []string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=413589504",
+		"memory_max=2147483648",
+		"memory_peak=",
+		"memory_oom_kill=0",
+		"cpu_max=100000 100000",
+		"cpu_usage_before=0",
+		"cpu_usage_after=0",
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+	})
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+	result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if strings.Contains(result.Combined, "peakBytes") || strings.Contains(result.Combined, "peakObserved") {
+		t.Fatalf("an unreadable peak must omit both peakBytes and peakObserved, got:\n%s", result.Combined)
+	}
+	if strings.Contains(result.Combined, "memory.peak reached") {
+		t.Fatalf("an unreadable peak must not warn from a percentage it never computed, got:\n%s", result.Combined)
+	}
+	golden.Equal(t, "usage/real_run_unreadable_peak_json_omits_peak_fields", normalize.Apply(result.Combined))
+}
+
+// real_run_genuine_zero_peak_renders_unchanged is the regression guard for
+// the sibling of the two scenarios above: a memory.peak that was actually
+// read as zero must keep rendering exactly as before this fix, since a
+// real zero is not the unknown state the two scenarios above cover.
+// real_run_dind_sidecar_usage_reported_separately is its own
+// regression scenario: an environment mid-release can read idle from the
+// runtime container while the erun-dind sidecar -- where the actual build
+// runs -- is close to its own memory limit, and before this fix nothing
+// in `erun usage`'s output let an operator tell the two apart. The stub
+// answers each container differently, matching the live measurement the
+// issue recorded (runtime container near-idle, sidecar under real load),
+// and asserts the sidecar's own reading -- and its own warning -- surface
+// distinctly rather than being silently dropped or conflated with the
+// runtime container's numbers.
+func testUsageRealRunDinDSidecarUsageReportedSeparately(t *testing.T) {
+	setup := env.New(t)
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	stubs := setup.Cwd + "/stubs"
+	stubUsageKubectlExecPerContainer(t, stubs,
+		[]string{
 			"cgroup_type=cgroup2fs",
-			"memory_current=413589504",
-			"memory_max=2147483648",
-			"memory_peak=1027301376",
+			"memory_current=104857600",
+			"memory_max=24696061952",
+			"memory_peak=104857600",
 			"memory_oom_kill=0",
-			"cpu_max=100000 100000",
-			"cpu_usage_before=581511501",
-			"cpu_usage_after=581611501",
-			"cpu_time_before_ns=1000000000",
-			"cpu_time_after_ns=2000000000",
-			"cpu_periods=376556",
-			"cpu_throttled_periods=425",
-			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-			"disk_own_used_kb=44040192",
-		})
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
-		result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if strings.Contains(result.Combined, "excludesBuilds") {
-			t.Fatalf("a runtime-type env has no dind sidecar and must not report excludesBuilds, got:\n%s", result.Combined)
-		}
-		golden.Equal(t, "usage/real_run_runtime_env_omits_builds_caveat", normalize.Apply(result.Combined))
-	})
-
-	// real_run_local_agent_env_states_the_builds_caveat is the positive
-	// sibling: a build-capable env (local-agent/remote-agent) carries the
-	// erun-dind sidecar every image build actually runs in, a separate cgroup
-	// this reading cannot see, so the JSON output must say so rather than let
-	// a busy build read as an idle environment.
-	t.Run("real_run_local_agent_env_states_the_builds_caveat", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		stubs := setup.Cwd + "/stubs"
-		stubUsageKubectlExec(t, stubs, []string{
-			"cgroup_type=cgroup2fs",
-			"memory_current=413589504",
-			"memory_max=2147483648",
-			"memory_peak=1027301376",
-			"memory_oom_kill=0",
-			"cpu_max=100000 100000",
-			"cpu_usage_before=581511501",
-			"cpu_usage_after=581611501",
-			"cpu_time_before_ns=1000000000",
-			"cpu_time_after_ns=2000000000",
-			"cpu_periods=376556",
-			"cpu_throttled_periods=425",
-			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-			"disk_own_used_kb=44040192",
-		})
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
-		result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "erun-dind sidecar") {
-			t.Fatalf("a build-capable env must state the builds-excluded caveat, got:\n%s", result.Combined)
-		}
-		// The Disk line names the node-shared scope, and the own-usage line
-		// beneath it is the figure scoped to this environment alone.
-		if !strings.Contains(result.Combined, "Disk (node, shared):") || !strings.Contains(result.Combined, "this environment's own usage:") {
-			t.Fatalf("expected the node-shared disk label and the own-usage line, got:\n%s", result.Combined)
-		}
-		golden.Equal(t, "usage/real_run_local_agent_env_states_the_builds_caveat", normalize.Apply(result.Combined))
-	})
-
-	// real_run_warns_when_the_sidecars_throttling_is_material is the firing
-	// half of the same verdict, and the reason the warning exists at all: a
-	// sidecar whose own cap is genuinely binding is the starvation that turns
-	// a lint step into a timeout, and it must still be named. The sidecar's
-	// counters here are materially throttled -- 4,000 of its 20,000 periods
-	// -- while the runtime container beside it stays at the immaterial 0.11%
-	// the scenario above carries, so the two readings differ in the one way
-	// that decides the verdict rather than in every way at once.
-	t.Run("real_run_warns_when_the_sidecars_throttling_is_material", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		stubs := setup.Cwd + "/stubs"
-		stubUsageKubectlExecPerContainer(t, stubs,
-			[]string{
-				"cgroup_type=cgroup2fs",
-				"memory_current=104857600",
-				"memory_max=24696061952",
-				"memory_peak=104857600",
-				"memory_oom_kill=0",
-				"cpu_max=1200000 100000",
-				"cpu_usage_before=1000000",
-				"cpu_usage_after=1003000",
-				"cpu_time_before_ns=1000000000",
-				"cpu_time_after_ns=2000000000",
-				"cpu_periods=376556",
-				"cpu_throttled_periods=425",
-				"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-				"disk_own_used_kb=44040192",
-			},
-			[]string{
-				"cgroup_type=cgroup2fs",
-				"memory_current=2040109465",
-				"memory_max=15032385536",
-				"memory_peak=3435973836",
-				"memory_oom_kill=0",
-				"cpu_max=400000 100000",
-				"cpu_usage_before=1000000",
-				"cpu_usage_after=2900000",
-				"cpu_time_before_ns=1000000000",
-				"cpu_time_after_ns=2000000000",
-				"cpu_periods=20000",
-				"cpu_throttled_periods=4000",
-				"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-			},
-		)
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
-		result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "the build was throttled in 4000 of 20000 cgroup periods") {
-			t.Fatalf("a materially throttled sidecar must still be named as starvation, got:\n%s", result.Combined)
-		}
-		golden.Equal(t, "usage/real_run_warns_when_the_sidecars_throttling_is_material", normalize.Apply(result.Combined))
-	})
-
-	t.Run("real_run_cgroup_v1_reports_unavailable_not_an_error", func(t *testing.T) {
-		// A cluster whose runtime image predates cgroup v2 (or any host where
-		// /sys/fs/cgroup is not cgroup2fs) must still succeed: CPU and memory
-		// report their own unavailability, matching the fail-soft posture
-		// runtime_resources.go already takes for kubectl-top-less clusters.
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		stubs := setup.Cwd + "/stubs"
-		stubUsageKubectlExec(t, stubs, []string{
-			"cgroup_type=tmpfs",
-			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-		})
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
-		result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		// No disk_own_used_kb line was stubbed (e.g. `du`/`timeout` missing or
-		// the walk failed) -- own usage must report unavailable, not a
-		// fabricated zero, independently of cgroup type.
-		if strings.Contains(result.Combined, `"ownUsedBytes"`) || strings.Contains(result.Combined, `"ownUsageObserved"`) {
-			t.Fatalf("an unread own-usage figure must omit both ownUsedBytes and ownUsageObserved, got:\n%s", result.Combined)
-		}
-		golden.Equal(t, "usage/real_run_cgroup_v1_reports_unavailable_not_an_error", normalize.Apply(result.Combined))
-	})
-
-	// real_run_warns_near_the_memory_limit is the "an agent notices it is
-	// heading for an OOM kill before it is killed" case: a reading nobody
-	// acts on is decoration, so a threshold crossing must show up as a named
-	// warning field rather than requiring the caller to compute the
-	// percentage itself.
-	t.Run("real_run_warns_near_the_memory_limit", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		stubs := setup.Cwd + "/stubs"
-		stubUsageKubectlExec(t, stubs, []string{
-			"cgroup_type=cgroup2fs",
-			"memory_current=1932735283", // ~90% of 2048Mi
-			"memory_max=2147483648",
-			"memory_peak=2100000000", // ~98% peak: also crosses the peak threshold
-			"memory_oom_kill=1",
-			"cpu_max=100000 100000",
-			"cpu_usage_before=0",
-			"cpu_usage_after=0",
-			"cpu_time_before_ns=1000000000",
-			"cpu_time_after_ns=2000000000",
-			"disk_workspace=overlay 198234112 99999999 99117056 95% /home/erun",
-			"disk_own_used_kb=10000000",
-		})
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
-		result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "usage/real_run_warns_near_the_memory_limit", normalize.Apply(result.Combined))
-		if !strings.Contains(result.Combined, "\"warnings\"") {
-			t.Fatalf("expected a warnings field in the JSON output, got:\n%s", result.Combined)
-		}
-	})
-
-	// real_run_disk_warning_names_the_node_shared_scope is the disk sibling of
-	// the memory-limit scenario above: the mount's used/total cross the
-	// warning threshold, and the warning text must name the node-shared scope
-	// so an operator does not clean up an environment that is not the real
-	// cause of a shared-node disk pressure warning.
-	t.Run("real_run_disk_warning_names_the_node_shared_scope", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		stubs := setup.Cwd + "/stubs"
-		stubUsageKubectlExec(t, stubs, []string{
-			"cgroup_type=cgroup2fs",
-			"memory_current=413589504",
-			"memory_max=2147483648",
-			"memory_peak=1027301376",
-			"memory_oom_kill=0",
-			"cpu_max=100000 100000",
-			"cpu_usage_before=0",
-			"cpu_usage_after=0",
-			"cpu_time_before_ns=1000000000",
-			"cpu_time_after_ns=2000000000",
-			// used/total = 178410701/198234112 = 90.0%, at the warn threshold.
-			"disk_workspace=overlay 198234112 178410701 19823411 90% /home/erun",
-			"disk_own_used_kb=10000000",
-		})
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
-		result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "node disk is at 90%") || !strings.Contains(result.Combined, "shared with every environment on this node") {
-			t.Fatalf("expected the disk warning to name the node-shared scope, got:\n%s", result.Combined)
-		}
-		golden.Equal(t, "usage/real_run_disk_warning_names_the_node_shared_scope", normalize.Apply(result.Combined))
-	})
-
-	// real_run_unreadable_peak_renders_unavailable_not_zero: an unreadable
-	// memory.peak (an older cgroup v2 kernel, or cgroup v1) must render as
-	// unavailable, not as a measured "peak 0B" -- the reassuring wrong answer
-	// for the least known state.
-	t.Run("real_run_unreadable_peak_renders_unavailable_not_zero", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		stubs := setup.Cwd + "/stubs"
-		stubUsageKubectlExec(t, stubs, []string{
-			"cgroup_type=cgroup2fs",
-			"memory_current=413589504",
-			"memory_max=2147483648",
-			"memory_peak=",
-			"memory_oom_kill=0",
-			"cpu_max=100000 100000",
-			"cpu_usage_before=0",
-			"cpu_usage_after=0",
+			"cpu_max=1200000 100000",
+			"cpu_usage_before=1000000",
+			"cpu_usage_after=1003000",
 			"cpu_time_before_ns=1000000000",
 			"cpu_time_after_ns=2000000000",
 			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-		})
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
-		result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if strings.Contains(result.Combined, "peak 0B") {
-			t.Fatalf("an unreadable peak must never render as a measured 0B, got:\n%s", result.Combined)
-		}
-		golden.Equal(t, "usage/real_run_unreadable_peak_renders_unavailable_not_zero", normalize.Apply(result.Combined))
-	})
-
-	// real_run_unreadable_peak_json_omits_peak_fields is the JSON-mode sibling
-	// of the scenario above: the wire shape must let a consumer tell "peak not
-	// readable here" from "peak is zero" (peakObserved's presence), and the
-	// close-to-OOM warning must not compute a percentage from a reading it
-	// never took, even though current usage alone is nowhere near either
-	// threshold in this fixture.
-	t.Run("real_run_unreadable_peak_json_omits_peak_fields", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		stubs := setup.Cwd + "/stubs"
-		stubUsageKubectlExec(t, stubs, []string{
+		},
+		[]string{
 			"cgroup_type=cgroup2fs",
-			"memory_current=413589504",
-			"memory_max=2147483648",
-			"memory_peak=",
+			"memory_current=13421772800",
+			"memory_max=15032385536",
+			"memory_peak=13958643712",
 			"memory_oom_kill=0",
-			"cpu_max=100000 100000",
-			"cpu_usage_before=0",
-			"cpu_usage_after=0",
+			"cpu_max=400000 100000",
+			"cpu_usage_before=1000000",
+			"cpu_usage_after=2900000",
 			"cpu_time_before_ns=1000000000",
 			"cpu_time_after_ns=2000000000",
 			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-		})
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
-		result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if strings.Contains(result.Combined, "peakBytes") || strings.Contains(result.Combined, "peakObserved") {
-			t.Fatalf("an unreadable peak must omit both peakBytes and peakObserved, got:\n%s", result.Combined)
-		}
-		if strings.Contains(result.Combined, "memory.peak reached") {
-			t.Fatalf("an unreadable peak must not warn from a percentage it never computed, got:\n%s", result.Combined)
-		}
-		golden.Equal(t, "usage/real_run_unreadable_peak_json_omits_peak_fields", normalize.Apply(result.Combined))
-	})
+		},
+	)
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+	result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if !strings.Contains(result.Combined, `"dind"`) {
+		t.Fatalf("expected a dind reading in the JSON output for a build-capable env, got:\n%s", result.Combined)
+	}
+	if !strings.Contains(result.Combined, `"currentBytes": 13421772800`) {
+		t.Fatalf("expected the sidecar's own (busy) memory reading distinct from the runtime container's idle one, got:\n%s", result.Combined)
+	}
+	if !strings.Contains(result.Combined, "erun-dind: memory is at") {
+		t.Fatalf("expected the sidecar's own near-limit memory to warn distinctly from the runtime container, got:\n%s", result.Combined)
+	}
+	golden.Equal(t, "usage/real_run_dind_sidecar_usage_reported_separately", normalize.Apply(result.Combined))
+}
 
-	// real_run_genuine_zero_peak_renders_unchanged is the regression guard for
-	// the sibling of the two scenarios above: a memory.peak that was actually
-	// read as zero must keep rendering exactly as before this fix, since a
-	// real zero is not the unknown state the two scenarios above cover.
-	// real_run_dind_sidecar_usage_reported_separately is its own
-	// regression scenario: an environment mid-release can read idle from the
-	// runtime container while the erun-dind sidecar -- where the actual build
-	// runs -- is close to its own memory limit, and before this fix nothing
-	// in `erun usage`'s output let an operator tell the two apart. The stub
-	// answers each container differently, matching the live measurement the
-	// issue recorded (runtime container near-idle, sidecar under real load),
-	// and asserts the sidecar's own reading -- and its own warning -- surface
-	// distinctly rather than being silently dropped or conflated with the
-	// runtime container's numbers.
-	t.Run("real_run_dind_sidecar_usage_reported_separately", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		stubs := setup.Cwd + "/stubs"
-		stubUsageKubectlExecPerContainer(t, stubs,
-			[]string{
-				"cgroup_type=cgroup2fs",
-				"memory_current=104857600",
-				"memory_max=24696061952",
-				"memory_peak=104857600",
-				"memory_oom_kill=0",
-				"cpu_max=1200000 100000",
-				"cpu_usage_before=1000000",
-				"cpu_usage_after=1003000",
-				"cpu_time_before_ns=1000000000",
-				"cpu_time_after_ns=2000000000",
-				"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-			},
-			[]string{
-				"cgroup_type=cgroup2fs",
-				"memory_current=13421772800",
-				"memory_max=15032385536",
-				"memory_peak=13958643712",
-				"memory_oom_kill=0",
-				"cpu_max=400000 100000",
-				"cpu_usage_before=1000000",
-				"cpu_usage_after=2900000",
-				"cpu_time_before_ns=1000000000",
-				"cpu_time_after_ns=2000000000",
-				"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-			},
-		)
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
-		result := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, `"dind"`) {
-			t.Fatalf("expected a dind reading in the JSON output for a build-capable env, got:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, `"currentBytes": 13421772800`) {
-			t.Fatalf("expected the sidecar's own (busy) memory reading distinct from the runtime container's idle one, got:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "erun-dind: memory is at") {
-			t.Fatalf("expected the sidecar's own near-limit memory to warn distinctly from the runtime container, got:\n%s", result.Combined)
-		}
-		golden.Equal(t, "usage/real_run_dind_sidecar_usage_reported_separately", normalize.Apply(result.Combined))
+func testUsageRealRunGenuineZeroPeakRendersUnchanged(t *testing.T) {
+	setup := env.New(t)
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	stubs := setup.Cwd + "/stubs"
+	stubUsageKubectlExec(t, stubs, []string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=0",
+		"memory_max=2147483648",
+		"memory_peak=0",
+		"memory_oom_kill=0",
+		"cpu_max=100000 100000",
+		"cpu_usage_before=0",
+		"cpu_usage_after=0",
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
 	})
-
-	t.Run("real_run_genuine_zero_peak_renders_unchanged", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		stubs := setup.Cwd + "/stubs"
-		stubUsageKubectlExec(t, stubs, []string{
-			"cgroup_type=cgroup2fs",
-			"memory_current=0",
-			"memory_max=2147483648",
-			"memory_peak=0",
-			"memory_oom_kill=0",
-			"cpu_max=100000 100000",
-			"cpu_usage_before=0",
-			"cpu_usage_after=0",
-			"cpu_time_before_ns=1000000000",
-			"cpu_time_after_ns=2000000000",
-			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-		})
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
-		result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "peak 0B") {
-			t.Fatalf("a genuinely-zero, observed peak must still render as peak 0B, got:\n%s", result.Combined)
-		}
-		golden.Equal(t, "usage/real_run_genuine_zero_peak_renders_unchanged", normalize.Apply(result.Combined))
-	})
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+	result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if !strings.Contains(result.Combined, "peak 0B") {
+		t.Fatalf("a genuinely-zero, observed peak must still render as peak 0B, got:\n%s", result.Combined)
+	}
+	golden.Equal(t, "usage/real_run_genuine_zero_peak_renders_unchanged", normalize.Apply(result.Combined))
 }
 
 // stubUsagePodRequestsList is the `kubectl get pods -o json` answer the

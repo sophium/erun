@@ -162,5 +162,8 @@ func writeUnauthorized(w http.ResponseWriter) {
 
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(value)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		// The body is already being sent, so a failed write has no one left to report to.
+		return
+	}
 }

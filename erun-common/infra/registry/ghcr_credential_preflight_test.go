@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -19,8 +20,8 @@ func TestVerifyGHCRCredentialConfiguredRefusesWhenNothingResolves(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected a refusal when no credential source resolves")
 	}
-	missing, ok := err.(*MissingGHCRCredentialError)
-	if !ok {
+	var missing *MissingGHCRCredentialError
+	if !errors.As(err, &missing) {
 		t.Fatalf("expected *MissingGHCRCredentialError, got %T: %v", err, err)
 	}
 	message := missing.Error()
@@ -88,7 +89,8 @@ func TestVerifyGHCRChartCredentialConfiguredRefusesWhenNothingResolves(t *testin
 	if err == nil {
 		t.Fatal("expected a refusal when no credential source resolves")
 	}
-	if _, ok := err.(*MissingGHCRCredentialError); !ok {
+	var missing *MissingGHCRCredentialError
+	if !errors.As(err, &missing) {
 		t.Fatalf("expected *MissingGHCRCredentialError, got %T: %v", err, err)
 	}
 }

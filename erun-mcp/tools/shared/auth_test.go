@@ -213,7 +213,9 @@ func signOIDCToken(t *testing.T, key *rsa.PrivateKey, keyID string, claims map[s
 
 func writeOIDCJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(value)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func oidcClaims(issuer, audience string) map[string]any {

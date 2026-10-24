@@ -7,9 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
@@ -54,41 +52,6 @@ var orchestratorPacingNudgeSettle = 150 * time.Millisecond
 // message is now editable via ~/.erun/config.yaml's `whip.message`; this
 // constant is what an install that configures nothing keeps getting, verbatim.
 const orchestratorPacingNudgeText = orchestrator.DefaultWhipMessage
-
-// orchestratorWhipConfig is the pacing pass's resolved, live-reloadable
-// configuration (message/stale-threshold/cap), read from the operator's global
-// config once per reconciler tick (refreshOrchestratorWhipConfig) so an edit to
-// ~/.erun/config.yaml takes effect on the next tick without a rebuild or
-// restart. Guarded by a mutex because the manual whip-now entrypoints
-// (whipOrchestratorsNow) can read it from a different goroutine than the
-// reconciler tick.
-var (
-	orchestratorWhipConfigMu sync.RWMutex
-	orchestratorWhipConfig   = orchestrator.ResolveWhipConfig(nil)
-)
-
-func setOrchestratorWhipConfig(cfg orchestrator.WhipConfig) {
-	orchestratorWhipConfigMu.Lock()
-	orchestratorWhipConfig = cfg
-	orchestratorWhipConfigMu.Unlock()
-}
-
-func getOrchestratorWhipConfig() orchestrator.WhipConfig {
-	orchestratorWhipConfigMu.RLock()
-	defer orchestratorWhipConfigMu.RUnlock()
-	return orchestratorWhipConfig
-}
-
-// refreshOrchestratorWhipConfig re-reads ~/.erun/config.yaml's whip override
-// and resolves it against today's defaults. Best-effort: a missing or
-// unreadable root config resolves to the zero ERunConfig, whose nil Whip
-// override keeps orchestratorWhipConfig on exactly today's behaviour — the same
-// "unconfigured install is unaffected" contract erun-common's ResolveWhipConfig
-// makes for every transport.
-func refreshOrchestratorWhipConfig() {
-	config, _, _ := configpkg.LoadERunConfig()
-	setOrchestratorWhipConfig(orchestrator.ResolveWhipConfig(config.Whip))
-}
 
 // orchestratorPacingActivity is the parsed report, independent of the TTL
 // readOrchestratorActivity applies for the busy spinner — that bound exists for
@@ -188,93 +151,6 @@ const (
 // its original two-argument shape.
 func decideOrchestratorPacing(c orchestratorPacingCandidate, now time.Time) (orchestratorPacingDecision, orchestratorPacingReason) {
 	return decideOrchestratorWhip(c, now, false)
-}
-
-// decideOrchestratorWhip is decideOrchestratorPacing's explicit-aware form: a
-// manual, operator-triggered whip (explicit=true) ignores staleness — the
-// operator clicking/invoking it now is the assertion that this session should
-// be pushed regardless of how recently it moved — but never bypasses the cap
-// or an already-capped session, exactly as DecideWhip's explicit contract
-// requires.
-func decideOrchestratorWhip(c orchestratorPacingCandidate, now time.Time, explicit bool) (orchestratorPacingDecision, orchestratorPacingReason) {
-	candidate := orchestrator.WhipCandidate{
-		Kind: orchestrator.WhipTargetOrchestrator,
-		// The desktop holds this orchestrator's own PTY, so it can write a
-		// nudge into it — except for a configured orchestrator it holds no
-		// session for, which nothing here can reach (see
-		// orchestratorPacingUnmanagedRows).
-		Reachable:    !c.unmanaged,
-		Alive:        c.alive,
-		LastActiveAt: c.lastActiveAt,
-		NudgeCount:   c.nudgeCount,
-		Capped:       c.capped,
-	}
-	decision, reason := orchestrator.DecideWhip(candidate, now, getOrchestratorWhipConfig(), explicit)
-	return orchestratorPacingDecisionFromWhip(decision), orchestratorPacingReasonFromWhip(reason)
-}
-
-func orchestratorPacingDecisionFromWhip(decision orchestrator.WhipDecision) orchestratorPacingDecision {
-	switch decision {
-	case orchestrator.WhipDecisionNudge:
-		return orchestratorPacingNudge
-	case orchestrator.WhipDecisionCap:
-		return orchestratorPacingCap
-	default:
-		return orchestratorPacingNone
-	}
-}
-
-// orchestratorPacingReasonFromWhip translates every reason DecideWhip can
-// return. WhipReasonUnreachable reaches here only for a configured
-// orchestrator whose session this desktop does not hold (see
-// orchestratorPacingUnmanagedRows) — every other orchestrator row is one the
-// desktop holds the PTY of, which is what makes those candidates reachable.
-func orchestratorPacingReasonFromWhip(reason orchestrator.WhipReason) orchestratorPacingReason {
-	switch reason {
-	case orchestrator.WhipReasonNotAlive:
-		return orchestratorPacingReasonNotAlive
-	case orchestrator.WhipReasonUnreachable:
-		return orchestratorPacingReasonUnreachable
-	case orchestrator.WhipReasonAlreadyCapped:
-		return orchestratorPacingReasonAlreadyCapped
-	case orchestrator.WhipReasonCapCrossed:
-		return orchestratorPacingReasonCapCrossed
-	case orchestrator.WhipReasonNudge:
-		return orchestratorPacingReasonNudge
-	default:
-		return orchestratorPacingReasonFresh
-	}
-}
-
-// whipDecisionFromOrchestratorPacing is orchestratorPacingDecisionFromWhip's
-// inverse, used by WhipNow (whip.go) to fold an orchestrator outcome into the
-// same eruncommon.WhipResult shape the environment side reports in.
-func whipDecisionFromOrchestratorPacing(decision orchestratorPacingDecision) orchestrator.WhipDecision {
-	switch decision {
-	case orchestratorPacingNudge:
-		return orchestrator.WhipDecisionNudge
-	case orchestratorPacingCap:
-		return orchestrator.WhipDecisionCap
-	default:
-		return orchestrator.WhipDecisionNone
-	}
-}
-
-// whipReasonFromOrchestratorPacing is orchestratorPacingReasonFromWhip's
-// inverse; see whipDecisionFromOrchestratorPacing.
-func whipReasonFromOrchestratorPacing(reason orchestratorPacingReason) orchestrator.WhipReason {
-	switch reason {
-	case orchestratorPacingReasonNotAlive:
-		return orchestrator.WhipReasonNotAlive
-	case orchestratorPacingReasonAlreadyCapped:
-		return orchestrator.WhipReasonAlreadyCapped
-	case orchestratorPacingReasonCapCrossed:
-		return orchestrator.WhipReasonCapCrossed
-	case orchestratorPacingReasonNudge:
-		return orchestrator.WhipReasonNudge
-	default:
-		return orchestrator.WhipReasonFresh
-	}
 }
 
 // orchestratorPacingRow is what the reconciler gathers under a.mu for one
@@ -441,100 +317,6 @@ func (a *App) orchestratorPacingRows() []orchestratorPacingRow {
 	return rows
 }
 
-// orchestratorWhipOutcome is one orchestrator's result from an explicit
-// whip-everything pass — the visible record an operator judges the feature
-// by: which orchestrator, what was decided, and why.
-type orchestratorWhipOutcome struct {
-	id       string
-	name     string
-	decision orchestratorPacingDecision
-	reason   orchestratorPacingReason
-}
-
-// orchestratorWhipTarget is one orchestrator the whip selection surface can
-// offer -- id plus the name a human-facing row renders, gathered without
-// deciding or pushing anything.
-type orchestratorWhipTarget struct{ id, name string }
-
-// listWhipOrchestratorTargets enumerates every orchestrator eligible to be
-// whipped -- every live session plus every persisted config with no session
-// yet, deduplicated by id -- the same union whipOrchestratorsNow decides
-// against, so "select all orchestrators" and "push the selected
-// orchestrators" can never disagree about who exists.
-func (a *App) listWhipOrchestratorTargets() []orchestratorWhipTarget {
-	rows := a.orchestratorPacingRows()
-	seen := make(map[string]struct{}, len(rows))
-	targets := make([]orchestratorWhipTarget, 0, len(rows))
-	for _, row := range rows {
-		targets = append(targets, orchestratorWhipTarget{id: row.id, name: row.name})
-		seen[row.id] = struct{}{}
-	}
-	if configs, err := a.loadOrchestratorConfigs(); err == nil {
-		for _, config := range configs {
-			if _, ok := seen[config.ID]; ok {
-				continue
-			}
-			targets = append(targets, orchestratorWhipTarget{id: config.ID, name: config.Name})
-		}
-	}
-	sort.Slice(targets, func(i, j int) bool {
-		if targets[i].name != targets[j].name {
-			return targets[i].name < targets[j].name
-		}
-		return targets[i].id < targets[j].id
-	})
-	return targets
-}
-
-// whipOrchestratorsNow pushes only the requested orchestrators (by id), each
-// still bound by its own cap and pushed now regardless of staleness. Named
-// per orchestrator in the return so a caller can report exactly who was
-// pushed and who was skipped, and why skipped.
-func (a *App) whipOrchestratorsNow(want map[string]struct{}) []orchestratorWhipOutcome {
-	refreshOrchestratorWhipConfig()
-	now := time.Now()
-	rows := a.orchestratorPacingRows()
-	outcomes := make([]orchestratorWhipOutcome, 0, len(want))
-	whipped := make(map[string]struct{}, len(rows))
-	for _, row := range rows {
-		if _, ok := want[row.id]; !ok {
-			continue
-		}
-		decision, reason := a.reconcileOrchestratorPacingOne(row, now, true)
-		outcomes = append(outcomes, orchestratorWhipOutcome{id: row.id, name: row.name, decision: decision, reason: reason})
-		whipped[row.id] = struct{}{}
-	}
-	// orchestratorPacingRows enumerates the sessions this desktop holds, so on
-	// its own it answers "who could be nudged", not "who was considered". A
-	// requested orchestrator that was never opened has no session and would
-	// therefore be absent from the report entirely -- and an omission reads as
-	// "not a target", where a skip names its reason. The environment half
-	// already lists configs for this reason, as does ListWhipOrchestratorCandidates
-	// on the CLI/MCP transports; this keeps the desktop honest the same way.
-	configs, err := a.loadOrchestratorConfigs()
-	if err != nil {
-		// Report what is known rather than nothing: the sessions above are still
-		// a truthful partial answer, and swallowing them to signal a config read
-		// failure would trade one silence for a larger one.
-		return outcomes
-	}
-	for _, config := range configs {
-		if _, ok := want[config.ID]; !ok {
-			continue
-		}
-		if _, ok := whipped[config.ID]; ok {
-			continue
-		}
-		outcomes = append(outcomes, orchestratorWhipOutcome{
-			id:       config.ID,
-			name:     config.Name,
-			decision: orchestratorPacingNone,
-			reason:   orchestratorPacingReasonNotAlive,
-		})
-	}
-	return outcomes
-}
-
 // orchestratorPacingActivitySignal is what the reconciler could tell about the
 // orchestrator's last report, carried through to the marker so a session that
 // died mid-turn reads differently from one that simply went quiet after
@@ -607,6 +389,7 @@ func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time
 		a.sendOrchestratorPacingNudge(row.id, row.serial, now, elapsed, signal, envBusy.stuckDetail(), explicit)
 	case orchestratorPacingCap:
 		a.capOrchestratorPacing(row.id, row.serial, row.name, now)
+	case orchestratorPacingNone:
 	}
 	return decision, reason
 }
@@ -825,6 +608,8 @@ func orchestratorPacingQuietDescription(elapsed time.Duration, signal orchestrat
 		return fmt.Sprintf("no activity report for %s — last report said mid-turn, so the turn may have died without one", quiet)
 	case orchestratorPacingSignalNoReport:
 		return fmt.Sprintf("no activity report received in the %s since it started", quiet)
+	case orchestratorPacingSignalIdle:
+		fallthrough
 	default:
 		return fmt.Sprintf("no activity report for %s", quiet)
 	}

@@ -75,7 +75,7 @@ func TrimGoBuildCache(ctx core.Context, dir string, maxBytes int64) (GoBuildCach
 	if maxBytes <= 0 {
 		return result, fmt.Errorf("the go build cache cap must be a positive number of bytes, got %d", maxBytes)
 	}
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+	if !isDirectory(dir) {
 		result.Missing = true
 		return result, nil
 	}
@@ -214,11 +214,9 @@ func goBuildCacheSize(path string) (int64, error) {
 		if d.IsDir() {
 			return nil
 		}
-		info, err := d.Info()
-		if err != nil {
-			return nil
+		if info, err := d.Info(); err == nil {
+			total += info.Size()
 		}
-		total += info.Size()
 		return nil
 	})
 	return total, err

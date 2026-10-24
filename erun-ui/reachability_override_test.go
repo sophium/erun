@@ -20,7 +20,7 @@ func TestLocalPortReachabilityOverrideWinsOverARealListener(t *testing.T) {
 		t.Fatalf("failed to bind a real listener: %v", err)
 	}
 	defer func() { _ = listener.Close() }()
-	port := listener.Addr().(*net.TCPAddr).Port
+	port := tcpListenerPort(t, listener)
 
 	t.Setenv("ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE", "0")
 	deps := withDefaultReachabilityDeps(erunUIDeps{})
@@ -43,7 +43,7 @@ func TestLocalPortReachabilityOverrideUnsetFallsBackToRealProbe(t *testing.T) {
 		t.Fatalf("failed to bind a real listener: %v", err)
 	}
 	defer func() { _ = listener.Close() }()
-	port := listener.Addr().(*net.TCPAddr).Port
+	port := tcpListenerPort(t, listener)
 
 	deps := withDefaultReachabilityDeps(erunUIDeps{})
 

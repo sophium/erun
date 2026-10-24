@@ -70,20 +70,20 @@ func helmRollbackArgs(req config.ShellLaunchParams) []string {
 func RunDeployRecovery(ctx core.Context, req config.ShellLaunchParams, action deploy.DeployRecoveryAction) (string, error) {
 	switch action {
 	case deploy.DeployRecoveryClearPendingHelm:
-		clear := deploy.HelmReleaseRecoveryParams{
+		recovery := deploy.HelmReleaseRecoveryParams{
 			ReleaseName:       config.RuntimeReleaseName(req.Tenant),
 			Namespace:         strings.TrimSpace(req.Namespace),
 			KubernetesContext: strings.TrimSpace(req.KubernetesContext),
 			Verbosity:         ctx.Verbosity,
 		}
-		ctx.TraceCommand("", clear.Command().Name, clear.Command().Args...)
+		ctx.TraceCommand("", recovery.Command().Name, recovery.Command().Args...)
 		if ctx.DryRun {
 			return "", nil
 		}
 		var out bytes.Buffer
-		clear.Stdout = &out
-		clear.Stderr = &out
-		err := deploy.ClearHelmReleasePendingOperation(clear)
+		recovery.Stdout = &out
+		recovery.Stderr = &out
+		err := deploy.ClearHelmReleasePendingOperation(recovery)
 		return strings.TrimSpace(out.String()), err
 	case deploy.DeployRecoveryRollback:
 		args := helmRollbackArgs(req)

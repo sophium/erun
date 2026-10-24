@@ -156,8 +156,8 @@ func TakeReleaseRepoClaim(ctx core.Context, projectRoot, environment, version st
 	ref := ReleaseRepoClaimRef(version)
 
 	for attempt := 0; attempt < releaseRepoClaimMaxAttempts; attempt++ {
-		existingSHA, exists, err := GitLsRemoteRef(ctx, projectRoot, ReleaseRepoClaimRemote, ref)
-		if err != nil {
+		existingSHA, exists, readable := readReleaseRepoClaimRef(ctx, projectRoot, ref)
+		if !readable {
 			ctx.Trace("release: could not read " + ref + " on " + ReleaseRepoClaimRemote + "; proceeding without the repository-global release claim")
 			return "", nil
 		}
@@ -387,4 +387,11 @@ func runReleaseClaimPush(ctx core.Context, projectRoot string, args ...string) e
 	err := cmd.Run()
 	gitx.ReportRulesetBypassFromPushArgs(ctx, args, pushOutput.String())
 	return err
+}
+
+// readReleaseRepoClaimRef reads ref on the claim remote, reporting readable
+// false when the remote could not be read at all.
+func readReleaseRepoClaimRef(ctx core.Context, projectRoot, ref string) (sha string, exists, readable bool) {
+	sha, exists, err := GitLsRemoteRef(ctx, projectRoot, ReleaseRepoClaimRemote, ref)
+	return sha, exists, err == nil
 }

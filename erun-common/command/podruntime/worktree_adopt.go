@@ -101,7 +101,7 @@ func previewWorktreeAdoption(ctx core.Context, result WorktreeAdoptResult, prese
 // empty and the legacy path holds a real repository; every other outcome is a
 // no-op the run explains.
 func decideWorktreeAdoption(ctx core.Context, params WorktreeAdoptParams) (WorktreeAdoptOutcome, error) {
-	if info, err := os.Stat(params.ClaimDir); err != nil || !info.IsDir() {
+	if !isDirectory(params.ClaimDir) {
 		ctx.Info(fmt.Sprintf("worktree-adopt: no worktree volume staged at %s; nothing to adopt", params.ClaimDir))
 		return WorktreeAdoptNoClaim, nil
 	}
@@ -115,11 +115,11 @@ func decideWorktreeAdoption(ctx core.Context, params WorktreeAdoptParams) (Workt
 	}
 	// A symlink here is a sourceless runtime environment's baked release
 	// (release-link), not a checkout this volume should take over.
-	if info, err := os.Lstat(params.LegacyDir); err != nil || !info.IsDir() {
+	if !isDirectoryNotSymlink(params.LegacyDir) {
 		ctx.Info(fmt.Sprintf("worktree-adopt: no previous tree at %s; the worktree volume starts empty", params.LegacyDir))
 		return WorktreeAdoptNoLegacyTree, nil
 	}
-	if _, err := os.Stat(filepath.Join(params.LegacyDir, ".git")); err != nil {
+	if !pathExists(filepath.Join(params.LegacyDir, ".git")) {
 		ctx.Info(fmt.Sprintf("worktree-adopt: %s is not a repository; leaving it on the home volume and starting the worktree volume empty", params.LegacyDir))
 		return WorktreeAdoptNotARepository, nil
 	}

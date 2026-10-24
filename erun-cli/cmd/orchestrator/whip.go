@@ -255,9 +255,9 @@ func whipResultLabel(result orchestrator.WhipResult) string {
 			label = result.Candidate.ID
 		}
 		return "orchestrator " + label
-	default:
-		return result.Candidate.ID
+	case orchestrator.WhipTargetEnvironment:
 	}
+	return result.Candidate.ID
 }
 
 func whipResultValue(result orchestrator.WhipResult, dryRun bool) string {
@@ -272,20 +272,20 @@ func whipResultValue(result orchestrator.WhipResult, dryRun bool) string {
 		return "would push (dry-run)"
 	case orchestrator.WhipDecisionCap:
 		return "capped: stopped nudging after repeated silence"
-	default:
-		if result.Reason == orchestrator.WhipReasonCallFailed {
-			return "call failed: " + result.Error
-		}
-		value := "skipped — " + string(result.Reason)
-		if result.Error != "" {
-			value += ": " + result.Error
-		}
-		// A dry run never reattaches, so a channel it could not reach says
-		// nothing yet about whether a real pass would have pushed this target:
-		// name that difference rather than letting the row read as a verdict.
-		if dryRun && result.Reason == orchestrator.WhipReasonChannelDown {
-			value += " (a real run reattaches the channel first)"
-		}
-		return value
+	case orchestrator.WhipDecisionNone:
 	}
+	if result.Reason == orchestrator.WhipReasonCallFailed {
+		return "call failed: " + result.Error
+	}
+	value := "skipped — " + string(result.Reason)
+	if result.Error != "" {
+		value += ": " + result.Error
+	}
+	// A dry run never reattaches, so a channel it could not reach says
+	// nothing yet about whether a real pass would have pushed this target:
+	// name that difference rather than letting the row read as a verdict.
+	if dryRun && result.Reason == orchestrator.WhipReasonChannelDown {
+		value += " (a real run reattaches the channel first)"
+	}
+	return value
 }

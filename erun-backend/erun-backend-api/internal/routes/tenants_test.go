@@ -276,7 +276,7 @@ func TestListTenants(t *testing.T) {
 }
 
 func TestListTenantsSurfacesRepositoryError(t *testing.T) {
-	tenants := &stubTenantRepository{err: errForeignKey{}}
+	tenants := &stubTenantRepository{err: foreignKeyError{}}
 	req := httptest.NewRequest(http.MethodGet, "/v1/tenants", nil)
 	rec := httptest.NewRecorder()
 	TenantRoutes{tenants: tenants}.listTenants(rec, req)
@@ -321,7 +321,7 @@ func TestReachableTenantsHasNoOperationsGate(t *testing.T) {
 }
 
 func TestReachableTenantsSurfacesRepositoryError(t *testing.T) {
-	tenants := &stubTenantRepository{err: errForeignKey{}}
+	tenants := &stubTenantRepository{err: foreignKeyError{}}
 	req := httptest.NewRequest(http.MethodGet, "/v1/tenants/reachable", nil)
 	rec := httptest.NewRecorder()
 	TenantRoutes{tenants: tenants}.reachableTenants(rec, req)

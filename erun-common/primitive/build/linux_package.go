@@ -105,8 +105,8 @@ func resolveProjectRootDevopsLinuxDir(findProjectRoot shared.ProjectFinderFunc, 
 }
 
 func detectedProjectRootDevopsLinuxDir(findProjectRoot shared.ProjectFinderFunc, projectRoot string) (string, bool, error) {
-	tenant, detectedProjectRoot, err := findProjectRoot()
-	if err != nil || filepath.Clean(strings.TrimSpace(detectedProjectRoot)) != projectRoot || strings.TrimSpace(tenant) == "" {
+	tenant, ok := shared.DetectedProjectTenant(findProjectRoot, projectRoot)
+	if !ok {
 		return "", false, nil
 	}
 	linuxDir := filepath.Join(projectRoot, config.RuntimeReleaseName(tenant), "linux")

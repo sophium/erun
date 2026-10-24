@@ -79,9 +79,14 @@ type stampedLineWriter struct {
 func (w *stampedLineWriter) Write(p []byte) (int, error) {
 	stamp := w.now().UTC().Format(time.RFC3339)
 	for _, line := range strings.Split(strings.TrimRight(string(p), "\n"), "\n") {
-		if _, err := fmt.Fprintf(w.out, "%s %s\n", stamp, line); err != nil {
-			return len(p), nil // diagnostics only: never fail the command
+		if !writeStampedLine(w.out, stamp, line) {
+			break // diagnostics only: never fail the command
 		}
 	}
 	return len(p), nil
+}
+
+func writeStampedLine(out io.Writer, stamp, line string) bool {
+	_, err := fmt.Fprintf(out, "%s %s\n", stamp, line)
+	return err == nil
 }

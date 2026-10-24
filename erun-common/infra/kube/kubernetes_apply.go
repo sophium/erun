@@ -201,11 +201,11 @@ func applySecretViaClientGo(contextName, namespace, manifest string) error {
 func decodeSecretManifest(manifest string) (map[string]any, string, error) {
 	raw, err := yaml.YAMLToJSON([]byte(manifest))
 	if err != nil {
-		return nil, "", fmt.Errorf("the manifest does not parse as a single YAML document: %s", err)
+		return nil, "", fmt.Errorf("the manifest does not parse as a single YAML document: %w", err)
 	}
 	var document map[string]any
 	if err := json.Unmarshal(raw, &document); err != nil {
-		return nil, "", fmt.Errorf("the manifest is not a single object: %s", err)
+		return nil, "", fmt.Errorf("the manifest is not a single object: %w", err)
 	}
 	apiVersion, _ := document["apiVersion"].(string)
 	kind, _ := document["kind"].(string)

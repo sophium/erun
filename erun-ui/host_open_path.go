@@ -133,7 +133,7 @@ func (a *App) ResolveEnvironmentHostPath(selection uiSelection, podPath string) 
 	}
 	result, hostRoot, err := a.resolveHostWorkspace(selection)
 	if err != nil {
-		return podPathResolution{Kind: "unresolved", Reason: err.Error()}, nil
+		return podPathResolution{Kind: "unresolved", Reason: fmt.Sprint(err)}, nil
 	}
 	cleanPodPath := path.Clean(filepath.ToSlash(podPath))
 	if rel, ok := relUnderPodDir(cleanPodPath, core.DefaultRuntimeOutputsDir); ok {

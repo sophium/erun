@@ -532,6 +532,14 @@ func RunReviewReviewerRemove(ctx core.Context, store config.CloudReadStore, alia
 	return client.RemoveReviewer(context.Background(), reviewID, userID)
 }
 
+func checkoutOriginRemoteURL() (string, bool) {
+	origin, err := OriginRemoteURL()
+	if err != nil {
+		return "", false
+	}
+	return origin, true
+}
+
 // resolveMergeQueueRepository answers which repository's queue the caller
 // means. The queue belongs to a repository — a target branch alone names one
 // only in a tenant that serves exactly one — so it is resolved from the
@@ -543,8 +551,8 @@ func resolveMergeQueueRepository(ctx core.Context, params platformclient.Platfor
 	remote := strings.TrimSpace(params.Repository)
 	if remote == "" {
 		ctx.Trace(traceLabel + ": no repository given; reading origin from the current checkout")
-		origin, err := OriginRemoteURL()
-		if err != nil {
+		origin, ok := checkoutOriginRemoteURL()
+		if !ok {
 			// Not fatal here, unlike opening a review: the platform still
 			// answers, and refuses a promotion the repository cannot be
 			// settled for rather than guessing at one.

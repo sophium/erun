@@ -44,9 +44,11 @@ func (a *App) IsContributeEligible(selection uiSelection) bool {
 	if err != nil {
 		return false
 	}
-	switch config.EnvironmentType(envConfig.Type) {
+	switch envConfig.Type {
 	case config.EnvironmentTypeLocalAgent, config.EnvironmentTypeRemoteAgent:
 		return true
+	case config.EnvironmentTypeRuntime, config.EnvironmentTypeHost:
+		fallthrough
 	default:
 		return false
 	}

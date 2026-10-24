@@ -126,24 +126,32 @@ func findBareRequiredInputLiterals(t testing.TB, root string) []bareRequiredInpu
 		if relErr != nil {
 			return fmt.Errorf("relativize %s: %w", path, relErr)
 		}
-		rel = filepath.ToSlash(rel)
-		ast.Inspect(file, func(n ast.Node) bool {
-			lit, ok := n.(*ast.BasicLit)
-			if !ok || lit.Kind != token.STRING {
-				return true
-			}
-			value, unquoteErr := strconv.Unquote(lit.Value)
-			if unquoteErr != nil || !bareRequiredInputPattern.MatchString(value) {
-				return true
-			}
-			hits = append(hits, bareRequiredInputHit{position: fset.Position(lit.Pos()).String(), file: rel, value: value})
-			return true
-		})
+		hits = append(hits, bareRequiredInputLiteralsInFile(fset, file, filepath.ToSlash(rel))...)
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("scan repo for bare required-input literals: %v", err)
 	}
+	return hits
+}
+
+// bareRequiredInputLiteralsInFile returns one hit per string literal in file
+// matching bareRequiredInputPattern; rel is the file's slash-separated path
+// relative to the scan root.
+func bareRequiredInputLiteralsInFile(fset *token.FileSet, file *ast.File, rel string) []bareRequiredInputHit {
+	var hits []bareRequiredInputHit
+	ast.Inspect(file, func(n ast.Node) bool {
+		lit, ok := n.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		value, unquoteErr := strconv.Unquote(lit.Value)
+		if unquoteErr != nil || !bareRequiredInputPattern.MatchString(value) {
+			return true
+		}
+		hits = append(hits, bareRequiredInputHit{position: fset.Position(lit.Pos()).String(), file: rel, value: value})
+		return true
+	})
 	return hits
 }
 

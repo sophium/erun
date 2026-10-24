@@ -162,6 +162,7 @@ func TestValidTenantScopeIsGranted(t *testing.T) {
 	token := h.apiToken(t, mcpauth.APITokenAudience, now.Add(-time.Minute), now.Add(time.Hour))
 
 	resp := h.requestToken(t, token, "repository:frs/hello:pull,push")
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -181,6 +182,7 @@ func TestCrossTenantScopeGrantsNothing(t *testing.T) {
 	token := h.apiToken(t, mcpauth.APITokenAudience, now.Add(-time.Minute), now.Add(time.Hour))
 
 	resp := h.requestToken(t, token, "repository:other-tenant/secret:pull,push")
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (authenticated, granted nothing)", resp.StatusCode)
 	}
@@ -197,6 +199,7 @@ func TestExpiredTokenIsRejected(t *testing.T) {
 	token := h.apiToken(t, mcpauth.APITokenAudience, now.Add(-2*time.Hour), now.Add(-time.Hour))
 
 	resp := h.requestToken(t, token, "repository:frs/hello:pull")
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 for an expired token", resp.StatusCode)
 	}
@@ -213,6 +216,7 @@ func TestWrongAudienceTokenIsRejected(t *testing.T) {
 	token := h.apiToken(t, mcpauth.MCPTokenAudience("frs", "prod"), now.Add(-time.Minute), now.Add(time.Hour))
 
 	resp := h.requestToken(t, token, "repository:frs/hello:pull")
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 for a wrong-audience token", resp.StatusCode)
 	}
@@ -244,6 +248,7 @@ func TestUnknownIssuerIsRejected(t *testing.T) {
 	}
 
 	resp := h.requestToken(t, token, "repository:frs/hello:pull")
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 for an unknown issuer", resp.StatusCode)
 	}
@@ -255,6 +260,7 @@ func TestMissingCredentialsIsRejected(t *testing.T) {
 	h := newTestHarness(t)
 	defer h.close()
 	resp := h.requestToken(t, "", "repository:frs/hello:pull")
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 for missing credentials", resp.StatusCode)
 	}

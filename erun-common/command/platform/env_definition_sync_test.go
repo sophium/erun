@@ -71,7 +71,7 @@ func TestPlanPullLocalPortRangeStartRefusesAClaimedRange(t *testing.T) {
 	}
 
 	_, err := PlanPullLocalPortRangeStart(configpkg.ConfigStore{}, "team", "fresh", configpkg.LowerServicePort)
-	var overlap configpkg.ErrLocalPortRangeOverlap
+	var overlap configpkg.LocalPortRangeOverlapError
 	if !errors.As(err, &overlap) {
 		t.Fatalf("a claimed range start was accepted: err = %v", err)
 	}
@@ -189,7 +189,7 @@ func TestPullAsNewRefusesAPortCollisionBeforeWriting(t *testing.T) {
 		// the lowest free range instead and never collides.
 		LocalPortRangeStart: configpkg.LowerServicePort,
 	})
-	var overlap configpkg.ErrLocalPortRangeOverlap
+	var overlap configpkg.LocalPortRangeOverlapError
 	if !errors.As(err, &overlap) {
 		t.Fatalf("a pull-as-new onto a claimed range start was not refused: err = %v", err)
 	}

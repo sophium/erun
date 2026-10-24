@@ -234,12 +234,15 @@ func (f *fakeZitadel) holdsApp(projectID string, name string) bool {
 }
 
 func writeFakeJSON(w http.ResponseWriter, body any) {
-	_ = json.NewEncoder(w).Encode(body)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func projectIDFromPath(path string) string {
 	rest := strings.TrimPrefix(path, "/management/v1/projects/")
-	return rest[:strings.Index(rest, "/")]
+	projectID, _, _ := strings.Cut(rest, "/")
+	return projectID
 }
 
 // TestEnsureMachineIdentityCreatesTheIdentityAndReturnsItsCredential is the

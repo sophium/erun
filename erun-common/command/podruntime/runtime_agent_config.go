@@ -82,7 +82,7 @@ type RuntimeAgentAssetsTarget struct {
 func InstallRuntimeAgentAssets(ctx core.Context, skillsRoot, agentsRoot string, targets RuntimeAgentAssetTargets) (RuntimeAgentAssetsInstall, error) {
 	result := RuntimeAgentAssetsInstall{Targets: []RuntimeAgentAssetsTarget{}}
 	install := func(kind, source string, dests []string, apply func(string, string) (AgentAssetsInstallResult, error)) error {
-		if info, err := os.Stat(source); err != nil || !info.IsDir() {
+		if !isDirectory(source) {
 			return nil
 		}
 		for _, dest := range dests {

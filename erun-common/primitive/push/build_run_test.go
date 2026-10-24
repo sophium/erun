@@ -1,6 +1,7 @@
 package push
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
@@ -31,7 +32,8 @@ func TestPreflightRegistryPushAccessRefusesBeforeBuildWhenNoCredentialConfigured
 	if err == nil {
 		t.Fatal("expected the preflight to refuse a push with no ghcr.io credential configured")
 	}
-	if _, ok := err.(*registry.MissingGHCRCredentialError); !ok {
+	var missing *registry.MissingGHCRCredentialError
+	if !errors.As(err, &missing) {
 		t.Fatalf("expected *MissingGHCRCredentialError, got %T: %v", err, err)
 	}
 }
@@ -55,7 +57,8 @@ func TestPreflightRegistryPushAccessRefusesChartPushWithNoCredentialConfigured(t
 	if err == nil {
 		t.Fatal("expected the preflight to refuse a chart push with no ghcr.io credential configured")
 	}
-	if _, ok := err.(*registry.MissingGHCRCredentialError); !ok {
+	var missing *registry.MissingGHCRCredentialError
+	if !errors.As(err, &missing) {
 		t.Fatalf("expected *MissingGHCRCredentialError, got %T: %v", err, err)
 	}
 }

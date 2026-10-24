@@ -186,6 +186,8 @@ func staleShellCommandFromKind(kind sessionKind) string {
 		return "local"
 	case sessionKindCommand:
 		return "command"
+	case sessionKindContributeERun, sessionKindContributeAI, sessionKindOrchestrator:
+		fallthrough
 	default:
 		return string(kind)
 	}

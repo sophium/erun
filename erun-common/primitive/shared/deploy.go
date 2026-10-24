@@ -211,8 +211,8 @@ func ResolveProjectRootDevopsK8sDir(findProjectRoot ProjectFinderFunc, projectRo
 }
 
 func detectedProjectRootDevopsK8sDir(findProjectRoot ProjectFinderFunc, projectRoot string) (string, bool, error) {
-	tenant, detectedProjectRoot, err := findProjectRoot()
-	if err != nil || filepath.Clean(strings.TrimSpace(detectedProjectRoot)) != projectRoot || strings.TrimSpace(tenant) == "" {
+	tenant, ok := DetectedProjectTenant(findProjectRoot, projectRoot)
+	if !ok {
 		return "", false, nil
 	}
 	k8sDir := filepath.Join(projectRoot, configpkg.RuntimeReleaseName(tenant), "k8s")
@@ -271,4 +271,14 @@ func HasHelmChart(chartFilePath string) bool {
 		return false
 	}
 	return !info.IsDir()
+}
+
+// DetectedProjectTenant reports the detected project's tenant when that
+// project is projectRoot; a failed detection is simply no match.
+func DetectedProjectTenant(findProjectRoot ProjectFinderFunc, projectRoot string) (string, bool) {
+	tenant, detectedProjectRoot, err := findProjectRoot()
+	if err != nil || filepath.Clean(strings.TrimSpace(detectedProjectRoot)) != projectRoot || strings.TrimSpace(tenant) == "" {
+		return "", false
+	}
+	return tenant, true
 }

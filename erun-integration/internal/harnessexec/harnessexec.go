@@ -140,7 +140,7 @@ func isGit(name string) bool {
 var (
 	harnessGitConfigOnce sync.Once
 	harnessGitConfigPath string
-	harnessGitConfigErr  error
+	errHarnessGitConfig  error
 )
 
 // harnessGitConfig writes, once per process, the global git config git
@@ -161,23 +161,23 @@ func harnessGitConfig() (string, error) {
 		}
 		tmp, err := os.CreateTemp(os.TempDir(), "erun-integration-gitconfig-*")
 		if err != nil {
-			harnessGitConfigErr = err
+			errHarnessGitConfig = err
 			return
 		}
 		_, werr := tmp.WriteString(b.String())
 		if err := errors.Join(werr, tmp.Close()); err != nil {
 			_ = os.Remove(tmp.Name())
-			harnessGitConfigErr = err
+			errHarnessGitConfig = err
 			return
 		}
 		if err := os.Rename(tmp.Name(), path); err != nil {
 			_ = os.Remove(tmp.Name())
-			harnessGitConfigErr = err
+			errHarnessGitConfig = err
 			return
 		}
 		harnessGitConfigPath = path
 	})
-	return harnessGitConfigPath, harnessGitConfigErr
+	return harnessGitConfigPath, errHarnessGitConfig
 }
 
 // hostGlobalGitConfigs lists the global config files git would read for the

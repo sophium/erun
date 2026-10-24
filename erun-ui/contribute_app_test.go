@@ -35,7 +35,7 @@ func freeTCPPort(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
+	port := tcpListenerPort(t, ln)
 	_ = ln.Close()
 	return port
 }

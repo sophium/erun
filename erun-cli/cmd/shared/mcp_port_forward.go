@@ -47,6 +47,7 @@ func ReusableRecordedPortForward(ctx core.Context, kind, logPath string, state, 
 		if ReapRecordedPortForwardProcess(matches, state.ProcessID, localPort) {
 			ctx.Trace(fmt.Sprintf("%s: the recorded port-forward for 127.0.0.1:%d never bound its port; clearing it (PID %d) before starting a fresh one", kind, localPort, state.ProcessID))
 		}
+	case kube.PortForwardUnestablished:
 	}
 	return false
 }

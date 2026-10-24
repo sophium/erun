@@ -337,11 +337,22 @@ func (w *world) recordUse(pkg *packages.Package, id *ast.Ident, obj types.Object
 	pos := pkg.Fset.Position(id.Pos())
 	s := site{file: pos.Filename, start: pos.Offset, end: pos.Offset + len(id.Name), objKey: o.key}
 	if sel, ok := qualified[id]; ok && !o.member {
-		x := sel.X.(*ast.Ident)
-		s.start = pkg.Fset.Position(x.Pos()).Offset
-		s.qualPath = pkg.TypesInfo.Uses[x].(*types.PkgName).Imported().Path()
+		if x, pkgName, ok := selectorQualifier(pkg, sel); ok {
+			s.start = pkg.Fset.Position(x.Pos()).Offset
+			s.qualPath = pkgName.Imported().Path()
+		}
 	}
 	w.addSite(s)
+}
+
+// selectorQualifier returns the package identifier qualifying sel.
+func selectorQualifier(pkg *packages.Package, sel *ast.SelectorExpr) (*ast.Ident, *types.PkgName, bool) {
+	x, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return nil, nil, false
+	}
+	pkgName, ok := pkg.TypesInfo.Uses[x].(*types.PkgName)
+	return x, pkgName, ok
 }
 
 func (w *world) addSite(s site) {
@@ -358,21 +369,31 @@ func (w *world) objectFor(fset *token.FileSet, obj types.Object) *object {
 	key := objKey(fset, obj)
 	o, ok := w.objects[key]
 	if !ok {
-		if o = describe(fset, obj, key); o == nil {
+		if o = w.register(fset, obj, key); o == nil {
 			return nil
-		}
-		o.oses = map[string]bool{}
-		w.objects[key] = o
-		if !o.member {
-			twin := obj.Pkg().Path() + "." + o.name
-			if first, ok := w.twins[twin]; ok {
-				w.union(first, key)
-			} else {
-				w.twins[twin] = key
-			}
 		}
 	}
 	o.oses[w.goos] = true
+	return o
+}
+
+// register records obj under key, uniting it with its twins, or returns nil
+// for an object describe skips.
+func (w *world) register(fset *token.FileSet, obj types.Object, key string) *object {
+	o := describe(fset, obj, key)
+	if o == nil {
+		return nil
+	}
+	o.oses = map[string]bool{}
+	w.objects[key] = o
+	if !o.member {
+		twin := obj.Pkg().Path() + "." + o.name
+		if first, ok := w.twins[twin]; ok {
+			w.union(first, key)
+		} else {
+			w.twins[twin] = key
+		}
+	}
 	return o
 }
 

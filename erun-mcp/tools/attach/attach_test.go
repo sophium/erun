@@ -82,7 +82,10 @@ func TestAttachReadHelpersToleratePastThePriorDeadline(t *testing.T) {
 	u.Scheme = "ws"
 	u.Path = "/slow"
 
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	conn, resp, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

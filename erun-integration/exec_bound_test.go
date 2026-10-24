@@ -128,10 +128,7 @@ func findBareExecConstructors(t testing.TB, root string) []bareExecHit {
 			return walkErr
 		}
 		if d.IsDir() {
-			if path != root && (skipDirForExecScan(d.Name()) || path == blessed) {
-				return filepath.SkipDir
-			}
-			return nil
+			return execScanDirVerdict(root, blessed, path, d)
 		}
 		if !strings.HasSuffix(path, ".go") {
 			return nil
@@ -146,38 +143,55 @@ func findBareExecConstructors(t testing.TB, root string) []bareExecHit {
 		}
 		rel = filepath.ToSlash(rel)
 
-		names, dotImported := execImportNames(file)
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			position := fset.Position(call.Pos())
-			switch fun := call.Fun.(type) {
-			case *ast.SelectorExpr:
-				ident, ok := fun.X.(*ast.Ident)
-				if !ok || !names[ident.Name] || !bareExecConstructors[fun.Sel.Name] {
-					return true
-				}
-				hits = append(hits, bareExecHit{
-					file: rel, line: position.Line, col: position.Column,
-					call: ident.Name + "." + fun.Sel.Name,
-				})
-			case *ast.Ident:
-				if dotImported && bareExecConstructors[fun.Name] {
-					hits = append(hits, bareExecHit{
-						file: rel, line: position.Line, col: position.Column,
-						call: fun.Name,
-					})
-				}
-			}
-			return true
-		})
+		hits = append(hits, bareExecHitsInFile(fset, file, rel)...)
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("scan harness for bare exec constructors: %v", err)
 	}
+	return hits
+}
+
+// execScanDirVerdict skips the directories the scan leaves out, the blessed
+// package among them, while always descending into root itself.
+func execScanDirVerdict(root, blessed, path string, d os.DirEntry) error {
+	if path != root && (skipDirForExecScan(d.Name()) || path == blessed) {
+		return filepath.SkipDir
+	}
+	return nil
+}
+
+// bareExecHitsInFile returns one hit per direct os/exec constructor call in
+// file, whether reached through the package name, an alias, or a dot import.
+func bareExecHitsInFile(fset *token.FileSet, file *ast.File, rel string) []bareExecHit {
+	var hits []bareExecHit
+	names, dotImported := execImportNames(file)
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		position := fset.Position(call.Pos())
+		switch fun := call.Fun.(type) {
+		case *ast.SelectorExpr:
+			ident, ok := fun.X.(*ast.Ident)
+			if !ok || !names[ident.Name] || !bareExecConstructors[fun.Sel.Name] {
+				return true
+			}
+			hits = append(hits, bareExecHit{
+				file: rel, line: position.Line, col: position.Column,
+				call: ident.Name + "." + fun.Sel.Name,
+			})
+		case *ast.Ident:
+			if dotImported && bareExecConstructors[fun.Name] {
+				hits = append(hits, bareExecHit{
+					file: rel, line: position.Line, col: position.Column,
+					call: fun.Name,
+				})
+			}
+		}
+		return true
+	})
 	return hits
 }
 

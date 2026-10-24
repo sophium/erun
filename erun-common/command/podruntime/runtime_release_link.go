@@ -18,7 +18,7 @@ const RuntimeReleaseDir = "/opt/erun/release"
 // replaced, and a populated directory -- a mounted or cloned worktree -- is
 // left untouched. It reports whether repoDir now links to releaseDir.
 func LinkRuntimeRelease(repoDir, releaseDir string) (bool, error) {
-	if info, err := os.Stat(releaseDir); err != nil || !info.IsDir() {
+	if !isDirectory(releaseDir) {
 		return false, nil
 	}
 	replaceable, err := clearRuntimeReleaseLinkTarget(repoDir)

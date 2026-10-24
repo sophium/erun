@@ -276,7 +276,7 @@ func (r *EnvDeleteReconciler) reconcileOne(ctx context.Context, environment mode
 // record is folded in rather than replacing it.
 func (r *EnvDeleteReconciler) unclaim(ctx context.Context, tenantID, environmentID string, cause error) error {
 	if err := r.environments.MarkDeleteBlocked(ctx, tenantID, environmentID, cause.Error()); err != nil {
-		return fmt.Errorf("%w (and recording it did not persist: %v)", cause, err)
+		return fmt.Errorf("%w (and recording it did not persist: %w)", cause, err)
 	}
 	return cause
 }

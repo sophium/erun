@@ -2,6 +2,7 @@ package review
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -163,9 +164,7 @@ func TestClosePullRequestRefusesWhenHeadHasMoved(t *testing.T) {
 	if !strings.Contains(err.Error(), "movedsha999") || !strings.Contains(err.Error(), "sourcesha123") {
 		t.Fatalf("expected the refusal to name both shas, got: %v", err)
 	}
-	if e, ok := err.(*ClosePullRequestHeadMovedError); ok {
-		moved = e
-	} else {
+	if !errors.As(err, &moved) {
 		t.Fatalf("expected *ClosePullRequestHeadMovedError, got %T", err)
 	}
 	if moved.Number != 7 {

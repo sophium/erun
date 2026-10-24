@@ -21,6 +21,10 @@ func fileLinkIdentity(info fs.FileInfo) (fileLinkKey, bool) {
 	if !ok || stat.Nlink < 2 {
 		return fileLinkKey{}, false
 	}
-	// Dev is int32 on darwin and uint64 on linux; the conversion serves both.
-	return fileLinkKey{dev: uint64(stat.Dev), ino: stat.Ino}, true
+	return fileLinkKey{dev: deviceNumber(stat.Dev), ino: stat.Ino}, true
+}
+
+// deviceNumber widens Stat_t.Dev, which is int32 on darwin and uint64 on linux.
+func deviceNumber[T ~int32 | ~uint32 | ~int64 | ~uint64](dev T) uint64 {
+	return uint64(dev)
 }

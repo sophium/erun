@@ -152,11 +152,11 @@ func RunReleaseBranchPush(ctx core.Context, spec ReleaseSpec, command ReleaseCom
 		}
 		ctx.Info(fmt.Sprintf("release: push rejected; origin/%s moved during the release, rebasing onto it and retrying (%d/%d)", branch, attempt, releasePushRebaseAttempts))
 		if rebaseErr := rebaseReleaseOntoRemoteBranch(ctx, command.Dir, branch, runGit); rebaseErr != nil {
-			return fmt.Errorf("%w\nrebasing onto origin/%s to absorb the move failed: %v\n%s",
+			return fmt.Errorf("%w\nrebasing onto origin/%s to absorb the move failed: %w\n%s",
 				err, branch, rebaseErr, ReleaseRebaseFailedRecovery(spec, branch))
 		}
 		if repointErr := repointReleaseTagIfRebased(ctx, spec, command.Dir, runGit); repointErr != nil {
-			return fmt.Errorf("%w\nrebasing onto origin/%s absorbed the move, but re-pointing the already-public release tag failed: %v\n%s",
+			return fmt.Errorf("%w\nrebasing onto origin/%s absorbed the move, but re-pointing the already-public release tag failed: %w\n%s",
 				err, branch, repointErr, ReleaseRepointFailedRecovery(spec))
 		}
 		pushOutput.Reset()
@@ -350,8 +350,8 @@ func repointReleaseTagIfRebased(ctx core.Context, spec ReleaseSpec, projectRoot 
 	}
 	tag := "v" + version
 
-	tagCommit, ok, err := GitResolvedRef(ctx, projectRoot, tag+"^{commit}")
-	if err != nil || !ok {
+	tagCommit, ok := resolvedReleaseTagCommit(ctx, projectRoot, tag)
+	if !ok {
 		return nil
 	}
 	ancestor, err := gitIsAncestorOfHead(projectRoot, tagCommit)
@@ -509,4 +509,11 @@ func rebaseReleaseOntoRemoteBranch(ctx core.Context, projectRoot, branch string,
 		return err
 	}
 	return nil
+}
+
+// resolvedReleaseTagCommit reports the commit tag names locally; a tag that
+// cannot be resolved has nothing to re-point.
+func resolvedReleaseTagCommit(ctx core.Context, projectRoot, tag string) (string, bool) {
+	commit, ok, err := GitResolvedRef(ctx, projectRoot, tag+"^{commit}")
+	return commit, err == nil && ok
 }

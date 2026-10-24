@@ -70,7 +70,7 @@ func TestOperatorPlatformErrorNamesReviewerNotFoundDistinctly(t *testing.T) {
 // wrong is worse than one that is merely technical.
 func TestOperatorPlatformErrorPassesThroughWhatItCannotClassify(t *testing.T) {
 	original := errors.New("dial tcp 127.0.0.1:1: connect: connection refused")
-	if got := operatorPlatformError(actionCreateReview, original); got != original {
+	if got := operatorPlatformError(actionCreateReview, original); !errors.Is(got, original) || got.Error() != original.Error() {
 		t.Fatalf("expected the original error unchanged, got %v", got)
 	}
 	if operatorPlatformError(actionCreateReview, nil) != nil {

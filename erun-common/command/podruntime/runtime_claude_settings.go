@@ -295,10 +295,10 @@ func readRuntimeJSONMap(path string) (map[string]any, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.UseNumber()
 	object := map[string]any{}
-	if decoder.Decode(&object) != nil || object == nil {
-		return map[string]any{}, nil
+	if decoder.Decode(&object) == nil && object != nil {
+		return object, nil
 	}
-	return object, nil
+	return map[string]any{}, nil
 }
 
 func writeRuntimeJSONMap(path string, value map[string]any) error {

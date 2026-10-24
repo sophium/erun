@@ -520,8 +520,8 @@ func mcpUninitializedSessionError(endpoint string, status int, reply []byte) err
 	if len(reply) == 0 {
 		return nil
 	}
-	var decoded mcpJSONRPCResponse
-	if err := json.Unmarshal(reply, &decoded); err != nil {
+	decoded, ok := decodeJSONRPCResponse(reply)
+	if !ok {
 		return nil
 	}
 	if decoded.Error == nil || !strings.Contains(decoded.Error.Message, mcpSessionInitializationGuard) {
@@ -592,7 +592,7 @@ func (s *mcpSession) unreachableTunnelError() error {
 // generic error; postRaw is what tells a dial failure and a mid-request drop
 // apart when deciding whether a retry is worth attempting.
 func (s *mcpSession) transportError(err error) error {
-	return fmt.Errorf("%w: %s (%v)", ErrMCPEndpointUnreachable, s.endpoint, err)
+	return fmt.Errorf("%w: %s (%w)", ErrMCPEndpointUnreachable, s.endpoint, err)
 }
 
 // sessionPinned says the request carried a session id, which is what separates
@@ -661,6 +661,12 @@ func decodeMCPEventStream(body io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("read MCP event stream: %w", err)
 	}
 	return nil, fmt.Errorf("MCP event stream carried no JSON-RPC reply")
+}
+
+func decodeJSONRPCResponse(reply []byte) (mcpJSONRPCResponse, bool) {
+	var decoded mcpJSONRPCResponse
+	err := json.Unmarshal(reply, &decoded)
+	return decoded, err == nil
 }
 
 type mcpJSONRPCRequest struct {

@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -113,9 +114,7 @@ func TestANewPackageDeniedByTheRegistryIsRefusedUpFront(t *testing.T) {
 		t.Fatal("a repository the registry denies push to must be refused before the build")
 	}
 	var missing *MissingGHCRCreatePackageError
-	if got, ok := err.(*MissingGHCRCreatePackageError); ok {
-		missing = got
-	} else {
+	if !errors.As(err, &missing) {
 		t.Fatalf("expected a MissingGHCRCreatePackageError, got %T: %v", err, err)
 	}
 	message := missing.Error()

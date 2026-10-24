@@ -57,7 +57,7 @@ func TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused(t *testing.T) {
 	}
 
 	credentialErr = nil
-	app.deps.store.(stubUIStore).config.OpenRouter = nil
+	stubStore(app).config.OpenRouter = nil
 	requireLoneRestartPreviewNotice(t, app.orchestratorRestartPreview(id), id,
 		"no gateway catalog is configured", "configure the gateway catalog")
 }

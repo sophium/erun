@@ -99,9 +99,9 @@ func (s *ReleaseService) reuse(ctx context.Context, existing model.Release) (Enq
 			return EnqueueResult{}, err
 		}
 		return EnqueueResult{Release: requeued, Requeued: true}, nil
-	default:
-		return EnqueueResult{Release: existing}, nil
+	case model.ReleaseStatusQueued, model.ReleaseStatusRunning:
 	}
+	return EnqueueResult{Release: existing}, nil
 }
 
 // Get reads one release.

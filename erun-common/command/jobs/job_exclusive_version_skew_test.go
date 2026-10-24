@@ -32,12 +32,12 @@ func TestDescribeExclusiveJobStartVersionSkewNamesTheVersionMismatch(t *testing.
 
 func TestDescribeExclusiveJobStartVersionSkewLeavesOtherFailuresAlone(t *testing.T) {
 	notExclusive := errors.New(rawExclusiveJobStartSchemaError)
-	if got := DescribeExclusiveJobStartVersionSkew("petios", "rihards-develop", false, notExclusive); got != notExclusive {
+	if got := DescribeExclusiveJobStartVersionSkew("petios", "rihards-develop", false, notExclusive); !errors.Is(got, notExclusive) || got.Error() != notExclusive.Error() {
 		t.Fatalf("a non-exclusive call must pass its error through unchanged, got %v", got)
 	}
 
 	unrelated := errors.New(`MCP tools/call failed: invalid params: validating "arguments": validating "name": value is required (code -32602)`)
-	if got := DescribeExclusiveJobStartVersionSkew("petios", "rihards-develop", true, unrelated); got != unrelated {
+	if got := DescribeExclusiveJobStartVersionSkew("petios", "rihards-develop", true, unrelated); !errors.Is(got, unrelated) || got.Error() != unrelated.Error() {
 		t.Fatalf("a genuinely malformed call must pass its error through unchanged, got %v", got)
 	}
 

@@ -171,9 +171,9 @@ func TestOrchestratorShellActivityHooksResolveTheirOwnOrchestrator(t *testing.T)
 		t.Fatalf("expected a start block and a clear block, got %d: %+v", len(blocks), blocks)
 	}
 	start := shellHookBlockCommand(t, blocks[0], "Bash")
-	clear := shellHookBlockCommand(t, blocks[1], "TaskOutput|TaskStop")
+	clearCommand := shellHookBlockCommand(t, blocks[1], "TaskOutput|TaskStop")
 
-	for _, command := range []string{start, clear} {
+	for _, command := range []string{start, clearCommand} {
 		if !strings.Contains(command, "process.env.ERUN_ORCHESTRATOR_ID") {
 			t.Fatalf("the hook must resolve its orchestrator at run time: %q", command)
 		}

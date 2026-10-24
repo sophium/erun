@@ -56,15 +56,11 @@ func runUnexposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore c
 	// a chance to use the override.
 	projectRoot := ""
 	if servicesZone == "" && platformNamespace == "" {
-		if findProjectRoot == nil {
-			findProjectRoot = config.FindProjectRoot
+		root, err := findExposeProjectRoot(findProjectRoot)
+		if err != nil && !skipIfUnconfigured {
+			return err
 		}
-		_, root, err := findProjectRoot()
-		if err != nil {
-			if !skipIfUnconfigured {
-				return err
-			}
-		} else {
+		if err == nil {
 			projectRoot = root
 		}
 	}

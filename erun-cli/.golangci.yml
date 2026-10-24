@@ -22,6 +22,26 @@ linters:
     - gocyclo
     - cyclop
     - revive
+    - errorlint
+    - bodyclose
+    - nilerr
+    - nilnil
+    - exhaustive
+    - gocritic
+    - forcetypeassert
+    - errchkjson
+    - predeclared
+    - errname
+    - unconvert
+    - copyloopvar
+    - usestdlibvars
+    - misspell
+    - wastedassign
+    - mirror
+    - nestif
+    - makezero
+    - durationcheck
+    - nakedret
     - depguard
   settings:
     revive:
@@ -31,10 +51,8 @@ linters:
             - max: 500
               skipComments: true
               skipBlankLines: true
-    # One package per command (#2741, erun-common/AGENTS.md "Package layers"):
-    # a command reaches another only through cmd/shared, so an edit to one
-    # command rebuilds that command and the root that registers it, not every
-    # command's test binary.
+    # A command reaches another only through cmd/shared
+    # (erun-common/AGENTS.md "Package layers").
     depguard:
       rules:
         commands:

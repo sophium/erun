@@ -30,7 +30,7 @@ func TestCanReachLocalMCPEndpointSeesThroughASilentListener(t *testing.T) {
 		}
 	}()
 
-	port := listener.Addr().(*net.TCPAddr).Port
+	port := loopbackListenerPort(t, listener)
 
 	if !LocalPortIsBound(port) {
 		t.Fatal("the dial must succeed — that is the trap this exists for")
@@ -74,14 +74,14 @@ func TestClassifyLocalMCPUnreachableNamesTheKind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	boundPort := listener.Addr().(*net.TCPAddr).Port
+	boundPort := loopbackListenerPort(t, listener)
 	defer func() { _ = listener.Close() }()
 
 	freeListener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	freePort := freeListener.Addr().(*net.TCPAddr).Port
+	freePort := loopbackListenerPort(t, freeListener)
 	_ = freeListener.Close()
 
 	if got := ClassifyLocalMCPUnreachable(boundPort); got != LocalMCPStaleForward {
@@ -110,7 +110,7 @@ func startHeldOpenListener(t *testing.T) int {
 			defer func() { _ = conn.Close() }()
 		}
 	}()
-	return listener.Addr().(*net.TCPAddr).Port
+	return loopbackListenerPort(t, listener)
 }
 
 // startDroppingListener is the shape a forward whose target has not come up
@@ -132,7 +132,7 @@ func startDroppingListener(t *testing.T) int {
 			_ = conn.Close()
 		}
 	}()
-	return listener.Addr().(*net.TCPAddr).Port
+	return loopbackListenerPort(t, listener)
 }
 
 // A forward whose target has not come up yet — a pod mid-roll after a deploy —
@@ -169,7 +169,7 @@ func TestDescribeLocalMCPUnreachableSeparatesMissingFromStale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
+	port := loopbackListenerPort(t, listener)
 	_ = listener.Close()
 
 	detail := DescribeLocalMCPUnreachable("acme", "dev", port)
@@ -179,4 +179,13 @@ func TestDescribeLocalMCPUnreachableSeparatesMissingFromStale(t *testing.T) {
 	if strings.Contains(detail, "not carrying traffic") {
 		t.Fatalf("a missing forward is not a stale one, got %q", detail)
 	}
+}
+
+func loopbackListenerPort(t *testing.T, listener net.Listener) int {
+	t.Helper()
+	addr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address %v is not TCP", listener.Addr())
+	}
+	return addr.Port
 }

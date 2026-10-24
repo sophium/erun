@@ -62,8 +62,7 @@ func DecideWorkCloneReclaim(ctx core.Context, dir string) WorkCloneReclaimDecisi
 		decision.Reason = "not a directory"
 		return decision
 	}
-	inside, err := gitIsInsideWorkTree(ctx, dir)
-	if err != nil || !inside {
+	if !gitIsInsideWorkTree(ctx, dir) {
 		decision.Reason = "not a git working tree"
 		return decision
 	}

@@ -86,8 +86,8 @@ func (RemoteVerifier) Contains(ctx context.Context, remoteURL, branch, commit st
 		return false, "", err
 	}
 
-	targetCommit, err := repo.CommitObject(plumbing.NewHash(commit))
-	if err != nil {
+	targetCommit, ok := fetchedCommit(repo, commit)
+	if !ok {
 		// Not present anywhere in the fetched history: definitely not on the
 		// branch, not a lookup failure.
 		return false, "", nil
@@ -128,8 +128,8 @@ func (RemoteVerifier) IsAncestor(ctx context.Context, remoteURL, branch, ancesto
 	if err != nil {
 		return false, err
 	}
-	ancestorCommit, err := repo.CommitObject(plumbing.NewHash(ancestor))
-	if err != nil {
+	ancestorCommit, ok := fetchedCommit(repo, ancestor)
+	if !ok {
 		// Not present anywhere in the fetched history: definitely not an
 		// ancestor, not a lookup failure.
 		return false, nil
@@ -619,6 +619,13 @@ func unreadableRemoteNote(remoteURL, fetchURL string) string {
 }
 
 // branchTip reads the commit at branch's just-fetched tip.
+// fetchedCommit looks commit up in the fetched history, reporting false when
+// it is not there.
+func fetchedCommit(repo *git.Repository, commit string) (*object.Commit, bool) {
+	found, err := repo.CommitObject(plumbing.NewHash(commit))
+	return found, err == nil
+}
+
 func branchTip(repo *git.Repository, branch string) (*object.Commit, error) {
 	tipRef, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", branch), true)
 	if err != nil {

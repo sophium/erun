@@ -98,13 +98,13 @@ func TestStaticAssetServed(t *testing.T) {
 
 func TestInvokeReturnsData(t *testing.T) {
 	_, target, ts := newTestServer(t)
-	body, _ := json.Marshal(invokeRequest{Method: "Echo", Args: []json.RawMessage{json.RawMessage(`"hello"`)}})
+	body := mustMarshal(t, invokeRequest{Method: "Echo", Args: []json.RawMessage{json.RawMessage(`"hello"`)}})
 	resp, err := http.Post(ts.URL+"/__erun_invoke", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		out, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status %d: %s", resp.StatusCode, out)
 	}
@@ -125,13 +125,13 @@ func TestInvokeReturnsData(t *testing.T) {
 
 func TestInvokeReturnsErrorEnvelope(t *testing.T) {
 	_, _, ts := newTestServer(t)
-	body, _ := json.Marshal(invokeRequest{Method: "Boom", Args: []json.RawMessage{}})
+	body := mustMarshal(t, invokeRequest{Method: "Boom", Args: []json.RawMessage{}})
 	resp, err := http.Post(ts.URL+"/__erun_invoke", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 500 {
+	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", resp.StatusCode)
 	}
 	var env invokeEnvelope
@@ -145,20 +145,20 @@ func TestInvokeReturnsErrorEnvelope(t *testing.T) {
 
 func TestInvokeUnknownMethod(t *testing.T) {
 	_, _, ts := newTestServer(t)
-	body, _ := json.Marshal(invokeRequest{Method: "Missing", Args: nil})
+	body := mustMarshal(t, invokeRequest{Method: "Missing", Args: nil})
 	resp, err := http.Post(ts.URL+"/__erun_invoke", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 404 {
+	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 }
 
 func TestInvokePlainReturn(t *testing.T) {
 	_, _, ts := newTestServer(t)
-	body, _ := json.Marshal(invokeRequest{Method: "Plain", Args: []json.RawMessage{json.RawMessage(`3`)}})
+	body := mustMarshal(t, invokeRequest{Method: "Plain", Args: []json.RawMessage{json.RawMessage(`3`)}})
 	resp, err := http.Post(ts.URL+"/__erun_invoke", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -253,14 +253,14 @@ func waitForSubscriber(t *testing.T, srv *Server) {
 
 func TestClipboardStoresInMemory(t *testing.T) {
 	_, _, ts := newTestServer(t)
-	body, _ := json.Marshal(clipboardRequest{Action: "set", Text: "hello"})
+	body := mustMarshal(t, clipboardRequest{Action: "set", Text: "hello"})
 	resp, err := http.Post(ts.URL+"/__erun_clipboard", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
 
-	body, _ = json.Marshal(clipboardRequest{Action: "get"})
+	body = mustMarshal(t, clipboardRequest{Action: "get"})
 	resp, err = http.Post(ts.URL+"/__erun_clipboard", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -323,7 +323,8 @@ func assertFillerRange(t *testing.T, events []event, startArg int) {
 	t.Helper()
 	for i, ev := range events {
 		want := startArg + i
-		if ev.Name != "filler" || ev.Args[0].(int) != want {
+		got, ok := ev.Args[0].(int)
+		if ev.Name != "filler" || !ok || got != want {
 			t.Fatalf("event %d = %+v, want filler #%d", i, ev, want)
 		}
 	}
@@ -334,9 +335,21 @@ func assertGapMarker(t *testing.T, ev event, wantMissed int64) {
 	if ev.Name != eventsDroppedName {
 		t.Fatalf("event = %+v, want the %q gap marker", ev, eventsDroppedName)
 	}
-	if len(ev.Args) != 1 || ev.Args[0].(int64) != wantMissed {
+	if len(ev.Args) != 1 {
 		t.Fatalf("gap marker args = %+v, want missed count %d", ev.Args, wantMissed)
 	}
+	if missed, ok := ev.Args[0].(int64); !ok || missed != wantMissed {
+		t.Fatalf("gap marker args = %+v, want missed count %d", ev.Args, wantMissed)
+	}
+}
+
+func mustMarshal(t *testing.T, v any) []byte {
+	t.Helper()
+	body, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
 }
 
 func bufioReaderForSSE(r io.Reader) *lineReader {

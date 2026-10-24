@@ -383,7 +383,7 @@ func admitAndCompleteJobReactors(t *testing.T, kube *fake.Clientset, watchName, 
 	jobsResource := batchv1.SchemeGroupVersion.WithResource("jobs")
 	var createdJob *batchv1.Job
 	kube.PrependReactor("create", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		obj := action.(k8stesting.CreateAction).GetObject().(*batchv1.Job).DeepCopy()
+		obj := reactorCreatedJob(t, action).DeepCopy()
 		if obj.Name != watchName {
 			return false, nil, nil
 		}
@@ -397,7 +397,7 @@ func admitAndCompleteJobReactors(t *testing.T, kube *fake.Clientset, watchName, 
 	})
 	polls := 0
 	kube.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		getAction := action.(k8stesting.GetAction)
+		getAction := jobGetAction(t, action)
 		if getAction.GetNamespace() != namespace || getAction.GetName() != watchName {
 			return false, nil, nil
 		}
@@ -477,7 +477,7 @@ func TestRunStopWhileStopJobStillRunningReWatchesIt(t *testing.T) {
 	jobsResource := batchv1.SchemeGroupVersion.WithResource("jobs")
 	polls := 0
 	kube.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		getAction := action.(k8stesting.GetAction)
+		getAction := jobGetAction(t, action)
 		if getAction.GetName() != inFlightName {
 			return false, nil, nil
 		}
@@ -494,7 +494,7 @@ func TestRunStopWhileStopJobStillRunningReWatchesIt(t *testing.T) {
 		return false, nil, nil
 	})
 	kube.PrependReactor("create", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		obj := action.(k8stesting.CreateAction).GetObject().(*batchv1.Job)
+		obj := reactorCreatedJob(t, action)
 		t.Fatalf("a second stop job %q was created while %q was still in flight", obj.Name, inFlightName)
 		return true, nil, nil
 	})
@@ -582,4 +582,28 @@ func TestStopAfterRedeploySequenceEndsStopped(t *testing.T) {
 	if len(jobs.Items) != 3 {
 		t.Fatalf("jobs in namespace = %d, want 3 (the failed first stop, the active redeploy, and the new second stop)", len(jobs.Items))
 	}
+}
+
+// reactorCreatedJob is the Job a "create jobs" reactor was handed.
+func reactorCreatedJob(t *testing.T, action k8stesting.Action) *batchv1.Job {
+	t.Helper()
+	create, ok := action.(k8stesting.CreateAction)
+	if !ok {
+		t.Fatalf("create jobs reactor got %T, want a CreateAction", action)
+	}
+	job, ok := create.GetObject().(*batchv1.Job)
+	if !ok {
+		t.Fatalf("create jobs reactor got a %T object, want *batchv1.Job", create.GetObject())
+	}
+	return job
+}
+
+// jobGetAction is the GetAction a "get jobs" reactor was handed.
+func jobGetAction(t *testing.T, action k8stesting.Action) k8stesting.GetAction {
+	t.Helper()
+	getAction, ok := action.(k8stesting.GetAction)
+	if !ok {
+		t.Fatalf("get jobs reactor got %T, want a GetAction", action)
+	}
+	return getAction
 }

@@ -61,8 +61,8 @@ func SignalEnvironmentJobProcessGroup(pid int, signal string) error {
 	if pid == os.Getpid() {
 		return fmt.Errorf("refusing to signal this process (%d) as a job", pid)
 	}
-	group, err := syscall.Getpgid(pid)
-	if err != nil {
+	group, alive := processGroupOf(pid)
+	if !alive {
 		// The process is already gone; the record reconciles on the next read.
 		return nil
 	}
@@ -285,4 +285,9 @@ func EnvironmentJobExitSignal(state *os.ProcessState) string {
 		return ""
 	}
 	return status.Signal().String()
+}
+
+func processGroupOf(pid int) (int, bool) {
+	group, err := syscall.Getpgid(pid)
+	return group, err == nil
 }

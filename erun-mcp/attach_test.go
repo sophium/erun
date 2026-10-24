@@ -180,6 +180,9 @@ func TestAttachRefusesWithoutAttachCapabilityBeforeUpgrade(t *testing.T) {
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "denied", token)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err == nil {
 		_ = conn.Close()
 		t.Fatalf("expected the handshake to be refused, it succeeded")
@@ -206,6 +209,9 @@ func TestAttachRefusesUnauthenticatedConnectionAtUpgrade(t *testing.T) {
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "denied", "")
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err == nil {
 		_ = conn.Close()
 		t.Fatalf("expected the handshake to be refused, it succeeded")
@@ -229,6 +235,9 @@ func TestAttachBridgesPTYAndReportsEndedOutcome(t *testing.T) {
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "golden", token)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err != nil {
 		t.Fatalf("dial: %v (response %+v)", err, resp)
 	}
@@ -266,6 +275,9 @@ func TestAttachCreatesSessionDirectoryOnAFreshPod(t *testing.T) {
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "fresh-pod", token)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err != nil {
 		t.Fatalf("dial: %v (response %+v)", err, resp)
 	}
@@ -292,6 +304,9 @@ func TestAttachResizeControlMessageResizesThePTY(t *testing.T) {
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttach(server.URL, "resize", token)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err != nil {
 		t.Fatalf("dial: %v (response %+v)", err, resp)
 	}
@@ -315,6 +330,9 @@ func TestAttachAuthenticatesViaSubprotocolForBrowserCallers(t *testing.T) {
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	conn, resp, err := dialAttachViaSubprotocol(server.URL, "browser", token)
+	if resp != nil {
+		defer func() { _ = resp.Body.Close() }()
+	}
 	if err != nil {
 		t.Fatalf("dial: %v (response %+v)", err, resp)
 	}
@@ -354,6 +372,9 @@ func TestAttachEvictionReportsTakenOverAndPreservesTheSession(t *testing.T) {
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
 
 	connA, respA, err := dialAttach(server.URL, "shared", token)
+	if respA != nil {
+		defer func() { _ = respA.Body.Close() }()
+	}
 	if err != nil {
 		t.Fatalf("dial A: %v (response %+v)", err, respA)
 	}
@@ -363,6 +384,9 @@ func TestAttachEvictionReportsTakenOverAndPreservesTheSession(t *testing.T) {
 	waitForAnyBinary(t, connA)
 
 	connB, respB, err := dialAttach(server.URL, "shared", token)
+	if respB != nil {
+		defer func() { _ = respB.Body.Close() }()
+	}
 	if err != nil {
 		t.Fatalf("dial B: %v (response %+v)", err, respB)
 	}

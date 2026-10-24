@@ -219,6 +219,7 @@ func releaseLeaseSummary(outcome activity.EnvironmentActivityLeaseReleaseOutcome
 		if note != "" {
 			return fmt.Sprintf("lease not released: %s is %s", trimmed, note)
 		}
+	case activity.EnvironmentActivityLeaseNotHeld:
 	}
 	return fmt.Sprintf("lease not held: %s", trimmed)
 }

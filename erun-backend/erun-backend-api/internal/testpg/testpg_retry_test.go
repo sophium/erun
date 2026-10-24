@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// reaperStartupFailure is the error a loaded Docker daemon produced when
+// errReaperStartup is the error a loaded Docker daemon produced when
 // Testcontainers' reaper never left status "created".
-var reaperStartupFailure = dockerStartupError{errors.New(`create a Docker network (the database suites need a Docker daemon): ` +
+var errReaperStartup = dockerStartupError{errors.New(`create a Docker network (the database suites need a Docker daemon): ` +
 	`reaper: new reaper: wait for reaper 1a2b3c4d: unexpected container status "created": failed to create network`)}
 
 // scriptedAttempts returns an attempt func that hands out results in order and
@@ -27,7 +27,7 @@ func scriptedAttempts(results ...error) (func(context.Context) (string, error), 
 }
 
 func TestStartRetriesADockerStartupFailureOnce(t *testing.T) {
-	attempt, calls := scriptedAttempts(reaperStartupFailure, nil)
+	attempt, calls := scriptedAttempts(errReaperStartup, nil)
 	url, err := startWithRetry(context.Background(), attempt, 0)
 	if err != nil {
 		t.Fatalf("expected the fresh attempt to succeed, got %v", err)
@@ -38,7 +38,7 @@ func TestStartRetriesADockerStartupFailureOnce(t *testing.T) {
 }
 
 func TestStartGivesUpAfterTheSecondDockerStartupFailure(t *testing.T) {
-	attempt, calls := scriptedAttempts(reaperStartupFailure, reaperStartupFailure, nil)
+	attempt, calls := scriptedAttempts(errReaperStartup, errReaperStartup, nil)
 	_, err := startWithRetry(context.Background(), attempt, 0)
 	if err == nil || *calls != 2 {
 		t.Fatalf("expected exactly two attempts and an error, got %d attempts, err %v", *calls, err)
@@ -60,7 +60,7 @@ func TestStartNeverRetriesAMigrationFailure(t *testing.T) {
 func TestStartDoesNotRetryOnceTheContextIsDone(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	attempt, calls := scriptedAttempts(reaperStartupFailure, nil)
+	attempt, calls := scriptedAttempts(errReaperStartup, nil)
 	_, err := startWithRetry(ctx, attempt, 0)
 	if err == nil || *calls != 1 {
 		t.Fatalf("expected no retry after cancellation, got %d attempts, err %v", *calls, err)

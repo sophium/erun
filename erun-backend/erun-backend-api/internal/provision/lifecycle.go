@@ -204,40 +204,8 @@ func (l *EnvLifecycle) Stop(ctx context.Context, input EnvLifecycleInput) error 
 // anyway would orphan the credential with nothing left naming it.
 func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) error {
 	if strings.TrimSpace(input.RunningVersion) != "" {
-		placement, err := l.placement(ctx, input)
-		if err != nil {
-			return l.blockDelete(ctx, input, err)
-		}
-		result, err := l.runner.RunDelete(ctx, deployexec.DeleteJobParams{
-			Tenant:                  input.Tenant,
-			Environment:             input.Environment,
-			Namespace:               l.config.PlatformNamespace,
-			Image:                   l.image(ctx, input.Tenant, input.RunningVersion),
-			ServiceAccount:          l.config.DeployerServiceAccount,
-			DeleteID:                input.DeleteID,
-			ExposeServicesZone:      l.config.ExposeServicesZone,
-			ExposePlatformNamespace: l.config.ExposePlatformNamespace,
-			Placement:               placement,
-		})
-		if err != nil {
-			return l.blockDelete(ctx, input, err)
-		}
-		if result.Outcome != deployexec.OutcomeSucceeded {
-			return l.blockDelete(ctx, input, fmt.Errorf("delete job %s: %s", result.Outcome, lifecycleFailureDetail(result)))
-		}
-		// The Job's own exit code is not the whole story: `erun delete` treats
-		// a namespace-teardown failure as non-fatal for itself (its local
-		// config cleanup still runs), so a Job the runner reports as
-		// succeeded can still have left the namespace stuck. This is the only
-		// place that failure is visible.
-		if blocker := deployexec.NamespaceDeleteFailureFromOutput(result.Output); blocker != "" {
-			return l.blockDelete(ctx, input, errors.New(blocker))
-		}
-		// The environment row is about to be removed, so a failed best-effort
-		// DNS cleanup has nowhere to be recorded once this returns —
-		// the server log is the only place left to name it.
-		if reason := deployexec.UnexposeFailureFromOutput(result.Output); reason != "" {
-			log.Printf("erun api env lifecycle: dns cleanup for %s/%s did not succeed: %s", input.Tenant, input.Environment, reason)
+		if err := l.runDeleteJob(ctx, input); err != nil {
+			return err
 		}
 	}
 	l.recordUsage(ctx, input.EnvironmentID, model.UsageEventEnvironmentDeleted)
@@ -265,6 +233,47 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 	// re-attempted.
 	if err := l.rows.Delete(ctx, input.TenantID, input.EnvironmentID); err != nil {
 		return l.blockDelete(ctx, input, fmt.Errorf("namespace torn down but removing the environment row failed: %w", err))
+	}
+	return nil
+}
+
+// runDeleteJob tears the environment's namespace down through a delete Job,
+// returning the blockDelete error for any outcome that left it standing.
+func (l *EnvLifecycle) runDeleteJob(ctx context.Context, input EnvLifecycleInput) error {
+	placement, err := l.placement(ctx, input)
+	if err != nil {
+		return l.blockDelete(ctx, input, err)
+	}
+	result, err := l.runner.RunDelete(ctx, deployexec.DeleteJobParams{
+		Tenant:                  input.Tenant,
+		Environment:             input.Environment,
+		Namespace:               l.config.PlatformNamespace,
+		Image:                   l.image(ctx, input.Tenant, input.RunningVersion),
+		ServiceAccount:          l.config.DeployerServiceAccount,
+		DeleteID:                input.DeleteID,
+		ExposeServicesZone:      l.config.ExposeServicesZone,
+		ExposePlatformNamespace: l.config.ExposePlatformNamespace,
+		Placement:               placement,
+	})
+	if err != nil {
+		return l.blockDelete(ctx, input, err)
+	}
+	if result.Outcome != deployexec.OutcomeSucceeded {
+		return l.blockDelete(ctx, input, fmt.Errorf("delete job %s: %s", result.Outcome, lifecycleFailureDetail(result)))
+	}
+	// The Job's own exit code is not the whole story: `erun delete` treats
+	// a namespace-teardown failure as non-fatal for itself (its local
+	// config cleanup still runs), so a Job the runner reports as
+	// succeeded can still have left the namespace stuck. This is the only
+	// place that failure is visible.
+	if blocker := deployexec.NamespaceDeleteFailureFromOutput(result.Output); blocker != "" {
+		return l.blockDelete(ctx, input, errors.New(blocker))
+	}
+	// The environment row is about to be removed, so a failed best-effort
+	// DNS cleanup has nowhere to be recorded once this returns —
+	// the server log is the only place left to name it.
+	if reason := deployexec.UnexposeFailureFromOutput(result.Output); reason != "" {
+		log.Printf("erun api env lifecycle: dns cleanup for %s/%s did not succeed: %s", input.Tenant, input.Environment, reason)
 	}
 	return nil
 }

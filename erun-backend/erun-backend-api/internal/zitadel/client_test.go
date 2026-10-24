@@ -94,7 +94,8 @@ func TestCallSetsHostHeaderAndNeverLeaksPATOnError(t *testing.T) {
 	if gotHost != "auth.example.com" {
 		t.Fatalf("request Host = %q, want the configured external domain", gotHost)
 	}
-	apiErr, ok := err.(*APIError)
+	var apiErr *APIError
+	ok := errors.As(err, &apiErr)
 	if !ok {
 		t.Fatalf("err = %T, want *APIError", err)
 	}
@@ -307,7 +308,8 @@ func TestDeactivateUserPropagatesNotFound(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 	err := client.DeactivateUser(context.Background(), "", "missing")
-	apiErr, ok := err.(*APIError)
+	var apiErr *APIError
+	ok := errors.As(err, &apiErr)
 	if !ok || !apiErr.NotFound() {
 		t.Fatalf("err = %v, want a not-found *APIError", err)
 	}

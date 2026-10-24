@@ -27,8 +27,7 @@ import (
 // it, but the section is a live report.
 func reportAgentCredentials(ctx core.Context, result config.OpenResult, diagnosis deploy.DeployDiagnosisResult) error {
 	status := diagnosis.AgentCredentials
-	switch status.State {
-	case "", deploy.RuntimeAgentCredentialNotApplicable:
+	if status.State == "" || status.State == deploy.RuntimeAgentCredentialNotApplicable {
 		return nil
 	}
 	if diagnosis.ClusterUnreachable {
@@ -56,7 +55,7 @@ func agentCredentialStatusLine(status deploy.RuntimeAgentCredentialStatus, resul
 			"erun configured the gateway %s for this environment and passes it to its chart on every deploy, so the deployed pod template is what dropped it: that chart predates the credential injection.\n"+
 			"Fix: deploy this environment (%s/%s) on a runtime chart that renders it — `erun deploy %s %s` after advancing the environment's runtime chart version.",
 			status.Container, deploy.GatewayBaseURLEnv, status.GatewayBaseURL, result.Tenant, result.Environment, result.Tenant, result.Environment)
-	default:
-		return fmt.Sprintf("unknown — could not read the runtime pod template's environment (%s), so this check has no answer either way.", status.ReadError)
+	case deploy.RuntimeAgentCredentialNotApplicable, deploy.RuntimeAgentCredentialUnknown:
 	}
+	return fmt.Sprintf("unknown — could not read the runtime pod template's environment (%s), so this check has no answer either way.", status.ReadError)
 }

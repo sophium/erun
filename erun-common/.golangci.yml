@@ -22,6 +22,26 @@ linters:
     - gocyclo
     - cyclop
     - revive
+    - errorlint
+    - bodyclose
+    - nilerr
+    - nilnil
+    - exhaustive
+    - gocritic
+    - forcetypeassert
+    - errchkjson
+    - predeclared
+    - errname
+    - unconvert
+    - copyloopvar
+    - usestdlibvars
+    - misspell
+    - wastedassign
+    - mirror
+    - nestif
+    - makezero
+    - durationcheck
+    - nakedret
     - depguard
   settings:
     revive:
@@ -31,12 +51,8 @@ linters:
             - max: 500
               skipComments: true
               skipBlankLines: true
-    # The package layers of #2741 (AGENTS.md "Package layers"): every package
-    # may import only the layers below it. Each rule denies the whole module
-    # and allows what lies beneath, so a new package is held to the table the
-    # moment its directory exists. An infra package names exactly the infra
-    # packages it uses: a new edge between two external systems is a decision
-    # recorded here, not something an import can add on its own.
+    # AGENTS.md "Package layers": each rule denies the module and allows only
+    # the layers beneath the package.
     depguard:
       rules:
         base-model:
@@ -172,7 +188,6 @@ linters:
             - github.com/sophium/erun/erun-common/base/
             - github.com/sophium/erun/erun-common/infra/
             - github.com/sophium/erun/erun-common/primitive/
-            - github.com/sophium/erun/erun-common/orchestration$
             - github.com/sophium/erun/erun-common/orchestration/
           deny:
             - pkg: github.com/sophium/erun/erun-common
@@ -198,14 +213,38 @@ linters:
               desc: a primitive may import base/*, infra/* and primitive/shared, never another primitive; composing primitives is orchestration's job
         orchestration:
           list-mode: lax
-          files: ["**/erun-common/orchestration/*.go", "**/erun-common/orchestration/*/*.go"]
+          files: ["**/erun-common/orchestration/build/*.go", "**/erun-common/orchestration/clusterread/*.go", "**/erun-common/orchestration/deploy/*.go", "**/erun-common/orchestration/diagnosis/*.go"]
           allow:
             - github.com/sophium/erun/erun-common/base/
             - github.com/sophium/erun/erun-common/infra/
             - github.com/sophium/erun/erun-common/primitive/
           deny:
             - pkg: github.com/sophium/erun/erun-common
-              desc: orchestration composes primitives and may import base/*, infra/* and primitive/* only
+              desc: an orchestration package composes primitives and may import base/*, infra/* and primitive/*, never another orchestration package
+        orchestration-release:
+          list-mode: lax
+          files: ["**/erun-common/orchestration/release/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/
+            - github.com/sophium/erun/erun-common/orchestration/build$
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: orchestration/release may import base/*, infra/*, primitive/* and orchestration/build
+        orchestration-execute:
+          list-mode: lax
+          files: ["**/erun-common/orchestration/execute/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/
+            - github.com/sophium/erun/erun-common/primitive/
+            - github.com/sophium/erun/erun-common/orchestration/build$
+            - github.com/sophium/erun/erun-common/orchestration/deploy$
+            - github.com/sophium/erun/erun-common/orchestration/release$
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: orchestration/execute may import base/*, infra/*, primitive/* and orchestration/{build,deploy,release}
     funlen:
       lines: 100
       statements: 50

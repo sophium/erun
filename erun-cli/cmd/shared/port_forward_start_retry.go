@@ -53,15 +53,23 @@ func retryTransientPortForwardStart(attempt func() error) error {
 const erunPortForwardForceTransientFailuresEnv = "ERUN_PORT_FORWARD_FORCE_TRANSIENT_FAILURES"
 
 func injectedTransientPortForwardStartFailure(attempt int) error {
-	raw := strings.TrimSpace(os.Getenv(erunPortForwardForceTransientFailuresEnv))
-	if raw == "" {
-		return nil
-	}
-	forceCount, err := strconv.Atoi(raw)
-	if err != nil || attempt > forceCount {
+	forceCount, ok := forcedTransientPortForwardStartFailures()
+	if !ok || attempt > forceCount {
 		return nil
 	}
 	return fmt.Errorf("injected for testing (attempt %d of %s): resource temporarily unavailable", attempt, erunPortForwardForceTransientFailuresEnv)
+}
+
+func forcedTransientPortForwardStartFailures() (int, bool) {
+	raw := strings.TrimSpace(os.Getenv(erunPortForwardForceTransientFailuresEnv))
+	if raw == "" {
+		return 0, false
+	}
+	forceCount, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	return forceCount, true
 }
 
 // isTransientPortForwardStartError reports whether err is the shape of an OS

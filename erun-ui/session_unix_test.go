@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -12,6 +13,16 @@ import (
 	"testing"
 	"time"
 )
+
+// unixSessionProcess is the OS process behind a unix terminal session.
+func unixSessionProcess(t *testing.T, session terminalSession) *os.Process {
+	t.Helper()
+	unixSession, ok := session.(*unixTerminalSession)
+	if !ok {
+		t.Fatalf("session is %T, not a unix terminal session", session)
+	}
+	return unixSession.cmd.Process
+}
 
 func startSleepingSession(t *testing.T) terminalSession {
 	t.Helper()
@@ -56,7 +67,7 @@ func TestAliveIsFalseForAKilledAndReapedProcess(t *testing.T) {
 	}
 
 	if session.Alive() {
-		probe := session.(*unixTerminalSession).cmd.Process.Signal(syscall.Signal(0))
+		probe := unixSessionProcess(t, session).Signal(syscall.Signal(0))
 		t.Fatalf(
 			"Alive() must be false for a killed-and-reaped process (pid %d); Process.Signal(0) = %v, errors.Is(err, syscall.ESRCH) = %v",
 			pid, probe, errors.Is(probe, syscall.ESRCH),
@@ -75,7 +86,7 @@ func TestAliveIsTrueForAProcessThatIsNotYetReaped(t *testing.T) {
 	pid := session.Pid()
 
 	// Kill the direct child without waiting on it, leaving it as a zombie.
-	if err := session.(*unixTerminalSession).cmd.Process.Kill(); err != nil {
+	if err := unixSessionProcess(t, session).Kill(); err != nil {
 		t.Fatalf("kill pid %d: %v", pid, err)
 	}
 	deadline := time.Now().Add(5 * time.Second)

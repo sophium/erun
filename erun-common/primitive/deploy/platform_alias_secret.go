@@ -380,14 +380,15 @@ func recordPlatformAliasSecretNameOnEnv(ctx core.Context, tenant, environment, n
 	// (the caller gates on the name being empty), so this is the reconciliation
 	// against the store rather than against the plan.
 	envConfig, _, err := config.LoadEnvConfig(tenant, environment)
-	if err == nil && strings.TrimSpace(envConfig.PlatformAliasSecretName) == name {
+	loaded := err == nil
+	if loaded && strings.TrimSpace(envConfig.PlatformAliasSecretName) == name {
 		return nil
 	}
 	ctx.Trace("deploy: platform alias: recording secret " + name + " on " + tenant + "/" + environment)
 	if ctx.DryRun {
 		return nil
 	}
-	if err != nil {
+	if !loaded {
 		ctx.Trace("deploy: platform alias: could not read the env config of " + tenant + "/" + environment + " to record " + name)
 		return nil
 	}

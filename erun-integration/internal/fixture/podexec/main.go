@@ -152,7 +152,8 @@ func respondWithWholePayload(opts options, script string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("erun-outputs: not found: %s", podPath)
 	}
-	kind, payload := "file", []byte(nil)
+	kind := "file"
+	var payload []byte
 	if info.IsDir() {
 		kind = "dir"
 		payload, err = tarGz(hostPath(opts.root, podPath), filepath.Base(podPath))

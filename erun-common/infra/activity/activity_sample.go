@@ -331,15 +331,19 @@ func LoadResidentActivitySample(tenant, environment string) (ResidentActivitySam
 	if err != nil {
 		return ResidentActivitySample{}, err
 	}
+	return readResidentActivitySample(path), nil
+}
+
+func readResidentActivitySample(path string) ResidentActivitySample {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ResidentActivitySample{}, nil
+		return ResidentActivitySample{}
 	}
 	var sample ResidentActivitySample
 	if err := json.Unmarshal(data, &sample); err != nil {
-		return ResidentActivitySample{}, nil
+		return ResidentActivitySample{}
 	}
-	return sample, nil
+	return sample
 }
 
 func SaveResidentActivitySample(tenant, environment string, sample ResidentActivitySample) error {

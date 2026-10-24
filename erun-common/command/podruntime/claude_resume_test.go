@@ -148,19 +148,19 @@ func TestRunClaudeKeysTheResolvedWorkingDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	real := filepath.Join(root, "real_repo")
-	if err := os.Mkdir(real, 0o755); err != nil {
+	target := filepath.Join(root, "real_repo")
+	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(root, "link")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
 	prefix := filepath.Join(root, "usr", "local")
 	claudeTestPackage(t, prefix, `{"bin": {"claude": "bin/claude.exe"}}`)
 	host := claudeTestHost(map[string]string{"NPM_CONFIG_PREFIX": prefix, "HOME": "/home/erun"})
 	host.getwd = func() (string, error) { return link, nil }
-	host.isDir = func(path string) bool { return path == "/home/erun/.claude/projects/"+claudeProjectKey(real) }
+	host.isDir = func(path string) bool { return path == "/home/erun/.claude/projects/"+claudeProjectKey(target) }
 	var gotArgv []string
 	host.exec = func(_ string, argv, _ []string) error {
 		gotArgv = argv

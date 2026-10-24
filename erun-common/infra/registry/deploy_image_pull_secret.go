@@ -68,7 +68,7 @@ func defaultExistingImagePullSecretAuths(name string, args []string) (map[string
 	output, err := core.Command("kubectl", args...).CombinedOutput()
 	if err != nil {
 		if kube.KubernetesResourceNotFound(string(output)) {
-			return nil, nil
+			return nil, nil //nolint:nilnil // a nil map is the empty auths set: no existing coverage
 		}
 		return nil, fmt.Errorf("read existing image pull secret %s: %w: %s", name, err, strings.TrimSpace(string(output)))
 	}
@@ -80,7 +80,7 @@ func defaultExistingImagePullSecretAuths(name string, args []string) (map[string
 	}
 	encoded, ok := secret.Data[config.DockerConfigJSONSecretKey]
 	if !ok {
-		return nil, nil
+		return nil, nil //nolint:nilnil // a nil map is the empty auths set: no existing coverage
 	}
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {

@@ -143,7 +143,7 @@ func TestStartTaskEnvironmentJobRefusesAnIDStillRunning(t *testing.T) {
 		Run: func(io.Writer) (any, error) {
 			close(started)
 			<-release
-			return nil, nil
+			return struct{}{}, nil
 		},
 	})
 	if err != nil {
@@ -158,7 +158,7 @@ func TestStartTaskEnvironmentJobRefusesAnIDStillRunning(t *testing.T) {
 		Name:        "blocking-task-again",
 		ID:          job.ID,
 		Run: func(io.Writer) (any, error) {
-			return nil, nil
+			return struct{}{}, nil
 		},
 	}); err == nil {
 		t.Fatal("starting a second task job with an id still running must be refused")
@@ -199,7 +199,7 @@ func TestCancelEnvironmentJobRefusesATaskJob(t *testing.T) {
 		Run: func(io.Writer) (any, error) {
 			close(started)
 			<-release
-			return nil, nil
+			return struct{}{}, nil
 		},
 	})
 	if err != nil {
@@ -269,7 +269,7 @@ func TestStartTaskEnvironmentJobCapsItsLog(t *testing.T) {
 		MaxOutputBytes: 16,
 		Run: func(log io.Writer) (any, error) {
 			_, _ = io.WriteString(log, strings.Repeat("x", 1024))
-			return nil, nil
+			return struct{}{}, nil
 		},
 	})
 	if err != nil {
@@ -358,7 +358,7 @@ func TestAHandoffTaskJobIsExcludedFromItsParentsFinishCheck(t *testing.T) {
 		Run: func(io.Writer) (any, error) {
 			close(started)
 			<-release
-			return nil, nil
+			return struct{}{}, nil
 		},
 	}); err != nil {
 		t.Fatalf("StartTaskEnvironmentJob: %v", err)

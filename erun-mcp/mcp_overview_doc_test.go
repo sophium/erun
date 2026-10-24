@@ -231,16 +231,16 @@ func compareDocumentedJSONPaths(t *testing.T, docPath, path string, documented, 
 	}
 	actualObject, _ := actual.(map[string]any)
 	for _, key := range sortedJSONKeys(documentedObject) {
-		real, present := actualObject[key]
+		actualValue, present := actualObject[key]
 		if !present {
 			t.Errorf("%s: the environment example names %q, which the resolved model never emits; the example is the contract a hand-written client reads these names from", docPath, path+"."+key)
 			continue
 		}
-		if documentedKind, actualKind := jsonValueKind(documentedObject[key]), jsonValueKind(real); documentedKind != actualKind {
+		if documentedKind, actualKind := jsonValueKind(documentedObject[key]), jsonValueKind(actualValue); documentedKind != actualKind {
 			t.Errorf("%s: the environment example types %q as %s, but the resolved model emits %s", docPath, path+"."+key, documentedKind, actualKind)
 			continue
 		}
-		compareDocumentedJSONPaths(t, docPath, path+"."+key, documentedObject[key], real)
+		compareDocumentedJSONPaths(t, docPath, path+"."+key, documentedObject[key], actualValue)
 	}
 }
 

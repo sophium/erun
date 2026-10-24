@@ -16,7 +16,7 @@ func TestNamespaceResourceQuotaManifestDefaultRequestIsFixedNotTheCap(t *testing
 	quota := config.NamespaceResourceQuota{CPU: "8", Memory: "17832Mi", Storage: "72Gi"}
 	manifest := namespaceResourceQuotaManifest("team-dev", quota)
 
-	limitRange := manifest[strings.Index(manifest, "kind: LimitRange"):]
+	limitRange := fromMarker(t, manifest, "kind: LimitRange")
 
 	defaultBlock := limitRange[strings.Index(limitRange, "default:"):strings.Index(limitRange, "defaultRequest:")]
 	if !strings.Contains(defaultBlock, `cpu: "8"`) {
@@ -26,7 +26,7 @@ func TestNamespaceResourceQuotaManifestDefaultRequestIsFixedNotTheCap(t *testing
 		t.Fatalf("default memory limit should equal the namespace cap, got: %s", defaultBlock)
 	}
 
-	requestBlock := limitRange[strings.Index(limitRange, "defaultRequest:"):]
+	requestBlock := fromMarker(t, limitRange, "defaultRequest:")
 	if !strings.Contains(requestBlock, `cpu: "`+config.DefaultLimitRangeDefaultRequestCPU+`"`) {
 		t.Fatalf("defaultRequest cpu should be the fixed constant %q, not the cap, got: %s", config.DefaultLimitRangeDefaultRequestCPU, requestBlock)
 	}
@@ -50,7 +50,7 @@ func TestNamespaceResourceQuotaManifestDefaultRequestIndependentOfCapSize(t *tes
 	large := namespaceResourceQuotaManifest("team-prod", config.NamespaceResourceQuota{CPU: "32", Memory: "65536Mi", Storage: "200Gi"})
 
 	for _, manifest := range []string{small, large} {
-		requestBlock := manifest[strings.Index(manifest, "defaultRequest:"):]
+		requestBlock := fromMarker(t, manifest, "defaultRequest:")
 		if !strings.Contains(requestBlock, `cpu: "`+config.DefaultLimitRangeDefaultRequestCPU+`"`) {
 			t.Fatalf("defaultRequest cpu should stay fixed at %q regardless of cap, got: %s", config.DefaultLimitRangeDefaultRequestCPU, requestBlock)
 		}
@@ -58,4 +58,13 @@ func TestNamespaceResourceQuotaManifestDefaultRequestIndependentOfCapSize(t *tes
 			t.Fatalf("defaultRequest memory should stay fixed at %q regardless of cap, got: %s", config.DefaultLimitRangeDefaultRequestMemory, requestBlock)
 		}
 	}
+}
+
+func fromMarker(t *testing.T, s, marker string) string {
+	t.Helper()
+	i := strings.Index(s, marker)
+	if i < 0 {
+		t.Fatalf("missing %q in: %s", marker, s)
+	}
+	return s[i:]
 }

@@ -89,7 +89,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/golangci-lint \
-    cd erun-ui && GOLANGCI_LINT_CACHE=/root/.cache/golangci-lint go tool golangci-lint run ./...
+    cd erun-ui && go mod tidy -diff && GOLANGCI_LINT_CACHE=/root/.cache/golangci-lint go tool golangci-lint run ./... && go run github.com/fe3dback/go-arch-lint@v1.19.0 check --project-path . && \
+    cd playwright/fixtures/winstub && GOWORK=off GOOS=windows go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.2.2 run ./...
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \

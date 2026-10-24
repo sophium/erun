@@ -70,17 +70,21 @@ func findAWSSSOProfileForAccount(sections []awsConfigSection, accountID string) 
 		}
 		if sessionName := strings.TrimSpace(section.values["sso_session"]); sessionName != "" {
 			if session, ok := sessions[sessionName]; ok {
-				if profile.SSOStartURL == "" {
-					profile.SSOStartURL = strings.TrimSpace(session.values["sso_start_url"])
-				}
-				if profile.SSORegion == "" {
-					profile.SSORegion = strings.TrimSpace(session.values["sso_region"])
-				}
+				profile.fillFromSSOSession(session)
 			}
 		}
 		return profile, true
 	}
 	return AWSSSOProfile{}, false
+}
+
+func (p *AWSSSOProfile) fillFromSSOSession(session awsConfigSection) {
+	if p.SSOStartURL == "" {
+		p.SSOStartURL = strings.TrimSpace(session.values["sso_start_url"])
+	}
+	if p.SSORegion == "" {
+		p.SSORegion = strings.TrimSpace(session.values["sso_region"])
+	}
 }
 
 func buildAWSSSOSessionIndex(sections []awsConfigSection) map[string]awsConfigSection {

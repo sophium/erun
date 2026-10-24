@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -89,7 +90,7 @@ func ListCloudContexts(store CloudReadStore) ([]CloudContextConfig, error) {
 		return nil, fmt.Errorf("store is required")
 	}
 	config, _, err := store.LoadERunConfig()
-	if err == ErrNotInitialized {
+	if errors.Is(err, ErrNotInitialized) {
 		return nil, nil
 	}
 	if err != nil {

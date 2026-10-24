@@ -106,7 +106,8 @@ func writeInternalError(w http.ResponseWriter, req *http.Request, message string
 }
 
 // logServerErrorForRoute is logServerError's counterpart for the few call
-// sites (environments.go's start-delete/deploy/provisioning failure paths)
+// sites (the start-delete/deploy/provisioning failure paths in
+// environment_lifecycle.go, environment_deploy.go and environment_create.go)
 // that only carry a context, not the original *http.Request.
 func logServerErrorForRoute(ctx context.Context, route string, err error) {
 	tenantID, userID := "", ""

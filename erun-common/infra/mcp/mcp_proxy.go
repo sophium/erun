@@ -118,7 +118,8 @@ func (p *mcpStdioProxy) answerLocally(ctx context.Context, id json.RawMessage, t
 	if len(id) == 0 {
 		return nil
 	}
-	text, callErr := "", error(nil)
+	var text string
+	var callErr error
 	if tool.Call == nil {
 		callErr = fmt.Errorf("the %s tool is not wired on this host", tool.Name)
 	} else {

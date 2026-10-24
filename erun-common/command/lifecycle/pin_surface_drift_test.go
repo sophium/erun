@@ -22,7 +22,7 @@ import (
 // in exactly the operation whose blast radius is the question being asked.
 var repinSurfaces = []string{
 	"erun-cli/cmd/pin/pin.go",
-	"erun-mcp/server.go",
+	"erun-mcp/server_review_delivery_tools.go",
 	"erun-ui/frontend/src/components/app/PinVersionDialog.tsx",
 	"erun-skills/skills/erun-pin-version/SKILL.md",
 	"erun-docs/docs/cli/pin.md",

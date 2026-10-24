@@ -557,9 +557,12 @@ func gateMergeOneSource(ctx core.Context, root string, source GateMergeSource, r
 	}
 
 	if mergeOutput, err := runGitCapturingOutput(root, deps, "merge", "--squash", sourceRef); err != nil {
-		skipped, skipErr := skipConflictedGateMergeSource(root, source, remote, sourceCommit, sourceRef, mergeOutput, err, deps)
-		if skipped != nil || skipErr != nil {
-			return nil, skipped, skipErr
+		skipped, skip, skipErr := skipConflictedGateMergeSource(root, source, remote, sourceCommit, sourceRef, mergeOutput, err, deps)
+		if skipErr != nil {
+			return nil, nil, skipErr
+		}
+		if skip {
+			return nil, &skipped, nil
 		}
 		// Every conflict was an atlas.sum this regenerated and staged — fall
 		// through and land this source like a clean squash.
@@ -597,8 +600,12 @@ func commitGateMergeSource(ctx core.Context, root string, source GateMergeSource
 	if err != nil {
 		return nil, nil, err
 	}
-	if skipped, err := refuseGateMergeSourceOnPolicy(root, source, sourceCommit, bodies, staged, deps); skipped != nil || err != nil {
-		return nil, skipped, err
+	skipped, refused, err := refuseGateMergeSourceOnPolicy(root, source, sourceCommit, bodies, staged, deps)
+	if err != nil {
+		return nil, nil, err
+	}
+	if refused {
+		return nil, &skipped, nil
 	}
 	// The squash lands content its source branch already authored and built,
 	// so the repository's own hooks are skipped: a formatter hook running
@@ -623,54 +630,54 @@ func commitGateMergeSource(ctx core.Context, root string, source GateMergeSource
 
 // refuseGateMergeSourceOnPolicy backs a squashed source out and skips it when
 // it fails the regression-test policy (evaluateMergeRegressionPolicy). The
-// rest of the batch still gates, exactly as after a conflict. It returns
-// nil, nil when the source may land.
-func refuseGateMergeSourceOnPolicy(root string, source GateMergeSource, sourceCommit string, bodies, staged []string, deps GateMergeWorkingTreeDependencies) (*GateMergeSkippedSource, error) {
+// rest of the batch still gates, exactly as after a conflict. It reports
+// false when the source may land.
+func refuseGateMergeSourceOnPolicy(root string, source GateMergeSource, sourceCommit string, bodies, staged []string, deps GateMergeWorkingTreeDependencies) (GateMergeSkippedSource, bool, error) {
 	readFile := func(path string) ([]byte, error) { return os.ReadFile(filepath.Join(root, filepath.FromSlash(path))) }
 	policyErr := evaluateMergeRegressionPolicy(source.Branch, bodies, staged, readFile)
 	if policyErr == nil {
-		return nil, nil
+		return GateMergeSkippedSource{}, false, nil
 	}
 	var resetStderr bytes.Buffer
 	if err := deps.RunGit(root, io.Discard, &resetStderr, "reset", "--hard", "HEAD"); err != nil {
-		return nil, fmt.Errorf("git reset --hard after refusing %s: %w: %s", source.Branch, err, strings.TrimSpace(resetStderr.String()))
+		return GateMergeSkippedSource{}, false, fmt.Errorf("git reset --hard after refusing %s: %w: %s", source.Branch, err, strings.TrimSpace(resetStderr.String()))
 	}
-	return &GateMergeSkippedSource{
+	return GateMergeSkippedSource{
 		SourceBranch: source.Branch,
 		SourceCommit: sourceCommit,
 		Reason:       "regression-test policy: " + policyErr.Error(),
-	}, nil
+	}, true, nil
 }
 
 // skipConflictedGateMergeSource classifies a failed `git merge --squash` for
-// one source. A nil skip with a nil error means the source is not skipped
+// one source. A false skip with a nil error means the source is not skipped
 // after all: every conflict was an atlas.sum that resolveAtlasSumConflicts
-// regenerated and staged, so the caller lands it like a clean squash. A non-nil
+// regenerated and staged, so the caller lands it like a clean squash. A true
 // skip is a recorded non-fatal skip; a non-nil error is fatal for the whole
 // batch. Isolated so gateMergeOneSource's own branching stays under the
 // cyclomatic-complexity gate.
-func skipConflictedGateMergeSource(root string, source GateMergeSource, remote, sourceCommit, sourceRef, mergeOutput string, mergeErr error, deps GateMergeWorkingTreeDependencies) (*GateMergeSkippedSource, error) {
+func skipConflictedGateMergeSource(root string, source GateMergeSource, remote, sourceCommit, sourceRef, mergeOutput string, mergeErr error, deps GateMergeWorkingTreeDependencies) (GateMergeSkippedSource, bool, error) {
 	conflicted, conflictErr := deps.ConflictedFiles(root, deps.RunGit)
 	if conflictErr != nil || len(conflicted) == 0 {
-		return nil, fmt.Errorf("git merge --squash %s: %w: %s", sourceRef, mergeErr, mergeOutput)
+		return GateMergeSkippedSource{}, false, fmt.Errorf("git merge --squash %s: %w: %s", sourceRef, mergeErr, mergeOutput)
 	}
 	remaining, resolveErr := resolveAtlasSumConflicts(root, deps.RunGit, deps.RunAtlasHash, conflicted)
 	if resolveErr != nil {
-		return nil, fmt.Errorf("regenerate conflicted atlas.sum for %s: %w", source.Branch, resolveErr)
+		return GateMergeSkippedSource{}, false, fmt.Errorf("regenerate conflicted atlas.sum for %s: %w", source.Branch, resolveErr)
 	}
 	if len(remaining) == 0 {
-		return nil, nil
+		return GateMergeSkippedSource{}, false, nil
 	}
 	var resetStderr bytes.Buffer
 	if err := deps.RunGit(root, io.Discard, &resetStderr, "reset", "--hard", "HEAD"); err != nil {
-		return nil, fmt.Errorf("git reset --hard after a conflicted squash of %s: %w: %s", source.Branch, err, strings.TrimSpace(resetStderr.String()))
+		return GateMergeSkippedSource{}, false, fmt.Errorf("git reset --hard after a conflicted squash of %s: %w: %s", source.Branch, err, strings.TrimSpace(resetStderr.String()))
 	}
-	return &GateMergeSkippedSource{
+	return GateMergeSkippedSource{
 		SourceBranch:    source.Branch,
 		SourceCommit:    sourceCommit,
 		Reason:          fmt.Sprintf("squashing %s onto %s left %d file(s) conflicted", source.Branch, remote, len(remaining)),
 		ConflictedFiles: remaining,
-	}, nil
+	}, true, nil
 }
 
 // gitResolveRef resolves ref to its full commit hash.

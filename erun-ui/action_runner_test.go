@@ -26,7 +26,6 @@ func TestRunnerSerializesSameEnv(t *testing.T) {
 	var sequence []int
 	gate := make(chan struct{})
 	for i := 0; i < 3; i++ {
-		i := i
 		// Distinct ids keep the three same-env actions from collapsing onto one
 		// entry: the auto-generated id embeds time.Now().UnixNano(), and the coarse
 		// Windows clock returns the same value for these rapid enqueues, so the

@@ -1,0 +1,51 @@
+version: 3
+workdir: .
+allow:
+  depOnAnyVendor: false
+  deepScan: false
+
+vendors:
+  cgo:
+    in: ["C"]
+  github-com-ActiveState-termtest-conpty:
+    in: ["github.com/ActiveState/termtest/conpty", "github.com/ActiveState/termtest/conpty/**"]
+  github-com-adrg-xdg:
+    in: ["github.com/adrg/xdg", "github.com/adrg/xdg/**"]
+  github-com-creack-pty:
+    in: ["github.com/creack/pty", "github.com/creack/pty/**"]
+  github-com-fsnotify-fsnotify:
+    in: ["github.com/fsnotify/fsnotify", "github.com/fsnotify/fsnotify/**"]
+  github-com-google-uuid:
+    in: ["github.com/google/uuid", "github.com/google/uuid/**"]
+  github-com-modelcontextprotocol-go-sdk:
+    in: ["github.com/modelcontextprotocol/go-sdk", "github.com/modelcontextprotocol/go-sdk/**"]
+  github-com-sophium-erun-erun-common:
+    in: ["github.com/sophium/erun/erun-common", "github.com/sophium/erun/erun-common/**"]
+  github-com-wailsapp-wails-v2:
+    in: ["github.com/wailsapp/wails/v2", "github.com/wailsapp/wails/v2/**"]
+
+exclude:
+  - playwright/fixtures/winstub
+
+components:
+  headlessserver:
+    in: "headlessserver"
+  playwright-node_modules-flatted-golang-pkg-flatted:
+    in: "playwright/node_modules/flatted/golang/pkg/flatted"
+  root:
+    in: "."
+
+deps:
+  root:
+    mayDependOn:
+      - headlessserver
+    canUse:
+      - cgo
+      - github-com-ActiveState-termtest-conpty
+      - github-com-adrg-xdg
+      - github-com-creack-pty
+      - github-com-fsnotify-fsnotify
+      - github-com-google-uuid
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+      - github-com-wailsapp-wails-v2

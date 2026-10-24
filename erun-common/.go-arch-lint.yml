@@ -1,0 +1,495 @@
+version: 3
+workdir: .
+allow:
+  depOnAnyVendor: false
+  deepScan: false
+
+vendors:
+  github-com-adrg-xdg:
+    in: ["github.com/adrg/xdg", "github.com/adrg/xdg/**"]
+  github-com-aws-aws-sdk-go-v2:
+    in: ["github.com/aws/aws-sdk-go-v2", "github.com/aws/aws-sdk-go-v2/**"]
+  github-com-aws-aws-sdk-go-v2-config:
+    in: ["github.com/aws/aws-sdk-go-v2/config", "github.com/aws/aws-sdk-go-v2/config/**"]
+  github-com-aws-aws-sdk-go-v2-service-sts:
+    in: ["github.com/aws/aws-sdk-go-v2/service/sts", "github.com/aws/aws-sdk-go-v2/service/sts/**"]
+  github-com-coreos-go-oidc-v3:
+    in: ["github.com/coreos/go-oidc/v3", "github.com/coreos/go-oidc/v3/**"]
+  github-com-go-jose-go-jose-v4:
+    in: ["github.com/go-jose/go-jose/v4", "github.com/go-jose/go-jose/v4/**"]
+  golang-org-x-tools:
+    in: ["golang.org/x/tools", "golang.org/x/tools/**"]
+  gopkg-in-yaml-v3:
+    in: ["gopkg.in/yaml.v3", "gopkg.in/yaml.v3/**"]
+  k8s-io-api:
+    in: ["k8s.io/api", "k8s.io/api/**"]
+  k8s-io-apimachinery:
+    in: ["k8s.io/apimachinery", "k8s.io/apimachinery/**"]
+  k8s-io-client-go:
+    in: ["k8s.io/client-go", "k8s.io/client-go/**"]
+  sigs-k8s-io-yaml:
+    in: ["sigs.k8s.io/yaml", "sigs.k8s.io/yaml/**"]
+
+components:
+  base-config:
+    in: "base/config"
+  base-core:
+    in: "base/core"
+  base-model:
+    in: "base/model"
+  cmd-buildcost:
+    in: "cmd/buildcost"
+  cmd-debpkg:
+    in: "cmd/debpkg"
+  cmd-pkgmove:
+    in: "cmd/pkgmove"
+  command-ai:
+    in: "command/ai"
+  command-doctor:
+    in: "command/doctor"
+  command-e2e:
+    in: "command/e2e"
+  command-expose:
+    in: "command/expose"
+  command-inputs:
+    in: "command/inputs"
+  command-jobs:
+    in: "command/jobs"
+  command-lifecycle:
+    in: "command/lifecycle"
+  command-mergequeue:
+    in: "command/mergequeue"
+  command-observe:
+    in: "command/observe"
+  command-orchestrator:
+    in: "command/orchestrator"
+  command-platform:
+    in: "command/platform"
+  command-podruntime:
+    in: "command/podruntime"
+  command-review:
+    in: "command/review"
+  command-setup:
+    in: "command/setup"
+  command-terraform:
+    in: "command/terraform"
+  command-workspace:
+    in: "command/workspace"
+  infra-activity:
+    in: "infra/activity"
+  infra-cloud:
+    in: "infra/cloud"
+  infra-codesign:
+    in: "infra/codesign"
+  infra-gitx:
+    in: "infra/gitx"
+  infra-helm:
+    in: "infra/helm"
+  infra-kube:
+    in: "infra/kube"
+  infra-mcp:
+    in: "infra/mcp"
+  infra-mcpauth:
+    in: "infra/mcpauth"
+  infra-mcptools:
+    in: "infra/mcptools"
+  infra-platformclient:
+    in: "infra/platformclient"
+  infra-registry:
+    in: "infra/registry"
+  infra-remoteinit:
+    in: "infra/remoteinit"
+  orchestration-build:
+    in: "orchestration/build"
+  orchestration-clusterread:
+    in: "orchestration/clusterread"
+  orchestration-deploy:
+    in: "orchestration/deploy"
+  orchestration-diagnosis:
+    in: "orchestration/diagnosis"
+  orchestration-execute:
+    in: "orchestration/execute"
+  orchestration-release:
+    in: "orchestration/release"
+  primitive-build:
+    in: "primitive/build"
+  primitive-deploy:
+    in: "primitive/deploy"
+  primitive-open:
+    in: "primitive/open"
+  primitive-push:
+    in: "primitive/push"
+  primitive-release:
+    in: "primitive/release"
+  primitive-shared:
+    in: "primitive/shared"
+
+deps:
+  base-config:
+    mayDependOn:
+      - base-core
+    canUse:
+      - github-com-adrg-xdg
+      - gopkg-in-yaml-v3
+  cmd-pkgmove:
+    canUse:
+      - golang-org-x-tools
+  command-ai:
+    mayDependOn:
+      - base-config
+      - base-model
+      - command-podruntime
+      - infra-cloud
+      - primitive-deploy
+      - primitive-open
+  command-doctor:
+    mayDependOn:
+      - base-config
+      - base-core
+      - infra-cloud
+      - infra-gitx
+      - infra-kube
+      - infra-remoteinit
+      - orchestration-diagnosis
+      - primitive-build
+      - primitive-deploy
+      - primitive-shared
+  command-e2e:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - orchestration-clusterread
+      - primitive-build
+      - primitive-deploy
+      - primitive-shared
+  command-expose:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - command-observe
+      - infra-cloud
+      - infra-kube
+      - infra-mcpauth
+      - infra-platformclient
+      - orchestration-clusterread
+      - primitive-deploy
+      - primitive-shared
+  command-inputs:
+    mayDependOn:
+      - base-config
+      - base-core
+      - infra-kube
+  command-jobs:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - infra-activity
+      - infra-cloud
+      - infra-codesign
+      - infra-gitx
+      - infra-kube
+      - infra-platformclient
+      - primitive-build
+      - primitive-open
+      - primitive-shared
+    canUse:
+      - github-com-adrg-xdg
+  command-lifecycle:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - infra-activity
+      - infra-cloud
+      - infra-gitx
+      - infra-kube
+      - infra-platformclient
+      - infra-registry
+      - orchestration-clusterread
+      - orchestration-diagnosis
+      - primitive-deploy
+      - primitive-open
+      - primitive-shared
+    canUse:
+      - github-com-adrg-xdg
+  command-mergequeue:
+    mayDependOn:
+      - base-core
+      - infra-gitx
+      - primitive-shared
+  command-observe:
+    mayDependOn:
+      - base-config
+      - base-core
+      - orchestration-clusterread
+      - primitive-deploy
+  command-orchestrator:
+    mayDependOn:
+      - base-config
+      - base-core
+      - command-ai
+      - infra-activity
+      - infra-kube
+      - primitive-open
+      - primitive-shared
+    canUse:
+      - github-com-adrg-xdg
+      - gopkg-in-yaml-v3
+  command-platform:
+    mayDependOn:
+      - base-config
+      - base-core
+      - command-setup
+      - infra-cloud
+      - infra-platformclient
+      - primitive-open
+    canUse:
+      - github-com-adrg-xdg
+  command-podruntime:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - command-doctor
+      - infra-activity
+      - infra-cloud
+      - infra-kube
+      - orchestration-diagnosis
+      - primitive-build
+      - primitive-deploy
+      - primitive-shared
+    canUse:
+      - github-com-adrg-xdg
+      - gopkg-in-yaml-v3
+  command-review:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - infra-cloud
+      - infra-gitx
+      - infra-platformclient
+      - infra-registry
+      - primitive-build
+  command-setup:
+    mayDependOn:
+      - base-config
+      - base-core
+      - command-lifecycle
+      - infra-activity
+      - infra-cloud
+      - infra-gitx
+      - infra-kube
+      - infra-platformclient
+      - infra-registry
+      - infra-remoteinit
+      - primitive-deploy
+      - primitive-open
+      - primitive-shared
+    canUse:
+      - github-com-adrg-xdg
+      - gopkg-in-yaml-v3
+  command-terraform:
+    mayDependOn:
+      - base-config
+      - base-core
+      - infra-kube
+      - orchestration-clusterread
+      - primitive-deploy
+      - primitive-shared
+  command-workspace:
+    mayDependOn:
+      - base-config
+      - base-core
+      - infra-codesign
+      - infra-mcp
+      - primitive-open
+      - primitive-shared
+  infra-activity:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+    canUse:
+      - github-com-adrg-xdg
+  infra-cloud:
+    mayDependOn:
+      - base-config
+      - base-core
+      - infra-activity
+      - infra-kube
+      - infra-platformclient
+    canUse:
+      - github-com-aws-aws-sdk-go-v2
+      - github-com-aws-aws-sdk-go-v2-config
+      - github-com-aws-aws-sdk-go-v2-service-sts
+      - k8s-io-client-go
+  infra-codesign:
+    mayDependOn:
+      - base-core
+  infra-gitx:
+    mayDependOn:
+      - base-config
+      - base-core
+      - infra-kube
+  infra-helm:
+    mayDependOn:
+      - base-config
+      - base-core
+    canUse:
+      - gopkg-in-yaml-v3
+  infra-kube:
+    mayDependOn:
+      - base-config
+      - base-core
+    canUse:
+      - github-com-adrg-xdg
+      - k8s-io-api
+      - k8s-io-apimachinery
+      - k8s-io-client-go
+      - sigs-k8s-io-yaml
+  infra-mcp:
+    mayDependOn:
+      - infra-kube
+  infra-mcpauth:
+    mayDependOn:
+      - base-core
+      - infra-mcptools
+    canUse:
+      - github-com-coreos-go-oidc-v3
+      - github-com-go-jose-go-jose-v4
+  infra-platformclient:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+  infra-registry:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - infra-kube
+  infra-remoteinit:
+    mayDependOn:
+      - base-config
+    canUse:
+      - gopkg-in-yaml-v3
+  orchestration-build:
+    mayDependOn:
+      - base-config
+      - base-core
+      - infra-helm
+      - primitive-build
+      - primitive-deploy
+      - primitive-push
+      - primitive-shared
+  orchestration-clusterread:
+    mayDependOn:
+      - base-config
+      - base-core
+      - primitive-deploy
+  orchestration-deploy:
+    mayDependOn:
+      - base-core
+      - primitive-build
+      - primitive-deploy
+      - primitive-shared
+  orchestration-diagnosis:
+    mayDependOn:
+      - base-config
+      - base-core
+      - infra-cloud
+      - infra-kube
+      - primitive-open
+      - primitive-shared
+  orchestration-execute:
+    mayDependOn:
+      - base-config
+      - base-core
+      - infra-cloud
+      - infra-gitx
+      - infra-helm
+      - orchestration-build
+      - orchestration-deploy
+      - orchestration-release
+      - primitive-build
+      - primitive-deploy
+      - primitive-release
+      - primitive-shared
+  orchestration-release:
+    mayDependOn:
+      - base-core
+      - infra-helm
+      - infra-registry
+      - orchestration-build
+      - primitive-build
+      - primitive-deploy
+      - primitive-push
+      - primitive-shared
+  primitive-build:
+    mayDependOn:
+      - base-config
+      - base-core
+      - infra-cloud
+      - infra-helm
+      - infra-kube
+      - infra-platformclient
+      - infra-registry
+      - primitive-shared
+    canUse:
+      - k8s-io-api
+  primitive-deploy:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
+      - infra-activity
+      - infra-cloud
+      - infra-helm
+      - infra-kube
+      - infra-mcpauth
+      - infra-registry
+      - primitive-shared
+    canUse:
+      - github-com-adrg-xdg
+      - gopkg-in-yaml-v3
+      - k8s-io-apimachinery
+  primitive-open:
+    mayDependOn:
+      - base-config
+      - base-core
+      - infra-activity
+      - infra-cloud
+      - infra-kube
+      - primitive-shared
+    canUse:
+      - gopkg-in-yaml-v3
+  primitive-push:
+    mayDependOn:
+      - base-core
+      - infra-helm
+      - infra-registry
+      - primitive-shared
+  primitive-release:
+    mayDependOn:
+      - base-core
+      - infra-activity
+      - infra-gitx
+      - primitive-shared
+    canUse:
+      - github-com-adrg-xdg
+  primitive-shared:
+    mayDependOn:
+      - base-config
+      - base-core
+      - infra-activity
+      - infra-cloud
+      - infra-gitx
+      - infra-helm
+      - infra-kube
+      - infra-registry
+    canUse:
+      - gopkg-in-yaml-v3

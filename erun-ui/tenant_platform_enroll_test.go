@@ -26,7 +26,10 @@ func enrollUserAPI(t *testing.T, status int, body string) *httptest.Server {
 }
 
 func enrollAuthEnvelope(code string) string {
-	encoded, _ := json.Marshal(map[string]string{"code": code, "message": "denied"})
+	encoded, err := json.Marshal(map[string]string{"code": code, "message": "denied"})
+	if err != nil {
+		panic(err)
+	}
 	return string(encoded)
 }
 

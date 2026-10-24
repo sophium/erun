@@ -359,6 +359,10 @@ func rawList(values []string) json.RawMessage {
 	if values == nil {
 		values = []string{}
 	}
-	encoded, _ := json.Marshal(values)
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		// A []string always encodes; this only keeps the result a valid list.
+		return json.RawMessage(`[]`)
+	}
 	return encoded
 }

@@ -101,9 +101,7 @@ func writeDoctorResizeNextAction(ctx core.Context, result config.OpenResult, siz
 	}
 	flags := make([]string, 0, 2)
 	for _, verdict := range sizing.Verdicts {
-		switch verdict.Action {
-		case deploy.RuntimeSizingRaise, deploy.RuntimeSizingLower:
-		default:
+		if verdict.Action != deploy.RuntimeSizingRaise && verdict.Action != deploy.RuntimeSizingLower {
 			continue
 		}
 		switch verdict.Resource {

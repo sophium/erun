@@ -107,7 +107,10 @@ func TestLoadConfigRejectsIncomplete(t *testing.T) {
 	if _, err := loadConfig(nil); err == nil {
 		t.Fatal("expected an error for nil config")
 	}
-	raw, _ := json.Marshal(map[string]any{"brokerURL": "https://x"})
+	raw, err := json.Marshal(map[string]any{"brokerURL": "https://x"})
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
 	if _, err := loadConfig(&extapi.JSON{Raw: raw}); err == nil {
 		t.Fatal("expected an error when tokenSecretRef is missing")
 	}

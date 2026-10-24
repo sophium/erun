@@ -46,6 +46,12 @@ func startRestartControlServer(app *App) (*restartControlServer, int) {
 		log.Printf("erun-app: restart control server disabled: %v", err)
 		return nil, 0
 	}
+	addr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = listener.Close()
+		log.Printf("erun-app: restart control server disabled: listener address %v is not TCP", listener.Addr())
+		return nil, 0
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(core.DesktopControlPath, handleRestartControl(app))
 	mux.HandleFunc(core.DesktopControlPlanPath, handleRestartPlanControl(app))
@@ -55,8 +61,7 @@ func startRestartControlServer(app *App) (*restartControlServer, int) {
 			log.Printf("erun-app: restart control server: %v", err)
 		}
 	}()
-	port := listener.Addr().(*net.TCPAddr).Port
-	return &restartControlServer{listener: listener, server: srv}, port
+	return &restartControlServer{listener: listener, server: srv}, addr.Port
 }
 
 // handleRestartControl calls app.RestartApp exactly once per request and
@@ -115,7 +120,10 @@ func decodeRestartControlRequest(w http.ResponseWriter, r *http.Request) (core.D
 
 func writeRestartControlResponse(w http.ResponseWriter, resp core.DesktopRestartResponse) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	// A failed write means the caller already hung up: nobody is left to tell.
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		return
+	}
 }
 
 // Close shuts the listener down. Safe to call on a nil server (no control
@@ -225,17 +233,18 @@ func removeDesktopControlMarker(path string, pid int) error {
 	if path == "" {
 		return nil
 	}
-	existing, err := core.ReadDesktopControlMarker(path)
-	if err != nil {
-		return nil
-	}
-	if existing.PID != pid {
+	if !desktopControlMarkerOwnedBy(path, pid) {
 		return nil
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
+}
+
+func desktopControlMarkerOwnedBy(path string, pid int) bool {
+	existing, err := core.ReadDesktopControlMarker(path)
+	return err == nil && existing.PID == pid
 }
 
 // startRestartControl binds the loopback restart-trigger server and records

@@ -519,25 +519,17 @@ func hostedRegistryDockerLogin(store config.CloudReadStore, deps cloud.CloudDepe
 }
 
 func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) {
-	if _, err := exec.LookPath("gh"); err != nil {
+	if !shared.GHCLIAvailable() {
 		return false, nil
 	}
 
-	user, err := registrypkg.CaptureGHCommand("api", "user", "--jq", ".login")
-	if err != nil {
-		return false, nil
-	}
-	user = strings.TrimSpace(user)
-	if user == "" {
+	user, ok := shared.CaptureGHValue("api", "user", "--jq", ".login")
+	if !ok {
 		return false, nil
 	}
 
-	token, err := registrypkg.CaptureGHCommand("auth", "token")
-	if err != nil {
-		return false, nil
-	}
-	token = strings.TrimSpace(token)
-	if token == "" {
+	token, ok := shared.CaptureGHValue("auth", "token")
+	if !ok {
 		return false, nil
 	}
 
@@ -570,7 +562,7 @@ func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Wri
 	if namespace == "" {
 		return false, nil
 	}
-	if _, err := exec.LookPath("gh"); err != nil {
+	if !shared.GHCLIAvailable() {
 		return false, nil
 	}
 

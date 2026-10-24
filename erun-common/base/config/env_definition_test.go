@@ -298,18 +298,20 @@ func firstStringLeaf(value reflect.Value) string {
 		}
 		value = value.Elem()
 	}
-	switch value.Kind() {
-	case reflect.String:
+	kind := value.Kind()
+	if kind == reflect.String {
 		return value.String()
-	case reflect.Struct:
-		return firstStringLeafInStruct(value)
-	case reflect.Slice, reflect.Array:
-		return firstStringLeafInSequence(value)
-	case reflect.Map:
-		return firstStringLeafInMap(value)
-	default:
-		return ""
 	}
+	if kind == reflect.Struct {
+		return firstStringLeafInStruct(value)
+	}
+	if kind == reflect.Slice || kind == reflect.Array {
+		return firstStringLeafInSequence(value)
+	}
+	if kind == reflect.Map {
+		return firstStringLeafInMap(value)
+	}
+	return ""
 }
 
 func firstStringLeafInStruct(value reflect.Value) string {

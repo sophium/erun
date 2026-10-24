@@ -1,0 +1,30 @@
+version: 3
+workdir: .
+allow:
+  depOnAnyVendor: false
+  deepScan: false
+
+vendors:
+  github-com-cert-manager-cert-manager:
+    in: ["github.com/cert-manager/cert-manager", "github.com/cert-manager/cert-manager/**"]
+  k8s-io-api:
+    in: ["k8s.io/api", "k8s.io/api/**"]
+  k8s-io-apiextensions-apiserver:
+    in: ["k8s.io/apiextensions-apiserver", "k8s.io/apiextensions-apiserver/**"]
+  k8s-io-apimachinery:
+    in: ["k8s.io/apimachinery", "k8s.io/apimachinery/**"]
+  k8s-io-client-go:
+    in: ["k8s.io/client-go", "k8s.io/client-go/**"]
+
+components:
+  root:
+    in: "."
+
+deps:
+  root:
+    canUse:
+      - github-com-cert-manager-cert-manager
+      - k8s-io-api
+      - k8s-io-apiextensions-apiserver
+      - k8s-io-apimachinery
+      - k8s-io-client-go

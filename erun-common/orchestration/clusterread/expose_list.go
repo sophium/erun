@@ -56,14 +56,14 @@ func ListExposedServices(req config.ShellLaunchParams) ([]ExposedService, error)
 	ingresses, err := FetchObservedIngresses(ObserveGetArgs(req, "ingress"))
 	if err != nil {
 		if IsForbiddenKubectlError(err) {
-			return nil, fmt.Errorf("%w: %s", ErrListExposedServicesForbidden, err)
+			return nil, fmt.Errorf("%w: %w", ErrListExposedServicesForbidden, err)
 		}
 		return nil, err
 	}
 	certs, err := FetchObservedCertificates(core.Context{}, req, ObserveGetArgs(req, "certificates.cert-manager.io"))
 	if err != nil {
 		if IsForbiddenKubectlError(err) {
-			return nil, fmt.Errorf("%w: %s", ErrListExposedServicesForbidden, err)
+			return nil, fmt.Errorf("%w: %w", ErrListExposedServicesForbidden, err)
 		}
 		return nil, err
 	}

@@ -233,23 +233,31 @@ func CodeCommitSSHKeyIDPrompt(run shared.PromptRunner, label string) (string, er
 }
 
 func KubernetesContextPrompt(run shared.PromptRunner, selectRun shared.SelectRunner, list shared.KubernetesContextsLister, label string) (string, error) {
-	if list != nil {
-		contexts, err := list()
-		if err == nil {
-			contexts = normalizeKubernetesContexts(contexts)
-			if len(contexts) > 0 && selectRun != nil {
-				selected, manual, err := selectKubernetesContextPrompt(selectRun, label, contexts)
-				if err != nil {
-					return "", err
-				}
-				if !manual {
-					return selected, nil
-				}
-			}
+	contexts := listedKubernetesContexts(list)
+	if len(contexts) > 0 && selectRun != nil {
+		selected, manual, err := selectKubernetesContextPrompt(selectRun, label, contexts)
+		if err != nil {
+			return "", err
+		}
+		if !manual {
+			return selected, nil
 		}
 	}
 
 	return manualKubernetesContextPrompt(run, label)
+}
+
+// listedKubernetesContexts returns the contexts to offer for selection; a
+// failed listing offers none, leaving the context to be typed in.
+func listedKubernetesContexts(list shared.KubernetesContextsLister) []string {
+	if list == nil {
+		return nil
+	}
+	contexts, err := list()
+	if err != nil {
+		return nil
+	}
+	return normalizeKubernetesContexts(contexts)
 }
 
 func manualKubernetesContextPrompt(run shared.PromptRunner, label string) (string, error) {

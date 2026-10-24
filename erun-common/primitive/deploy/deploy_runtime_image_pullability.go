@@ -13,7 +13,7 @@ import (
 )
 
 // deployRuntimeImagePullProbe is the anonymousPullProbeFunc RunHelmDeploy
-// calls; a var (like ensureDeployNamespace above it in deploy.go) so a test
+// calls; a var (like ensureDeployNamespace in deploy_run.go) so a test
 // can swap in a deterministic result instead of reaching live ghcr.io.
 var deployRuntimeImagePullProbe shared.AnonymousPullProbeFunc = shared.ProbeAnonymousManifestPull
 

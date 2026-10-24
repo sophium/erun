@@ -54,6 +54,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -246,18 +247,7 @@ func collectScopeFacts(fset *token.FileSet, body *ast.BlockStmt) *stubScope {
 			// here and then skipped by the FuncLit case above.
 			scope.handlers = append(scope.handlers, handlerRegistration(node)...)
 		case *ast.AssignStmt:
-			names := assignedNames(node.Lhs)
-			for _, name := range names {
-				scope.recordWrite(name, node.Pos(), line(node.Pos()), node.Tok == token.DEFINE)
-			}
-			if serving := newServerCall(node.Rhs); serving != nil {
-				scope.markServing(node.Pos(), serving.End(), line(node.Pos()))
-			}
-			for i, name := range names {
-				if i < len(node.Rhs) && isNewUnstartedServerCall(node.Rhs[i]) {
-					unstarted[name] = true
-				}
-			}
+			scope.recordAssign(node, line(node.Pos()), unstarted)
 		case *ast.ExprStmt:
 			if call, ok := node.X.(*ast.CallExpr); ok && isStartCall(call, unstarted) {
 				scope.markServing(node.Pos(), node.End(), line(node.Pos()))
@@ -274,6 +264,24 @@ func collectScopeFacts(fset *token.FileSet, body *ast.BlockStmt) *stubScope {
 		return true
 	})
 	return scope
+}
+
+// recordAssign records an assignment's writes, the serving it begins when its
+// right side is a serving constructor, and the names it binds to an unstarted
+// server.
+func (s *stubScope) recordAssign(node *ast.AssignStmt, line int, unstarted map[string]bool) {
+	names := assignedNames(node.Lhs)
+	for _, name := range names {
+		s.recordWrite(name, node.Pos(), line, node.Tok == token.DEFINE)
+	}
+	if serving := newServerCall(node.Rhs); serving != nil {
+		s.markServing(node.Pos(), serving.End(), line)
+	}
+	for i, name := range names {
+		if i < len(node.Rhs) && isNewUnstartedServerCall(node.Rhs[i]) {
+			unstarted[name] = true
+		}
+	}
 }
 
 // assignedNames returns the plain identifiers on an assignment's left side,
@@ -351,28 +359,10 @@ func handlerReads(fset *token.FileSet, lit *ast.FuncLit) map[string]handlerRead 
 	bound := map[string]bool{}
 	notARead := map[token.Pos]bool{}
 	ast.Inspect(lit, func(n ast.Node) bool {
+		for _, name := range boundNames(n) {
+			bound[name] = true
+		}
 		switch node := n.(type) {
-		case *ast.AssignStmt:
-			if node.Tok == token.DEFINE {
-				for _, name := range assignedNames(node.Lhs) {
-					bound[name] = true
-				}
-			}
-		case *ast.ValueSpec:
-			for _, ident := range node.Names {
-				bound[ident.Name] = true
-			}
-		case *ast.Field:
-			for _, ident := range node.Names {
-				bound[ident.Name] = true
-			}
-		case *ast.RangeStmt:
-			if ident, ok := node.Key.(*ast.Ident); ok {
-				bound[ident.Name] = true
-			}
-			if ident, ok := node.Value.(*ast.Ident); ok {
-				bound[ident.Name] = true
-			}
 		case *ast.SelectorExpr:
 			notARead[node.Sel.Pos()] = true
 		case *ast.KeyValueExpr:
@@ -393,6 +383,32 @@ func handlerReads(fset *token.FileSet, lit *ast.FuncLit) map[string]handlerRead 
 		return true
 	})
 	return reads
+}
+
+// boundNames returns the names a node inside a handler literal binds: short
+// declarations, var specs, parameters and results, and range variables.
+func boundNames(n ast.Node) []string {
+	switch node := n.(type) {
+	case *ast.AssignStmt:
+		if node.Tok == token.DEFINE {
+			return assignedNames(node.Lhs)
+		}
+	case *ast.ValueSpec:
+		return identNames(node.Names)
+	case *ast.Field:
+		return identNames(node.Names)
+	case *ast.RangeStmt:
+		return assignedNames([]ast.Expr{node.Key, node.Value})
+	}
+	return nil
+}
+
+func identNames(idents []*ast.Ident) []string {
+	names := make([]string, 0, len(idents))
+	for _, ident := range idents {
+		names = append(names, ident.Name)
+	}
+	return names
 }
 
 // stubOrderingViolationsInFile analyses every function scope in one parsed
@@ -514,328 +530,32 @@ func TestFixtureStubsAssignBeforeServing(t *testing.T) {
 // temp directory rather than committed source.
 func TestStubOrderingScannerFixtures(t *testing.T) {
 	t.Parallel()
-	fixtures := map[string]struct {
-		src   string
-		names []string // the read names the scanner must report, in any order
-	}{
-		"reads_the_server_assigned_by_newserver": {
-			src: `package fixture
-
-import (
-	"net/http"
-	"net/http/httptest"
-)
-
-func stub(t testing.TB) *httptest.Server {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(server.URL))
-	})
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	return server
-}
-`,
-			names: []string{"server"},
-		},
-		"reads_a_value_assigned_after_newserver": {
-			src: `package fixture
-
-import (
-	"net/http"
-	"net/http/httptest"
-)
-
-func stub(t testing.TB) *httptest.Server {
-	var issuer string
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(issuer))
-	})
-	server := httptest.NewServer(mux)
-	issuer = server.URL
-	t.Cleanup(server.Close)
-	return server
-}
-`,
-			names: []string{"issuer"},
-		},
-		"handler_is_the_constructor_argument_reading_the_constructor_binding": {
-			// The literal is not registered after the constructor returned; it
-			// is what the server starts with, so the binding NewServer performs
-			// on its way out is unordered against the handler's read of it.
-			src: `package fixture
-
-import (
-	"net/http"
-	"net/http/httptest"
-)
-
-func stub(t testing.TB) *httptest.Server {
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(server.URL))
-	}))
-	t.Cleanup(server.Close)
-	return server
-}
-`,
-			names: []string{"server"},
-		},
-		"handler_is_the_constructor_argument_reading_a_later_assignment": {
-			src: `package fixture
-
-import (
-	"net/http"
-	"net/http/httptest"
-)
-
-func stub(t testing.TB) *httptest.Server {
-	var issuer string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(issuer))
-	}))
-	issuer = server.URL
-	t.Cleanup(server.Close)
-	return server
-}
-`,
-			names: []string{"issuer"},
-		},
-		"handler_is_the_constructor_argument_reading_only_prior_values": {
-			src: `package fixture
-
-import (
-	"net/http"
-	"net/http/httptest"
-)
-
-func stub(t testing.TB) *httptest.Server {
-	issuer := "http://example.invalid"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(issuer))
-	}))
-	t.Cleanup(server.Close)
-	return server
-}
-`,
-			names: nil,
-		},
-		"assigns_before_start": {
-			src: `package fixture
-
-import (
-	"net/http"
-	"net/http/httptest"
-)
-
-func stub(t testing.TB) *httptest.Server {
-	var issuer string
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(issuer))
-	})
-	server := httptest.NewUnstartedServer(mux)
-	issuer = "http://" + server.Listener.Addr().String()
-	server.Start()
-	t.Cleanup(server.Close)
-	return server
-}
-`,
-			names: nil,
-		},
-		"ordinary_closure_called_after_the_server_is_up": {
-			src: `package fixture
-
-import (
-	"net/http"
-	"net/http/httptest"
-)
-
-func stub(t testing.TB) *httptest.Server {
-	report := func() string { return server.URL }
-	server := httptest.NewServer(http.NewServeMux())
-	t.Cleanup(server.Close)
-	_ = report()
-	return server
-}
-`,
-			names: nil,
-		},
-		"handler_registered_after_serving_begins": {
-			src: `package fixture
-
-import (
-	"net/http"
-	"net/http/httptest"
-)
-
-func stub(t testing.TB) *httptest.Server {
-	mux := http.NewServeMux()
-	server := httptest.NewServer(mux)
-	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(server.URL))
-	})
-	t.Cleanup(server.Close)
-	return server
-}
-`,
-			names: nil,
-		},
-		"reads_the_server_assigned_by_newtlsserver": {
-			// NewTLSServer serves before it returns exactly as NewServer does:
-			// it is NewUnstartedServer followed by StartTLS, so the returned
-			// server is already accepting connections while the binding it
-			// hands back -- and every value assigned after it -- has no
-			// happens-before edge to a handler it was given.
-			src: `package fixture
-
-import (
-	"net/http"
-	"net/http/httptest"
-)
-
-func stub(t testing.TB) *httptest.Server {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(server.URL))
-	})
-	server := httptest.NewTLSServer(mux)
-	t.Cleanup(server.Close)
-	return server
-}
-`,
-			names: []string{"server"},
-		},
-		"tls_server_handler_reads_only_prior_values": {
-			// Widening the serving constructors to NewTLSServer must not turn a
-			// correctly ordered TLS stub into a finding.
-			src: `package fixture
-
-import (
-	"net/http"
-	"net/http/httptest"
-)
-
-func stub(t testing.TB) *httptest.Server {
-	issuer := "http://example.invalid"
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(issuer))
-	}))
-	t.Cleanup(server.Close)
-	return server
-}
-`,
-			names: nil,
-		},
-		"started_from_a_go_statement": {
-			// `go server.Start()` begins serving too. The call is the same one
-			// the ExprStmt case recognises; only the statement wrapper differs,
-			// so a scope that starts its stub this way must not be skipped.
-			src: `package fixture
-
-import (
-	"net/http"
-	"net/http/httptest"
-)
-
-func stub(t testing.TB) *httptest.Server {
-	var issuer string
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(issuer))
-	})
-	server := httptest.NewUnstartedServer(mux)
-	go server.Start()
-	issuer = server.URL
-	t.Cleanup(server.Close)
-	return server
-}
-`,
-			names: []string{"issuer"},
-		},
-		"handler_reads_a_package_level_value_shadowed_later": {
-			// The handler's `issuer` is the package-level one, which is never
-			// written after serving begins. The local declared underneath is a
-			// different binding that begins after both the handler's read and
-			// the serving site, so matching the two by name alone would red
-			// correct code.
-			src: `package fixture
-
-import (
-	"net/http"
-	"net/http/httptest"
-)
-
-var issuer = "http://example.invalid"
-
-func stub(t testing.TB) *httptest.Server {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(issuer))
-	})
-	server := httptest.NewServer(mux)
-	issuer := server.URL
-	_ = issuer
-	t.Cleanup(server.Close)
-	return server
-}
-`,
-			names: nil,
-		},
-		"local_declared_before_the_handler_still_counts": {
-			// The shadow exemption must not be a general amnesty for short
-			// declarations: this one is in scope at the handler's read, so the
-			// later assignment to it is a genuine finding.
-			src: `package fixture
-
-import (
-	"net/http"
-	"net/http/httptest"
-)
-
-func stub(t testing.TB) *httptest.Server {
-	mux := http.NewServeMux()
-	issuer := "http://example.invalid"
-	server := httptest.NewUnstartedServer(mux)
-	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(issuer))
-	})
-	server.Start()
-	issuer = server.URL
-	t.Cleanup(server.Close)
-	return server
-}
-`,
-			names: []string{"issuer"},
-		},
-	}
-
-	for name, fixture := range fixtures {
+	for name, fixture := range stubOrderingScannerFixtures {
 		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			path := filepath.Join(dir, "fixture_test.go")
-			if err := os.WriteFile(path, []byte(fixture.src), 0o644); err != nil {
-				t.Fatalf("write fixture: %v", err)
-			}
-			var got []string
-			for _, hit := range findStubOrderingViolations(t, dir) {
-				got = append(got, hit.name)
-			}
-			if len(got) != len(fixture.names) {
-				t.Fatalf("scanner reported %v, want the names %v", got, fixture.names)
-			}
-			for _, want := range fixture.names {
-				found := false
-				for _, name := range got {
-					if name == want {
-						found = true
-					}
-				}
-				if !found {
-					t.Fatalf("scanner reported %v, want %v", got, fixture.names)
-				}
-			}
+			assertStubOrderingFixture(t, fixture.src, fixture.names)
 		})
+	}
+}
+
+// assertStubOrderingFixture scans src on its own and requires the scanner to
+// report exactly the read names in want, in any order.
+func assertStubOrderingFixture(t *testing.T, src string, want []string) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fixture_test.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var got []string
+	for _, hit := range findStubOrderingViolations(t, dir) {
+		got = append(got, hit.name)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("scanner reported %v, want the names %v", got, want)
+	}
+	for _, name := range want {
+		if !slices.Contains(got, name) {
+			t.Fatalf("scanner reported %v, want %v", got, want)
+		}
 	}
 }

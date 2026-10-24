@@ -180,29 +180,7 @@ func TestConfigLocationsDocMatchesResolver(t *testing.T) {
 		t.Fatalf("the global config %s is not directly under the resolved config root %s", globalPath, configRoot)
 	}
 
-	entries := docTreeEntries(t, docPath, doc)
-	present := make(map[string]bool, len(entries))
-	for _, entry := range entries {
-		present[entry] = true
-	}
-	for _, resolved := range []string{globalPath, tenantPath, envPath} {
-		name := filepath.Base(resolved)
-		if !present[name] {
-			t.Errorf("%s: the per-user tree does not list %q, the name erun-common resolves for %s -- the tree and the resolver disagree",
-				docPath, name, resolved)
-		}
-	}
-	for _, dir := range []string{"<tenant>/", "<environment>/"} {
-		if !present[dir] {
-			t.Errorf("%s: the per-user tree no longer nests %s, but erun-common resolves %s", docPath, dir, tenantPath)
-		}
-	}
-	// The specific regression this page carried: a tenant config under a name
-	// erun never reads. Checked by name as well as through the resolver above,
-	// so the failure reads as the historical bug rather than a generic miss.
-	if present["tenant.yaml"] {
-		t.Errorf("%s: the per-user tree names the tenant config tenant.yaml, but erun-common resolves %s", docPath, tenantPath)
-	}
+	assertConfigTreeMatchesResolver(t, docPath, doc, globalPath, tenantPath, envPath)
 
 	// The host platform's row must match the root this process resolves.
 	if _, ok := configLocationsGoOSFallbacks[runtime.GOOS]; !ok {
@@ -221,6 +199,35 @@ func TestConfigLocationsDocMatchesResolver(t *testing.T) {
 	// Linux and macOS together.
 	if strings.Contains(doc, "~/.config/erun on Linux/macOS") {
 		t.Errorf("%s: still claims ~/.config/erun for Linux and macOS together; macOS resolves %s", docPath, configLocationsGoOSFallbacks["darwin"])
+	}
+}
+
+// assertConfigTreeMatchesResolver requires the documented per-user tree to list
+// every file and directory name the resolver produces.
+func assertConfigTreeMatchesResolver(t *testing.T, docPath, doc, globalPath, tenantPath, envPath string) {
+	t.Helper()
+	entries := docTreeEntries(t, docPath, doc)
+	present := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		present[entry] = true
+	}
+	for _, resolved := range []string{globalPath, tenantPath, envPath} {
+		name := filepath.Base(resolved)
+		if !present[name] {
+			t.Errorf("%s: the per-user tree does not list %q, the name erun-common resolves for %s -- the tree and the resolver disagree",
+				docPath, name, resolved)
+		}
+	}
+	for _, dir := range []string{"<tenant>/", "<environment>/"} {
+		if !present[dir] {
+			t.Errorf("%s: the per-user tree no longer nests %s, but erun-common resolves %s", docPath, dir, tenantPath)
+		}
+	}
+	// The specific regression this page carried: a tenant config under a name
+	// erun never reads. Checked by name as well as through the resolver,
+	// so the failure reads as the historical bug rather than a generic miss.
+	if present["tenant.yaml"] {
+		t.Errorf("%s: the per-user tree names the tenant config tenant.yaml, but erun-common resolves %s", docPath, tenantPath)
 	}
 }
 
@@ -323,17 +330,7 @@ func TestOrchestratorSessionEnvVarsAreDocumented(t *testing.T) {
 	// The script is read unconditionally, before any name is judged, so a moved
 	// or renamed script fails loudly rather than silently dropping the one name
 	// it owns from the check.
-	scriptPath := filepath.Join(root, "erun-cli", "run.sh")
-	script, err := os.ReadFile(scriptPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", scriptPath, err)
-	}
-	fromScript := docDriftEnvNamePattern.FindAllString(string(script), -1)
-	if len(fromScript) == 0 {
-		t.Fatalf("%s references no ERUN_* variable; the development wrapper this test reads for "+
-			"ERUN_DEV_BIN_DIR has moved or stopped owning one", scriptPath)
-	}
-	names = append(names, fromScript...)
+	names = append(names, devWrapperEnvNames(t, root)...)
 
 	var missing []string
 	seen := map[string]bool{}
@@ -351,6 +348,23 @@ func TestOrchestratorSessionEnvVarsAreDocumented(t *testing.T) {
 		t.Errorf("%s: %s is set on a host-side orchestrator session but has no row in the %q table -- "+
 			"add it there (erun-common/orchestrator_session_env.go)", docPath, name, heading)
 	}
+}
+
+// devWrapperEnvNames returns the ERUN_* names the development wrapper
+// erun-cli/run.sh references.
+func devWrapperEnvNames(t *testing.T, root string) []string {
+	t.Helper()
+	scriptPath := filepath.Join(root, "erun-cli", "run.sh")
+	script, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", scriptPath, err)
+	}
+	fromScript := docDriftEnvNamePattern.FindAllString(string(script), -1)
+	if len(fromScript) == 0 {
+		t.Fatalf("%s references no ERUN_* variable; the development wrapper this test reads for "+
+			"ERUN_DEV_BIN_DIR has moved or stopped owning one", scriptPath)
+	}
+	return fromScript
 }
 
 // documentedAsTableRow reports whether name appears in a markdown table row of

@@ -73,7 +73,6 @@ func TestEveryToolsRequiredInputIsExpressibleInItsOwnSchema(t *testing.T) {
 	}
 
 	for _, tool := range tools.Tools {
-		tool := tool
 		t.Run(tool.Name, func(t *testing.T) {
 			auditToolRequiredInputAgainstItsOwnSchema(t, session, tool)
 		})

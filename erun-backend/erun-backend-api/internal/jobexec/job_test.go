@@ -2,6 +2,7 @@ package jobexec
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -142,6 +143,26 @@ func TestRunReportsTheJobConditionWhenThePodIsGone(t *testing.T) {
 	}
 }
 
+// admitCreatedJob records the Job a create action carries as admitted Active,
+// returning both the Job as created and its admitted copy.
+func admitCreatedJob(tracker k8stesting.ObjectTracker, action k8stesting.Action) (*batchv1.Job, *batchv1.Job, error) {
+	create, ok := action.(k8stesting.CreateAction)
+	if !ok {
+		return nil, nil, fmt.Errorf("create action is %T", action)
+	}
+	job, ok := create.GetObject().(*batchv1.Job)
+	if !ok {
+		return nil, nil, fmt.Errorf("created object is %T, not a Job", create.GetObject())
+	}
+	created := job.DeepCopy()
+	admitted := created.DeepCopy()
+	admitted.Status.Active = 1
+	if err := tracker.Add(admitted); err != nil {
+		return nil, nil, err
+	}
+	return created, admitted, nil
+}
+
 // TestRunCreatesWhenAbsent proves the Job is actually created when it doesn't
 // exist, and that Run keeps polling until it turns terminal. The reactions below
 // stand in for the cluster's Job controller: the Job is admitted Active and only
@@ -154,12 +175,11 @@ func TestRunCreatesWhenAbsent(t *testing.T) {
 	jobsResource := batchv1.SchemeGroupVersion.WithResource("jobs")
 	var created *batchv1.Job
 	kube.PrependReactor("create", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		created = action.(k8stesting.CreateAction).GetObject().(*batchv1.Job).DeepCopy()
-		admitted := created.DeepCopy()
-		admitted.Status.Active = 1
-		if err := kube.Tracker().Add(admitted); err != nil {
+		job, admitted, err := admitCreatedJob(kube.Tracker(), action)
+		if err != nil {
 			return true, nil, err
 		}
+		created = job
 		return true, admitted, nil
 	})
 	polls := 0

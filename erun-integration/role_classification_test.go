@@ -43,31 +43,39 @@ func protectedRouteSites(t testing.TB, root string) []string {
 			t.Fatalf("parse %s: %v", name, err)
 		}
 		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
+			if route, ok := registerCallRoute(n); ok {
+				routes = append(routes, route)
 			}
-			ident, ok := call.Fun.(*ast.Ident)
-			if !ok || ident.Name != "register" || len(call.Args) < 2 {
-				return true
-			}
-			method, ok := httpMethodLiteral(call.Args[0])
-			if !ok {
-				return true
-			}
-			pathLit, ok := call.Args[1].(*ast.BasicLit)
-			if !ok || pathLit.Kind != token.STRING {
-				return true
-			}
-			p, err := strconv.Unquote(pathLit.Value)
-			if err != nil {
-				return true
-			}
-			routes = append(routes, method+" "+p)
 			return true
 		})
 	}
 	return routes
+}
+
+// registerCallRoute returns the "METHOD /path" key of a
+// register(http.MethodX, "path", ...) call, and false for any other node.
+func registerCallRoute(n ast.Node) (string, bool) {
+	call, ok := n.(*ast.CallExpr)
+	if !ok {
+		return "", false
+	}
+	ident, ok := call.Fun.(*ast.Ident)
+	if !ok || ident.Name != "register" || len(call.Args) < 2 {
+		return "", false
+	}
+	method, ok := httpMethodLiteral(call.Args[0])
+	if !ok {
+		return "", false
+	}
+	pathLit, ok := call.Args[1].(*ast.BasicLit)
+	if !ok || pathLit.Kind != token.STRING {
+		return "", false
+	}
+	p, err := strconv.Unquote(pathLit.Value)
+	if err != nil {
+		return "", false
+	}
+	return method + " " + p, true
 }
 
 // routeRoleClassifications parses erun-backend-api/internal/routeroles'

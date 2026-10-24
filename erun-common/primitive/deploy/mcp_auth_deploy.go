@@ -95,14 +95,15 @@ func recordMCPAuthKeyOnEnv(ctx core.Context, deployInput HelmDeploySpec) error {
 	// The read runs in both modes so a dry run traces the write only where a real
 	// one would perform it: an env already naming this key needs nothing.
 	envConfig, _, err := config.LoadEnvConfig(tenant, environment)
-	if err == nil && strings.TrimSpace(envConfig.MCPAuthPublicKeyPath) == keyPath {
+	loaded := err == nil
+	if loaded && strings.TrimSpace(envConfig.MCPAuthPublicKeyPath) == keyPath {
 		return nil
 	}
 	ctx.Trace("deploy: mcp auth: recording the public key " + keyPath + " on " + tenant + "/" + environment)
 	if ctx.DryRun {
 		return nil
 	}
-	if err != nil {
+	if !loaded {
 		// init writes the env config itself around its own first rollout, so an
 		// unreadable one is not worth failing a deploy that did apply the key.
 		ctx.Trace("deploy: mcp auth: could not read the env config of " + tenant + "/" + environment + " to record the public key")

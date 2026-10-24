@@ -11,12 +11,12 @@ import (
 	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-func WrapHelmDeployWithReleaseRecovery(promptRunner PromptRunner, deploy deploypkg.HelmChartDeployerFunc, recover deploypkg.HelmReleaseRecovererFunc) deploypkg.HelmChartDeployerFunc {
+func WrapHelmDeployWithReleaseRecovery(promptRunner PromptRunner, deploy deploypkg.HelmChartDeployerFunc, recoverRelease deploypkg.HelmReleaseRecovererFunc) deploypkg.HelmChartDeployerFunc {
 	if deploy == nil {
 		return nil
 	}
-	if recover == nil {
-		recover = deploypkg.ClearHelmReleasePendingOperation
+	if recoverRelease == nil {
+		recoverRelease = deploypkg.ClearHelmReleasePendingOperation
 	}
 
 	return func(params deploypkg.HelmDeployParams) error {
@@ -41,7 +41,7 @@ func WrapHelmDeployWithReleaseRecovery(promptRunner PromptRunner, deploy deployp
 		if params.Stderr != nil {
 			_, _ = fmt.Fprintf(params.Stderr, "clearing pending helm metadata: %s\n", pending.RecoveryCommand())
 		}
-		if err := recover(pending.RecoveryParams(params.Verbosity, params.Stdout, params.Stderr)); err != nil {
+		if err := recoverRelease(pending.RecoveryParams(params.Verbosity, params.Stdout, params.Stderr)); err != nil {
 			return err
 		}
 		return deploy(params)

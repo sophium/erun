@@ -106,12 +106,12 @@ ENV GOLANGCI_LINT_CACHE=/root/.cache/golangci-lint
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/golangci-lint \
-    cd erun-common && go tool golangci-lint run ./... && go test -race -count=1 ./...
+    cd erun-common && go mod tidy -diff && go tool golangci-lint run ./... && go run github.com/fe3dback/go-arch-lint@v1.19.0 check --project-path . && go test -race -count=1 ./...
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/golangci-lint \
-    cd erun-mcp && go tool golangci-lint run ./... && go test -count=1 ./... && \
+    cd erun-mcp && go mod tidy -diff && go tool golangci-lint run ./... && go run github.com/fe3dback/go-arch-lint@v1.19.0 check --project-path . && go test -count=1 ./... && \
     CGO_ENABLED=0 GOOS=darwin go build ./... && \
     CGO_ENABLED=0 GOOS=windows go build ./...
 
@@ -120,14 +120,14 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/golangci-lint \
-    cd erun-cli && go tool golangci-lint run ./... && go test -count=1 ./... && \
+    cd erun-cli && go mod tidy -diff && go tool golangci-lint run ./... && go run github.com/fe3dback/go-arch-lint@v1.19.0 check --project-path . && go test -count=1 ./... && \
     CGO_ENABLED=0 GOOS=darwin go build ./... && \
     CGO_ENABLED=0 GOOS=windows go build ./...
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/golangci-lint \
-    cd erun-integration && go tool golangci-lint run ./... && go test -count=1 -timeout=45m ./...
+    cd erun-integration && go tool golangci-lint run ./... && go run github.com/fe3dback/go-arch-lint@v1.19.0 check --project-path . && go test -count=1 -timeout=45m ./...
 
 # The stage erun detects. A further part of this image would join here.
 FROM cli-test AS test

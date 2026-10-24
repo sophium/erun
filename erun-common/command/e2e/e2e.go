@@ -463,6 +463,11 @@ func parseE2EBaseURLOverride(raw string) (string, error) {
 	return raw, nil
 }
 
+func lookupHostAddrs(lookup func(string) ([]string, error), host string) ([]string, bool) {
+	addrs, err := lookup(host)
+	return addrs, err == nil
+}
+
 // refuseLoopbackE2ETarget refuses a URL whose host resolves to a loopback
 // address -- a local cluster's ingress -- because the suite runs inside a
 // docker build without host networking, where loopback is the build container
@@ -476,8 +481,9 @@ func refuseLoopbackE2ETarget(ctx core.Context, rawURL string, lookup func(string
 	host := parsed.Hostname()
 	addrs := []string{host}
 	if net.ParseIP(host) == nil {
-		addrs, err = lookup(host)
-		if err != nil {
+		var resolved bool
+		addrs, resolved = lookupHostAddrs(lookup, host)
+		if !resolved {
 			ctx.Trace(fmt.Sprintf("e2e: %s does not resolve from this machine; not checked for a loopback address", host))
 			return nil
 		}

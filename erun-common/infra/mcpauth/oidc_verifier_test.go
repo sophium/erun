@@ -78,7 +78,9 @@ func signWithKey(t *testing.T, key *rsa.PrivateKey, keyID string, claims map[str
 
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(value)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func standardClaims(issuer string, now time.Time) map[string]any {

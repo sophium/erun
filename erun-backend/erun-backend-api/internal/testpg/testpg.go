@@ -54,7 +54,7 @@ const ExternalURLEnv = "ERUN_TEST_DATABASE_URL"
 var (
 	once     sync.Once
 	url      string
-	startErr error
+	errStart error
 )
 
 // URL returns this package's migrated database.
@@ -63,9 +63,9 @@ func URL(t testing.TB) string {
 	if external := strings.TrimSpace(os.Getenv(ExternalURLEnv)); external != "" {
 		return external
 	}
-	once.Do(func() { url, startErr = startWithRetry(context.Background(), start, startupRetryBackoff) })
-	if startErr != nil {
-		t.Fatalf("testpg: %v", startErr)
+	once.Do(func() { url, errStart = startWithRetry(context.Background(), start, startupRetryBackoff) })
+	if errStart != nil {
+		t.Fatalf("testpg: %v", errStart)
 	}
 	return url
 }
@@ -103,7 +103,7 @@ func startWithRetry(ctx context.Context, attempt func(context.Context) (string, 
 	}
 	url, retryErr := attempt(ctx)
 	if retryErr != nil {
-		return "", fmt.Errorf("%w (a first attempt failed too: %v)", retryErr, err)
+		return "", fmt.Errorf("%w (a first attempt failed too: %w)", retryErr, err)
 	}
 	return url, nil
 }
@@ -228,8 +228,12 @@ func migrate(ctx context.Context, net *testcontainers.DockerNetwork, url string)
 // copyAtlasInputs copies only what Atlas reads: the module also carries agent
 // guidance (a symlinked CLAUDE.md) that has no business in a migration run.
 func copyAtlasInputs(ctx context.Context, run testcontainers.Container) error {
-	if code, _, err := run.Exec(ctx, []string{"mkdir", "-p", "/work"}); err != nil || code != 0 {
-		return fmt.Errorf("prepare /work in %s: exit %d: %v", atlasImage, code, err)
+	code, _, err := run.Exec(ctx, []string{"mkdir", "-p", "/work"})
+	if err != nil {
+		return fmt.Errorf("prepare /work in %s: exit %d: %w", atlasImage, code, err)
+	}
+	if code != 0 {
+		return fmt.Errorf("prepare /work in %s: exit %d: <nil>", atlasImage, code)
 	}
 	if err := run.CopyFileToContainer(ctx, filepath.Join(dbModuleDir(), "atlas.hcl"), "/work/atlas.hcl", 0o644); err != nil {
 		return fmt.Errorf("copy atlas.hcl into %s: %w", atlasImage, err)

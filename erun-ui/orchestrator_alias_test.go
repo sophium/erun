@@ -17,7 +17,7 @@ import (
 func orchestratorAliasTestApp(t *testing.T) *App {
 	t.Helper()
 	app := orchestratorTestApp(t)
-	store := app.deps.store.(stubUIStore)
+	store := stubStore(app)
 	store.config.CloudProviders = []configpkg.CloudProviderConfig{
 		{Alias: "erun+erunpaas.com@erun", Provider: configpkg.CloudProviderERun},
 		{Alias: "aws-prod", Provider: configpkg.CloudProviderAWS},

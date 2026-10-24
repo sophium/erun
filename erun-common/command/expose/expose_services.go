@@ -81,14 +81,14 @@ func ListEnvironmentServices(req config.ShellLaunchParams) ([]EnvironmentService
 	services, err := clusterread.FetchObservedServices(clusterread.ObserveGetArgs(req, "service"))
 	if err != nil {
 		if clusterread.IsForbiddenKubectlError(err) {
-			return nil, fmt.Errorf("%w: %s", ErrListEnvironmentServicesForbidden, err)
+			return nil, fmt.Errorf("%w: %w", ErrListEnvironmentServicesForbidden, err)
 		}
 		return nil, err
 	}
 	ingresses, err := clusterread.FetchObservedIngresses(clusterread.ObserveGetArgs(req, "ingress"))
 	if err != nil {
 		if clusterread.IsForbiddenKubectlError(err) {
-			return nil, fmt.Errorf("%w: %s", ErrListEnvironmentServicesForbidden, err)
+			return nil, fmt.Errorf("%w: %w", ErrListEnvironmentServicesForbidden, err)
 		}
 		return nil, err
 	}

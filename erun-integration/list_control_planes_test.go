@@ -230,383 +230,48 @@ func seedControlPlaneConfigOrdered(t testing.TB, setup env.Setup, planes []contr
 func TestListControlPlanes(t *testing.T) {
 	t.Parallel()
 
-	t.Run("help_documents_control_planes", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		result := erun.Run(t, []string{"list", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "--control-planes") {
-			t.Fatalf("expected --control-planes in help:\n%s", result.Combined)
-		}
-	})
+	t.Run("help_documents_control_planes", testListControlPlanesHelpDocumentsControlPlanes)
 
-	t.Run("combined_with_tenant_errors", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		result := erun.Run(t, []string{"list", "--tenant", "erun", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit combining --control-planes with --tenant, got 0:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_combined_with_tenant_errors", normalize.Apply(result.Combined))
-	})
+	t.Run("combined_with_tenant_errors", testListControlPlanesCombinedWithTenantErrors)
 
 	// Every other platform-touching command (`jobs list`, `platform whoami`,
 	// ...) accepts --erun-alias to narrow its work to one configured alias,
 	// but --control-planes rejected it outright and unconditionally probed
 	// every configured erun-hosted alias instead.
 
-	t.Run("erun_alias_requires_control_planes", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		result := erun.Run(t, []string{"list", "--erun-alias", "erun+test@erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for --erun-alias without --control-planes, got 0:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_erun_alias_requires_control_planes", normalize.Apply(result.Combined))
-	})
+	t.Run("erun_alias_requires_control_planes", testListControlPlanesErunAliasRequiresControlPlanes)
 
-	t.Run("erun_alias_unconfigured_errors", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		plane := controlPlaneStub(t, "1.0.247")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+	t.Run("erun_alias_unconfigured_errors", testListControlPlanesErunAliasUnconfiguredErrors)
 
-		result := erun.Run(t, []string{"list", "--control-planes", "--erun-alias", "erun+nonexistent@erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for an unconfigured --erun-alias, got 0:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, `cloud provider alias "erun+nonexistent@erun" is not configured`) {
-			t.Fatalf("expected the error to name the unconfigured alias:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_erun_alias_unconfigured_errors",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
+	t.Run("erun_alias_narrows_the_check_to_one_configured_plane", testListControlPlanesErunAliasNarrowsTheCheckToOneConfiguredPlane)
 
-	t.Run("erun_alias_narrows_the_check_to_one_configured_plane", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		planeA := controlPlaneStub(t, "1.0.247")
-		planeB := controlPlaneStub(t, "1.0.247")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{
-			"erun+a@erun": planeA.URL,
-			"erun+b@erun": planeB.URL,
-		}, registry.URL)
+	t.Run("dry_run_traces_planes_and_registry_lookup_without_probing", testListControlPlanesDryRunTracesPlanesAndRegistryLookupWithoutProbing)
 
-		result := erun.Run(t, []string{"list", "--control-planes", "--erun-alias", "erun+b@erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "erun+b@erun") {
-			t.Fatalf("expected the narrowed-to alias to be reported:\n%s", result.Combined)
-		}
-		if strings.Contains(result.Combined, "erun+a@erun") {
-			t.Fatalf("expected the other configured alias to never be probed or reported:\n%s", result.Combined)
-		}
-		if strings.Count(result.Combined, "GET ") != 2 {
-			t.Fatalf("expected exactly one plane probed (its trace line plus its actual GET), got:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_erun_alias_narrows_the_check_to_one_configured_plane",
-			normalize.Apply(result.Combined, stubServerRule(planeA, "<PLANE_A_API>"), stubServerRule(planeB, "<PLANE_B_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
+	t.Run("real_run_reports_a_plane_behind_published", testListControlPlanesRealRunReportsAPlaneBehindPublished)
 
-	t.Run("dry_run_traces_planes_and_registry_lookup_without_probing", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		plane := controlPlaneStub(t, "1.0.245")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+	t.Run("real_run_reports_a_plane_ahead_of_published", testListControlPlanesRealRunReportsAPlaneAheadOfPublished)
 
-		result := erun.Run(t, []string{"list", "--control-planes", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_dry_run_traces_planes_and_registry_lookup_without_probing",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
+	t.Run("real_run_reports_a_plane_up_to_date", testListControlPlanesRealRunReportsAPlaneUpToDate)
 
-	t.Run("real_run_reports_a_plane_behind_published", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		plane := controlPlaneStub(t, "1.0.245")
-		registry := controlPlaneRegistryStub(t, "1.0.246", "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+	t.Run("real_run_reports_an_unreachable_plane_as_not_current", testListControlPlanesRealRunReportsAnUnreachablePlaneAsNotCurrent)
 
-		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "[behind published -- roll it]") {
-			t.Fatalf("expected a behind-published verdict:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_real_run_reports_a_plane_behind_published",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
+	t.Run("real_run_reports_a_console_behind_published", testListControlPlanesRealRunReportsAConsoleBehindPublished)
 
-	t.Run("real_run_reports_a_plane_ahead_of_published", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		// The plane runs a build newer than anything the registry has ever
-		// published -- a more alarming condition than routine drift, and
-		// reported distinctly from "behind" rather than folded into it.
-		plane := controlPlaneStub(t, "1.0.999")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+	t.Run("real_run_reports_a_console_ahead_of_published", testListControlPlanesRealRunReportsAConsoleAheadOfPublished)
 
-		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "[ahead of published -- running an unpublished version]") {
-			t.Fatalf("expected an ahead-of-published verdict:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_real_run_reports_a_plane_ahead_of_published",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
+	t.Run("real_run_reports_an_unreachable_console_as_not_current", testListControlPlanesRealRunReportsAnUnreachableConsoleAsNotCurrent)
 
-	t.Run("real_run_reports_a_plane_up_to_date", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		plane := controlPlaneStub(t, "1.0.247")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+	t.Run("real_run_reports_a_console_serving_html_as_reachable_with_unknown_version", testListControlPlanesRealRunReportsAConsoleServingHTMLAsReachableWithUnknownVersion)
 
-		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if strings.Contains(result.Combined, "behind published") || strings.Contains(result.Combined, "ahead of published") {
-			t.Fatalf("a plane at the published version must carry no verdict:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_real_run_reports_a_plane_up_to_date",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
+	t.Run("real_run_reports_a_docs_site_behind_published", testListControlPlanesRealRunReportsADocsSiteBehindPublished)
 
-	t.Run("real_run_reports_an_unreachable_plane_as_not_current", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		// 127.0.0.1:1 refuses the connection immediately (the same
-		// unreachable-registry trick pin_test.go's
-		// seedUnreachableRuntimeRegistry uses), modeling a plane that never
-		// answers -- it must never be reported current.
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": "http://127.0.0.1:1"}, registry.URL)
+	t.Run("real_run_reports_no_docs_site_when_the_plane_has_none", testListControlPlanesRealRunReportsNoDocsSiteWhenThePlaneHasNone)
 
-		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "reachable=no") {
-			t.Fatalf("expected the unreachable plane to be reported unreachable:\n%s", result.Combined)
-		}
-		if strings.Contains(result.Combined, "behind published") || strings.Contains(result.Combined, "ahead of published") {
-			t.Fatalf("an unreachable plane must never carry a behind/ahead verdict:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_real_run_reports_an_unreachable_plane_as_not_current",
-			normalize.Apply(result.Combined, stubServerRule(registry, "<REGISTRY_API>")))
-	})
+	t.Run("real_run_json_output_reports_the_docs_site", testListControlPlanesRealRunJSONOutputReportsTheDocsSite)
 
-	t.Run("real_run_reports_a_console_behind_published", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		console := versionJSONStub(t, "1.0.245")
-		plane := controlPlaneStub(t, "1.0.247", console.URL)
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+	t.Run("real_run_with_no_configured_planes", testListControlPlanesRealRunWithNoConfiguredPlanes)
 
-		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_real_run_reports_a_console_behind_published",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(console, "<CONSOLE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
-
-	t.Run("real_run_reports_a_console_ahead_of_published", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		console := versionJSONStub(t, "1.0.999")
-		plane := controlPlaneStub(t, "1.0.247", console.URL)
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
-
-		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_real_run_reports_a_console_ahead_of_published",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(console, "<CONSOLE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
-
-	t.Run("real_run_reports_an_unreachable_console_as_not_current", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		// The plane itself is reachable and reports a consoleUrl nothing
-		// listens on -- a plane and its console can go down independently,
-		// and the console must never be reported current just because its
-		// plane is.
-		plane := controlPlaneStub(t, "1.0.247", "http://127.0.0.1:1")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
-
-		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_real_run_reports_an_unreachable_console_as_not_current",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
-
-	t.Run("real_run_reports_a_console_serving_html_as_reachable_with_unknown_version", func(t *testing.T) {
-		// A console that answers GET /version.json with 200 text/html (the
-		// SPA's own index.html, served by an nginx fallback that doesn't yet
-		// exact-match the route) must be reported reachable -- it answered
-		// -- with an unknown version and a reason naming the status code
-		// and content type, never reachable=no.
-		t.Parallel()
-		setup := env.New(t)
-		console := versionJSONHTMLFallbackStub(t)
-		plane := controlPlaneStub(t, "1.0.247", console.URL)
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
-
-		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		consoleLineIdx := strings.Index(result.Combined, "console: url=")
-		if consoleLineIdx == -1 {
-			t.Fatalf("expected a console entry:\n%s", result.Combined)
-		}
-		consoleLine := result.Combined[consoleLineIdx:]
-		if nl := strings.IndexByte(consoleLine, '\n'); nl != -1 {
-			consoleLine = consoleLine[:nl]
-		}
-		if !strings.Contains(consoleLine, "reachable=yes") {
-			t.Fatalf("expected the console to be reported reachable despite the wrong content type:\n%s", consoleLine)
-		}
-		if !strings.Contains(consoleLine, "version=unknown") {
-			t.Fatalf("expected the console's version to be reported unknown:\n%s", consoleLine)
-		}
-		if !strings.Contains(consoleLine, "/version.json returned 200 text/html (expected application/json)") {
-			t.Fatalf("expected the reason to name the status code and content type:\n%s", consoleLine)
-		}
-		golden.Equal(t, "list/control_planes_real_run_reports_a_console_serving_html_as_reachable_with_unknown_version",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(console, "<CONSOLE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
-
-	// The docs site is its own surface, not a second view of the console: it
-	// is published by its own deploy, so a docs site left behind by that
-	// deploy is invisible unless it is compared on its own. Here the plane and
-	// its console are both current and only the docs site lags.
-	t.Run("real_run_reports_a_docs_site_behind_published", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		console := versionJSONStub(t, "1.0.247")
-		docs := versionJSONStub(t, "1.0.245")
-		plane := controlPlaneStubWithDocs(t, "1.0.247", console.URL, docs.URL)
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
-
-		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		docsLine := lineContaining(result.Combined, "docs site: url=")
-		if docsLine == "" {
-			t.Fatalf("expected a docs-site entry:\n%s", result.Combined)
-		}
-		// Read the docs entry's own line: the console's line carries the same
-		// verdict text, so matching the whole document would pass on it.
-		if !strings.Contains(docsLine, "[behind published -- roll it]") {
-			t.Fatalf("expected the docs site to be flagged behind while the plane and console are current:\n%s", docsLine)
-		}
-		golden.Equal(t, "list/control_planes_real_run_reports_a_docs_site_behind_published",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(console, "<CONSOLE_API>"), stubServerRule(docs, "<DOCS_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
-
-	// A plane that advertises no docsUrl has no docs site to check, and that
-	// has to read as absent rather than as current: reporting a surface erun
-	// never reached as up to date is the same fail-open shape as reporting an
-	// unreachable console as current.
-	t.Run("real_run_reports_no_docs_site_when_the_plane_has_none", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		plane := controlPlaneStub(t, "1.0.247")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
-
-		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if strings.Contains(result.Combined, "docs site") {
-			t.Fatalf("expected no docs entry for a plane that advertises none, not a current-looking one:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_real_run_reports_no_docs_site_when_the_plane_has_none",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
-
-	t.Run("real_run_json_output_reports_the_docs_site", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		docs := versionJSONStub(t, "1.0.245")
-		plane := controlPlaneStubWithDocs(t, "1.0.247", "", docs.URL)
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
-
-		result := erun.Run(t, []string{"list", "--control-planes", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		// The console was advertised as empty here, so a "console" key in this
-		// document would be the same absence-reported-as-current mistake one
-		// field over.
-		if strings.Contains(result.Combined, `"console"`) {
-			t.Fatalf("expected no console entry for a plane that advertises none:\n%s", result.Combined)
-		}
-		for _, want := range []string{`"docs"`, `"url": "` + docs.URL + `"`, `"behind": true`} {
-			if !strings.Contains(result.Combined, want) {
-				t.Fatalf("expected %q in JSON output:\n%s", want, result.Combined)
-			}
-		}
-	})
-
-	t.Run("real_run_with_no_configured_planes", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, nil, registry.URL)
-
-		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_real_run_with_no_configured_planes",
-			normalize.Apply(result.Combined, stubServerRule(registry, "<REGISTRY_API>")))
-	})
-
-	t.Run("real_run_json_output", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		console := versionJSONStub(t, "1.0.245")
-		plane := controlPlaneStub(t, "1.0.245", console.URL)
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
-
-		result := erun.Run(t, []string{"list", "--control-planes", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		for _, want := range []string{`"behind": true`, `"reachable": true`, `"publishedVersion": "1.0.247"`, `"console"`} {
-			if !strings.Contains(result.Combined, want) {
-				t.Fatalf("expected %q in JSON output:\n%s", want, result.Combined)
-			}
-		}
-	})
+	t.Run("real_run_json_output", testListControlPlanesRealRunJSONOutput)
 
 	// erun#2052: --fail-on-drift is the opt-in that lets this reporting
 	// command's own finding be wired into a gate -- without it this whole
@@ -614,110 +279,17 @@ func TestListControlPlanes(t *testing.T) {
 	// (erun-cli/AGENTS.md § "Exit-Code Contract: Reporting Commands Vs
 	// Gating Checks").
 
-	t.Run("fail_on_drift_behind_published_exits_non_zero", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		plane := controlPlaneStub(t, "1.0.245")
-		registry := controlPlaneRegistryStub(t, "1.0.246", "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+	t.Run("fail_on_drift_behind_published_exits_non_zero", testListControlPlanesFailOnDriftBehindPublishedExitsNonZero)
 
-		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for a plane behind published, got 0:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_fail_on_drift_behind_published_exits_non_zero",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
+	t.Run("fail_on_drift_up_to_date_exits_zero", testListControlPlanesFailOnDriftUpToDateExitsZero)
 
-	t.Run("fail_on_drift_up_to_date_exits_zero", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		plane := controlPlaneStub(t, "1.0.247")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+	t.Run("fail_on_drift_console_behind_published_exits_non_zero", testListControlPlanesFailOnDriftConsoleBehindPublishedExitsNonZero)
 
-		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("expected exit 0 for a plane already at the published version, got %d:\n%s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_fail_on_drift_up_to_date_exits_zero",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
+	t.Run("fail_on_drift_docs_site_behind_published_exits_non_zero", testListControlPlanesFailOnDriftDocsSiteBehindPublishedExitsNonZero)
 
-	t.Run("fail_on_drift_console_behind_published_exits_non_zero", func(t *testing.T) {
-		// The plane itself is at the published version -- only its linked
-		// console is behind. --fail-on-drift must catch console drift the
-		// same as plane drift, since a console has no version surface of its
-		// own to notice this without the check.
-		t.Parallel()
-		setup := env.New(t)
-		console := versionJSONStub(t, "1.0.245")
-		plane := controlPlaneStub(t, "1.0.247", console.URL)
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+	t.Run("fail_on_drift_unreachable_plane_exits_non_zero", testListControlPlanesFailOnDriftUnreachablePlaneExitsNonZero)
 
-		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for a console behind published, got 0:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_fail_on_drift_console_behind_published_exits_non_zero",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(console, "<CONSOLE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
-
-	t.Run("fail_on_drift_docs_site_behind_published_exits_non_zero", func(t *testing.T) {
-		// The same one surface over: the plane and its console are both at the
-		// published version and the docs site a deploy left behind is the only
-		// thing stale. Nothing else in erun reads the docs site's version, so
-		// without this leg the drift is invisible.
-		t.Parallel()
-		setup := env.New(t)
-		console := versionJSONStub(t, "1.0.247")
-		docs := versionJSONStub(t, "1.0.245")
-		plane := controlPlaneStubWithDocs(t, "1.0.247", console.URL, docs.URL)
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
-
-		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for a docs site behind published, got 0:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "(docs site)") {
-			t.Fatalf("expected the summary to name the docs site as the drifting surface:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_fail_on_drift_docs_site_behind_published_exits_non_zero",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(console, "<CONSOLE_API>"), stubServerRule(docs, "<DOCS_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
-
-	t.Run("fail_on_drift_unreachable_plane_exits_non_zero", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": "http://127.0.0.1:1"}, registry.URL)
-
-		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for an unreachable plane, got 0:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_fail_on_drift_unreachable_plane_exits_non_zero",
-			normalize.Apply(result.Combined, stubServerRule(registry, "<REGISTRY_API>")))
-	})
-
-	t.Run("fail_on_drift_dry_run_never_fails", func(t *testing.T) {
-		// Nothing was actually probed, so there is nothing to fail on --
-		// --fail-on-drift must not turn a dry-run preview into a failure.
-		t.Parallel()
-		setup := env.New(t)
-		plane := controlPlaneStub(t, "1.0.245")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
-
-		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("expected exit 0 for a dry run, got %d:\n%s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_fail_on_drift_dry_run_never_fails",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
+	t.Run("fail_on_drift_dry_run_never_fails", testListControlPlanesFailOnDriftDryRunNeverFails)
 
 	// Two configured aliases that resolve to the same backend must
 	// be reported as one plane, not two -- pointing two aliases at one plane
@@ -728,78 +300,11 @@ func TestListControlPlanes(t *testing.T) {
 	// two distinct listeners that both report that same canonical apiUrl,
 	// the same as one real backend answering on two hostnames/ingresses.
 
-	t.Run("real_run_two_aliases_sharing_a_backend_collapse_into_one_plane", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		canonical := controlPlaneStubAt(t, "https://api.example-canonical.test", "1.0.245")
-		alias := controlPlaneStubAt(t, "https://api.example-canonical.test", "1.0.245")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfigOrdered(t, setup, []controlPlaneAliasSeed{
-			{Alias: "erun+canonical@erun", APIURL: canonical.URL},
-			{Alias: "erun+alias@erun", APIURL: alias.URL},
-		}, registry.URL)
+	t.Run("real_run_two_aliases_sharing_a_backend_collapse_into_one_plane", testListControlPlanesRealRunTwoAliasesSharingABackendCollapseIntoOnePlane)
 
-		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "Control planes (1 backend, 2 aliases):") {
-			t.Fatalf("expected the two aliases to collapse into one reported backend:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "erun+canonical@erun") || !strings.Contains(result.Combined, "erun+alias@erun") {
-			t.Fatalf("expected both configured aliases to remain visible:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_real_run_two_aliases_sharing_a_backend_collapse_into_one_plane",
-			normalize.Apply(result.Combined, stubServerRule(canonical, "<PLANE_API>"), stubServerRule(alias, "<ALIAS_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
+	t.Run("fail_on_drift_two_aliases_sharing_a_backend_counts_once", testListControlPlanesFailOnDriftTwoAliasesSharingABackendCountsOnce)
 
-	t.Run("fail_on_drift_two_aliases_sharing_a_backend_counts_once", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		canonical := controlPlaneStubAt(t, "https://api.example-canonical.test", "1.0.245")
-		alias := controlPlaneStubAt(t, "https://api.example-canonical.test", "1.0.245")
-		registry := controlPlaneRegistryStub(t, "1.0.246", "1.0.247")
-		seedControlPlaneConfigOrdered(t, setup, []controlPlaneAliasSeed{
-			{Alias: "erun+canonical@erun", APIURL: canonical.URL},
-			{Alias: "erun+alias@erun", APIURL: alias.URL},
-		}, registry.URL)
-
-		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for a plane behind published, got 0:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "1 plane(s) behind published") {
-			t.Fatalf("expected drift to count one deployment, not one per alias:\n%s", result.Combined)
-		}
-		if strings.Contains(result.Combined, "2 plane(s) behind published") {
-			t.Fatalf("two aliases of the same backend must not double-count as two planes behind published:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_fail_on_drift_two_aliases_sharing_a_backend_counts_once",
-			normalize.Apply(result.Combined, stubServerRule(canonical, "<PLANE_API>"), stubServerRule(alias, "<ALIAS_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
-
-	t.Run("real_run_json_output_two_aliases_sharing_a_backend_does_not_double_count", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		canonical := controlPlaneStubAt(t, "https://api.example-canonical.test", "1.0.245")
-		alias := controlPlaneStubAt(t, "https://api.example-canonical.test", "1.0.245")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfigOrdered(t, setup, []controlPlaneAliasSeed{
-			{Alias: "erun+canonical@erun", APIURL: canonical.URL},
-			{Alias: "erun+alias@erun", APIURL: alias.URL},
-		}, registry.URL)
-
-		result := erun.Run(t, []string{"list", "--control-planes", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, `"additionalAliases"`) {
-			t.Fatalf("expected the second alias to appear as an additional alias, not a second plane:\n%s", result.Combined)
-		}
-		if got := strings.Count(result.Combined, `"reachable": true`); got != 1 {
-			t.Fatalf("expected exactly one reachable plane entry in the structured output, got %d:\n%s", got, result.Combined)
-		}
-	})
+	t.Run("real_run_json_output_two_aliases_sharing_a_backend_does_not_double_count", testListControlPlanesRealRunJSONOutputTwoAliasesSharingABackendDoesNotDoubleCount)
 
 	// Follow-up: identity must never be guessed from DNS/host alone
 	// when neither alias's own GET /v1/platform self-reports an apiUrl -- an
@@ -812,53 +317,9 @@ func TestListControlPlanes(t *testing.T) {
 	// plane. erun-common no longer keys identity on DNS at all when the
 	// self-declared signal is missing, so these must stay two backends.
 
-	t.Run("real_run_two_aliases_with_no_self_declared_identity_stay_separate", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		first := controlPlaneStubAt(t, "", "1.0.245")
-		second := controlPlaneStubAt(t, "", "1.0.245")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfigOrdered(t, setup, []controlPlaneAliasSeed{
-			{Alias: "erun+first@erun", APIURL: first.URL},
-			{Alias: "erun+second@erun", APIURL: second.URL},
-		}, registry.URL)
+	t.Run("real_run_two_aliases_with_no_self_declared_identity_stay_separate", testListControlPlanesRealRunTwoAliasesWithNoSelfDeclaredIdentityStaySeparate)
 
-		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "Control planes (2 backends, 2 aliases):") {
-			t.Fatalf("expected two distinct backends with no self-declared identity to stay separate, not collapse:\n%s", result.Combined)
-		}
-		if strings.Contains(result.Combined, "additionalAliases") {
-			t.Fatalf("neither alias should be folded into the other as an additional alias:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_real_run_two_aliases_with_no_self_declared_identity_stay_separate",
-			normalize.Apply(result.Combined, stubServerRule(first, "<FIRST_API>"), stubServerRule(second, "<SECOND_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
-
-	t.Run("real_run_json_output_two_aliases_with_no_self_declared_identity_stay_separate", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		first := controlPlaneStubAt(t, "", "1.0.245")
-		second := controlPlaneStubAt(t, "", "1.0.245")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfigOrdered(t, setup, []controlPlaneAliasSeed{
-			{Alias: "erun+first@erun", APIURL: first.URL},
-			{Alias: "erun+second@erun", APIURL: second.URL},
-		}, registry.URL)
-
-		result := erun.Run(t, []string{"list", "--control-planes", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if strings.Contains(result.Combined, `"additionalAliases"`) {
-			t.Fatalf("expected no additional-alias merge between two distinct, unidentified backends:\n%s", result.Combined)
-		}
-		if got := strings.Count(result.Combined, `"reachable": true`); got != 2 {
-			t.Fatalf("expected two reachable plane entries in the structured output, got %d:\n%s", got, result.Combined)
-		}
-	})
+	t.Run("real_run_json_output_two_aliases_with_no_self_declared_identity_stay_separate", testListControlPlanesRealRunJSONOutputTwoAliasesWithNoSelfDeclaredIdentityStaySeparate)
 
 	// A plane's own discovery document can name an apiUrl that is not this
 	// backend. A textually different apiUrl is common and benign (the
@@ -868,78 +329,220 @@ func TestListControlPlanes(t *testing.T) {
 	// configured stub's loopback listener against the reserved, never-routed
 	// 2001:db8::/32 documentation prefix -- so no DNS stub is needed.
 
-	t.Run("real_run_flags_a_foreign_advertised_apiurl", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		plane := controlPlaneStubAt(t, "http://[2001:db8::1]:9999", "1.0.247")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+	t.Run("real_run_flags_a_foreign_advertised_apiurl", testListControlPlanesRealRunFlagsAForeignAdvertisedAPIURL)
 
-		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "advertised apiUrl mismatch") {
-			t.Fatalf("expected the plane's foreign advertised apiUrl to be flagged:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_real_run_flags_a_foreign_advertised_apiurl",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
+	t.Run("fail_on_drift_foreign_advertised_apiurl_exits_non_zero", testListControlPlanesFailOnDriftForeignAdvertisedAPIURLExitsNonZero)
 
-	t.Run("fail_on_drift_foreign_advertised_apiurl_exits_non_zero", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		plane := controlPlaneStubAt(t, "http://[2001:db8::1]:9999", "1.0.247")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+	t.Run("real_run_json_output_reports_the_advertised_apiurl_mismatch", testListControlPlanesRealRunJSONOutputReportsTheAdvertisedAPIURLMismatch)
 
-		// The plane is at the published version, so nothing else in this
-		// report is drift -- a foreign advertised apiUrl has to fail the run
-		// on its own.
-		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected a non-zero exit for a foreign advertised apiUrl, got 0:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "1 plane(s) advertising a foreign apiUrl: erun+test@erun") {
-			t.Fatalf("expected the failure to name the plane advertising a foreign apiUrl:\n%s", result.Combined)
-		}
-		golden.Equal(t, "list/control_planes_fail_on_drift_foreign_advertised_apiurl_exits_non_zero",
-			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
-	})
+	t.Run("real_run_json_output_omits_the_advertised_apiurl_mismatch_when_the_plane_agrees", testListControlPlanesRealRunJSONOutputOmitsTheAdvertisedAPIURLMismatchWhenThePlaneAgrees)
+}
 
-	t.Run("real_run_json_output_reports_the_advertised_apiurl_mismatch", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		plane := controlPlaneStubAt(t, "http://[2001:db8::1]:9999", "1.0.247")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+func testListControlPlanesHelpDocumentsControlPlanes(t *testing.T) {
+	t.Parallel()
+	setup := env.New(t)
+	result := erun.Run(t, []string{"list", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if !strings.Contains(result.Combined, "--control-planes") {
+		t.Fatalf("expected --control-planes in help:\n%s", result.Combined)
+	}
+}
 
-		result := erun.Run(t, []string{"list", "--control-planes", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, `"advertisedApiUrlMismatch"`) {
-			t.Fatalf("expected the mismatch in the structured output:\n%s", result.Combined)
-		}
-	})
+func testListControlPlanesCombinedWithTenantErrors(t *testing.T) {
+	t.Parallel()
+	setup := env.New(t)
+	result := erun.Run(t, []string{"list", "--tenant", "erun", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode == 0 {
+		t.Fatalf("expected non-zero exit combining --control-planes with --tenant, got 0:\n%s", result.Combined)
+	}
+	golden.Equal(t, "list/control_planes_combined_with_tenant_errors", normalize.Apply(result.Combined))
+}
 
-	t.Run("real_run_json_output_omits_the_advertised_apiurl_mismatch_when_the_plane_agrees", func(t *testing.T) {
-		t.Parallel()
-		setup := env.New(t)
-		// controlPlaneStub advertises its own listener address, the same one
-		// erun dialed -- so the field has to be a signal, not a constant.
-		plane := controlPlaneStub(t, "1.0.247")
-		registry := controlPlaneRegistryStub(t, "1.0.247")
-		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+func testListControlPlanesErunAliasRequiresControlPlanes(t *testing.T) {
+	t.Parallel()
+	setup := env.New(t)
+	result := erun.Run(t, []string{"list", "--erun-alias", "erun+test@erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode == 0 {
+		t.Fatalf("expected non-zero exit for --erun-alias without --control-planes, got 0:\n%s", result.Combined)
+	}
+	golden.Equal(t, "list/control_planes_erun_alias_requires_control_planes", normalize.Apply(result.Combined))
+}
 
-		result := erun.Run(t, []string{"list", "--control-planes", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+func testListControlPlanesErunAliasUnconfiguredErrors(t *testing.T) {
+	t.Parallel()
+	setup := env.New(t)
+	plane := controlPlaneStub(t, "1.0.247")
+	registry := controlPlaneRegistryStub(t, "1.0.247")
+	seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+	result := erun.Run(t, []string{"list", "--control-planes", "--erun-alias", "erun+nonexistent@erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode == 0 {
+		t.Fatalf("expected non-zero exit for an unconfigured --erun-alias, got 0:\n%s", result.Combined)
+	}
+	if !strings.Contains(result.Combined, `cloud provider alias "erun+nonexistent@erun" is not configured`) {
+		t.Fatalf("expected the error to name the unconfigured alias:\n%s", result.Combined)
+	}
+	golden.Equal(t, "list/control_planes_erun_alias_unconfigured_errors",
+		normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+}
+
+func testListControlPlanesErunAliasNarrowsTheCheckToOneConfiguredPlane(t *testing.T) {
+	t.Parallel()
+	setup := env.New(t)
+	planeA := controlPlaneStub(t, "1.0.247")
+	planeB := controlPlaneStub(t, "1.0.247")
+	registry := controlPlaneRegistryStub(t, "1.0.247")
+	seedControlPlaneConfig(t, setup, map[string]string{
+		"erun+a@erun": planeA.URL,
+		"erun+b@erun": planeB.URL,
+	}, registry.URL)
+
+	result := erun.Run(t, []string{"list", "--control-planes", "--erun-alias", "erun+b@erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if !strings.Contains(result.Combined, "erun+b@erun") {
+		t.Fatalf("expected the narrowed-to alias to be reported:\n%s", result.Combined)
+	}
+	if strings.Contains(result.Combined, "erun+a@erun") {
+		t.Fatalf("expected the other configured alias to never be probed or reported:\n%s", result.Combined)
+	}
+	if strings.Count(result.Combined, "GET ") != 2 {
+		t.Fatalf("expected exactly one plane probed (its trace line plus its actual GET), got:\n%s", result.Combined)
+	}
+	golden.Equal(t, "list/control_planes_erun_alias_narrows_the_check_to_one_configured_plane",
+		normalize.Apply(result.Combined, stubServerRule(planeA, "<PLANE_A_API>"), stubServerRule(planeB, "<PLANE_B_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+}
+
+func testListControlPlanesDryRunTracesPlanesAndRegistryLookupWithoutProbing(t *testing.T) {
+	t.Parallel()
+	setup := env.New(t)
+	plane := controlPlaneStub(t, "1.0.245")
+	registry := controlPlaneRegistryStub(t, "1.0.247")
+	seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+	result := erun.Run(t, []string{"list", "--control-planes", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	golden.Equal(t, "list/control_planes_dry_run_traces_planes_and_registry_lookup_without_probing",
+		normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+}
+
+func testListControlPlanesRealRunReportsAPlaneBehindPublished(t *testing.T) {
+	t.Parallel()
+	setup := env.New(t)
+	plane := controlPlaneStub(t, "1.0.245")
+	registry := controlPlaneRegistryStub(t, "1.0.246", "1.0.247")
+	seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+	result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if !strings.Contains(result.Combined, "[behind published -- roll it]") {
+		t.Fatalf("expected a behind-published verdict:\n%s", result.Combined)
+	}
+	golden.Equal(t, "list/control_planes_real_run_reports_a_plane_behind_published",
+		normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+}
+
+func testListControlPlanesRealRunReportsAPlaneAheadOfPublished(t *testing.T) {
+	t.Parallel()
+	setup := env.New(t)
+	// The plane runs a build newer than anything the registry has ever
+	// published -- a more alarming condition than routine drift, and
+	// reported distinctly from "behind" rather than folded into it.
+	plane := controlPlaneStub(t, "1.0.999")
+	registry := controlPlaneRegistryStub(t, "1.0.247")
+	seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+	result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if !strings.Contains(result.Combined, "[ahead of published -- running an unpublished version]") {
+		t.Fatalf("expected an ahead-of-published verdict:\n%s", result.Combined)
+	}
+	golden.Equal(t, "list/control_planes_real_run_reports_a_plane_ahead_of_published",
+		normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+}
+
+func testListControlPlanesRealRunReportsAPlaneUpToDate(t *testing.T) {
+	t.Parallel()
+	setup := env.New(t)
+	plane := controlPlaneStub(t, "1.0.247")
+	registry := controlPlaneRegistryStub(t, "1.0.247")
+	seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+	result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if strings.Contains(result.Combined, "behind published") || strings.Contains(result.Combined, "ahead of published") {
+		t.Fatalf("a plane at the published version must carry no verdict:\n%s", result.Combined)
+	}
+	golden.Equal(t, "list/control_planes_real_run_reports_a_plane_up_to_date",
+		normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+}
+
+func testListControlPlanesRealRunReportsAnUnreachablePlaneAsNotCurrent(t *testing.T) {
+	t.Parallel()
+	setup := env.New(t)
+	registry := controlPlaneRegistryStub(t, "1.0.247")
+	// 127.0.0.1:1 refuses the connection immediately (the same
+	// unreachable-registry trick pin_test.go's
+	// seedUnreachableRuntimeRegistry uses), modeling a plane that never
+	// answers -- it must never be reported current.
+	seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": "http://127.0.0.1:1"}, registry.URL)
+
+	result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if !strings.Contains(result.Combined, "reachable=no") {
+		t.Fatalf("expected the unreachable plane to be reported unreachable:\n%s", result.Combined)
+	}
+	if strings.Contains(result.Combined, "behind published") || strings.Contains(result.Combined, "ahead of published") {
+		t.Fatalf("an unreachable plane must never carry a behind/ahead verdict:\n%s", result.Combined)
+	}
+	golden.Equal(t, "list/control_planes_real_run_reports_an_unreachable_plane_as_not_current",
+		normalize.Apply(result.Combined, stubServerRule(registry, "<REGISTRY_API>")))
+}
+
+func testListControlPlanesRealRunWithNoConfiguredPlanes(t *testing.T) {
+	t.Parallel()
+	setup := env.New(t)
+	registry := controlPlaneRegistryStub(t, "1.0.247")
+	seedControlPlaneConfig(t, setup, nil, registry.URL)
+
+	result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	golden.Equal(t, "list/control_planes_real_run_with_no_configured_planes",
+		normalize.Apply(result.Combined, stubServerRule(registry, "<REGISTRY_API>")))
+}
+
+func testListControlPlanesRealRunJSONOutput(t *testing.T) {
+	t.Parallel()
+	setup := env.New(t)
+	console := versionJSONStub(t, "1.0.245")
+	plane := controlPlaneStub(t, "1.0.245", console.URL)
+	registry := controlPlaneRegistryStub(t, "1.0.247")
+	seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+	result := erun.Run(t, []string{"list", "--control-planes", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	for _, want := range []string{`"behind": true`, `"reachable": true`, `"publishedVersion": "1.0.247"`, `"console"`} {
+		if !strings.Contains(result.Combined, want) {
+			t.Fatalf("expected %q in JSON output:\n%s", want, result.Combined)
 		}
-		if strings.Contains(result.Combined, `"advertisedApiUrlMismatch"`) {
-			t.Fatalf("expected no mismatch for a plane advertising the address erun reached:\n%s", result.Combined)
-		}
-	})
+	}
 }
 
 func lineContaining(text, substr string) string {

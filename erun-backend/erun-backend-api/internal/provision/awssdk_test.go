@@ -83,7 +83,7 @@ func (f *fakeAWS) serveSSM(w http.ResponseWriter, target string) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	writeAWSJSON(w, map[string]any{
 		"Parameter": map[string]any{"Name": "ubuntu-ami", "Value": fakeAMI},
 	})
 }
@@ -169,7 +169,13 @@ func writeQueryError(w http.ResponseWriter, status int, code, message string) {
 func writeJSONError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/x-amz-json-1.1")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"__type": code, "message": message})
+	writeAWSJSON(w, map[string]any{"__type": code, "message": message})
+}
+
+func writeAWSJSON(w http.ResponseWriter, value any) {
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 // isolateAWSEnvironment keeps the host's own AWS configuration out of the

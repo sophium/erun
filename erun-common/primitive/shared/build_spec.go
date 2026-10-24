@@ -117,7 +117,7 @@ func NewDockerBuildSpec(ctx core.Context, store DockerStore, now NowFunc, projec
 	// Mark local snapshot builds so ERUN_VERSION reads "1.0.51-snapshot", not
 	// "1.0.51", which would falsely claim a release.
 	if imageRef.BaseVersion != "" {
-		imageRef.BaseVersion = imageRef.BaseVersion + "-snapshot"
+		imageRef.BaseVersion += "-snapshot"
 	}
 
 	platforms, err := ResolveDockerBuildPlatforms(ctx, projectRoot, environment, platformOverride)

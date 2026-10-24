@@ -1,0 +1,277 @@
+version: 3
+workdir: .
+allow:
+  depOnAnyVendor: false
+  deepScan: false
+
+vendors:
+  github-com-adrg-xdg:
+    in: ["github.com/adrg/xdg", "github.com/adrg/xdg/**"]
+  github-com-briandowns-spinner:
+    in: ["github.com/briandowns/spinner", "github.com/briandowns/spinner/**"]
+  github-com-manifoldco-promptui:
+    in: ["github.com/manifoldco/promptui", "github.com/manifoldco/promptui/**"]
+  github-com-spf13-cobra:
+    in: ["github.com/spf13/cobra", "github.com/spf13/cobra/**"]
+  github-com-spf13-pflag:
+    in: ["github.com/spf13/pflag", "github.com/spf13/pflag/**"]
+  golang-org-x-term:
+    in: ["golang.org/x/term", "golang.org/x/term/**"]
+
+components:
+  cmd:
+    in: "cmd"
+  cmd-activity:
+    in: "cmd/activity"
+  cmd-adopt:
+    in: "cmd/adopt"
+  cmd-apiserver:
+    in: "cmd/apiserver"
+  cmd-app:
+    in: "cmd/app"
+  cmd-build:
+    in: "cmd/build"
+  cmd-cloud:
+    in: "cmd/cloud"
+  cmd-contribute:
+    in: "cmd/contribute"
+  cmd-deploy:
+    in: "cmd/deploy"
+  cmd-dind:
+    in: "cmd/dind"
+  cmd-doctor:
+    in: "cmd/doctor"
+  cmd-e2e:
+    in: "cmd/e2e"
+  cmd-envdelete:
+    in: "cmd/envdelete"
+  cmd-execcmd:
+    in: "cmd/execcmd"
+  cmd-expose:
+    in: "cmd/expose"
+  cmd-idle:
+    in: "cmd/idle"
+  cmd-initcmd:
+    in: "cmd/initcmd"
+  cmd-inputs:
+    in: "cmd/inputs"
+  cmd-jobs:
+    in: "cmd/jobs"
+  cmd-kubecontext:
+    in: "cmd/kubecontext"
+  cmd-list:
+    in: "cmd/list"
+  cmd-mcp:
+    in: "cmd/mcp"
+  cmd-observe:
+    in: "cmd/observe"
+  cmd-open:
+    in: "cmd/open"
+  cmd-orchestrator:
+    in: "cmd/orchestrator"
+  cmd-outputs:
+    in: "cmd/outputs"
+  cmd-pin:
+    in: "cmd/pin"
+  cmd-platform:
+    in: "cmd/platform"
+  cmd-resize:
+    in: "cmd/resize"
+  cmd-review:
+    in: "cmd/review"
+  cmd-services:
+    in: "cmd/services"
+  cmd-shared:
+    in: "cmd/shared"
+  cmd-sshd:
+    in: "cmd/sshd"
+  cmd-stop:
+    in: "cmd/stop"
+  cmd-terraform:
+    in: "cmd/terraform"
+  cmd-upgrade:
+    in: "cmd/upgrade"
+  cmd-usage:
+    in: "cmd/usage"
+  cmd-version:
+    in: "cmd/version"
+  internal:
+    in: "internal"
+  internal-jetbrainsconfig:
+    in: "internal/jetbrainsconfig"
+  internal-sshknownhosts:
+    in: "internal/sshknownhosts"
+  root:
+    in: "."
+
+deps:
+  cmd:
+    anyProjectDeps: true
+    canUse:
+      - github-com-manifoldco-promptui
+      - github-com-spf13-cobra
+  cmd-activity:
+    anyProjectDeps: true
+    canUse:
+      - github-com-adrg-xdg
+      - github-com-spf13-cobra
+  cmd-adopt:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-apiserver:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-app:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-build:
+    anyProjectDeps: true
+    canUse:
+      - github-com-manifoldco-promptui
+      - github-com-spf13-cobra
+  cmd-cloud:
+    anyProjectDeps: true
+    canUse:
+      - github-com-manifoldco-promptui
+      - github-com-spf13-cobra
+  cmd-contribute:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-deploy:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-dind:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-doctor:
+    anyProjectDeps: true
+    canUse:
+      - github-com-manifoldco-promptui
+      - github-com-spf13-cobra
+  cmd-e2e:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-envdelete:
+    anyProjectDeps: true
+    canUse:
+      - github-com-manifoldco-promptui
+      - github-com-spf13-cobra
+  cmd-execcmd:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-expose:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-idle:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-initcmd:
+    anyProjectDeps: true
+    canUse:
+      - github-com-manifoldco-promptui
+      - github-com-spf13-cobra
+  cmd-inputs:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-jobs:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-kubecontext:
+    anyProjectDeps: true
+    canUse:
+      - github-com-manifoldco-promptui
+      - github-com-spf13-cobra
+  cmd-list:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-mcp:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-observe:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-open:
+    anyProjectDeps: true
+    canUse:
+      - github-com-briandowns-spinner
+      - github-com-manifoldco-promptui
+      - github-com-spf13-cobra
+      - golang-org-x-term
+  cmd-orchestrator:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-outputs:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-pin:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-platform:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-resize:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-review:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-services:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-shared:
+    anyProjectDeps: true
+    canUse:
+      - github-com-manifoldco-promptui
+      - github-com-spf13-cobra
+      - github-com-spf13-pflag
+      - golang-org-x-term
+  cmd-sshd:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-stop:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-terraform:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-upgrade:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-usage:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  cmd-version:
+    anyProjectDeps: true
+    canUse:
+      - github-com-spf13-cobra
+  internal-sshknownhosts:
+    anyProjectDeps: true
+  root:
+    anyProjectDeps: true

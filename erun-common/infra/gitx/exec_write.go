@@ -101,11 +101,11 @@ func resolveWorkingTreePath(root, requested string) (string, string, error) {
 // a symlink that happens to be named root.
 func realWorkingTreeRoot(root string) (string, error) {
 	root = filepath.Clean(strings.TrimSpace(root))
-	real, err := filepath.EvalSymlinks(root)
+	resolved, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return "", fmt.Errorf("resolve working tree root %q: %w", root, err)
 	}
-	return filepath.Clean(real), nil
+	return filepath.Clean(resolved), nil
 }
 
 // refuseSymlinkInPath walks relative one path component at a time from root,

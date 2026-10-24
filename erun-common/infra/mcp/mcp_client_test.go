@@ -163,7 +163,7 @@ func reserveLoopbackPort(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("reserve loopback port: %v", err)
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
+	port := loopbackListenerPort(t, listener)
 	if err := listener.Close(); err != nil {
 		t.Fatalf("release reserved port: %v", err)
 	}

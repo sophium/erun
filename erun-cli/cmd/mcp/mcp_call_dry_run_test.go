@@ -79,7 +79,11 @@ func closedLoopbackPort(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("reserve a loopback port: %v", err)
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
+	addr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("loopback listener address is %T, not TCP", listener.Addr())
+	}
+	port := addr.Port
 	if err := listener.Close(); err != nil {
 		t.Fatalf("release loopback port %d: %v", port, err)
 	}

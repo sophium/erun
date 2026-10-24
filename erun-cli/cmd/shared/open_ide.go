@@ -58,9 +58,9 @@ func intelliJOptionsBaseDir(hostOS core.HostOS) (string, error) {
 			return filepath.Join(appData, "JetBrains"), nil
 		}
 		return "", fmt.Errorf("JetBrains options directory base is not configured")
-	default:
-		return "", fmt.Errorf("unsupported host OS: %s", hostOS)
+	case core.HostOSUnknown:
 	}
+	return "", fmt.Errorf("unsupported host OS: %s", hostOS)
 }
 
 func intelliJOptionsCandidates(baseDir string) ([]intelliJOptionsCandidate, error) {

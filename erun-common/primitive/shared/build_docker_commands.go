@@ -338,16 +338,12 @@ func TryGHCRNamespaceLogin(tag string, stdout, stderr io.Writer) (bool, error) {
 	if namespace == "" {
 		return false, nil
 	}
-	if _, err := exec.LookPath("gh"); err != nil {
+	if !GHCLIAvailable() {
 		return false, nil
 	}
 
-	token, err := registrypkg.CaptureGHCommand("auth", "token", "-u", namespace, "-h", "github.com")
-	if err != nil {
-		return false, nil
-	}
-	token = strings.TrimSpace(token)
-	if token == "" {
+	token, ok := CaptureGHValue("auth", "token", "-u", namespace, "-h", "github.com")
+	if !ok {
 		return false, nil
 	}
 
@@ -359,4 +355,21 @@ func TryGHCRNamespaceLogin(tag string, stdout, stderr io.Writer) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// GHCLIAvailable reports whether the gh CLI is on PATH.
+func GHCLIAvailable() bool {
+	_, err := exec.LookPath("gh")
+	return err == nil
+}
+
+// CaptureGHValue reports gh's trimmed output, or false when gh fails or prints
+// nothing: an unusable gh login is not an error, just no credential.
+func CaptureGHValue(args ...string) (string, bool) {
+	value, err := registrypkg.CaptureGHCommand(args...)
+	if err != nil {
+		return "", false
+	}
+	value = strings.TrimSpace(value)
+	return value, value != ""
 }

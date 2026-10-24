@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -155,7 +156,7 @@ func (r *ReleaseRepository) ClaimNext(ctx context.Context, window ClaimWindow) (
 		case err == nil:
 			claimed = true
 			return nil
-		case normalizeNoRows(err) == ErrNotFound, isUniqueViolation(err):
+		case errors.Is(normalizeNoRows(err), ErrNotFound), isUniqueViolation(err):
 			return nil
 		default:
 			return err

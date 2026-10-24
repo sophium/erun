@@ -126,8 +126,8 @@ func ResolveProjectRootDevopsDockerDir(findProjectRoot shared.ProjectFinderFunc,
 }
 
 func detectedProjectRootDevopsDockerDir(findProjectRoot shared.ProjectFinderFunc, projectRoot string) (string, bool, error) {
-	tenant, detectedProjectRoot, err := findProjectRoot()
-	if err != nil || filepath.Clean(strings.TrimSpace(detectedProjectRoot)) != projectRoot || strings.TrimSpace(tenant) == "" {
+	tenant, ok := shared.DetectedProjectTenant(findProjectRoot, projectRoot)
+	if !ok {
 		return "", false, nil
 	}
 	dockerDir := filepath.Join(projectRoot, config.RuntimeReleaseName(tenant), "docker")

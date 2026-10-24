@@ -29,8 +29,11 @@ func activityQueueStatusIsTerminal(s activityQueueStatus) bool {
 		activityQueueStatusSkipped,
 		activityQueueStatusCancelled:
 		return true
+	case activityQueueStatusWaiting, activityQueueStatusRunning:
+		fallthrough
+	default:
+		return false
 	}
-	return false
 }
 
 // activityQueueContainerStatus is one container's last observed state under the
@@ -301,7 +304,8 @@ func (s *activityQueueStore) recordOutputLine(tenant, environment, line string) 
 		if entry.Tenant != tenant || entry.Environment != environment {
 			continue
 		}
-		buf := append(s.outputByID[entry.ID], line)
+		buf := s.outputByID[entry.ID]
+		buf = append(buf, line)
 		if len(buf) > activityQueueOutputBufferLines {
 			buf = buf[len(buf)-activityQueueOutputBufferLines:]
 		}

@@ -3,6 +3,7 @@ package zitadel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -169,7 +170,8 @@ func e2eRefusesDeactivatingAnInitialUser(t *testing.T, ctx context.Context, clie
 	if err == nil {
 		t.Fatal("want DeactivateUser to refuse a USER_STATE_INITIAL user")
 	}
-	apiErr, ok := err.(*APIError)
+	var apiErr *APIError
+	ok := errors.As(err, &apiErr)
 	if !ok || !strings.Contains(apiErr.Body, "initial") {
 		t.Fatalf("DeactivateUser error = %v, want Zitadel's state-precondition message", err)
 	}

@@ -32,12 +32,12 @@ func TestDescribeExclusiveActivityLeaseVersionSkewNamesTheVersionMismatch(t *tes
 
 func TestDescribeExclusiveActivityLeaseVersionSkewLeavesOtherFailuresAlone(t *testing.T) {
 	notExclusive := errors.New(rawExclusiveLeaseSchemaError)
-	if got := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", false, notExclusive); got != notExclusive {
+	if got := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", false, notExclusive); !errors.Is(got, notExclusive) || got.Error() != notExclusive.Error() {
 		t.Fatalf("a non-exclusive call must pass its error through unchanged, got %v", got)
 	}
 
 	unrelated := errors.New(`MCP tools/call failed: invalid params: validating "arguments": validating "name": value is required (code -32602)`)
-	if got := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", true, unrelated); got != unrelated {
+	if got := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", true, unrelated); !errors.Is(got, unrelated) || got.Error() != unrelated.Error() {
 		t.Fatalf("a genuinely malformed call must pass its error through unchanged, got %v", got)
 	}
 

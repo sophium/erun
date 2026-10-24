@@ -105,6 +105,14 @@ type exposeCommandArgs struct {
 	erunAlias                                                                    string
 }
 
+func findExposeProjectRoot(findProjectRoot sharedpkg.ProjectFinderFunc) (string, error) {
+	if findProjectRoot == nil {
+		findProjectRoot = config.FindProjectRoot
+	}
+	_, root, err := findProjectRoot()
+	return root, err
+}
+
 func runExposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot sharedpkg.ProjectFinderFunc, a exposeCommandArgs) error {
 	servicesZone := strings.TrimSpace(a.servicesZone)
 	platformNamespace := strings.TrimSpace(a.platformNamespace)
@@ -115,21 +123,17 @@ func runExposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore con
 	// on it before RunExposeService even gets a chance to use the override.
 	projectRoot := ""
 	if servicesZone == "" && platformNamespace == "" {
-		if findProjectRoot == nil {
-			findProjectRoot = config.FindProjectRoot
+		root, err := findExposeProjectRoot(findProjectRoot)
+		// --skip-if-unconfigured exists to make expose a no-op when the
+		// target is not set up for exposure — no project at all is the
+		// strongest case of that, not a reason to fail before
+		// RunExposeService gets to decide. Fall through with an
+		// empty ProjectRoot: its platform-configured check on "" resolves
+		// to false, same as a project with no platform block.
+		if err != nil && !a.skipIfUnconfigured {
+			return err
 		}
-		_, root, err := findProjectRoot()
-		if err != nil {
-			// --skip-if-unconfigured exists to make expose a no-op when the
-			// target is not set up for exposure — no project at all is the
-			// strongest case of that, not a reason to fail before
-			// RunExposeService gets to decide. Fall through with an
-			// empty ProjectRoot: its platform-configured check on "" resolves
-			// to false, same as a project with no platform block.
-			if !a.skipIfUnconfigured {
-				return err
-			}
-		} else {
+		if err == nil {
 			projectRoot = root
 		}
 	}

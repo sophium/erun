@@ -95,15 +95,21 @@ func LoadRuntimeUsageHistory(tenant, environment string) (RuntimeUsageHistory, e
 	if err != nil {
 		return RuntimeUsageHistory{}, err
 	}
+	return readRuntimeUsageHistory(path), nil
+}
+
+// readRuntimeUsageHistory returns the history stored at path, or an empty one
+// when it is missing or unreadable.
+func readRuntimeUsageHistory(path string) RuntimeUsageHistory {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return RuntimeUsageHistory{}, nil
+		return RuntimeUsageHistory{}
 	}
 	var history RuntimeUsageHistory
 	if err := json.Unmarshal(data, &history); err != nil {
-		return RuntimeUsageHistory{}, nil
+		return RuntimeUsageHistory{}
 	}
-	return history, nil
+	return history
 }
 
 // RuntimeUsageHistoryPath keeps the history beside the activity markers. It has

@@ -191,13 +191,17 @@ func (a *App) GetMyTenantInviteRequest(input uiTenantInput) (*uiInviteRequest, e
 	request, err := client.MyInviteRequest(ctx)
 	if err != nil {
 		if errors.Is(err, platformclient.ErrPlatformNotFound) {
-			return nil, nil
+			return noInviteRequest, nil
 		}
 		return nil, err
 	}
 	ui := inviteRequestToUI(request)
 	return &ui, nil
 }
+
+// noInviteRequest is the answer for a caller with no request on file: the
+// frontend reads it as null, not as a failure.
+var noInviteRequest *uiInviteRequest
 
 // uiDecideInviteRequestInput identifies which request an operator/admin is
 // deciding on.

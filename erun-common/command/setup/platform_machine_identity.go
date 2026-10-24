@@ -108,8 +108,7 @@ func resolveMachineIdentity(ctx core.Context, store config.CloudReadStore, envir
 	if !ok {
 		return provisionedMachineIdentity{}, false, nil
 	}
-	if err := verifyMachineIdentityCredential(ctx, identity, deps); err != nil {
-		ctx.Trace("machine identity: the credential the platform minted for " + environment + " could not be exchanged for a token (" + err.Error() + "); leaving its platform identity as it is")
+	if !machineIdentityCredentialAccepted(ctx, identity, deps, environment) {
 		return provisionedMachineIdentity{}, false, nil
 	}
 	return provisionedMachineIdentity{
@@ -188,6 +187,14 @@ func machineIdentityProviderConfig(host config.CloudProviderConfig, identity pla
 		ClientSecretRef: machineIdentityClientSecretRef(host.Alias),
 	}
 	return cloud.NormalizeCloudProviderConfig(provider)
+}
+
+func machineIdentityCredentialAccepted(ctx core.Context, identity platformclient.PlatformMachineIdentity, deps cloud.CloudDependencies, environment string) bool {
+	if err := verifyMachineIdentityCredential(ctx, identity, deps); err != nil {
+		ctx.Trace("machine identity: the credential the platform minted for " + environment + " could not be exchanged for a token (" + err.Error() + "); leaving its platform identity as it is")
+		return false
+	}
+	return true
 }
 
 // verifyMachineIdentityCredential exchanges the freshly minted credential for

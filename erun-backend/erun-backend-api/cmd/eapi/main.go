@@ -187,24 +187,32 @@ type apiDependencies struct {
 }
 
 func optionalDependencies(cfg apiConfig) (apiDependencies, error) {
-	cipher, err := optionalCipher(cfg.SecretsKey)
+	cipher, err := whenConfigured(cfg.SecretsKey != "", func() (*secrets.Cipher, error) {
+		return secrets.NewCipher(cfg.SecretsKey)
+	})
 	if err != nil {
 		return apiDependencies{}, err
 	}
-	dbosCtx, err := optionalDBOS(cfg.DBOSDatabaseURL)
+	dbosCtx, err := whenConfigured(cfg.DBOSDatabaseURL != "", func() (dbos.DBOSContext, error) {
+		return newDBOSContext(cfg.DBOSDatabaseURL)
+	})
 	if err != nil {
 		return apiDependencies{}, err
 	}
-	mcpSigner, err := optionalMCPSigner(cfg.MCPSigningKeyPath)
+	mcpSigner, err := whenConfigured(cfg.MCPSigningKeyPath != "", func() (*mcptoken.Signer, error) {
+		return loadMCPSigner(cfg.MCPSigningKeyPath)
+	})
 	if err != nil {
 		return apiDependencies{}, err
 	}
-	dns01Writer, err := optionalDNS01Writer(cfg)
+	dns01Writer, err := whenConfigured(dns01WriterConfigured(cfg), func() (*dns01broker.PowerDNSWriter, error) {
+		return newDNS01Writer(cfg)
+	})
 	if err != nil {
 		return apiDependencies{}, err
 	}
 	dns01Broker := optionalDNS01Broker(mcpSigner, dns01Writer, cfg.DNS01ServicesZone)
-	kubeClient, err := optionalKubeClient(cfg)
+	kubeClient, err := whenConfigured(cfg.EnvDeployerServiceAccount != "", envDeployKubeClient)
 	if err != nil {
 		return apiDependencies{}, err
 	}
@@ -221,6 +229,16 @@ func optionalDependencies(cfg apiConfig) (apiDependencies, error) {
 		kubeClient:    kubeClient,
 		identityAdmin: identityAdmin,
 	}, nil
+}
+
+// whenConfigured builds a dependency only when its configuration is present,
+// leaving it the zero value, and so its feature disabled, otherwise.
+func whenConfigured[T any](configured bool, build func() (T, error)) (T, error) {
+	if !configured {
+		var disabled T
+		return disabled, nil
+	}
+	return build()
 }
 
 // environmentHostnameWriter adapts a possibly-nil *dns01broker.PowerDNSWriter
@@ -458,15 +476,12 @@ func configFromEnv() apiConfig {
 	}
 }
 
-// optionalKubeClient builds the in-cluster Kubernetes client the env-deploy
-// executor needs. A blank deployer ServiceAccount disables it (env creation
-// only registers the row); a set SA outside a cluster is a hard
-// misconfiguration (the SA is only ever set by the in-cluster deploy), so we
-// fail fast rather than silently disabling.
-func optionalKubeClient(cfg apiConfig) (kubernetes.Interface, error) {
-	if cfg.EnvDeployerServiceAccount == "" {
-		return nil, nil
-	}
+// envDeployKubeClient builds the in-cluster Kubernetes client the env-deploy
+// executor needs, wired only when a deployer ServiceAccount is set (without
+// one env creation only registers the row). A set SA outside a cluster is a
+// hard misconfiguration (the SA is only ever set by the in-cluster deploy), so
+// we fail fast rather than silently disabling.
+func envDeployKubeClient() (kubernetes.Interface, error) {
 	restConfig, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, fmt.Errorf("in-cluster config for env-deploy executor: %w", err)
@@ -474,21 +489,11 @@ func optionalKubeClient(cfg apiConfig) (kubernetes.Interface, error) {
 	return kubernetes.NewForConfig(restConfig)
 }
 
-func optionalCipher(key string) (*secrets.Cipher, error) {
-	if key == "" {
-		return nil, nil
-	}
-	return secrets.NewCipher(key)
-}
-
-// optionalMCPSigner loads the backend's MCP signing key when a path is set. A
-// blank path disables per-env MCP token minting (the endpoint reports 501); a
-// set-but-unreadable or invalid key is a hard misconfiguration, not a silent
-// disable.
-func optionalMCPSigner(path string) (*mcptoken.Signer, error) {
-	if path == "" {
-		return nil, nil
-	}
+// loadMCPSigner loads the backend's MCP signing key, wired only when a path is
+// set. A blank path disables per-env MCP token minting (the endpoint reports
+// 501); a set-but-unreadable or invalid key is a hard misconfiguration, not a
+// silent disable.
+func loadMCPSigner(path string) (*mcptoken.Signer, error) {
 	privatePEM, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read mcp signing key %s: %w", path, err)
@@ -531,15 +536,16 @@ func dns01BrokerURL(cfg apiConfig, broker *dns01broker.Broker) string {
 	return strings.TrimRight(cfg.PlatformAPIURL, "/") + "/v1/dns01"
 }
 
-// optionalDNS01Writer builds the shared PowerDNS write path when the
-// services zone and TSIG credential are all configured. Nil (with no error)
-// leaves both the DNS-01 broker and the environment hostname route
-// disabled — neither can write DNS without it; a bad TSIG algorithm is a
-// hard misconfiguration, not a silent disable.
-func optionalDNS01Writer(cfg apiConfig) (*dns01broker.PowerDNSWriter, error) {
-	if cfg.DNS01ServicesZone == "" || cfg.DNS01Nameserver == "" || cfg.DNS01TSIGKeyName == "" || cfg.DNS01TSIGSecret == "" {
-		return nil, nil
-	}
+// dns01WriterConfigured reports whether the services zone and TSIG credential
+// are all configured. Without them both the DNS-01 broker and the environment
+// hostname route stay disabled — neither can write DNS.
+func dns01WriterConfigured(cfg apiConfig) bool {
+	return cfg.DNS01ServicesZone != "" && cfg.DNS01Nameserver != "" && cfg.DNS01TSIGKeyName != "" && cfg.DNS01TSIGSecret != ""
+}
+
+// newDNS01Writer builds the shared PowerDNS write path; a bad TSIG algorithm is
+// a hard misconfiguration, not a silent disable.
+func newDNS01Writer(cfg apiConfig) (*dns01broker.PowerDNSWriter, error) {
 	algorithm := cfg.DNS01TSIGAlgorithm
 	if algorithm == "" {
 		algorithm = "hmac-sha256"
@@ -562,10 +568,7 @@ func optionalDNS01Broker(signer *mcptoken.Signer, writer *dns01broker.PowerDNSWr
 	return dns01broker.NewBroker(signer, writer, servicesZone, nil)
 }
 
-func optionalDBOS(databaseURL string) (dbos.DBOSContext, error) {
-	if databaseURL == "" {
-		return nil, nil
-	}
+func newDBOSContext(databaseURL string) (dbos.DBOSContext, error) {
 	return dbos.NewDBOSContext(context.Background(), dbos.Config{
 		AppName:     "erun-api",
 		DatabaseURL: databaseURL,

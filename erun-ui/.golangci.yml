@@ -29,6 +29,26 @@ linters:
     - gocyclo
     - cyclop
     - revive
+    - errorlint
+    - bodyclose
+    - nilerr
+    - nilnil
+    - exhaustive
+    - gocritic
+    - forcetypeassert
+    - errchkjson
+    - predeclared
+    - errname
+    - unconvert
+    - copyloopvar
+    - usestdlibvars
+    - misspell
+    - wastedassign
+    - mirror
+    - nestif
+    - makezero
+    - durationcheck
+    - nakedret
   settings:
     revive:
       rules:

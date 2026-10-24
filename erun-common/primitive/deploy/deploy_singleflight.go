@@ -117,6 +117,13 @@ func (d helmDeploySingleFlightDeps) resolved() helmDeploySingleFlightDeps {
 	return d
 }
 
+// usableConfigDir returns the erun config dir; ok is false when it cannot be
+// resolved or is empty.
+func (d helmDeploySingleFlightDeps) usableConfigDir() (string, bool) {
+	configDir, err := d.configDir()
+	return configDir, err == nil && strings.TrimSpace(configDir) != ""
+}
+
 const deployInflightDirName = "deploys"
 
 // helmDeploySingleFlightMaxAge is the upper bound on how long a marker can
@@ -151,8 +158,8 @@ func acquireHelmDeploySingleFlight(ctx core.Context, deploy HelmDeploySpec, deps
 	releaseKey := helmDeployReleaseKey(deploy)
 	paramsHash := helmDeployParamsHash(deploy)
 
-	configDir, err := deps.configDir()
-	if err != nil || strings.TrimSpace(configDir) == "" {
+	configDir, ok := deps.usableConfigDir()
+	if !ok {
 		ctx.Trace("dedup: skip (config dir unavailable)")
 		return HelmDeploySingleFlightProceed, nil, nil
 	}
@@ -164,7 +171,7 @@ func acquireHelmDeploySingleFlight(ctx core.Context, deploy HelmDeploySpec, deps
 	}
 
 	if err := os.MkdirAll(deployDir, 0o755); err != nil {
-		ctx.Trace("dedup: skip (mkdir failed: " + err.Error() + ")")
+		ctx.Trace(fmt.Sprintf("dedup: skip (mkdir failed: %v)", err))
 		return HelmDeploySingleFlightProceed, nil, nil
 	}
 
@@ -294,9 +301,9 @@ func reconcileExistingInflightMarker(ctx core.Context, deps helmDeploySingleFlig
 	case inflightMarkerFateSkipDuplicate:
 		ctx.Trace(fmt.Sprintf("dedup: skip (release=%s, hash=%s, pid=%d already running identical deploy)", releaseKey, paramsHash, existing.PID))
 		return false, HelmDeploySingleFlightSkipDuplicate, nil
-	default:
-		return false, HelmDeploySingleFlightProceed, concurrentDeployError(deploy, existing)
+	case inflightMarkerFateConcurrent:
 	}
+	return false, HelmDeploySingleFlightProceed, concurrentDeployError(deploy, existing)
 }
 
 // reportHelmDeploySingleFlightDryRun mirrors the dedup decision a real run would
@@ -308,7 +315,7 @@ func reportHelmDeploySingleFlightDryRun(ctx core.Context, deploy HelmDeploySpec,
 		return HelmDeploySingleFlightProceed, nil, nil
 	}
 	if readErr != nil {
-		ctx.Trace("dedup: ready (release=" + releaseKey + ", hash=" + paramsHash + ", existing marker unreadable: " + readErr.Error() + ")")
+		ctx.Trace(fmt.Sprintf("dedup: ready (release=%s, hash=%s, existing marker unreadable: %v)", releaseKey, paramsHash, readErr))
 		return HelmDeploySingleFlightProceed, nil, nil
 	}
 	switch decideInflightMarkerFate(deps, existing, paramsHash) {
@@ -321,9 +328,9 @@ func reportHelmDeploySingleFlightDryRun(ctx core.Context, deploy HelmDeploySpec,
 	case inflightMarkerFateSkipDuplicate:
 		ctx.Trace(fmt.Sprintf("dedup: would skip (release=%s, hash=%s, pid=%d already running identical deploy)", releaseKey, paramsHash, existing.PID))
 		return HelmDeploySingleFlightSkipDuplicate, nil, nil
-	default:
-		return HelmDeploySingleFlightProceed, nil, concurrentDeployError(deploy, existing)
+	case inflightMarkerFateConcurrent:
 	}
+	return HelmDeploySingleFlightProceed, nil, concurrentDeployError(deploy, existing)
 }
 
 func helmDeployReleaseKey(deploy HelmDeploySpec) string {

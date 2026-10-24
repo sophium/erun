@@ -405,9 +405,9 @@ func erunLoginBrowserCommand(hostOS core.HostOS, url string) (string, []string, 
 		return "xdg-open", []string{url}, nil
 	case core.HostOSWindows:
 		return "cmd", []string{"/c", "start", "", url}, nil
-	default:
-		return "", nil, fmt.Errorf("opening a browser is unsupported on %s", hostOS)
+	case core.HostOSUnknown:
 	}
+	return "", nil, fmt.Errorf("opening a browser is unsupported on %s", hostOS)
 }
 
 // openERunLoginBrowser launches the operator's default browser at url and

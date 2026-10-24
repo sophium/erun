@@ -130,7 +130,9 @@ func (p *mockOIDCProvider) signWithUntrustedKey(t *testing.T, claims map[string]
 
 func writeOIDCJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(value)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 // mustVerify returns the claims of a token the verifier must accept.

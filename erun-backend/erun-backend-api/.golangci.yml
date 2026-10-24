@@ -22,6 +22,26 @@ linters:
     - gocyclo
     - cyclop
     - revive
+    - errorlint
+    - bodyclose
+    - nilerr
+    - nilnil
+    - exhaustive
+    - gocritic
+    - forcetypeassert
+    - errchkjson
+    - predeclared
+    - errname
+    - unconvert
+    - copyloopvar
+    - usestdlibvars
+    - misspell
+    - wastedassign
+    - mirror
+    - nestif
+    - makezero
+    - durationcheck
+    - nakedret
     - depguard
   settings:
     revive:
@@ -31,10 +51,8 @@ linters:
             - max: 500
               skipComments: true
               skipBlankLines: true
-    # The API reaches erun-common only through its lowest layers (#2741,
-    # erun-common/AGENTS.md "Package layers"): base/* and the infra packages
-    # named here. Anything above them -- the command packages and the root
-    # package -- would rebuild the API on every change to a CLI command.
+    # The API reaches erun-common only through base/* and the infra packages
+    # named here (erun-common/AGENTS.md "Package layers").
     depguard:
       rules:
         erun-common-layers:

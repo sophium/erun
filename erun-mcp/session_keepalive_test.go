@@ -102,9 +102,10 @@ func claimSession(t *testing.T, server *httptest.Server) string {
 	return sessionID
 }
 
-// getMCPStream opens the session's standalone SSE stream and hands it back
-// still open, which is the state a connected client is in between its calls.
-func getMCPStream(t *testing.T, server *httptest.Server, sessionID string) *http.Response {
+// getMCPStream opens the session's standalone SSE stream and leaves it open
+// until the test ends, which is the state a connected client is in between its
+// calls.
+func getMCPStream(t *testing.T, server *httptest.Server, sessionID string) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -123,7 +124,6 @@ func getMCPStream(t *testing.T, server *httptest.Server, sessionID string) *http
 		_ = resp.Body.Close()
 		t.Fatalf("opening the session stream returned HTTP %d, want 200", resp.StatusCode)
 	}
-	return resp
 }
 
 // waitFor polls an observable condition to a deadline. The condition is always

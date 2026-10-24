@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -109,7 +110,8 @@ func runERunAppMain(t *testing.T, args ...string) (stdout, stderr string, exitCo
 	err := cmd.Run()
 	exitCode = 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			t.Fatalf("running erun-app helper process: %v", err)
@@ -126,10 +128,9 @@ func assertNoSideEffects(t *testing.T, home string) {
 	t.Helper()
 	var found []string
 	_ = filepath.WalkDir(home, func(path string, d os.DirEntry, err error) error {
-		if err != nil || path == home {
-			return nil
+		if err == nil && path != home {
+			found = append(found, strings.TrimPrefix(path, home))
 		}
-		found = append(found, strings.TrimPrefix(path, home))
 		return nil
 	})
 	if len(found) > 0 {

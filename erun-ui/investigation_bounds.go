@@ -97,11 +97,11 @@ type investigationRecord struct {
 	Suppressed  int
 }
 
-// investigationRefusal is a decision not to spawn, carrying the operator-facing
+// investigationRefusalError is a decision not to spawn, carrying the operator-facing
 // reason. It is returned as an error because refusing is the answer to the
 // operator's action, and the desktop already renders that answer beside the
 // orchestrator list.
-type investigationRefusal struct {
+type investigationRefusalError struct {
 	reason  string
 	message string
 	// existingID names the already-admitted investigation this refusal points
@@ -110,7 +110,7 @@ type investigationRefusal struct {
 	existingID string
 }
 
-func (r *investigationRefusal) Error() string { return r.message }
+func (r *investigationRefusalError) Error() string { return r.message }
 
 // investigationTimer is the lifetime bound's handle, so a session that ends on
 // its own does not leave a timer waiting to stop something already gone.
@@ -158,11 +158,11 @@ func defaultInvestigationReportDir() string {
 // under the same lock the decision was taken under — a decision that released
 // the lock before recording would let concurrent events all pass a cap that none
 // of them had filled yet — and the caller must then either activate(id) it or
-// discard(id) it. On refusal it returns an investigationRefusal naming the bound
+// discard(id) it. On refusal it returns an investigationRefusalError naming the bound
 // that stopped the spawn.
 func (r *investigationRegistry) admit(id, report, tenant, environment string) error {
 	if !investigationReportHasDiagnosticContent(report) {
-		return &investigationRefusal{
+		return &investigationRefusalError{
 			reason: "thin-report",
 			message: "This failure report carries no diagnostic content — no command, no exit status, and no captured output — so an investigation would have nothing to work from. " +
 				"The gap is in the failure reporting: capture the command, its exit status, and the output tail, then investigate again.",
@@ -180,7 +180,7 @@ func (r *investigationRegistry) admit(id, report, tenant, environment string) er
 	for _, existing := range live {
 		if existing.EventKey == eventKey && now.Sub(existing.StartedAt) < investigationEventWindow {
 			existing.Suppressed++
-			return &investigationRefusal{
+			return &investigationRefusalError{
 				reason: "same-event",
 				message: fmt.Sprintf("%s is already being investigated as %s, started %s ago. This report is part of the same failure event, so it was recorded against that investigation instead of starting another.",
 					investigationTargetLabel(tenant, environment), existing.ID, investigationAge(now.Sub(existing.StartedAt))),
@@ -189,7 +189,7 @@ func (r *investigationRegistry) admit(id, report, tenant, environment string) er
 		}
 		if existing.Signature == signature {
 			existing.Suppressed++
-			return &investigationRefusal{
+			return &investigationRefusalError{
 				reason: "already-investigating",
 				message: fmt.Sprintf("That failure is already under investigation as %s, started %s ago. Watch or stop that investigation rather than starting a second one for the same failure.",
 					existing.ID, investigationAge(now.Sub(existing.StartedAt))),
@@ -200,7 +200,7 @@ func (r *investigationRegistry) admit(id, report, tenant, environment string) er
 	if previous, ok := r.lastForSignatureLocked(signature); ok {
 		if since := now.Sub(previous.StartedAt); since < investigationCooldown {
 			previous.Suppressed++
-			return &investigationRefusal{
+			return &investigationRefusalError{
 				reason: "cooldown",
 				message: fmt.Sprintf("That failure was investigated %s ago as %s (%s). Investigations of the same failure are spaced %s apart so a failure that keeps repeating cannot accumulate agents; the next one for it can start in %s.",
 					investigationAge(since), previous.ID, previous.State, investigationAge(investigationCooldown), investigationAge(investigationCooldown-since)),
@@ -208,7 +208,7 @@ func (r *investigationRegistry) admit(id, report, tenant, environment string) er
 		}
 	}
 	if len(live) >= maxLiveInvestigations {
-		return &investigationRefusal{
+		return &investigationRefusalError{
 			reason: "at-capacity",
 			message: fmt.Sprintf("%d investigations are already running (%s), which is the limit. They share the agent account with every orchestrator driving these environments, so stop one before starting another.",
 				len(live), strings.Join(investigationIDs(live), ", ")),
@@ -399,7 +399,8 @@ func (r *investigationRegistry) pruneLocked() {
 	if len(finished) > room {
 		finished = finished[:room]
 	}
-	r.records = append(kept, finished...)
+	kept = append(kept, finished...)
+	r.records = kept
 	sort.Slice(r.records, func(i, j int) bool { return r.records[i].StartedAt.Before(r.records[j].StartedAt) })
 }
 

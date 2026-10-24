@@ -167,7 +167,7 @@ func (a *App) orchestratorSessionPID(id string) int {
 
 // investigationRefusalReason names the bound that refused, for the log line.
 func investigationRefusalReason(err error) string {
-	var refusal *investigationRefusal
+	var refusal *investigationRefusalError
 	if errors.As(err, &refusal) {
 		return refusal.reason
 	}
@@ -179,7 +179,7 @@ func investigationRefusalReason(err error) string {
 // hard refusal such as a thin report or a full population), so a caller can
 // offer "focus that one" instead of only surfacing the refusal as an error.
 func investigationRefusalDetails(err error) (reason, message, existingID string) {
-	var refusal *investigationRefusal
+	var refusal *investigationRefusalError
 	if errors.As(err, &refusal) {
 		return refusal.reason, refusal.message, refusal.existingID
 	}

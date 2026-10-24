@@ -28,7 +28,7 @@ package platformclient
 // package writes for a request no registered pattern matches (http.NotFound
 // -> http.Error); erun-backend-api never installs a custom NotFoundHandler,
 // so this exact text is what tells "no route matched at all" apart from a
-// route's own application-level 404. platform_client.go's
+// route's own application-level 404. platform_client_http.go's
 // PlatformStatusError.routeNotRegistered reuses this same constant so an
 // ordinary command (not just route-check) can tell the two apart too.
 const MuxDefaultNotFoundBody = "404 page not found"

@@ -54,7 +54,15 @@ func main() {
 		_, _ = fmt.Fprint(os.Stderr, cliUsage)
 		os.Exit(1)
 	}
+	if !launch(parsed) {
+		os.Exit(1)
+	}
+}
 
+// launch runs the app for already-parsed flags and reports whether it ran to
+// completion. A failure is logged here, while the durable log is still open,
+// so the caller only has to exit.
+func launch(parsed parsedCLIFlags) bool {
 	setAppIdentity("ERun")
 	defer initDurableAppLog()()
 
@@ -68,12 +76,14 @@ func main() {
 
 	if headless {
 		if err := runHeadless(app, port); err != nil {
-			log.Fatal(err)
+			log.Print(err)
+			return false
 		}
-		return
+		return true
 	}
 
 	runWails(app)
+	return true
 }
 
 // desktopDeps is the composition-root dependency set for one launch mode.

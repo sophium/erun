@@ -175,6 +175,7 @@ func (a *App) runWorkspaceSyncLoop(ctx context.Context, key string, selection ui
 			return
 		case workspaceSyncPassRetry:
 			continue
+		case workspaceSyncPassProceed:
 		}
 		synced, err := a.deps.syncWorkspace(ctx, params)
 		if err != nil {

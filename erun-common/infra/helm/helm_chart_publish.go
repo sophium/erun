@@ -267,6 +267,13 @@ func ResolveHelmChartPublishSpec(chartPath, version, containerRegistry string) (
 	}, nil
 }
 
+// shippedComponentChartPath returns the chart that ships with imageName; ok is
+// false when there is none.
+func shippedComponentChartPath(projectRoot, imageName string) (string, bool) {
+	chartPath, err := FindComponentHelmChartPath(projectRoot, imageName)
+	return chartPath, err == nil
+}
+
 // PublishComponentChart publishes the Helm chart that ships with a component
 // image so every component is deployable by envs and platform wrapper charts,
 // not just the runtime erun-devops chart.
@@ -282,8 +289,8 @@ func PublishComponentChart(ctx core.Context, image DockerImageReference, chartVe
 	if imageName == "" || projectRoot == "" {
 		return nil
 	}
-	chartPath, err := FindComponentHelmChartPath(projectRoot, imageName)
-	if err != nil {
+	chartPath, ok := shippedComponentChartPath(projectRoot, imageName)
+	if !ok {
 		// No chart ships with this image; nothing to publish.
 		return nil
 	}

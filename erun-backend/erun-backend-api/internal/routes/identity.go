@@ -73,8 +73,8 @@ func RegisterIdentityRoutes(register ProtectedRouteRegistrar, admin IdentityAdmi
 	register(http.MethodPost, "/v1/identity/orgs", http.HandlerFunc(routes.createOrg))
 	register(http.MethodGet, "/v1/identity/org-settings", http.HandlerFunc(routes.getOrgSettings))
 	register(http.MethodPatch, "/v1/identity/org-settings", http.HandlerFunc(routes.updateOrgSettings))
-	// The platform's honest answer to "can this instance send mail at all"
-	//: every flow that reaches a user out of band -- signup
+	// The platform's honest answer to "can this instance send mail at all":
+	// every flow that reaches a user out of band -- signup
 	// verification, password reset, invitation -- depends on it, and until
 	// this the only signal was Zitadel's own unhandled 404.
 	register(http.MethodGet, "/v1/identity/smtp-settings", http.HandlerFunc(routes.getSMTPSettings))

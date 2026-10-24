@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -90,7 +91,7 @@ func assertTenantIssuerMappingResolvable(ctx context.Context, tx bun.Tx, tenantI
 		 WHERE ti.tenant_id = ? AND ti.issuer = ?
 	`, tenantID, issuer).Scan(ctx, &mapping)
 	if err != nil {
-		if normalizeNoRows(err) == ErrNotFound {
+		if errors.Is(normalizeNoRows(err), ErrNotFound) {
 			return &UnresolvableIssuerMappingError{
 				Issuer: strings.TrimSpace(issuer),
 				Reason: model.TenantReachabilityIssuerNotMapped,

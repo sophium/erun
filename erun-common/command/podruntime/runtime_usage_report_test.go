@@ -81,7 +81,7 @@ func memoryVerdict(t *testing.T, recommendation deploy.RuntimeSizingRecommendati
 // itself. A host that has never retained history is the case that regressed,
 // so the history here is empty on purpose.
 func TestSaturationWarningAlwaysCarriesItsRecommendation(t *testing.T) {
-	limit := int64(6 * testGiB)
+	limit := 6 * testGiB
 
 	// The first figure is the threshold itself, crossed by the smallest byte
 	// count that crosses it. That is the boundary the alarm and the advisory
@@ -163,7 +163,7 @@ func TestOOMKillWarningCarriesARaise(t *testing.T) {
 // history-based answer `erun list` shows and the reading-based answer
 // `erun usage` shows could name different sizes for one environment.
 func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
-	limit := int64(6 * testGiB)
+	limit := 6 * testGiB
 	history := deploy.RuntimeUsageHistory{
 		Samples:                 []config.RuntimeUsage{saturatingReading(1024*1024*1024, limit)},
 		ObservedPeakMemoryBytes: 1024 * 1024 * 1024,
@@ -204,7 +204,7 @@ func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
 // retained under an older, smaller runtimepod must not size the environment
 // against a limit it no longer runs under.
 func TestLiveReadingIsTheSizeScoredAgainst(t *testing.T) {
-	oldLimit := int64(3 * testGiB)
+	oldLimit := 3 * testGiB
 	history := deploy.RuntimeUsageHistory{
 		Samples:                 []config.RuntimeUsage{saturatingReading(1024*1024*1024, oldLimit)},
 		ObservedPeakMemoryBytes: 1024 * 1024 * 1024,

@@ -48,7 +48,7 @@ func (a *App) LoadRuntimeUsage(selection uiSelection) (uiRuntimeUsage, error) {
 		return uiRuntimeUsage{
 			Tenant:      selection.Tenant,
 			Environment: selection.Environment,
-			Message:     "Cannot read this environment's resource usage: " + err.Error(),
+			Message:     fmt.Sprintf("Cannot read this environment's resource usage: %v", err),
 		}, nil
 	}
 	return usage, nil

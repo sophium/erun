@@ -96,9 +96,8 @@ func (a *App) resolveTenantPlatform(tenant, aliasOverride string) (tenantPlatfor
 	}
 	apiURL := provider.ERun.APIURL
 
-	token, err := cloud.CloudProviderBearerToken(core.Context{}, a.deps.store, cloud.CloudBearerParams{Alias: provider.Alias}, a.deps.cloudDeps)
-	bearer := strings.TrimSpace(token.Token)
-	if err != nil || bearer == "" {
+	bearer, ok := a.tenantPlatformBearer(provider.Alias)
+	if !ok {
 		return tenantPlatformResolution{state: tenantPlatformStateNotSignedIn, alias: provider.Alias, apiURL: apiURL}, nil
 	}
 
@@ -114,6 +113,14 @@ func (a *App) resolveTenantPlatform(tenant, aliasOverride string) (tenantPlatfor
 		issuer:  issuer,
 		subject: subject,
 	}, nil
+}
+
+// tenantPlatformBearer mints the alias's bearer; one that cannot be minted, or
+// comes back empty, leaves the caller not signed in.
+func (a *App) tenantPlatformBearer(alias string) (string, bool) {
+	token, err := cloud.CloudProviderBearerToken(core.Context{}, a.deps.store, cloud.CloudBearerParams{Alias: alias}, a.deps.cloudDeps)
+	bearer := strings.TrimSpace(token.Token)
+	return bearer, err == nil && bearer != ""
 }
 
 // resolveTenantERunPlatformAlias picks which erun-type cloud alias backs

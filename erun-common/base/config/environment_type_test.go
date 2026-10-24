@@ -57,7 +57,6 @@ func TestEnvironmentTypeUsesDindSidecar(t *testing.T) {
 // updated.
 func TestEnvironmentTypePredicatesCoverEveryValidType(t *testing.T) {
 	for _, envType := range ValidEnvironmentTypes {
-		envType := envType
 		t.Run(string(envType), func(t *testing.T) {
 			defer func() {
 				if r := recover(); r != nil {

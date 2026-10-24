@@ -156,35 +156,33 @@ func unknownFlagTokens(vocab cliFlagVocabulary, remaining []string) []string {
 		if !strings.HasPrefix(tok, "-") || tok == "-" || tok == "" {
 			continue
 		}
-		if strings.HasPrefix(tok, "--") {
-			name := strings.TrimPrefix(tok, "--")
-			if eq := strings.IndexByte(name, '='); eq >= 0 {
-				name = name[:eq]
-			}
-			if name != "" && !vocab.long[name] {
-				unknown = append(unknown, raw)
-			}
-			continue
-		}
-		letters := strings.TrimPrefix(tok, "-")
-		if eq := strings.IndexByte(letters, '='); eq >= 0 {
-			letters = letters[:eq]
-		}
-		if letters == "" {
-			continue
-		}
-		allKnown := true
-		for _, r := range letters {
-			if !vocab.short[string(r)] {
-				allKnown = false
-				break
-			}
-		}
-		if !allKnown {
+		if flagTokenUnknown(vocab, tok) {
 			unknown = append(unknown, raw)
 		}
 	}
 	return unknown
+}
+
+// flagTokenUnknown reports whether a "--long" token, or any letter of a
+// "-short" cluster, is missing from vocab; an "=value" suffix is ignored.
+func flagTokenUnknown(vocab cliFlagVocabulary, tok string) bool {
+	if strings.HasPrefix(tok, "--") {
+		name := strings.TrimPrefix(tok, "--")
+		if eq := strings.IndexByte(name, '='); eq >= 0 {
+			name = name[:eq]
+		}
+		return name != "" && !vocab.long[name]
+	}
+	letters := strings.TrimPrefix(tok, "-")
+	if eq := strings.IndexByte(letters, '='); eq >= 0 {
+		letters = letters[:eq]
+	}
+	for _, r := range letters {
+		if !vocab.short[string(r)] {
+			return true
+		}
+	}
+	return false
 }
 
 // erunInvocationCandidates finds the first occurrence of the exact token

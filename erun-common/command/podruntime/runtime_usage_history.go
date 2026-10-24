@@ -95,12 +95,12 @@ func runtimeUsageIntervalCPUMilli(previous, current config.RuntimeUsage, elapsed
 // rather than resliceing so the trimmed prefix is not retained by the backing
 // array for the life of a long-running monitor.
 func appendBoundedUsageSamples(samples []config.RuntimeUsage, sample config.RuntimeUsage) []config.RuntimeUsage {
-	next := append(samples, sample)
-	if len(next) <= runtimeUsageHistorySampleCap {
-		return next
+	samples = append(samples, sample)
+	if len(samples) <= runtimeUsageHistorySampleCap {
+		return samples
 	}
 	trimmed := make([]config.RuntimeUsage, runtimeUsageHistorySampleCap)
-	copy(trimmed, next[len(next)-runtimeUsageHistorySampleCap:])
+	copy(trimmed, samples[len(samples)-runtimeUsageHistorySampleCap:])
 	return trimmed
 }
 

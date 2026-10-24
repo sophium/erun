@@ -129,6 +129,8 @@ func whipResultToUI(result orchestrator.WhipResult) uiWhipResult {
 		ui.Outcome = "capped"
 		ui.Reason = "stopped nudging after repeated silence — reply in its pane or restart it"
 		return ui
+	case orchestrator.WhipDecisionNone:
+		fallthrough
 	default:
 		if result.Reason == orchestrator.WhipReasonCallFailed {
 			// A call that was actually attempted and failed is a write that was
@@ -160,6 +162,8 @@ func whipSkipReasonText(reason orchestrator.WhipReason) string {
 		return "already capped — reply in its pane or restart it"
 	case orchestrator.WhipReasonFresh:
 		return "moved recently"
+	case orchestrator.WhipReasonCapCrossed, orchestrator.WhipReasonNudge, orchestrator.WhipReasonCallFailed, orchestrator.WhipReasonChannelDown:
+		fallthrough
 	default:
 		return string(reason)
 	}

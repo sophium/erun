@@ -219,9 +219,9 @@ func jobRung(status model.JobStatus) string {
 		return rungPlanned
 	case model.JobStatusRunning:
 		return rungInProgress
-	default:
-		return string(status)
+	case model.JobStatusSucceeded, model.JobStatusFailed, model.JobStatusAbandoned, model.JobStatusSuperseded:
 	}
+	return string(status)
 }
 
 // reviewRung names the rung a review stands on. OPEN is work being written,
@@ -238,9 +238,9 @@ func reviewRung(status model.ReviewStatus) string {
 		return rungMerging
 	case model.ReviewStatusMerged:
 		return rungMerged
-	default:
-		return string(status)
+	case model.ReviewStatusClosed, model.ReviewStatusFailed:
 	}
+	return string(status)
 }
 
 func pipelineRungSortKey(rung string) int {

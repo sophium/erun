@@ -39,16 +39,16 @@ type EnvironmentPortStore interface {
 	ListEnvConfigs(string) ([]EnvConfig, error)
 }
 
-// ErrLocalPortRangeOverlap is returned when two envs persist the same range
+// LocalPortRangeOverlapError is returned when two envs persist the same range
 // start. The conflict is surfaced rather than silently reassigned because the
 // persisted value is a durable, user-visible contract only the operator may change.
-type ErrLocalPortRangeOverlap struct {
+type LocalPortRangeOverlapError struct {
 	A          string
 	B          string
 	RangeStart int
 }
 
-func (e ErrLocalPortRangeOverlap) Error() string {
+func (e LocalPortRangeOverlapError) Error() string {
 	return fmt.Sprintf("local port range start %d is claimed by both %s and %s; edit localportrangestart in one of the env configs to resolve", e.RangeStart, e.A, e.B)
 }
 
@@ -232,7 +232,7 @@ func CollectEnvironmentPortRefs(store EnvironmentPortStore) (persisted, unpersis
 // persisted envs keep their declared range start, then the rest fill the lowest
 // free index in alphabetical (tenant, env) order so allocation is deterministic.
 // Two persisted envs claiming the same range start surface as
-// ErrLocalPortRangeOverlap instead of being silently reassigned.
+// LocalPortRangeOverlapError instead of being silently reassigned.
 func ResolveAllEnvironmentLocalPorts(store EnvironmentPortStore) (map[string]EnvironmentLocalPorts, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store is required")
@@ -263,7 +263,7 @@ func allocatePersistedEnvironmentPorts(persisted []environmentPortRef, allocatio
 			return err
 		}
 		if other, dup := claimedByIndex[index]; dup {
-			return ErrLocalPortRangeOverlap{A: other, B: ref.Key, RangeStart: ref.Env.LocalPortRangeStart}
+			return LocalPortRangeOverlapError{A: other, B: ref.Key, RangeStart: ref.Env.LocalPortRangeStart}
 		}
 		ports, err := environmentLocalPortsForIndex(index, ref.Env)
 		if err != nil {

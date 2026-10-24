@@ -70,7 +70,7 @@ func (a *App) LoadRuntimeActivity(selection uiSelection) (uiRuntimeActivity, err
 		return uiRuntimeActivity{
 			Tenant:      selection.Tenant,
 			Environment: selection.Environment,
-			Message:     "Cannot read what the runtime is running: " + err.Error(),
+			Message:     fmt.Sprintf("Cannot read what the runtime is running: %v", err),
 		}, nil
 	}
 	return report, nil

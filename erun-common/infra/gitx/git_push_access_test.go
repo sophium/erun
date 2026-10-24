@@ -1,6 +1,7 @@
 package gitx
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,7 +76,8 @@ func runGitPushAccessScript(t *testing.T, repoPath string, env map[string]string
 }
 
 func stderrOf(err error) string {
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
 		return string(exitErr.Stderr)
 	}
 	return ""

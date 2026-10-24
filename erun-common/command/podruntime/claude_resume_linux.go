@@ -22,8 +22,3 @@ func defaultClaudeHost() (claudeHost, error) {
 		environ:    os.Environ,
 	}, nil
 }
-
-func isDirectory(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
-}

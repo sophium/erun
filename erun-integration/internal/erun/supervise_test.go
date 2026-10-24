@@ -123,7 +123,7 @@ func driveSupervise(t *testing.T, script string, timeout, delay time.Duration) (
 	case <-time.After(30 * time.Second):
 		_ = cmd.Process.Kill()
 		t.Fatalf("supervise never returned: it was waiting on a child whose descendant %q still held the inherited stdout pipe open; the wait is unbounded when the child does not exit", script)
-		return nil, nil
+		return &stdout, nil
 	}
 }
 

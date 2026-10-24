@@ -19,7 +19,7 @@ import (
 // kubectlPodWatchExecutionOperation is the ExecutionModeFor/
 // ExecutionModeReport key for the `kubectl [--context c] --namespace <ns> get
 // pods -o json` poll watchReleasePods runs throughout every real helm deploy
-// (runHelmDeployWithPodWatch, deploy.go) to catch an early container failure
+// (runHelmDeployWithPodWatch, deploy_helm_run.go) to catch an early container failure
 // before helm's own timeout fires. Its file and function names say "watch",
 // but the mechanism has always been a ticker-driven re-Get, not a real
 // client-go Watch -- exactly the shape kubectl-deployment-wait
@@ -359,17 +359,23 @@ func watchReleasePods(ctx context.Context, params podWatchParams) podWatchOutcom
 // from a reading in which nothing is pulling, and callers must keep the
 // distinction: only the latter means a pull finished.
 func pollOnce(ctx context.Context, params podWatchParams, unscheduledSince map[string]time.Time) (failure *HelmReleaseContainerFailureError, summaries []podSummary, pulling []string, read bool) {
-	output, err := runKubectlGetPods(ctx, params)
-	if err != nil {
-		return nil, nil, nil, false
-	}
-	pods, ok := ParsePodStatusList(output)
+	pods, ok := readPodStatusList(ctx, params)
 	if !ok {
 		return nil, nil, nil, false
 	}
 	releasePods := filterReleasePods(pods, params.ReleaseName)
 	failure = classifyTerminalFailure(releasePods, params, unscheduledSince)
 	return failure, summarizePods(releasePods), pullingContainers(releasePods), true
+}
+
+// readPodStatusList runs one kubectl get pods; ok is false when the call failed
+// or its output could not be parsed.
+func readPodStatusList(ctx context.Context, params podWatchParams) (podStatusList, bool) {
+	output, err := runKubectlGetPods(ctx, params)
+	if err != nil {
+		return podStatusList{}, false
+	}
+	return ParsePodStatusList(output)
 }
 
 // pullingContainers names every container of the release currently waiting on

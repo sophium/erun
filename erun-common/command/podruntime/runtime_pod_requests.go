@@ -124,16 +124,16 @@ func selectRuntimePodForRequests(items []deploy.PodStatusItem) (deploy.PodStatus
 // smaller reservation than the pod declares is the one wrong answer that
 // matters here, since the whole reading exists to be compared against a limit.
 func declaredContainerRequests(pod deploy.PodStatusItem) (map[string]config.KubernetesRequests, error) {
-	containers := make(map[string]config.KubernetesRequests, len(pod.Spec.Containers))
+	var containers map[string]config.KubernetesRequests
 	for _, container := range pod.Spec.Containers {
 		requests, err := kubernetesRequestsFromValues(container.Resources.Requests)
 		if err != nil {
 			return nil, fmt.Errorf("container %s: %w", container.Name, err)
 		}
+		if containers == nil {
+			containers = make(map[string]config.KubernetesRequests, len(pod.Spec.Containers))
+		}
 		containers[container.Name] = requests
-	}
-	if len(containers) == 0 {
-		return nil, nil
 	}
 	return containers, nil
 }

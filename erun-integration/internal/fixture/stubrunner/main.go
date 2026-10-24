@@ -14,6 +14,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -22,23 +23,29 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+// run returns the exit code, so the argv file's removal is deferred past
+// every exit path.
+func run() int {
 	script := strings.TrimSuffix(os.Args[0], ".exe")
 
 	argvFile, err := os.CreateTemp("", "erun-stub-argv-*")
 	if err != nil {
-		os.Exit(97)
+		return 97
 	}
 	defer func() { _ = os.Remove(argvFile.Name()) }()
 	for _, arg := range os.Args[1:] {
 		if _, err := argvFile.WriteString(arg); err != nil {
-			os.Exit(97)
+			return 97
 		}
 		if _, err := argvFile.Write([]byte{0}); err != nil {
-			os.Exit(97)
+			return 97
 		}
 	}
 	if err := argvFile.Close(); err != nil {
-		os.Exit(97)
+		return 97
 	}
 
 	// The scenario PATH holds no shell, so the scenario routes an absolute one
@@ -54,9 +61,11 @@ func main() {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		if exit, ok := err.(*exec.ExitError); ok {
-			os.Exit(exit.ExitCode())
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return exit.ExitCode()
 		}
-		os.Exit(98)
+		return 98
 	}
+	return 0
 }

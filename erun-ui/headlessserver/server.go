@@ -248,7 +248,7 @@ func decodeMethodArgs(mt reflect.Type, rawArgs []json.RawMessage) ([]reflect.Val
 		slot := reflect.New(mt.In(i))
 		if len(rawArgs[i]) > 0 && string(rawArgs[i]) != "null" {
 			if err := json.Unmarshal(rawArgs[i], slot.Interface()); err != nil {
-				return nil, fmt.Errorf("arg %d: %v", i, err)
+				return nil, fmt.Errorf("arg %d: %w", i, err)
 			}
 		}
 		in[i] = slot.Elem()
@@ -265,8 +265,8 @@ func mapMethodResults(results []reflect.Value) (any, error) {
 	)
 	for _, r := range results {
 		if r.Type().Implements(errorType) {
-			if !r.IsNil() {
-				err = r.Interface().(error)
+			if callErr, ok := r.Interface().(error); ok && !r.IsNil() {
+				err = callErr
 			}
 			continue
 		}

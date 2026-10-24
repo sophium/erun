@@ -116,7 +116,6 @@ func patchReconcileBootstrapName(t *testing.T, srv *httptest.Server) *http.Respo
 	req.Header.Set("Authorization", "Bearer "+e2eDevToken)
 	resp, err := srv.Client().Do(req)
 	mustNoErr(t, err, "do request")
-	t.Cleanup(func() { _ = resp.Body.Close() })
 	return resp
 }
 
@@ -134,6 +133,7 @@ func TestReconcileBootstrapNameAppliesWhenTenantHasNoEnvironments(t *testing.T) 
 
 	srv := startReconcileAPI(t, db, declaredName, issuer, "operator-subject")
 	resp := patchReconcileBootstrapName(t, srv)
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -171,6 +171,7 @@ func TestReconcileBootstrapNameRefusesWhenTenantHasEnvironments(t *testing.T) {
 
 	srv := startReconcileAPI(t, db, declaredName, issuer, "operator-subject")
 	resp := patchReconcileBootstrapName(t, srv)
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", resp.StatusCode)
 	}
@@ -207,6 +208,7 @@ func TestReconcileBootstrapNameForbidsNonOperationsCaller(t *testing.T) {
 
 	srv := startReconcileAPI(t, db, "frs-forbid"+suffix, companyIssuer, "company-subject")
 	resp := patchReconcileBootstrapName(t, srv)
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
 	}

@@ -95,28 +95,28 @@ type EnvDefinitionPullResult struct {
 	Created bool `json:"created,omitempty"`
 }
 
-// ErrHostedDefinitionConflicts is returned by a pull that found a two-sided
+// HostedDefinitionConflictsError is returned by a pull that found a two-sided
 // portable edit and had no way to ask about it. The plan rides on the error so
 // a caller can render the diff without re-fetching.
-type ErrHostedDefinitionConflicts struct {
+type HostedDefinitionConflictsError struct {
 	Plan configpkg.EnvDefinitionPlan
 }
 
-func (e *ErrHostedDefinitionConflicts) Error() string {
+func (e *HostedDefinitionConflictsError) Error() string {
 	return fmt.Sprintf(
 		"this environment and the platform have both changed since the last sync (%s): "+
 			"re-run and confirm the diff, or revert the local changes you want the platform's copy to replace",
 		renderDefinitionConflicts(e.Plan.Conflicts))
 }
 
-// ErrHostedDefinitionRefused is returned when a transfer cannot proceed at all:
+// HostedDefinitionRefusedError is returned when a transfer cannot proceed at all:
 // a platform-owned field disagrees, which no confirmation can resolve because
 // the platform's copy is what the row is addressed by.
-type ErrHostedDefinitionRefused struct {
-	Refusals []configpkg.EnvDefinitionRefusal
+type HostedDefinitionRefusedError struct {
+	Refusals []configpkg.EnvDefinitionRefusalError
 }
 
-func (e *ErrHostedDefinitionRefused) Error() string {
+func (e *HostedDefinitionRefusedError) Error() string {
 	rendered := make([]string, 0, len(e.Refusals))
 	for _, refusal := range e.Refusals {
 		rendered = append(rendered, refusal.Error())
@@ -131,7 +131,7 @@ var ErrDefinitionPullDeclined = errors.New("pull declined")
 
 func confirmDefinitionConflicts(confirm func(configpkg.EnvDefinitionPlan) (bool, error), plan configpkg.EnvDefinitionPlan) (bool, error) {
 	if confirm == nil {
-		return false, &ErrHostedDefinitionConflicts{Plan: plan}
+		return false, &HostedDefinitionConflictsError{Plan: plan}
 	}
 	return confirm(plan)
 }
@@ -231,7 +231,7 @@ func AdoptEnvironmentDefinition(ctx context.Context, store envDefinitionConfigSt
 		PlatformKubernetesContext: row.KubernetesContext,
 	})
 	if len(refusals) > 0 {
-		return EnvDefinitionPushResult{}, &ErrHostedDefinitionRefused{Refusals: refusals}
+		return EnvDefinitionPushResult{}, &HostedDefinitionRefusedError{Refusals: refusals}
 	}
 
 	return uploadDefinition(ctx, store, client, config, row, params.Tenant)
@@ -312,7 +312,7 @@ func loadPullBase(store envDefinitionConfigStore, params EnvDefinitionPullParams
 // only the operator can decide.
 func confirmPullPlan(plan configpkg.EnvDefinitionPlan, confirm func(configpkg.EnvDefinitionPlan) (bool, error)) error {
 	if len(plan.Refusals) > 0 {
-		return &ErrHostedDefinitionRefused{Refusals: plan.Refusals}
+		return &HostedDefinitionRefusedError{Refusals: plan.Refusals}
 	}
 	if len(plan.Conflicts) == 0 {
 		return nil
@@ -367,7 +367,7 @@ func resolvePullTarget(ctx context.Context, store envDefinitionConfigStore, clie
 	// than the one named — the silent rename the marker exists to prevent,
 	// caught here before anything is written.
 	if row.Name != params.Environment {
-		return configpkg.HostedEnvironment{}, platformclient.PlatformEnvironment{}, &ErrHostedDefinitionRefused{Refusals: []configpkg.EnvDefinitionRefusal{{
+		return configpkg.HostedEnvironment{}, platformclient.PlatformEnvironment{}, &HostedDefinitionRefusedError{Refusals: []configpkg.EnvDefinitionRefusalError{{
 			Field:  "Name",
 			Class:  configpkg.EnvFieldPlatformOwned,
 			Reason: fmt.Sprintf("the platform knows it as %q, so pulling it down would write %s/%s, not %s/%s", row.Name, params.Tenant, row.Name, params.Tenant, params.Environment),
@@ -407,7 +407,7 @@ func resolveHostedRow(ctx context.Context, client PlatformEnvDefinitionClient, c
 		PlatformKubernetesContext: row.KubernetesContext,
 	})
 	if len(refusals) > 0 {
-		return platformclient.PlatformEnvironment{}, &ErrHostedDefinitionRefused{Refusals: refusals}
+		return platformclient.PlatformEnvironment{}, &HostedDefinitionRefusedError{Refusals: refusals}
 	}
 	return row, nil
 }
@@ -492,7 +492,7 @@ func checkRequestedPortRangeStart(claimed map[int]string, requested int, key str
 		return 0, err
 	}
 	if other, taken := claimed[index]; taken {
-		return 0, configpkg.ErrLocalPortRangeOverlap{A: other, B: key, RangeStart: requested}
+		return 0, configpkg.LocalPortRangeOverlapError{A: other, B: key, RangeStart: requested}
 	}
 	return requested, nil
 }
@@ -547,6 +547,8 @@ func IsHostableEnvironmentType(envType configpkg.EnvironmentType) bool {
 	switch envType {
 	case configpkg.EnvironmentTypeLocalAgent, configpkg.EnvironmentTypeRemoteAgent, configpkg.EnvironmentTypeRuntime:
 		return true
+	case configpkg.EnvironmentTypeHost:
+		return false
 	default:
 		return false
 	}

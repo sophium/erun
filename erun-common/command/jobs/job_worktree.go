@@ -170,7 +170,7 @@ func agentJobDirtyWorktree(ctx core.Context, job shared.EnvironmentJob) (dir, br
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return "", "", false
 	}
-	if inside, err := gitIsInsideWorkTree(ctx, dir); err != nil || !inside {
+	if !gitIsInsideWorkTree(ctx, dir) {
 		return "", "", false
 	}
 	changed, err := gitx.GitChangedWorkingTreeFiles(ctx, dir)
@@ -244,13 +244,10 @@ func checkpointAgentJobWorktree(ctx core.Context, dir, branch string, outcome en
 // all — an agent job's Dir is not guaranteed to be one, and this is what lets
 // every other check in this file no-op cleanly instead of misreading git's
 // own "not a git repository" error as some other failure.
-func gitIsInsideWorkTree(ctx core.Context, dir string) (bool, error) {
+func gitIsInsideWorkTree(ctx core.Context, dir string) bool {
 	ctx.TraceCommand("", "git", "-C", dir, "rev-parse", "--is-inside-work-tree")
 	output, err := core.Command("git", "-C", dir, "rev-parse", "--is-inside-work-tree").Output()
-	if err != nil {
-		return false, nil
-	}
-	return strings.TrimSpace(string(output)) == "true", nil
+	return err == nil && strings.TrimSpace(string(output)) == "true"
 }
 
 // gitResolveGitDir resolves dir's actual .git directory, following the

@@ -2,15 +2,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
-	"os/exec"
 	"sort"
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/command/setup"
 )
@@ -68,10 +65,7 @@ func loadClusterRegistry(ctx context.Context, input uiRuntimeResourceInput) (uiC
 	// A ClusterIP means the registry Service exists in this context. A missing
 	// Service makes kubectl exit non-zero — treated as "not deployed", not an
 	// error, so the dialog simply falls back to its normal registry default.
-	output, err := kubectlJSON(ctx, input.KubernetesContext,
-		"get", "svc", service, "-n", namespace, "-o", "jsonpath={.spec.clusterIP}")
-	clusterIP := strings.TrimSpace(string(output))
-	if err != nil || clusterIP == "" || clusterIP == "None" {
+	if !clusterRegistryServiceDeployed(ctx, input.KubernetesContext, service, namespace) {
 		return uiClusterRegistryStatus{KubernetesContext: input.KubernetesContext, Deployed: false}, nil
 	}
 	port := config.DefaultClusterRegistryPort
@@ -87,6 +81,13 @@ func loadClusterRegistry(ctx context.Context, input uiRuntimeResourceInput) (uiC
 	}, nil
 }
 
+func clusterRegistryServiceDeployed(ctx context.Context, kubernetesContext, service, namespace string) bool {
+	output, err := kubectlJSON(ctx, kubernetesContext,
+		"get", "svc", service, "-n", namespace, "-o", "jsonpath={.spec.clusterIP}")
+	clusterIP := strings.TrimSpace(string(output))
+	return err == nil && clusterIP != "" && clusterIP != "None"
+}
+
 func loadRuntimeResourceStatus(ctx context.Context, input uiRuntimeResourceInput) (uiRuntimeResourceStatus, error) {
 	input = normalizeRuntimeResourceInput(input)
 	if input.KubernetesContext == "" {
@@ -94,11 +95,11 @@ func loadRuntimeResourceStatus(ctx context.Context, input uiRuntimeResourceInput
 	}
 	nodes, err := loadKubernetesNodes(ctx, input.KubernetesContext)
 	if err != nil {
-		return unavailableRuntimeResourceStatus(input.KubernetesContext, "Node capacity is unavailable: "+err.Error()), nil
+		return unavailableRuntimeResourceStatus(input.KubernetesContext, fmt.Sprintf("Node capacity is unavailable: %v", err)), nil
 	}
 	pods, err := loadKubernetesPods(ctx, input.KubernetesContext)
 	if err != nil {
-		return unavailableRuntimeResourceStatus(input.KubernetesContext, "Current pod allocation is unavailable: "+err.Error()), nil
+		return unavailableRuntimeResourceStatus(input.KubernetesContext, fmt.Sprintf("Current pod allocation is unavailable: %v", err)), nil
 	}
 	// Measured usage is a best-effort refinement, not a requirement: clusters
 	// without metrics-server still get the limits-based reading, and say so.
@@ -539,150 +540,4 @@ func unavailableRuntimeResourceStatus(kubernetesContext, message string) uiRunti
 		Available:         false,
 		Message:           strings.TrimSpace(message),
 	}
-}
-
-func loadKubernetesNodes(ctx context.Context, kubernetesContext string) (kubernetesNodeList, error) {
-	output, err := kubectlJSON(ctx, kubernetesContext, "get", "nodes", "-o", "json")
-	if err != nil {
-		return kubernetesNodeList{}, err
-	}
-	var nodes kubernetesNodeList
-	if err := json.Unmarshal(output, &nodes); err != nil {
-		return kubernetesNodeList{}, fmt.Errorf("parse nodes: %w", err)
-	}
-	return nodes, nil
-}
-
-// kubernetesContainerUsage is measured per-container consumption, keyed by
-// namespace/pod/container. Empty when the cluster has no metrics source.
-type kubernetesContainerUsage map[string]runtimeResourceTotals
-
-func containerUsageKey(pod kubernetesPod, container kubernetesContainer) string {
-	return strings.TrimSpace(pod.Metadata.Namespace) + "/" + strings.TrimSpace(pod.Metadata.Name) + "/" + strings.TrimSpace(container.Name)
-}
-
-// loadKubernetesContainerUsage reads what containers are actually consuming, so
-// a container that declares no limits is counted at its real usage instead of
-// being treated as free. Deliberately fail-soft: a cluster without
-// metrics-server still gets the limits-based reading, flagged as incomplete
-// rather than presented as exact.
-func loadKubernetesContainerUsage(ctx context.Context, kubernetesContext string) kubernetesContainerUsage {
-	output, err := kubectlJSON(ctx, kubernetesContext, "top", "pod", "--all-namespaces", "--containers", "--no-headers")
-	if err != nil {
-		return nil
-	}
-	return parseKubernetesContainerUsage(string(output))
-}
-
-// parseKubernetesContainerUsage reads `kubectl top pod --containers` rows:
-// NAMESPACE POD CONTAINER CPU MEMORY.
-func parseKubernetesContainerUsage(output string) kubernetesContainerUsage {
-	usage := kubernetesContainerUsage{}
-	for _, line := range strings.Split(output, "\n") {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) < 5 {
-			continue
-		}
-		cpu, cpuErr := config.ParseKubernetesCPUToMilli(fields[3])
-		memory, memoryErr := config.ParseKubernetesMemoryToMi(fields[4])
-		if cpuErr != nil && memoryErr != nil {
-			continue
-		}
-		totals := runtimeResourceTotals{}
-		if cpuErr == nil {
-			totals.CPUMilli = cpu
-		}
-		if memoryErr == nil {
-			totals.MemoryMi = memory
-		}
-		usage[fields[0]+"/"+fields[1]+"/"+fields[2]] = totals
-	}
-	if len(usage) == 0 {
-		return nil
-	}
-	return usage
-}
-
-func loadKubernetesPods(ctx context.Context, kubernetesContext string) (kubernetesPodList, error) {
-	output, err := kubectlJSON(ctx, kubernetesContext, "get", "pods", "--all-namespaces", "-o", "json")
-	if err != nil {
-		return kubernetesPodList{}, err
-	}
-	var pods kubernetesPodList
-	if err := json.Unmarshal(output, &pods); err != nil {
-		return kubernetesPodList{}, fmt.Errorf("parse pods: %w", err)
-	}
-	return pods, nil
-}
-
-func kubectlJSON(ctx context.Context, kubernetesContext string, args ...string) ([]byte, error) {
-	kubernetesContext = strings.TrimSpace(kubernetesContext)
-	if kubernetesContext != "" {
-		args = append([]string{"--context", kubernetesContext}, args...)
-	}
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	core.HideConsoleWindow(cmd)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		detail := strings.TrimSpace(string(output))
-		if detail != "" {
-			return nil, fmt.Errorf("%w: %s", err, detail)
-		}
-		return nil, err
-	}
-	return output, nil
-}
-
-type kubernetesNodeList struct {
-	Items []kubernetesNode `json:"items"`
-}
-
-type kubernetesNode struct {
-	Metadata struct {
-		Name string `json:"name"`
-	} `json:"metadata"`
-	Status struct {
-		Allocatable struct {
-			CPU    string `json:"cpu"`
-			Memory string `json:"memory"`
-		} `json:"allocatable"`
-	} `json:"status"`
-}
-
-type kubernetesPodList struct {
-	Items []kubernetesPod `json:"items"`
-}
-
-type kubernetesPod struct {
-	Metadata struct {
-		Name      string `json:"name"`
-		Namespace string `json:"namespace"`
-	} `json:"metadata"`
-	Status struct {
-		Phase string `json:"phase"`
-	} `json:"status"`
-	Spec struct {
-		NodeName   string                `json:"nodeName"`
-		Containers []kubernetesContainer `json:"containers"`
-		// InitContainers are read because Kubernetes admits a pod on
-		// max(max over these, sum over Containers); a request reading that
-		// skipped them would understate what the node has committed.
-		InitContainers []kubernetesContainer `json:"initContainers"`
-	} `json:"spec"`
-}
-
-type kubernetesContainer struct {
-	Name      string `json:"name"`
-	Resources struct {
-		// Limits is the cgroup ceiling the worst-case reading sums. Requests is
-		// what the scheduler admits the pod on, and no cgroup file carries it --
-		// it is read from the pod spec, where it exists.
-		Limits   kubernetesResourceQuantity `json:"limits"`
-		Requests map[string]string          `json:"requests"`
-	} `json:"resources"`
-}
-
-type kubernetesResourceQuantity struct {
-	CPU    string `json:"cpu"`
-	Memory string `json:"memory"`
 }

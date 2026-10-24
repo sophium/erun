@@ -64,24 +64,34 @@ func stageAppCopy(t *testing.T, dir string, hostOS core.HostOS, executableName s
 	t.Helper()
 	launch := appCopyPath(dir, hostOS, executableName)
 	if hostOS == core.HostOSDarwin {
-		binary := bundleExecutablePath(launch, executableName)
-		if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
-			t.Fatalf("create app bundle %s: %v", launch, err)
-		}
-		if err := os.WriteFile(binary, []byte("desktop app"), 0o755); err != nil {
-			t.Fatalf("write %s: %v", binary, err)
-		}
-		setAppModTime(t, binary, builtAt)
+		stageAppBundleExecutable(t, launch, executableName, builtAt)
 	} else {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("create %s: %v", dir, err)
-		}
-		if err := os.WriteFile(launch, []byte("desktop app"), 0o755); err != nil {
-			t.Fatalf("write %s: %v", launch, err)
-		}
+		stagePlainAppExecutable(t, dir, launch)
 	}
 	setAppModTime(t, launch, builtAt)
 	return launch
+}
+
+func stageAppBundleExecutable(t *testing.T, launch, executableName string, builtAt time.Time) {
+	t.Helper()
+	binary := bundleExecutablePath(launch, executableName)
+	if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
+		t.Fatalf("create app bundle %s: %v", launch, err)
+	}
+	if err := os.WriteFile(binary, []byte("desktop app"), 0o755); err != nil {
+		t.Fatalf("write %s: %v", binary, err)
+	}
+	setAppModTime(t, binary, builtAt)
+}
+
+func stagePlainAppExecutable(t *testing.T, dir, launch string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create %s: %v", dir, err)
+	}
+	if err := os.WriteFile(launch, []byte("desktop app"), 0o755); err != nil {
+		t.Fatalf("write %s: %v", launch, err)
+	}
 }
 
 func setAppModTime(t *testing.T, path string, at time.Time) {
@@ -217,6 +227,17 @@ var desktopAppCopyCases = []desktopAppCopyCase{
 	},
 }
 
+func expectedAppCopyPath(root string, hostOS core.HostOS, executableName string, location copyLocation) string {
+	switch location {
+	case besideCLI:
+		return appCopyPath(cliBinDir(root), hostOS, executableName)
+	case inCheckout:
+		return appCopyPath(checkoutBinDir(root), hostOS, executableName)
+	case noCopy:
+	}
+	return ""
+}
+
 // TestResolveAppExecutableNearChoosesAmongCopies covers the rest of the
 // freshness rule: the inverse of the reported shadowing, the case where the
 // rebuild replaced the bundle's executable in place, what a tie does, and what
@@ -238,13 +259,7 @@ func TestResolveAppExecutableNearChoosesAmongCopies(t *testing.T) {
 					root := t.TempDir()
 					tc.stage(t, root, hostOS, executableName)
 
-					want := ""
-					switch tc.want {
-					case besideCLI:
-						want = appCopyPath(cliBinDir(root), hostOS, executableName)
-					case inCheckout:
-						want = appCopyPath(checkoutBinDir(root), hostOS, executableName)
-					}
+					want := expectedAppCopyPath(root, hostOS, executableName, tc.want)
 					chosen, trace := shared.ResolveAppExecutableNear(cliExecutable(t, root), executableName, hostOS)
 					if chosen != want {
 						t.Fatalf("resolved %q, want %q", chosen, want)

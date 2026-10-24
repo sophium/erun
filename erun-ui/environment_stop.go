@@ -206,7 +206,7 @@ func (a *App) LoadRuntimeRunState(selection uiSelection) (uiRuntimeRunState, err
 	}
 	resolved, read, err := a.readRuntimeRunStateForSelection(selection)
 	if err != nil {
-		state.Message = "Cannot read this environment's runtime run state: " + err.Error()
+		state.Message = fmt.Sprintf("Cannot read this environment's runtime run state: %v", err)
 		return state, nil
 	}
 	state.Present = read.Present

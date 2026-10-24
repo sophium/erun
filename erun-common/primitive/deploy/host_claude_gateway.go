@@ -52,19 +52,22 @@ func HostClaudeSettingsEnv() (map[string]string, error) {
 		return nil, err
 	}
 	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
+	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
+	return claudeSettingsEnv(raw), nil
+}
+
+// claudeSettingsEnv returns the env block of raw settings, or nil when raw is
+// empty or malformed.
+func claudeSettingsEnv(raw []byte) map[string]string {
 	var settings struct {
 		Env map[string]string `json:"env"`
 	}
 	if err := json.Unmarshal(raw, &settings); err != nil {
-		return nil, nil
+		return nil
 	}
-	return settings.Env, nil
+	return settings.Env
 }
 
 // GatewayCredentialFromEnv picks the gateway credential out of a Claude Code

@@ -40,7 +40,7 @@ COPY erun-devops/docker/erun-backend-api /src/erun-devops/docker/erun-backend-ap
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/golangci-lint \
-    go tool golangci-lint run ./...
+    go mod tidy -diff && go tool golangci-lint run ./... && go run github.com/fe3dback/go-arch-lint@v1.19.0 check --project-path .
 
 ARG DOCKER_HOST=tcp://127.0.0.1:2375
 RUN --mount=type=cache,target=/go/pkg/mod \

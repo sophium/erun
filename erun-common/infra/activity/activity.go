@@ -374,11 +374,11 @@ func mergeEnvironmentActivityClients(snapshot *EnvironmentActivitySnapshot, upda
 	evictOldestEnvironmentActivityClients(snapshot.Clients, environmentActivityClientCap)
 }
 
-func evictOldestEnvironmentActivityClients(clients map[string]EnvironmentActivityClient, cap int) {
-	if cap <= 0 || len(clients) <= cap {
+func evictOldestEnvironmentActivityClients(clients map[string]EnvironmentActivityClient, limit int) {
+	if limit <= 0 || len(clients) <= limit {
 		return
 	}
-	for len(clients) > cap {
+	for len(clients) > limit {
 		oldestKey := ""
 		var oldestActivity time.Time
 		first := true
@@ -580,71 +580,4 @@ func validEnvironmentActivityKind(kind string) bool {
 		}
 	}
 	return false
-}
-
-// lastMinuteOfDay is the highest minute-of-day parseClockMinute can produce
-// (23:59). HH:MM has no way to spell midnight/24:00, so a window declared
-// 00:00-23:59 is the only literal all-day span an operator can write.
-const lastMinuteOfDay = 23*60 + 59
-
-func applyWorkingHoursTimezone(now time.Time, timezone string) (time.Time, error) {
-	timezone = strings.TrimSpace(timezone)
-	if timezone == "" {
-		return now, nil
-	}
-	loc, err := time.LoadLocation(timezone)
-	if err != nil {
-		return now, fmt.Errorf("invalid environment idle timezone %q: %w", timezone, err)
-	}
-	return now.In(loc), nil
-}
-
-func WorkingHoursStatus(value string, timezone string, now time.Time) (bool, int64, error) {
-	start, end, err := configpkg.ParseWorkingHours(value)
-	if err != nil {
-		return false, 0, err
-	}
-	now, err = applyWorkingHoursTimezone(now, timezone)
-	if err != nil {
-		return false, 0, err
-	}
-	outside, remainingSeconds := evaluateWorkingHoursWindow(start, end, now)
-	return outside, remainingSeconds, nil
-}
-
-func evaluateWorkingHoursWindow(start, end int, now time.Time) (bool, int64) {
-	minute := now.Hour()*60 + now.Minute()
-	if start == 0 && end == lastMinuteOfDay {
-		// The all-day span is always inside rather than excluding the day's
-		// last minute under the ordinary end-exclusive rule below.
-		return false, int64((24*60-minute)*60 - now.Second())
-	}
-	if start < end {
-		if minute < start || minute >= end {
-			return true, 0
-		}
-		return false, int64((end-minute)*60 - now.Second())
-	}
-	if minute >= end && minute < start {
-		return true, 0
-	}
-	remainingMinutes := end - minute
-	if remainingMinutes <= 0 {
-		remainingMinutes += 24 * 60
-	}
-	return false, int64(remainingMinutes*60 - now.Second())
-}
-
-func workingHoursReason(outside bool, workingHours string) string {
-	if outside {
-		return "outside working hours " + workingHours
-	}
-	return "inside working hours " + workingHours
-}
-
-func secondsRemaining(duration time.Duration) int64 {
-	if duration <= 0 {
-		return 0
-	}
-	return int64((duration + time.Second - 1) / time.Second)
 }

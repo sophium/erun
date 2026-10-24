@@ -133,11 +133,16 @@ func (a *App) LoadEnvironmentGatewayRouting(selection uiSelection) (uiGatewayRou
 		return uiGatewayRouting{}, nil
 	}
 	tenant, environment := strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)
-	env, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
-	if err != nil || !gatewayRoutingReadable(env) {
+	env, ok := a.loadGatewayRoutingReadableEnv(tenant, environment)
+	if !ok {
 		return uiGatewayRouting{}, nil
 	}
 	return a.readGatewayRoutingDrift(tenant, env, a.resolveOpenRouterConfig()), nil
+}
+
+func (a *App) loadGatewayRoutingReadableEnv(tenant, environment string) (config.EnvConfig, bool) {
+	env, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
+	return env, err == nil && gatewayRoutingReadable(env)
 }
 
 // gatewayRoutingReadable is an environment with a runtime pod erun deploys: a

@@ -51,7 +51,7 @@ const waitDelay = 10 * time.Second
 var (
 	buildOnce   sync.Once
 	binaryPath  string
-	buildErr    error
+	errBuild    error
 	coverDir    string
 	procCounter int64
 )
@@ -61,10 +61,10 @@ var (
 func BinaryPath(t testing.TB) string {
 	t.Helper()
 	buildOnce.Do(func() {
-		binaryPath, buildErr = buildBinary()
+		binaryPath, errBuild = buildBinary()
 	})
-	if buildErr != nil {
-		t.Fatalf("build erun: %v", buildErr)
+	if errBuild != nil {
+		t.Fatalf("build erun: %v", errBuild)
 	}
 	return binaryPath
 }
@@ -132,7 +132,7 @@ func buildBinary() (string, error) {
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("go build -cover failed: %v\n%s", err, buf.String())
+		return "", fmt.Errorf("go build -cover failed: %w\n%s", err, buf.String())
 	}
 
 	coverDir = os.Getenv(CoverDirEnv)
@@ -212,8 +212,8 @@ func requireIsolatedEnv(t testing.TB, env []string) {
 	if home == "" || xdgConfig == "" {
 		t.Fatalf("erun.Run: RunOptions.Env must carry an isolated HOME and XDG_CONFIG_HOME (use env.New(t) and setup.Env()); got HOME=%q XDG_CONFIG_HOME=%q", home, xdgConfig)
 	}
-	if real := strings.TrimSpace(os.Getenv("HOME")); real != "" && home == real {
-		t.Fatalf("erun.Run: RunOptions.Env points HOME at the developer's real home %q; scenarios must run against the env.New(t) tempdir", real)
+	if realHome := strings.TrimSpace(os.Getenv("HOME")); realHome != "" && home == realHome {
+		t.Fatalf("erun.Run: RunOptions.Env points HOME at the developer's real home %q; scenarios must run against the env.New(t) tempdir", realHome)
 	}
 }
 
@@ -301,7 +301,8 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 	// could not be run at all. The status lives on ProcessState either way --
 	// a run whose wait was rescued by the delay reads its exit code there
 	// rather than from an error that no longer describes the child.
-	if _, ok := err.(*exec.ExitError); err != nil && !ok {
+	var exitErr *exec.ExitError
+	if err != nil && !errors.As(err, &exitErr) {
 		t.Fatalf("erun exec error: %v", err)
 	}
 	result := Result{

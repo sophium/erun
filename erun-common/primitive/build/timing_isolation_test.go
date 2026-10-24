@@ -23,10 +23,10 @@ func TestTimingRecordsNeverResolveToTheOperatorsRealHistory(t *testing.T) {
 	if err != nil {
 		t.Skipf("no ambient home directory to compare against: %v", err)
 	}
-	real := filepath.Join(home, ".erun", "timing")
-	if filepath.Clean(dir) == filepath.Clean(real) {
+	realDir := filepath.Join(home, ".erun", "timing")
+	if filepath.Clean(dir) == filepath.Clean(realDir) {
 		t.Fatalf("timing records resolve to the operator's real history %q; this binary must redirect %s at a temp tree",
-			real, core.TimingRecordDirEnv)
+			realDir, core.TimingRecordDirEnv)
 	}
 }
 

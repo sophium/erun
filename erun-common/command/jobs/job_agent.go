@@ -195,7 +195,9 @@ func (r *agentProgressReader) feed(chunk []byte) {
 // carrying the partial trailing one — a feed can land mid-line, and re-reading
 // it from the start would double-count everything before it. Caller holds mu.
 func (r *agentProgressReader) consume(chunk []byte) {
-	buffer := append(r.pending, chunk...)
+	buffer := make([]byte, 0, len(r.pending)+len(chunk))
+	buffer = append(buffer, r.pending...)
+	buffer = append(buffer, chunk...)
 	for {
 		index := bytes.IndexByte(buffer, '\n')
 		if index < 0 {
@@ -217,7 +219,7 @@ func (r *agentProgressReader) apply(line []byte) {
 	if !strings.HasPrefix(trimmed, "{") {
 		return
 	}
-	applied := false
+	var applied bool
 	if r.tool == agentToolCodex {
 		applied = applyCodexAgentEvent(&r.progress, []byte(trimmed))
 	} else {

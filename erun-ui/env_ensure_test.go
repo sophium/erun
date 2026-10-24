@@ -134,7 +134,7 @@ func TestEnsureFailureNotificationDedupesPerEpisode(t *testing.T) {
 	var ensures int32
 	var ensuresMu sync.Mutex
 	var reconnectMu sync.Mutex
-	reconnectErr := error(errors.New("timed out waiting for API port-forward"))
+	reconnectErr := errors.New("timed out waiting for API port-forward")
 
 	projectRoot := t.TempDir()
 	store := stubUIStore{

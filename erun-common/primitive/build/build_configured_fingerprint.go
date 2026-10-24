@@ -54,8 +54,8 @@ func loadConfiguredFingerprints(projectRoot, environment string, cache map[strin
 	cfg, _, err := config.LoadProjectConfig(projectRoot)
 	if err != nil {
 		if errors.Is(err, config.ErrNotInitialized) {
-			cache[key] = nil
-			return nil, nil
+			cache[key] = map[string]string{}
+			return cache[key], nil
 		}
 		return nil, err
 	}

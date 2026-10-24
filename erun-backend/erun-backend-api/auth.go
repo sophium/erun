@@ -403,7 +403,9 @@ type authErrorEnvelope struct {
 func writeAuthError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(authErrorEnvelope{Code: code, Message: message})
+	if err := json.NewEncoder(w).Encode(authErrorEnvelope{Code: code, Message: message}); err != nil {
+		return // the status is already sent; a failed body write has no one to report to
+	}
 }
 
 func (m *AuthMiddleware) resolveOrg(ctx context.Context, claims Claims) (string, error) {

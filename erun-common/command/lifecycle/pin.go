@@ -1,9 +1,7 @@
 package lifecycle
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -464,103 +462,6 @@ func DescribeCwdFallbackProjectRoot(ctx core.Context, plan PinPlan) string {
 	return note
 }
 
-// scanPinFiles walks the repo once and recognises each erun reference it finds.
-// Vendored trees are skipped: a chart pulled into charts/ is a build artifact of
-// a pin, not a pin, and rewriting it would edit something the next
-// `helm dependency update` regenerates anyway.
-func scanPinFiles(projectRoot, target string) ([]PinSite, error) {
-	var sites []PinSite
-	walkErr := filepath.WalkDir(projectRoot, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if entry.IsDir() {
-			if skipPinScanDir(entry.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		relative, relErr := filepath.Rel(projectRoot, path)
-		if relErr != nil {
-			return nil
-		}
-		found, readErr := pinSitesInFile(path, filepath.ToSlash(relative), entry.Name(), target)
-		if readErr != nil {
-			return nil
-		}
-		sites = append(sites, found...)
-		return nil
-	})
-	if walkErr != nil {
-		return nil, walkErr
-	}
-	sort.SliceStable(sites, func(i, j int) bool {
-		if sites[i].Path == sites[j].Path {
-			return sites[i].Detail < sites[j].Detail
-		}
-		return sites[i].Path < sites[j].Path
-	})
-	return sites, nil
-}
-
-func skipPinScanDir(name string) bool {
-	switch name {
-	case ".git", "node_modules", "charts", ".terraform", "vendor", "build", "dist":
-		return true
-	}
-	return false
-}
-
-func pinSitesInFile(path, relative, name, target string) ([]PinSite, error) {
-	if !pinScannableFile(name) {
-		return nil, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	content := string(data)
-
-	var sites []PinSite
-	for _, match := range erunTerraformRefPattern.FindAllStringSubmatch(content, -1) {
-		sites = append(sites, PinSite{Kind: PinSiteTerraformRef, Path: relative, Detail: match[0], Current: match[2], Target: target})
-	}
-	for _, match := range erunHelmDependencyPattern.FindAllStringSubmatch(content, -1) {
-		sites = append(sites, PinSite{Kind: PinSiteHelmDependency, Path: relative, Detail: match[2], Current: match[3], Target: target})
-	}
-	for _, match := range erunDevopsImagePattern.FindAllStringSubmatch(content, -1) {
-		sites = append(sites, PinSite{Kind: PinSiteRuntimeImage, Path: relative, Detail: "erun-devops", Current: match[2], Target: target})
-	}
-	if pinTerraformFile(name) {
-		for _, match := range erunImageReferencePattern.FindAllStringSubmatch(content, -1) {
-			if match[3] == "erun-devops" {
-				continue
-			}
-			sites = append(sites, PinSite{Kind: PinSiteImageReference, Path: relative, Detail: match[3], Current: match[4], Target: target})
-		}
-	}
-	return sites, nil
-}
-
-func pinScannableFile(name string) bool {
-	switch {
-	case pinTerraformFile(name):
-		return true
-	case name == "Chart.yaml":
-		return true
-	case name == "Dockerfile" || strings.HasPrefix(name, "Dockerfile."):
-		return true
-	}
-	return false
-}
-
-// pinTerraformFile reports whether name is a Terraform configuration or
-// variables file — the two places a tenant's own terraform can carry an erun
-// image reference directly, alongside a module ref.
-func pinTerraformFile(name string) bool {
-	return strings.HasSuffix(name, ".tf") || strings.HasSuffix(name, ".tfvars")
-}
-
 // ApplyPinPlan rewrites every file site to the target. The environment's own
 // config fields (runtimeversion, runtimeimage, runtimechart) are not written
 // here: they live in erun's config store, which the caller owns via
@@ -743,65 +644,4 @@ func RefreshPinnedChartLocks(ctx core.Context, plan PinPlan, update HelmDependen
 		}
 	}
 	return nil
-}
-
-// pinHistoryFileName records what the repo was pinned to before the last
-// re-pin, so reverting is one motion rather than remembering a number. It lives
-// beside the project's erun config because it describes this tree.
-const pinHistoryFileName = "pin-history.json"
-
-type pinHistory struct {
-	Previous map[string]string `json:"previous"`
-}
-
-func pinHistoryPath(projectRoot string) string {
-	return filepath.Join(projectRoot, config.ProjectConfigDir, pinHistoryFileName)
-}
-
-func pinHistoryKey(tenant, environment string) string {
-	return strings.TrimSpace(tenant) + "/" + strings.TrimSpace(environment)
-}
-
-// RecordPinPrevious remembers the version this environment was on before a
-// re-pin. A re-pin that changes nothing does not overwrite the record: reverting
-// twice must still reach the version you came from, not the one you are on.
-func RecordPinPrevious(projectRoot, tenant, environment, previous string) error {
-	previous = strings.TrimSpace(previous)
-	if previous == "" {
-		return nil
-	}
-	path := pinHistoryPath(projectRoot)
-	history := readPinHistory(path)
-	if history.Previous == nil {
-		history.Previous = map[string]string{}
-	}
-	history.Previous[pinHistoryKey(tenant, environment)] = previous
-	data, err := json.MarshalIndent(history, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
-}
-
-// PinPrevious reports the version recorded before the last re-pin, which is what
-// a revert targets.
-func PinPrevious(projectRoot, tenant, environment string) (string, bool) {
-	history := readPinHistory(pinHistoryPath(projectRoot))
-	previous, ok := history.Previous[pinHistoryKey(tenant, environment)]
-	return strings.TrimSpace(previous), ok && strings.TrimSpace(previous) != ""
-}
-
-func readPinHistory(path string) pinHistory {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return pinHistory{}
-	}
-	var history pinHistory
-	if err := json.Unmarshal(data, &history); err != nil {
-		return pinHistory{}
-	}
-	return history
 }

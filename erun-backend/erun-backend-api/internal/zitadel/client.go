@@ -69,7 +69,7 @@ func NewClientFromFile(cfg Config) (*Client, error) {
 	externalDomain := strings.TrimSpace(cfg.ExternalDomain)
 	patPath := strings.TrimSpace(cfg.PATPath)
 	if baseURL == "" || externalDomain == "" || patPath == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // an incomplete config leaves the feature disabled
 	}
 	raw, err := os.ReadFile(patPath)
 	if err != nil {

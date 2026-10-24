@@ -165,6 +165,8 @@ func ClassifyLocalMCPUnreachable(port int) LocalMCPUnreachableKind {
 		return LocalMCPTargetNotAnswering
 	case localMCPSilent:
 		return LocalMCPStaleForward
+	case localMCPAnswered, localMCPRefused:
+		return LocalMCPNotOpen
 	}
 	return LocalMCPNotOpen
 }
@@ -181,6 +183,7 @@ func DescribeLocalMCPUnreachable(tenant, environment string, port int) string {
 		return fmt.Sprintf("the port-forward for %s/%s on 127.0.0.1:%d is not carrying traffic (the local port is held but the edge never answers) — re-establishing it", tenant, environment, port)
 	case LocalMCPTargetNotAnswering:
 		return fmt.Sprintf("the port-forward for %s/%s on 127.0.0.1:%d is up but the environment behind it did not answer (the local port took the connection and closed it without a reply) — the environment is most likely still starting, so retry shortly, and re-establish the forward only if it stays unresponsive", tenant, environment, port)
+	case LocalMCPNotOpen:
 	}
 	return fmt.Sprintf("no port-forward is listening for %s/%s on 127.0.0.1:%d", tenant, environment, port)
 }

@@ -1,0 +1,75 @@
+version: 3
+workdir: .
+allow:
+  depOnAnyVendor: false
+  deepScan: false
+
+vendors:
+  github-com-sophium-erun:
+    in: ["github.com/sophium/erun", "github.com/sophium/erun/**"]
+  github-com-sophium-erun-erun-common:
+    in: ["github.com/sophium/erun/erun-common", "github.com/sophium/erun/erun-common/**"]
+  github-com-spf13-cobra:
+    in: ["github.com/spf13/cobra", "github.com/spf13/cobra/**"]
+  github-com-spf13-pflag:
+    in: ["github.com/spf13/pflag", "github.com/spf13/pflag/**"]
+
+components:
+  internal-desktopsurface:
+    in: "internal/desktopsurface"
+  internal-env:
+    in: "internal/env"
+  internal-erun:
+    in: "internal/erun"
+  internal-fixture:
+    in: "internal/fixture"
+  internal-fixture-podexec:
+    in: "internal/fixture/podexec"
+  internal-fixture-portsim:
+    in: "internal/fixture/portsim"
+  internal-fixture-stubrunner:
+    in: "internal/fixture/stubrunner"
+  internal-golden:
+    in: "internal/golden"
+  internal-harnessexec:
+    in: "internal/harnessexec"
+  internal-normalize:
+    in: "internal/normalize"
+  internal-roleclassification:
+    in: "internal/roleclassification"
+  root:
+    in: "."
+
+deps:
+  internal-env:
+    mayDependOn:
+      - internal-harnessexec
+  internal-erun:
+    mayDependOn:
+      - internal-harnessexec
+    canUse:
+      - github-com-sophium-erun-erun-common
+  internal-fixture:
+    mayDependOn:
+      - internal-env
+      - internal-harnessexec
+    canUse:
+      - github-com-sophium-erun-erun-common
+  internal-fixture-stubrunner:
+    mayDependOn:
+      - internal-harnessexec
+  root:
+    mayDependOn:
+      - internal-desktopsurface
+      - internal-env
+      - internal-erun
+      - internal-fixture
+      - internal-golden
+      - internal-harnessexec
+      - internal-normalize
+      - internal-roleclassification
+    canUse:
+      - github-com-sophium-erun
+      - github-com-sophium-erun-erun-common
+      - github-com-spf13-cobra
+      - github-com-spf13-pflag

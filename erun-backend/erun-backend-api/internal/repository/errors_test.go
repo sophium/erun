@@ -39,11 +39,11 @@ func TestNormalizeNoRowsStillMapsNoRowsToErrNotFound(t *testing.T) {
 // writeRepositoryError's default 500 case still fires for real faults.
 func TestNormalizeNoRowsPassesThroughOtherErrors(t *testing.T) {
 	other := &pgconn.PgError{Code: pgerrcode.UniqueViolation}
-	if got := normalizeNoRows(other); got != other {
+	if got := normalizeNoRows(other); !errors.Is(got, other) {
 		t.Fatalf("normalizeNoRows(unique_violation) = %v, want the error passed through unchanged", got)
 	}
 	plain := errors.New("boom")
-	if got := normalizeNoRows(plain); got != plain {
+	if got := normalizeNoRows(plain); !errors.Is(got, plain) {
 		t.Fatalf("normalizeNoRows(plain error) = %v, want it passed through unchanged", got)
 	}
 }

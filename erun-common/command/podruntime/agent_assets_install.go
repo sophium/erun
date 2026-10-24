@@ -50,6 +50,7 @@ const (
 
 func (r *AgentAssetsInstallResult) record(name string, outcome agentAssetOutcome) {
 	switch outcome {
+	case agentAssetSkipped:
 	case agentAssetInstalled:
 		r.Installed = append(r.Installed, name)
 	case agentAssetRefreshed:
@@ -105,7 +106,7 @@ func InstallOrRefreshAgents(srcRoot, destRoot string) (AgentAssetsInstallResult,
 
 func installOrRefreshSkill(src, dst string) (agentAssetOutcome, error) {
 	sourceMD := filepath.Join(src, "SKILL.md")
-	if _, err := os.Stat(sourceMD); err != nil {
+	if !pathExists(sourceMD) {
 		return agentAssetSkipped, nil // a directory with no SKILL.md is not a skill
 	}
 	installedMD := filepath.Join(dst, "SKILL.md")

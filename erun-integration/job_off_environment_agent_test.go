@@ -22,8 +22,8 @@ import (
 // start --agent` run from
 // OUTSIDE any environment (a host caller), which reaches the target's
 // exec_agent MCP tool instead of calling StartEnvironmentJob directly the way
-// job_test.go's self-dispatch scenarios do (both run inside the environment,
-// via inEnvironment's ERUN_REPO_REMOTE=true).
+// job_agent_finish_test.go's self-dispatch scenarios do (both run inside the
+// environment, via inEnvironment's ERUN_REPO_REMOTE=true).
 //
 // The two dispatch paths converge on the identical eruncommon.StartEnvironmentJob
 // call and the identical `exec job supervise` re-exec, so nothing in the
@@ -162,7 +162,7 @@ esac
 var (
 	emcpBuildOnce sync.Once
 	emcpBuildPath string
-	emcpBuildErr  error
+	errEmcpBuild  error
 )
 
 // emcpBinaryPath builds the real erun-mcp/cmd/emcp binary once per test run --
@@ -173,12 +173,12 @@ func emcpBinaryPath(t *testing.T) string {
 	emcpBuildOnce.Do(func() {
 		moduleDir, err := filepath.Abs(filepath.Join("..", "erun-mcp"))
 		if err != nil {
-			emcpBuildErr = err
+			errEmcpBuild = err
 			return
 		}
 		binDir, err := os.MkdirTemp("", "erun-integration-emcp-bin-")
 		if err != nil {
-			emcpBuildErr = err
+			errEmcpBuild = err
 			return
 		}
 		exe := filepath.Join(binDir, "emcp")
@@ -186,13 +186,13 @@ func emcpBinaryPath(t *testing.T) string {
 		cmd.Dir = moduleDir
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 		if out, buildErr := cmd.CombinedOutput(); buildErr != nil {
-			emcpBuildErr = fmt.Errorf("go build emcp: %w\n%s", buildErr, out)
+			errEmcpBuild = fmt.Errorf("go build emcp: %w\n%s", buildErr, out)
 			return
 		}
 		emcpBuildPath = exe
 	})
-	if emcpBuildErr != nil {
-		t.Fatalf("build emcp: %v", emcpBuildErr)
+	if errEmcpBuild != nil {
+		t.Fatalf("build emcp: %v", errEmcpBuild)
 	}
 	return emcpBuildPath
 }

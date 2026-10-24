@@ -23,79 +23,95 @@ func resolveProjectBuildScript(findProjectRoot shared.ProjectFinderFunc, target 
 	return ResolveNestedProjectBuildScript(findProjectRoot, target)
 }
 
+// ResolveProjectRootBuildScript returns the project root's own build.sh, or
+// nil when there is none.
 func ResolveProjectRootBuildScript(findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) (*shared.ScriptSpec, error) {
+	projectRoot, ok, err := buildScriptDiscoveryRoot(findProjectRoot, target)
+	if err != nil || !ok {
+		return nil, err
+	}
+	script, found, err := projectRootBuildScript(projectRoot)
+	if err != nil || !found {
+		return nil, err
+	}
+	return &script, nil
+}
+
+// ResolveNestedProjectBuildScript returns the first build.sh below the project
+// root, or nil when there is none.
+func ResolveNestedProjectBuildScript(findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) (*shared.ScriptSpec, error) {
+	projectRoot, ok, err := buildScriptDiscoveryRoot(findProjectRoot, target)
+	if err != nil || !ok {
+		return nil, err
+	}
+	script, found, err := findNestedProjectBuildScript(projectRoot)
+	if err != nil || !found {
+		return nil, err
+	}
+	return &script, nil
+}
+
+// buildScriptDiscoveryRoot reports the cleaned project root to search for a
+// build script, or false when discovery is disabled or there is no root.
+func buildScriptDiscoveryRoot(findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) (string, bool, error) {
 	if target.DisableBuildScriptDiscovery {
-		return nil, nil
+		return "", false, nil
 	}
 	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
-		return nil, err
+		return "", false, err
 	}
 	if strings.TrimSpace(projectRoot) == "" {
-		return nil, nil
+		return "", false, nil
 	}
+	return filepath.Clean(projectRoot), true, nil
+}
 
-	projectRoot = filepath.Clean(projectRoot)
-	rootScriptPath := filepath.Join(projectRoot, "build.sh")
-	info, err := os.Stat(rootScriptPath)
+func projectRootBuildScript(projectRoot string) (shared.ScriptSpec, bool, error) {
+	info, err := os.Stat(filepath.Join(projectRoot, "build.sh"))
 	if err == nil && !info.IsDir() {
-		return &shared.ScriptSpec{
+		return shared.ScriptSpec{
 			Dir:  projectRoot,
 			Path: "./build.sh",
-		}, nil
+		}, true, nil
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
+		return shared.ScriptSpec{}, false, err
 	}
-
-	return nil, nil
+	return shared.ScriptSpec{}, false, nil
 }
 
-func ResolveNestedProjectBuildScript(findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) (*shared.ScriptSpec, error) {
-	if target.DisableBuildScriptDiscovery {
-		return nil, nil
-	}
-	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(projectRoot) == "" {
-		return nil, nil
-	}
-
-	return findNestedProjectBuildScript(filepath.Clean(projectRoot))
-}
-
-func findNestedProjectBuildScript(projectRoot string) (*shared.ScriptSpec, error) {
-	var script *shared.ScriptSpec
+func findNestedProjectBuildScript(projectRoot string) (shared.ScriptSpec, bool, error) {
+	var script shared.ScriptSpec
+	var found bool
 	err := filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, err error) error {
 		var walkErr error
-		script, walkErr = nestedProjectBuildScriptCandidate(projectRoot, path, d, err)
+		script, found, walkErr = nestedProjectBuildScriptCandidate(projectRoot, path, d, err)
 		return walkErr
 	})
 	if err != nil {
 		if errors.Is(err, fs.SkipAll) {
-			return script, nil
+			return script, found, nil
 		}
-		return nil, err
+		return shared.ScriptSpec{}, false, err
 	}
-	return script, nil
+	return script, found, nil
 }
 
-func nestedProjectBuildScriptCandidate(projectRoot, path string, d fs.DirEntry, err error) (*shared.ScriptSpec, error) {
+func nestedProjectBuildScriptCandidate(projectRoot, path string, d fs.DirEntry, err error) (shared.ScriptSpec, bool, error) {
 	if err != nil {
-		return nil, err
+		return shared.ScriptSpec{}, false, err
 	}
 	if d.IsDir() {
 		if d.Name() == ".git" || isProjectBuildArtifactDir(path, projectRoot) {
-			return nil, filepath.SkipDir
+			return shared.ScriptSpec{}, false, filepath.SkipDir
 		}
-		return nil, nil
+		return shared.ScriptSpec{}, false, nil
 	}
 	if d.Name() != "build.sh" || filepath.Dir(path) == projectRoot {
-		return nil, nil
+		return shared.ScriptSpec{}, false, nil
 	}
-	return &shared.ScriptSpec{Dir: filepath.Dir(path), Path: "./build.sh"}, fs.SkipAll
+	return shared.ScriptSpec{Dir: filepath.Dir(path), Path: "./build.sh"}, true, fs.SkipAll
 }
 
 func isProjectBuildArtifactDir(path, projectRoot string) bool {

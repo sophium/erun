@@ -30,11 +30,7 @@ const ProjectConfigGitIgnoreFix = `replace a bare ".erun/" ignore with ".erun/*"
 // silently: the caller already resolved the config from disk, so a git error
 // here should not add noise on top of that.
 func ProjectConfigGitIgnored(ctx core.Context, projectRoot string) (present, ignored bool, err error) {
-	configFilePath, pathErr := projectConfigPath(projectRoot)
-	if pathErr != nil {
-		return false, false, nil
-	}
-	if _, statErr := os.Stat(configFilePath); statErr != nil {
+	if !projectConfigFileExists(projectRoot) {
 		return false, false, nil
 	}
 
@@ -50,6 +46,15 @@ func ProjectConfigGitIgnored(ctx core.Context, projectRoot string) (present, ign
 		return true, false, nil
 	}
 	return true, false, runErr
+}
+
+func projectConfigFileExists(projectRoot string) bool {
+	configFilePath, err := projectConfigPath(projectRoot)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(configFilePath)
+	return err == nil
 }
 
 // WarnIfProjectConfigGitIgnored traces a one-line warning when projectRoot's

@@ -559,19 +559,7 @@ func (c *ProjectConfig) SetContainerRegistriesForEnvironment(environment string,
 		return
 	}
 	if list.IsZero() || list.Equal(c.ContainerRegistries) {
-		if c.Environments != nil {
-			if envConfig, ok := c.Environments[environment]; ok {
-				envConfig.ContainerRegistries = nil
-				if envConfig.isEmpty() {
-					delete(c.Environments, environment)
-				} else {
-					c.Environments[environment] = envConfig
-				}
-				if len(c.Environments) == 0 {
-					c.Environments = nil
-				}
-			}
-		}
+		c.clearEnvironmentContainerRegistries(environment)
 		return
 	}
 	if c.Environments == nil {
@@ -580,6 +568,22 @@ func (c *ProjectConfig) SetContainerRegistriesForEnvironment(environment string,
 	envConfig := c.Environments[environment]
 	envConfig.ContainerRegistries = list.Clone()
 	c.Environments[environment] = envConfig
+}
+
+func (c *ProjectConfig) clearEnvironmentContainerRegistries(environment string) {
+	envConfig, ok := c.Environments[environment]
+	if !ok {
+		return
+	}
+	envConfig.ContainerRegistries = nil
+	if envConfig.isEmpty() {
+		delete(c.Environments, environment)
+	} else {
+		c.Environments[environment] = envConfig
+	}
+	if len(c.Environments) == 0 {
+		c.Environments = nil
+	}
 }
 
 // isEmpty reports whether a per-env entry carries nothing worth persisting, so

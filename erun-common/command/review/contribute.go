@@ -146,32 +146,37 @@ func RunContributeCloneWithIO(ctx core.Context, homeDir string, runGit gitx.GitC
 			return fmt.Errorf("%s exists but origin remote %q does not point at the ERun repository", status.Target, status.ExistingRemote)
 		}
 		ctx.Info(fmt.Sprintf("==> ERun contribute clone already present at %s", status.Target))
-	} else {
-		ctx.TraceCommand("", "mkdir", "-p", status.ParentDir)
-		if !ctx.DryRun {
-			if err := io.MkdirAll(status.ParentDir, 0o755); err != nil {
-				return fmt.Errorf("create %s: %w", status.ParentDir, err)
-			}
-		}
-		ctx.TraceCommand("", "git", "clone", ContributeRepoHTTPS, status.Target)
-		if !ctx.DryRun {
-			if runGit == nil {
-				runGit = gitx.GitCommandRunner
-			}
-			stdout := new(strings.Builder)
-			stderr := new(strings.Builder)
-			if err := runGit(status.ParentDir, AsWriter(stdout), AsWriter(stderr), "clone", ContributeRepoHTTPS, status.Target); err != nil {
-				return fmt.Errorf("git clone: %w%s", err, core.FormatGitCommandStderr(stderr.String()))
-			}
-			ctx.Info(fmt.Sprintf("==> Cloned ERun for contribute mode at %s", status.Target))
-		} else {
-			ctx.Info(fmt.Sprintf("==> Would clone ERun to %s", status.Target))
-		}
+	} else if err := cloneContributeRepository(ctx, status, runGit, io); err != nil {
+		return err
 	}
 
 	if err := installContributeShim(ctx, homeDir, io); err != nil {
 		return err
 	}
+	return nil
+}
+
+func cloneContributeRepository(ctx core.Context, status ContributeCloneStatus, runGit gitx.GitCommandRunnerFunc, io ContributeCloneIO) error {
+	ctx.TraceCommand("", "mkdir", "-p", status.ParentDir)
+	if !ctx.DryRun {
+		if err := io.MkdirAll(status.ParentDir, 0o755); err != nil {
+			return fmt.Errorf("create %s: %w", status.ParentDir, err)
+		}
+	}
+	ctx.TraceCommand("", "git", "clone", ContributeRepoHTTPS, status.Target)
+	if ctx.DryRun {
+		ctx.Info(fmt.Sprintf("==> Would clone ERun to %s", status.Target))
+		return nil
+	}
+	if runGit == nil {
+		runGit = gitx.GitCommandRunner
+	}
+	stdout := new(strings.Builder)
+	stderr := new(strings.Builder)
+	if err := runGit(status.ParentDir, AsWriter(stdout), AsWriter(stderr), "clone", ContributeRepoHTTPS, status.Target); err != nil {
+		return fmt.Errorf("git clone: %w%s", err, core.FormatGitCommandStderr(stderr.String()))
+	}
+	ctx.Info(fmt.Sprintf("==> Cloned ERun for contribute mode at %s", status.Target))
 	return nil
 }
 

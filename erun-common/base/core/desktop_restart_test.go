@@ -169,7 +169,7 @@ func TestRestartDesktopApp_DryRunAgainstADesktopThatPredatesThePlanRefusesRather
 		_ = json.NewEncoder(w).Encode(DesktopRestartResponse{OK: true})
 	}))
 	defer server.Close()
-	port := server.Listener.Addr().(*net.TCPAddr).Port
+	port := testTCPPort(t, server.Listener.Addr())
 
 	outcome := RestartDesktopApp(context.Background(), DesktopRestartDeps{
 		MarkerPath: "unused-in-fake",
@@ -356,7 +356,7 @@ func TestPostDesktopRestart_RoundTrips(t *testing.T) {
 	}))
 	defer server.Close()
 
-	port := server.Listener.Addr().(*net.TCPAddr).Port
+	port := testTCPPort(t, server.Listener.Addr())
 	response, err := postDesktopRestart(context.Background(), port, "orch-9")
 	if err != nil {
 		t.Fatalf("postDesktopRestart: %v", err)
@@ -386,7 +386,7 @@ func TestPostDesktopRestartPlan_CarriesThePlanBack(t *testing.T) {
 	}))
 	defer server.Close()
 
-	port := server.Listener.Addr().(*net.TCPAddr).Port
+	port := testTCPPort(t, server.Listener.Addr())
 	response, err := postDesktopRestartPlan(context.Background(), port, "orch-9")
 	if err != nil {
 		t.Fatalf("postDesktopRestartPlan: %v", err)
@@ -418,7 +418,7 @@ func TestPostDesktopRestart_ReportsRemoteRefusal(t *testing.T) {
 	}))
 	defer server.Close()
 
-	port := server.Listener.Addr().(*net.TCPAddr).Port
+	port := testTCPPort(t, server.Listener.Addr())
 	response, err := postDesktopRestart(context.Background(), port, "orch-9")
 	if err != nil {
 		t.Fatalf("postDesktopRestart: %v", err)
@@ -439,11 +439,20 @@ func TestPostDesktopRestart_TransportErrorWhenUnreachable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("net.Listen: %v", err)
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
+	port := testTCPPort(t, listener.Addr())
 	if err := listener.Close(); err != nil {
 		t.Fatalf("close listener: %v", err)
 	}
 	if _, err := postDesktopRestart(context.Background(), port, "orch-9"); err == nil {
 		t.Fatal("expected a transport error against a port nothing is listening on")
 	}
+}
+
+func testTCPPort(t *testing.T, addr net.Addr) int {
+	t.Helper()
+	tcp, ok := addr.(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("want a TCP address, got %T", addr)
+	}
+	return tcp.Port
 }

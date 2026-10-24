@@ -12,7 +12,7 @@ import (
 
 // AWSStubError injects a deterministic AWS CLI failure for one argv family.
 // Stderr must read like the real AWS CLI's, because the classifiers in
-// erun-common/cloud_context.go substring-match against it; ExitCode defaults
+// erun-common/infra/cloud/cloud_context_*.go substring-match against it; ExitCode defaults
 // to 254, the AWS CLI's client-error code. Once fires the failure only on the
 // family's first invocation, so production retry/recovery loops can be driven
 // to their success arm.
@@ -26,7 +26,7 @@ type AWSStubError struct {
 // real-run `erun context ...` scenarios. Success-output fields feed the
 // decision inputs production parses from AWS CLI stdout; the *Error fields
 // make the error classifiers and recovery branches in
-// erun-common/cloud_context.go reachable. Zero values fall back to defaults
+// erun-common/infra/cloud/cloud_context_*.go reachable. Zero values fall back to defaults
 // chosen so the happy path completes.
 type AWSCloudContextStubSpec struct {
 	// RoleName's value is ignored by production; only the call's exit code matters.

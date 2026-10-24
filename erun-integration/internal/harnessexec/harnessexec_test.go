@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -226,14 +227,14 @@ func TestGitChildrenDetachNoMaintenance(t *testing.T) {
 	run(git(work, "-c", "user.email=t@example", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "one"))
 	run(git(work, "remote", "add", "origin", filepath.Join(root, "origin.git")))
 
-	if trace := run(git(work, "push", "-q", "origin", "main")); bytes.Contains([]byte(trace), []byte("maintenance run")) {
+	if trace := run(git(work, "push", "-q", "origin", "main")); strings.Contains(trace, "maintenance run") {
 		t.Fatalf("a git child built by Command still detached maintenance:\n%s", trace)
 	}
 
 	run(git(work, "-c", "user.email=t@example", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "two"))
 	plain := git(work, "push", "-q", "origin", "main")
 	plain.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+filepath.Join(root, "empty-gitconfig"))
-	if trace := run(plain); !bytes.Contains([]byte(trace), []byte("maintenance run")) {
+	if trace := run(plain); !strings.Contains(trace, "maintenance run") {
 		t.Fatalf("expected git's default to detach maintenance after a push, so this test reproduces the race:\n%s", trace)
 	}
 }

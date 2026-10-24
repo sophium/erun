@@ -75,10 +75,10 @@ func readRuntimeJSONObject(path string) (map[string]json.RawMessage, error) {
 		return nil, err
 	}
 	object := map[string]json.RawMessage{}
-	if json.Unmarshal(data, &object) != nil || object == nil {
-		return map[string]json.RawMessage{}, nil
+	if json.Unmarshal(data, &object) == nil && object != nil {
+		return object, nil
 	}
-	return object, nil
+	return map[string]json.RawMessage{}, nil
 }
 
 func runtimeJSONObjectField(object map[string]json.RawMessage, key string) map[string]json.RawMessage {
@@ -166,9 +166,9 @@ func readRuntimePlatformAliasEntry(path string) ([]config.CloudProviderConfig, e
 // the store's own function and ships beside the token, so nothing here re-derives
 // it.
 func seedRuntimePlatformAliasToken(boot runtimeBoot, configHome string) error {
-	nameData, nameErr := os.ReadFile(filepath.Join(boot.platformAliasDir, deploy.PlatformAliasSecretFileKey))
-	token, tokenErr := os.ReadFile(filepath.Join(boot.platformAliasDir, deploy.PlatformAliasSecretTokenKey))
-	if nameErr != nil || tokenErr != nil {
+	nameData, nameOK := readFileIfReadable(filepath.Join(boot.platformAliasDir, deploy.PlatformAliasSecretFileKey))
+	token, tokenOK := readFileIfReadable(filepath.Join(boot.platformAliasDir, deploy.PlatformAliasSecretTokenKey))
+	if !nameOK || !tokenOK {
 		return nil
 	}
 	name := strings.TrimSpace(string(nameData))

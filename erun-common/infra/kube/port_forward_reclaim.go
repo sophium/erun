@@ -79,9 +79,14 @@ func ReclaimOrphanedPortForwardRecords(ctx core.Context) error {
 	return nil
 }
 
+func readDirIfPresent(dir string) ([]os.DirEntry, bool) {
+	entries, err := os.ReadDir(dir)
+	return entries, err == nil
+}
+
 func reclaimOrphanedRecordsInKind(ctx core.Context, kindDir, kind string, configured map[string]map[string]bool, reclaimed map[string]bool) error {
-	tenantEntries, err := os.ReadDir(kindDir)
-	if err != nil {
+	tenantEntries, ok := readDirIfPresent(kindDir)
+	if !ok {
 		// Nothing recorded for this kind yet, which is the ordinary state of a
 		// machine that never opened a forward of it.
 		return nil
@@ -170,7 +175,7 @@ func portForwardRecordNames(tenantDir string) ([]string, error) {
 // whether the machine-level config it is initialized around is there.
 func configuredEnvironmentNames() (map[string]map[string]bool, bool, error) {
 	store := config.ConfigStore{}
-	if _, _, err := store.LoadERunConfig(); err != nil {
+	if !machineConfigLoads(store) {
 		return nil, false, nil
 	}
 	tenants, err := store.ListTenantConfigs()
@@ -214,4 +219,9 @@ func removeDirIfEmpty(ctx core.Context, dir string) {
 		return
 	}
 	_ = os.Remove(dir)
+}
+
+func machineConfigLoads(store config.ConfigStore) bool {
+	_, _, err := store.LoadERunConfig()
+	return err == nil
 }

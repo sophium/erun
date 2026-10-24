@@ -1,0 +1,353 @@
+version: 3
+workdir: .
+allow:
+  depOnAnyVendor: false
+  deepScan: false
+
+vendors:
+  github-com-adrg-xdg:
+    in: ["github.com/adrg/xdg", "github.com/adrg/xdg/**"]
+  github-com-creack-pty:
+    in: ["github.com/creack/pty", "github.com/creack/pty/**"]
+  github-com-go-jose-go-jose-v4:
+    in: ["github.com/go-jose/go-jose/v4", "github.com/go-jose/go-jose/v4/**"]
+  github-com-google-jsonschema-go:
+    in: ["github.com/google/jsonschema-go", "github.com/google/jsonschema-go/**"]
+  github-com-gorilla-websocket:
+    in: ["github.com/gorilla/websocket", "github.com/gorilla/websocket/**"]
+  github-com-modelcontextprotocol-go-sdk:
+    in: ["github.com/modelcontextprotocol/go-sdk", "github.com/modelcontextprotocol/go-sdk/**"]
+  github-com-prometheus-client_golang:
+    in: ["github.com/prometheus/client_golang", "github.com/prometheus/client_golang/**"]
+  github-com-prometheus-client_model:
+    in: ["github.com/prometheus/client_model", "github.com/prometheus/client_model/**"]
+  github-com-prometheus-common:
+    in: ["github.com/prometheus/common", "github.com/prometheus/common/**"]
+  github-com-sophium-erun-erun-common:
+    in: ["github.com/sophium/erun/erun-common", "github.com/sophium/erun/erun-common/**"]
+
+components:
+  cmd-emcp:
+    in: "cmd/emcp"
+  root:
+    in: "."
+  tools-activity:
+    in: "tools/activity"
+  tools-agent:
+    in: "tools/agent"
+  tools-aisessions:
+    in: "tools/aisessions"
+  tools-attach:
+    in: "tools/attach"
+  tools-build:
+    in: "tools/build"
+  tools-cloud:
+    in: "tools/cloud"
+  tools-contribute:
+    in: "tools/contribute"
+  tools-deploy:
+    in: "tools/deploy"
+  tools-diff:
+    in: "tools/diff"
+  tools-doctor:
+    in: "tools/doctor"
+  tools-e2e:
+    in: "tools/e2e"
+  tools-envdelete:
+    in: "tools/envdelete"
+  tools-environment:
+    in: "tools/environment"
+  tools-exectool:
+    in: "tools/exectool"
+  tools-expose:
+    in: "tools/expose"
+  tools-idle:
+    in: "tools/idle"
+  tools-initenv:
+    in: "tools/initenv"
+  tools-jobs:
+    in: "tools/jobs"
+  tools-kubecontext:
+    in: "tools/kubecontext"
+  tools-list:
+    in: "tools/list"
+  tools-observe:
+    in: "tools/observe"
+  tools-outputs:
+    in: "tools/outputs"
+  tools-pin:
+    in: "tools/pin"
+  tools-platform:
+    in: "tools/platform"
+  tools-resize:
+    in: "tools/resize"
+  tools-review:
+    in: "tools/review"
+  tools-services:
+    in: "tools/services"
+  tools-shared:
+    in: "tools/shared"
+  tools-terraform:
+    in: "tools/terraform"
+  tools-upgrade:
+    in: "tools/upgrade"
+  tools-usage:
+    in: "tools/usage"
+  tools-version:
+    in: "tools/version"
+  tools-whip:
+    in: "tools/whip"
+
+deps:
+  cmd-emcp:
+    mayDependOn:
+      - root
+      - tools-shared
+    canUse:
+      - github-com-sophium-erun-erun-common
+  root:
+    mayDependOn:
+      - tools-activity
+      - tools-agent
+      - tools-aisessions
+      - tools-attach
+      - tools-build
+      - tools-cloud
+      - tools-contribute
+      - tools-deploy
+      - tools-diff
+      - tools-doctor
+      - tools-e2e
+      - tools-envdelete
+      - tools-environment
+      - tools-exectool
+      - tools-expose
+      - tools-idle
+      - tools-initenv
+      - tools-jobs
+      - tools-kubecontext
+      - tools-list
+      - tools-observe
+      - tools-outputs
+      - tools-pin
+      - tools-platform
+      - tools-resize
+      - tools-review
+      - tools-services
+      - tools-shared
+      - tools-terraform
+      - tools-upgrade
+      - tools-usage
+      - tools-version
+      - tools-whip
+    canUse:
+      - github-com-adrg-xdg
+      - github-com-google-jsonschema-go
+      - github-com-gorilla-websocket
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-prometheus-client_golang
+      - github-com-prometheus-client_model
+      - github-com-prometheus-common
+      - github-com-sophium-erun-erun-common
+  tools-activity:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-adrg-xdg
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-agent:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-aisessions:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-adrg-xdg
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-attach:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-creack-pty
+      - github-com-gorilla-websocket
+      - github-com-sophium-erun-erun-common
+  tools-build:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-cloud:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-contribute:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-deploy:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-diff:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-doctor:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-e2e:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-envdelete:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-environment:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-exectool:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-expose:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-idle:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-initenv:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-jobs:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-adrg-xdg
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-kubecontext:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-list:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-observe:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-outputs:
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-pin:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-platform:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-resize:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-review:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-services:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-shared:
+    canUse:
+      - github-com-go-jose-go-jose-v4
+      - github-com-google-jsonschema-go
+      - github-com-gorilla-websocket
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-prometheus-client_golang
+      - github-com-sophium-erun-erun-common
+  tools-terraform:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-upgrade:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-usage:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-version:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  tools-whip:
+    mayDependOn:
+      - tools-shared
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common

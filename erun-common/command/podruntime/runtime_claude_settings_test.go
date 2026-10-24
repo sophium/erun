@@ -63,7 +63,7 @@ func TestRelayRuntimeClaudeSettingsRelaysBedrock(t *testing.T) {
 		"ERUN_CLOUD_PROVIDER_ALIAS": "operator@aws", "ERUN_CLOUD_REGION": "eu-west-2",
 		"CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_MANTLE": "0",
 	}, `{"env": {"CLAUDE_CODE_USE_MANTLE": "0"}}`)
-	env := settings["env"].(map[string]any)
+	env := testJSONObject(t, settings["env"])
 	if env["CLAUDE_CODE_USE_BEDROCK"] != "1" || env["AWS_REGION"] != "eu-west-2" || env["ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION"] != "eu-west-2" ||
 		env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] != "32000" || env["MAX_THINKING_TOKENS"] != "1024" {
 		t.Fatalf("unexpected Bedrock relay: %v", env)
@@ -136,13 +136,13 @@ func TestRuntimeClaudeSessionSettingsInstallEveryAISessionHook(t *testing.T) {
 		}
 	}
 	settings := readTestJSON(t, path)
-	permissions := settings["permissions"].(map[string]any)
+	permissions := testJSONObject(t, settings["permissions"])
 	if permissions["defaultMode"] != "bypassPermissions" || permissions["allow"] == nil || settings["skipDangerousModePermissionPrompt"] != true {
 		t.Fatalf("unexpected permission settings: %v", settings)
 	}
-	hooks := settings["hooks"].(map[string]any)
+	hooks := testJSONObject(t, settings["hooks"])
 	for _, binding := range AISessionHookBindings() {
-		ours := runtimeAISessionHookCommands(hooks[binding.ToolEvent].([]any))
+		ours := runtimeAISessionHookCommands(t, testJSONArray(t, hooks[binding.ToolEvent]))
 		if len(ours) != 1 {
 			t.Fatalf("%s should carry exactly one AI-session report, got %d", binding.ToolEvent, len(ours))
 		}
@@ -150,16 +150,22 @@ func TestRuntimeClaudeSessionSettingsInstallEveryAISessionHook(t *testing.T) {
 			t.Fatalf("%s should report %s, got %q", binding.ToolEvent, binding.ModelEvent, ours[0])
 		}
 	}
-	if len(hooks["Stop"].([]any)) != 2 {
+	if len(testJSONArray(t, hooks["Stop"])) != 2 {
 		t.Fatalf("the operator's own Stop hook must be kept beside ours: %v", hooks["Stop"])
 	}
 }
 
-func runtimeAISessionHookCommands(blocks []any) []string {
+func runtimeAISessionHookCommands(t *testing.T, blocks []any) []string {
+	t.Helper()
 	var commands []string
 	for _, block := range blocks {
 		if isRuntimeAISessionHookBlock(block) {
-			commands = append(commands, block.(map[string]any)["hooks"].([]any)[0].(map[string]any)["command"].(string))
+			hook := testJSONObject(t, testJSONArray(t, testJSONObject(t, block)["hooks"])[0])
+			command, ok := hook["command"].(string)
+			if !ok {
+				t.Fatalf("want a hook command string, got %T", hook["command"])
+			}
+			commands = append(commands, command)
 		}
 	}
 	return commands

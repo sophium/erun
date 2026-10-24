@@ -63,7 +63,7 @@ func libraryKubernetesNamespaceExists(contextName, namespace string) (bool, erro
 	namespace = strings.TrimSpace(namespace)
 	clientset, err := KubernetesClientsetForContext(contextName)
 	if err != nil {
-		return false, fmt.Errorf("failed to check kubernetes namespace %q in context %q: %s", namespace, contextName, err)
+		return false, fmt.Errorf("failed to check kubernetes namespace %q in context %q: %w", namespace, contextName, err)
 	}
 	_, err = clientset.CoreV1().Namespaces().Get(context.Background(), namespace, metav1.GetOptions{})
 	if err == nil {
@@ -72,7 +72,7 @@ func libraryKubernetesNamespaceExists(contextName, namespace string) (bool, erro
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
-	return false, fmt.Errorf("failed to check kubernetes namespace %q in context %q: %s", namespace, contextName, err)
+	return false, fmt.Errorf("failed to check kubernetes namespace %q in context %q: %w", namespace, contextName, err)
 }
 
 // kubernetesClientConfigLoader builds the same non-interactive deferred
@@ -121,7 +121,7 @@ func LibraryPersistentVolumeClaimExists(contextName, namespace, claim string) (b
 	claim = strings.TrimSpace(claim)
 	clientset, err := KubernetesClientsetForContext(contextName)
 	if err != nil {
-		return false, fmt.Errorf("failed to check persistent volume claim %q in namespace %q context %q: %s", claim, namespace, contextName, err)
+		return false, fmt.Errorf("failed to check persistent volume claim %q in namespace %q context %q: %w", claim, namespace, contextName, err)
 	}
 	_, err = clientset.CoreV1().PersistentVolumeClaims(namespace).Get(context.Background(), claim, metav1.GetOptions{})
 	if err == nil {
@@ -130,7 +130,7 @@ func LibraryPersistentVolumeClaimExists(contextName, namespace, claim string) (b
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
-	return false, fmt.Errorf("failed to check persistent volume claim %q in namespace %q context %q: %s", claim, namespace, contextName, err)
+	return false, fmt.Errorf("failed to check persistent volume claim %q in namespace %q context %q: %w", claim, namespace, contextName, err)
 }
 
 // LibraryImagePullSecretAuths is the library-backed alternative to
@@ -146,18 +146,18 @@ func LibraryImagePullSecretAuths(contextName, namespace, name string) (map[strin
 	name = strings.TrimSpace(name)
 	clientset, err := KubernetesClientsetForContext(contextName)
 	if err != nil {
-		return nil, fmt.Errorf("read existing image pull secret %s: %s", name, err)
+		return nil, fmt.Errorf("read existing image pull secret %s: %w", name, err)
 	}
 	secret, err := clientset.CoreV1().Secrets(namespace).Get(context.Background(), name, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, nil
+			return nil, nil //nolint:nilnil // a nil map is the empty auths set: no existing coverage
 		}
-		return nil, fmt.Errorf("read existing image pull secret %s: %s", name, err)
+		return nil, fmt.Errorf("read existing image pull secret %s: %w", name, err)
 	}
 	encoded, ok := secret.Data[configpkg.DockerConfigJSONSecretKey]
 	if !ok {
-		return nil, nil
+		return nil, nil //nolint:nilnil // a nil map is the empty auths set: no existing coverage
 	}
 	var file configpkg.DockerConfigJSONFile
 	if err := json.Unmarshal(encoded, &file); err != nil {
@@ -264,7 +264,7 @@ func libraryDeploymentPresent(contextName, namespace, name string) (bool, error)
 	name = strings.TrimSpace(name)
 	clientset, err := KubernetesClientsetForContext(contextName)
 	if err != nil {
-		return false, fmt.Errorf("failed to check deployment %q in namespace %q context %q: %s", name, namespace, contextName, err)
+		return false, fmt.Errorf("failed to check deployment %q in namespace %q context %q: %w", name, namespace, contextName, err)
 	}
 	_, err = clientset.AppsV1().Deployments(namespace).Get(context.Background(), name, metav1.GetOptions{})
 	if err == nil {
@@ -273,7 +273,7 @@ func libraryDeploymentPresent(contextName, namespace, name string) (bool, error)
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
-	return false, fmt.Errorf("failed to check deployment %q in namespace %q context %q: %s", name, namespace, contextName, err)
+	return false, fmt.Errorf("failed to check deployment %q in namespace %q context %q: %w", name, namespace, contextName, err)
 }
 
 // LibraryGetPod is the library-backed alternative to shelling out to
@@ -288,19 +288,19 @@ func LibraryGetPod(podName string) (*corev1.Pod, error) {
 	loader := kubernetesClientConfigLoader("")
 	namespace, _, err := loader.Namespace()
 	if err != nil {
-		return nil, fmt.Errorf("read pod %q: resolve current namespace: %s", podName, err)
+		return nil, fmt.Errorf("read pod %q: resolve current namespace: %w", podName, err)
 	}
 	config, err := loader.ClientConfig()
 	if err != nil {
-		return nil, fmt.Errorf("read pod %q: %s", podName, err)
+		return nil, fmt.Errorf("read pod %q: %w", podName, err)
 	}
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("read pod %q: %s", podName, err)
+		return nil, fmt.Errorf("read pod %q: %w", podName, err)
 	}
 	pod, err := clientset.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("read pod %q in namespace %q: %s", podName, namespace, err)
+		return nil, fmt.Errorf("read pod %q in namespace %q: %w", podName, namespace, err)
 	}
 	return pod, nil
 }
@@ -352,11 +352,11 @@ func LibraryWaitForDeploymentAvailable(contextName, namespace, name, timeout str
 	name = strings.TrimSpace(name)
 	duration, err := time.ParseDuration(strings.TrimSpace(timeout))
 	if err != nil {
-		return fmt.Errorf("failed to wait for deployment %q in namespace %q context %q: invalid timeout %q: %s", name, namespace, contextName, timeout, err)
+		return fmt.Errorf("failed to wait for deployment %q in namespace %q context %q: invalid timeout %q: %w", name, namespace, contextName, timeout, err)
 	}
 	clientset, err := KubernetesClientsetForContext(contextName)
 	if err != nil {
-		return fmt.Errorf("failed to wait for deployment %q in namespace %q context %q: %s", name, namespace, contextName, err)
+		return fmt.Errorf("failed to wait for deployment %q in namespace %q context %q: %w", name, namespace, contextName, err)
 	}
 
 	deployments := clientset.AppsV1().Deployments(namespace)
@@ -368,7 +368,7 @@ func LibraryWaitForDeploymentAvailable(contextName, namespace, name, timeout str
 		case err == nil && deploymentConditionAvailable(deployment):
 			return nil
 		case err != nil && !apierrors.IsNotFound(err):
-			return fmt.Errorf("failed to wait for deployment %q in namespace %q context %q: %s", name, namespace, contextName, err)
+			return fmt.Errorf("failed to wait for deployment %q in namespace %q context %q: %w", name, namespace, contextName, err)
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("timed out waiting for deployment %q in namespace %q context %q to report condition Available after %s", name, namespace, contextName, duration)

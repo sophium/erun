@@ -195,12 +195,12 @@ func RunLocalEnvironmentWhip(now time.Time, runner WhipCommandRunner, tenant, en
 	case WhipDecisionNudge:
 		if err := pushEnvironmentWhipNudge(runner, tenant, environment, cfg.Message, orchestratorPacingNudgeSettleDuration); err != nil {
 			result.Error = err.Error()
-			return result, nil
+		} else {
+			result.Pushed = true
+			state.NudgeCount++
+			state.LastNudgeAtUnix = now.Unix()
+			_ = saveWhipEnvironmentState(tenant, environment, state)
 		}
-		result.Pushed = true
-		state.NudgeCount++
-		state.LastNudgeAtUnix = now.Unix()
-		_ = saveWhipEnvironmentState(tenant, environment, state)
 	case WhipDecisionCap:
 		state.Capped = true
 		_ = saveWhipEnvironmentState(tenant, environment, state)

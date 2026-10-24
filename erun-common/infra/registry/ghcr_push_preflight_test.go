@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -96,9 +97,5 @@ func TestANonGHCRRegistryIsNotChecked(t *testing.T) {
 }
 
 func asMissingScope(err error, target **MissingGHCRPushScopeError) bool {
-	missing, ok := err.(*MissingGHCRPushScopeError)
-	if ok {
-		*target = missing
-	}
-	return ok
+	return errors.As(err, target)
 }

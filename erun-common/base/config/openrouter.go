@@ -310,12 +310,13 @@ type RootConfigStore interface {
 // pre-existing one. A store that cannot be read is reported to the caller so a
 // genuinely broken config is still visible where it matters.
 func ResolveOpenRouterConfig(store RootConfigStore) (*OpenRouterConfig, error) {
-	if store == nil {
-		return nil, nil
-	}
-	config, _, err := store.LoadERunConfig()
-	if err != nil {
-		return nil, err
+	var config ERunConfig
+	if store != nil {
+		loaded, _, err := store.LoadERunConfig()
+		if err != nil {
+			return nil, err
+		}
+		config = loaded
 	}
 	return config.OpenRouter, nil
 }
