@@ -641,30 +641,94 @@ func (w *world) testHelpersUsedAtHome(d decisions) map[*declTarget]bool {
 
 // methodsFollowTheirTypes puts every method where its receiver type ended up,
 // copied wherever the type is copied: Go keeps methods with their type, so a
-// method is never placed on its own.
+// method is never placed on its own. A test type's method that nothing calls
+// through an interface is the one exception: it goes only to the packages
+// that call it, so a copy never carries a method none of its users call.
 func (w *world) methodsFollowTheirTypes(d decisions) {
-	for _, decls := range d.decls {
+	calledIn := w.methodCallers(d)
+	linked := w.linkedKeys()
+	for file, decls := range d.decls {
 		for i := range decls {
-			o, ok := w.objects[decls[i].method]
-			if !ok || o.owner == "" {
-				continue
-			}
-			ownerObj, ok := w.objects[o.owner]
-			if !ok {
-				continue
-			}
-			owner := d.declAt(ownerObj.file, offsetOf(o.owner))
-			if owner == nil {
-				continue
-			}
-			decls[i].dir = owner.dir
-			decls[i].dups = map[string]bool{}
-			for dir := range owner.dups {
-				decls[i].dups[dir] = true
-			}
-			w.redirectDeclObjects(&decls[i], d)
+			w.placeMethod(&decls[i], d, strings.HasSuffix(file, "_test.go") && !linked[decls[i].method], calledIn)
 		}
 	}
+}
+
+// placeMethod puts one method declaration with its type, narrowed to the
+// packages that call it when narrowing is allowed.
+func (w *world) placeMethod(decl *declTarget, d decisions, narrow bool, calledIn map[string]map[string]bool) {
+	o, ok := w.objects[decl.method]
+	if !ok || o.owner == "" {
+		return
+	}
+	ownerObj, ok := w.objects[o.owner]
+	if !ok {
+		return
+	}
+	owner := d.declAt(ownerObj.file, offsetOf(o.owner))
+	if owner == nil {
+		return
+	}
+	dirs := append([]string{owner.dir}, sortedKeys(owner.dups)...)
+	if narrow && len(calledIn[decl.method]) > 0 {
+		dirs = keepCalled(dirs, calledIn[decl.method])
+	}
+	decl.dir = dirs[0]
+	decl.dups = map[string]bool{}
+	for _, dir := range dirs[1:] {
+		decl.dups[dir] = true
+	}
+	w.redirectDeclObjects(decl, d)
+}
+
+// methodCallers are the packages each method is called from directly.
+func (w *world) methodCallers(d decisions) map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	for _, s := range w.sites {
+		if s.def || !w.objects[s.objKey].method {
+			continue
+		}
+		if out[s.objKey] == nil {
+			out[s.objKey] = map[string]bool{}
+		}
+		for _, dir := range w.siteDirs(s, d) {
+			out[s.objKey][dir] = true
+		}
+	}
+	return out
+}
+
+// linkedKeys are the methods that share a name with an interface method they
+// satisfy, or with an implementation of theirs: they stay with their type
+// wherever it goes.
+func (w *world) linkedKeys() map[string]bool {
+	classSize := map[string]int{}
+	for key := range w.links {
+		classSize[w.find(key)]++
+	}
+	out := map[string]bool{}
+	for key := range w.objects {
+		root := w.find(key)
+		if root != key || classSize[root] > 0 {
+			out[key] = true
+		}
+	}
+	return out
+}
+
+// keepCalled narrows the packages a method goes to down to the ones that call
+// it, keeping them in the type's order.
+func keepCalled(dirs []string, called map[string]bool) []string {
+	var out []string
+	for _, dir := range dirs {
+		if called[dir] {
+			out = append(out, dir)
+		}
+	}
+	if len(out) == 0 {
+		return dirs
+	}
+	return out
 }
 
 // alreadyDeclares reports whether a package already has its own declaration of

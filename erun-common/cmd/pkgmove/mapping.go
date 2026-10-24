@@ -118,9 +118,14 @@ func trimOSSuffix(stem string) string {
 }
 
 // declDir is where a top-level declaration goes: its override if it has one,
-// otherwise its file's directory.
+// otherwise its file's directory. An override names its file the way a rule
+// does: a bare name is a root package file, a path names any other.
 func (m packageMap) declDir(rel, name string) string {
-	if dir, ok := m.overrides[declKey{file: path.Base(rel), name: name}]; ok {
+	key := declKey{file: rel, name: name}
+	if path.Dir(rel) == rootDir {
+		key.file = path.Base(rel)
+	}
+	if dir, ok := m.overrides[key]; ok {
 		return dir
 	}
 	return m.fileDir(rel)

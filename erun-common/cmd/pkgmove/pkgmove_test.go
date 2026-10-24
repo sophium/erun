@@ -142,6 +142,9 @@ func TestFileDirFollowsTheFirstMatchingRuleAndTestsFollowTheirSource(t *testing.
 	if got := m.declDir("a.go", "Name"); got != "base/model" {
 		t.Errorf("a declaration override must win over its file's rule, got %q", got)
 	}
+	if got := m.declDir("infra/x/a.go", "Name"); got != "infra/x" {
+		t.Errorf("an override naming a root file must not reach a same-named file elsewhere, got %q", got)
+	}
 	if m.renames["old"] != "New" {
 		t.Errorf("rename not parsed: %v", m.renames)
 	}
@@ -221,6 +224,24 @@ func TestApplyAppendsToAFileAPackageAlreadyHas(t *testing.T) {
 	}
 	if strings.Index(merged, "func Earlier") > strings.Index(merged, "func Later") {
 		t.Errorf("what the file already held stays first:\n%s", merged)
+	}
+	goIn(t, dir, "vet", "./...")
+}
+
+// TestApplyDropsAnImportOnlyAShadowingLocalStillSpells is the reproduction of
+// a moved file that kept an import it no longer used: a parameter named like
+// the package it shadows is not a use of that package, so once the one real
+// use moves away, the import goes with it.
+func TestApplyDropsAnImportOnlyAShadowingLocalStillSpells(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"files.go":     "package fixture\n\nimport (\n\t\"io\"\n\t\"strings\"\n)\n\ntype FileIO struct{ Write func(string) }\n\nfunc Save(io FileIO) { io.Write(\"x\") }\n\nfunc AsWriter(b *strings.Builder) io.Writer { return b }\n",
+		"packages.map": "sub files.go\n. files.go:AsWriter\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if moved := readFile(t, filepath.Join(dir, "sub", "files.go")); strings.Contains(moved, `"io"`) {
+		t.Errorf("the moved file must not import io for a parameter named io:\n%s", moved)
 	}
 	goIn(t, dir, "vet", "./...")
 }

@@ -624,6 +624,9 @@ func (r *rewriter) fragmentNames(sf *sourceFile, f *fragment, local string) bool
 		}
 		if x, ok := sel.X.(*ast.Ident); ok && x.Name == local {
 			off := sf.fset.Position(x.Pos()).Offset
+			if !sf.pkgRefs[off] {
+				return true
+			}
 			for _, rg := range f.ranges {
 				if off >= rg[0] && off < rg[1] {
 					found = true
