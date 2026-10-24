@@ -45,18 +45,22 @@ erun-common/
   command/       ai/ doctor/ e2e/ expose/ inputs/ jobs/ lifecycle/ mergequeue/ observe/ orchestrator/ platform/ podruntime/ review/ setup/ terraform/ workspace/
 ```
 
-| Layer | May depend on |
+Every package may import the Go standard library. Beyond that, a package may
+import only the erun packages its row names:
+
+| Package | May import |
 |---|---|
-| `base/model` | stdlib only |
-| `base/core`, `base/config` | lower `base/*` (config → core → model) |
+| `base/model` | no other erun package |
+| `base/core` | `base/model` |
+| `base/config` | `base/model`, `base/core` |
 | `infra/*` | `base/*`; another `infra/*` only where its depguard rule names it |
 | `primitive/shared` | `base/*`, `infra/*` |
 | `primitive/*` | `base/*`, `infra/*`, `primitive/shared`; never another primitive |
-| `orchestration/{build,deploy,clusterread,diagnosis}` | `base/*`, `infra/*`, `primitive/*` |
-| `orchestration/release` | the above and `orchestration/build` |
-| `orchestration/execute` | the above and `orchestration/{build,deploy,release}` |
-| `command/*` | anything below; never another `command/*` |
-| erun-backend-api | `base/*`, `infra/{cloud,mcpauth,mcptools,platformclient}` only |
+| `orchestration/build`, `/deploy`, `/clusterread`, `/diagnosis` | `base/*`, `infra/*`, `primitive/*` |
+| `orchestration/release` | `base/*`, `infra/*`, `primitive/*`, `orchestration/build` |
+| `orchestration/execute` | `base/*`, `infra/*`, `primitive/*`, `orchestration/build`, `/deploy`, `/release` |
+| `command/*` | `base/*`, `infra/*`, `primitive/*`, `orchestration/*`; never another `command/*` |
+| erun-backend-api | `base/*`, `infra/cloud`, `/mcpauth`, `/mcptools`, `/platformclient` |
 
 - depguard in `.golangci.yml` enforces the table: each package denies the
   module and allows only what lies beneath it. An infra package lists the exact
